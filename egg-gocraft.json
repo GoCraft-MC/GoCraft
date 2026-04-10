@@ -1,0 +1,191 @@
+{
+  "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "exported_at": "2026-07-30T20:30:00+02:00",
+  "name": "GoCraft",
+  "author": "support@oreostudios.info",
+  "description": "GoCraft — an experimental Minecraft Java Edition 1.21.4 and Bedrock Edition server implementation written in Go.",
+  "features": [],
+  "docker_images": {
+    "Debian": "ghcr.io/ptero-eggs/yolks:debian"
+  },
+  "file_denylist": [],
+  "startup": "chmod +x ./gocraft && GOCRAFT_JAVA_PORT={{SERVER_PORT}} GOCRAFT_BEDROCK_ADDR=0.0.0.0:{{BEDROCK_PORT}} ./gocraft --config server.yml",
+  "config": {
+    "files": "{}",
+    "startup": "{\r\n    \"done\": \"GoCraft starting\"\r\n}",
+    "logs": "{}",
+    "stop": "^C"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\nset -euo pipefail\n\nmkdir -p /mnt/server\ncd /mnt/server\n\nexport DEBIAN_FRONTEND=noninteractive\napt-get update\napt-get install -y --no-install-recommends ca-certificates git\n\nBUILD_DIR=\"$(mktemp -d)\"\ntrap 'rm -rf \"${BUILD_DIR}\"' EXIT\n\necho \"Cloning ${REPO_OWNER}/${REPO_NAME} (${BRANCH})...\"\ngit clone --depth 1 --branch \"${BRANCH}\" \"https://github.com/${REPO_OWNER}/${REPO_NAME}.git\" \"${BUILD_DIR}\"\n\ncd \"${BUILD_DIR}\"\ngo mod download\n\necho \"Building GoCraft for Linux amd64...\"\nCGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags=\"-s -w -X main.version=${BRANCH}\" -o /mnt/server/gocraft .\nchmod 755 /mnt/server/gocraft\n\nif [ ! -f /mnt/server/server.yml ] && [ -f \"${BUILD_DIR}/server.yml\" ]; then\n  cp \"${BUILD_DIR}/server.yml\" /mnt/server/server.yml\nfi\n\ncd /mnt/server\n./gocraft --version\necho \"GoCraft installation complete.\"",
+      "container": "golang:1.24-bookworm",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Repository Owner",
+      "description": "GitHub account or organization that owns the GoCraft repository.",
+      "env_variable": "REPO_OWNER",
+      "default_value": "el211",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:191",
+      "field_type": "text"
+    },
+    {
+      "name": "Repository Name",
+      "description": "GitHub repository containing the GoCraft source code.",
+      "env_variable": "REPO_NAME",
+      "default_value": "GoCraft",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:191",
+      "field_type": "text"
+    },
+    {
+      "name": "Branch or Tag",
+      "description": "Git branch or tag to clone and build during installation.",
+      "env_variable": "BRANCH",
+      "default_value": "main",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:191",
+      "field_type": "text"
+    },
+    {
+      "name": "Bedrock Port",
+      "description": "UDP port for the Bedrock listener. Assign the same port as an additional allocation in Pterodactyl.",
+      "env_variable": "BEDROCK_PORT",
+      "default_value": "19132",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer|between:1,65535",
+      "field_type": "text"
+    },
+    {
+      "name": "Enable Java Listener",
+      "description": "Whether to start the Minecraft Java Edition TCP listener.",
+      "env_variable": "GOCRAFT_JAVA_ENABLED",
+      "default_value": "true",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|in:true,false",
+      "field_type": "text"
+    },
+    {
+      "name": "Enable Bedrock Listener",
+      "description": "Whether to start the Minecraft Bedrock Edition UDP listener.",
+      "env_variable": "GOCRAFT_BEDROCK_ENABLED",
+      "default_value": "false",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|in:true,false",
+      "field_type": "text"
+    },
+    {
+      "name": "Java Online Mode",
+      "description": "Require Java Edition players to authenticate with Mojang.",
+      "env_variable": "GOCRAFT_ONLINE_MODE",
+      "default_value": "false",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|in:true,false",
+      "field_type": "text"
+    },
+    {
+      "name": "Bedrock Online Mode",
+      "description": "Require Bedrock Edition players to authenticate with Xbox Live.",
+      "env_variable": "GOCRAFT_BEDROCK_ONLINE_MODE",
+      "default_value": "true",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|in:true,false",
+      "field_type": "text"
+    },
+    {
+      "name": "MOTD",
+      "description": "Message shown in the Minecraft server list.",
+      "env_variable": "GOCRAFT_MOTD",
+      "default_value": "A GoCraft Server",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:255",
+      "field_type": "text"
+    },
+    {
+      "name": "Max Players",
+      "description": "Maximum number of concurrent players.",
+      "env_variable": "GOCRAFT_MAX_PLAYERS",
+      "default_value": "20",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer|min:0|max:10000",
+      "field_type": "text"
+    },
+    {
+      "name": "World Storage",
+      "description": "Choose disk for persistent Anvil storage or memory for an ephemeral world that is lost on restart.",
+      "env_variable": "GOCRAFT_WORLD_STORAGE",
+      "default_value": "disk",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|in:disk,memory",
+      "field_type": "text"
+    },    {
+      "name": "World Directory",
+      "description": "World directory relative to the server root when World Storage is disk.",
+      "env_variable": "GOCRAFT_WORLD_DIR",
+      "default_value": "world",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:255",
+      "field_type": "text"
+    },
+    {
+      "name": "World Seed",
+      "description": "Signed 64-bit seed for deterministic overworld terrain generation.",
+      "env_variable": "GOCRAFT_WORLD_SEED",
+      "default_value": "0",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer",
+      "field_type": "text"
+    },
+    {
+      "name": "Java View Distance",
+      "description": "Chunk radius sent to Java clients. Larger values use more bandwidth and memory.",
+      "env_variable": "GOCRAFT_VIEW_DISTANCE",
+      "default_value": "8",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer|between:2,32",
+      "field_type": "text"
+    },
+    {
+      "name": "Pregeneration Radius",
+      "description": "Background chunk cache radius around players. Must be at least the Java view distance.",
+      "env_variable": "GOCRAFT_PREGENERATE_RADIUS",
+      "default_value": "12",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer|between:2,64",
+      "field_type": "text"
+    }
+,
+    {
+      "name": "Maximum Cached Chunks",
+      "description": "Maximum clean chunks retained in RAM. Lower this to reduce memory use at the cost of more disk reads or regeneration.",
+      "env_variable": "GOCRAFT_MAX_CACHED_CHUNKS",
+      "default_value": "768",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer|between:128,65536",
+      "field_type": "text"
+    }  ]
+}
