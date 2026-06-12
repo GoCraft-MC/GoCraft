@@ -1,0 +1,16 @@
+{
+  "_gocraft_version": "1.21.4",
+  "_scope": "packets currently implemented by GoCraft — not a complete 1.21.4 protocol specification",
+  "_comment": "Minecraft Java Edition 1.21.4 login-state packet IDs (protocol 769).",
+  "_source": "Derived from wiki.vg/Java_Edition_Protocol and packet captures against 1.21.4 client.",
+  "clientbound": {
+    "minecraft:login_disconnect":          0,
+    "minecraft:hello":                     1,
+    "minecraft:game_profile":              2
+  },
+  "serverbound": {
+    "minecraft:hello":                     0,
+    "minecraft:key":                       1,
+    "minecraft:login_acknowledged":        3
+  }
+}
