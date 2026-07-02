@@ -21,3 +21,18 @@ func TryEndermanTeleport(ex, ey, ez float64) (nx, ny, nz float64, ok bool) {
 	}
 	return ex, ey, ez, false
 }
+
+// EndermanPickupBlocks lists block IDs an enderman can pick up.
+// TODO: wire into mob_actions block-pickup event.
+var EndermanPickupBlocks = map[string]bool{
+	"minecraft:grass_block":   true,
+	"minecraft:dirt":          true,
+	"minecraft:sand":          true,
+	"minecraft:gravel":        true,
+	"minecraft:brown_mushroom": true,
+	"minecraft:red_mushroom":  true,
+	"minecraft:cactus":        true,
+	"minecraft:pumpkin":       true,
+	"minecraft:melon":         true,
+	"minecraft:mycelium":      true,
+}
