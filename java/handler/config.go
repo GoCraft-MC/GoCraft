@@ -7,6 +7,7 @@ import (
 
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
+	"GoCraft/java/registry"
 )
 
 // ── Configuration state packet IDs ────────────────────────────────────────────
@@ -37,10 +38,14 @@ const (
 //	S→C  Update Tags (0x0D)        — empty (client uses cached tags from known pack)
 //	S→C  Finish Configuration (0x03)
 //	C→S  Acknowledge Finish (0x03)
-func HandleConfiguration(conn *network.ClientConn) error {
+func HandleConfiguration(conn *network.ClientConn, reg registry.Provider) error {
 	// ── Step 1: Advertise known data packs ──────────────────────────────────
-	if err := sendKnownPacks(conn); err != nil {
+	if err := sendKnownPacks(conn, reg.Packs()); err != nil {
 		return fmt.Errorf("config: %w", err)
+	}
+	// Send any explicit registry data (no-op for VanillaProvider).
+	if err := reg.SendRegistries(conn); err != nil {
+		return fmt.Errorf("config: sending registries: %w", err)
 	}
 
 	// ── Step 2: Drain client packets until we see Known Packs response ──────
@@ -87,24 +92,24 @@ func HandleConfiguration(conn *network.ClientConn) error {
 
 // sendKnownPacks sends the Clientbound Known Packs packet (0x0E S→C).
 //
-// We advertise a single pack: "minecraft:core" at version "1.21.4".
-// A vanilla client will recognise this pack and confirm it has the data cached,
-// allowing the server to skip sending redundant Registry Data entries.
+// The packs slice comes from a registry.Provider so the set of advertised packs
+// can differ between VanillaProvider (minecraft:core 1.21.4) and future
+// ExplicitProvider implementations (custom dimensions, Bedrock translation, etc.).
 //
 // Wire layout:
 //
-//	VarInt   pack_count (1)
-//	String   namespace  "minecraft"
-//	String   id         "core"
-//	String   version    "1.21.4"
-func sendKnownPacks(conn *network.ClientConn) error {
-	pkt := protocol.NewBuilder(packetIDClientboundKnownPacks).
-		VarInt(1).
-		String("minecraft").
-		String("core").
-		String("1.21.4").
-		Build()
-	return conn.WritePacket(pkt)
+//	VarInt   pack_count
+//	String   namespace
+//	String   id
+//	String   version
+//	  … repeated for each pack …
+func sendKnownPacks(conn *network.ClientConn, packs []registry.Pack) error {
+	b := protocol.NewBuilder(packetIDClientboundKnownPacks).
+		VarInt(int32(len(packs)))
+	for _, p := range packs {
+		b.String(p.Namespace).String(p.ID).String(p.Version)
+	}
+	return conn.WritePacket(b.Build())
 }
 
 // sendConfigPluginMessage sends a Plugin Message packet (0x01 S→C) in Configuration state.

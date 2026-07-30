@@ -9,9 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	coreworld "GoCraft/core/world"
 	"GoCraft/core/player"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
+	javaworld "GoCraft/java/world"
 )
 
 // ── Play state packet IDs (1.21.4 / protocol 769) ────────────────────────────
@@ -42,8 +44,8 @@ const keepAliveInterval = 10 * time.Second
 const keepAliveTimeout = 30 * time.Second
 
 // HandlePlay sends the initial Play-state packet burst, waits for the client
-// to confirm the teleport, then runs the keep-alive / packet loop until the
-// client disconnects or the connection errors.
+// to confirm the teleport, sends nearby chunks, then runs the keep-alive /
+// packet loop until the client disconnects or the connection errors.
 //
 // Protocol flow (1.21.4):
 //
@@ -55,8 +57,9 @@ const keepAliveTimeout = 30 * time.Second
 //	S→C  Set Center Chunk          (0x58) — chunk streaming anchor
 //	S→C  Game Event reason=13      (0x23) — "start waiting for level chunks"
 //	C→S  Confirm Teleport (ID 1)   (0x00)
+//	S→C  Level Chunk With Light    (0x27) × (2r+1)² — initial chunk burst
 //	     … keep-alive / play loop …
-func HandlePlay(conn *network.ClientConn, p *player.Player) error {
+func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
 	if err := sendLoginPlay(conn, p); err != nil {
 		return fmt.Errorf("play: %w", err)
@@ -88,7 +91,8 @@ func HandlePlay(conn *network.ClientConn, p *player.Player) error {
 		"name", p.Username,
 		"uuid", p.UUID,
 	)
-	return playLoop(conn, p, teleportID)
+
+	return playLoop(conn, p, teleportID, w, sender)
 }
 
 // ── Clientbound packet helpers ────────────────────────────────────────────────
@@ -271,10 +275,18 @@ func sendGameEvent(conn *network.ClientConn, reason byte, value float32) error {
 // playLoop is the main body for an in-game player session.
 // It reads incoming packets and dispatches them, while a ticker sends
 // periodic Keep Alive packets to the client.
-func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32) error {
+func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
+	}
+
+	// Send initial chunk burst (radius 3 → 7×7 = 49 chunks) so the client
+	// sees the world immediately after teleport confirmation.
+	chunkX := int32(p.Position.X) >> 4
+	chunkZ := int32(p.Position.Z) >> 4
+	if err := sender.SendChunksAround(conn, w, chunkX, chunkZ, 3); err != nil {
+		return fmt.Errorf("play loop: sending initial chunks: %w", err)
 	}
 
 	var (

@@ -20,9 +20,12 @@ import (
 	"GoCraft/config"
 	"GoCraft/core/game"
 	"GoCraft/core/player"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/auth"
 	"GoCraft/java/handler"
 	"GoCraft/java/network"
+	"GoCraft/java/registry"
+	javaworld "GoCraft/java/world"
 )
 
 // Server owns the game core and the Java Edition TCP listener.
@@ -38,6 +41,11 @@ type Server struct {
 	pubKeyDER []byte
 
 	loginHandler *handler.LoginHandler
+
+	// World and Java encoding resources.
+	world        *coreworld.World
+	regProvider  registry.Provider
+	chunkSender  *javaworld.Sender
 
 	// connCount tracks the number of active TCP connections.
 	connCount atomic.Int64
@@ -56,10 +64,13 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:       cfg,
-		game:      game.New(),
-		privKey:   privKey,
-		pubKeyDER: pubKeyDER,
+		cfg:         cfg,
+		game:        game.New(),
+		privKey:     privKey,
+		pubKeyDER:   pubKeyDER,
+		world:       coreworld.New(&coreworld.FlatGenerator{}),
+		regProvider: &registry.VanillaProvider{},
+		chunkSender: javaworld.DefaultSender,
 	}
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
 	s.listener = network.NewListener(cfg.Addr(), s.handleConn)
@@ -107,7 +118,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 		}
 
 		// ── Configuration state ──────────────────────────────────────────────
-		if err := handler.HandleConfiguration(conn); err != nil {
+		if err := handler.HandleConfiguration(conn, s.regProvider); err != nil {
 			slog.Debug("configuration error", "remote", remote, "err", err)
 			return
 		}
@@ -116,7 +127,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 		p := s.registerPlayer(result)
 		defer s.game.RemovePlayer(p.UUID)
 
-		if err := handler.HandlePlay(conn, p); err != nil {
+		if err := handler.HandlePlay(conn, p, s.world, s.chunkSender); err != nil {
 			slog.Debug("play error", "remote", remote, "err", err)
 		}
 
