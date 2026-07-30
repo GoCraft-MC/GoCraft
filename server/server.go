@@ -1,13 +1,17 @@
-// Package server wires together the game core, Java network listener,
-// configuration, and protocol handlers into a runnable GoCraft server.
+// Package server wires together the game core, Java and Bedrock network
+// listeners, configuration, and protocol handlers into a runnable GoCraft
+// server.
 //
 // Architecture:
 //
 //	server.Server
 //	  ├─ core/game.Game          — edition-agnostic player registry
-//	  └─ java adapter            — TCP listener + Java protocol handlers
-//	       ├─ java/network       — ClientConn, Listener
-//	       └─ java/handler       — Handshake, Status, Login, Config, Play
+//	  ├─ core/intent.Queue       — simulation command bus (M14.1+)
+//	  ├─ java adapter            — TCP listener + Java protocol handlers
+//	  │    ├─ java/network       — ClientConn, Listener
+//	  │    └─ java/handler       — Handshake, Status, Login, Config, Play
+//	  └─ bedrock adapter         — RakNet/UDP listener via gophertunnel
+//	       └─ bedrock.Listener   — M14.0: accept + auth; M14.1+: play loop
 package server
 
 import (
@@ -20,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"GoCraft/bedrock"
 	"GoCraft/config"
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
@@ -34,7 +39,7 @@ import (
 	"GoCraft/java/world/anvil"
 )
 
-// Server owns the game core and the Java Edition TCP listener.
+// Server owns the game core and both Java and Bedrock network listeners.
 type Server struct {
 	cfg  *config.Config
 	game *game.Game
@@ -55,7 +60,10 @@ type Server struct {
 	sessions     *session.Manager
 	cmds         *handler.Dispatcher
 
-	// connCount tracks the number of active TCP connections.
+	// Bedrock adapter (nil when bedrock.enabled = false).
+	bedrockListener *bedrock.Listener
+
+	// connCount tracks the number of active TCP connections (Java).
 	connCount atomic.Int64
 }
 
@@ -101,27 +109,56 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
 	s.listener = network.NewListener(cfg.Addr(), s.handleConn)
+
+	if cfg.Bedrock.Enabled {
+		s.bedrockListener = bedrock.NewListener(cfg.Bedrock)
+	}
 	return s, nil
 }
 
 // Run starts the server and blocks until ctx is cancelled or a fatal error occurs.
-// When the listener stops, all dirty chunks are flushed to disk before returning.
+// When the listeners stop, all dirty chunks are flushed to disk before returning.
 func (s *Server) Run(ctx context.Context) error {
-	slog.Info("starting GoCraft server",
-		"addr", s.cfg.Addr(),
-		"motd", s.cfg.MOTD,
-		"version", s.cfg.VersionName,
-		"protocol", s.cfg.ProtocolVersion,
-		"onlineMode", s.cfg.OnlineMode,
-	)
+	if s.cfg.JavaEnabled {
+		slog.Info("java listener enabled",
+			"addr", s.cfg.Addr(),
+			"version", s.cfg.VersionName,
+			"protocol", s.cfg.ProtocolVersion,
+			"onlineMode", s.cfg.OnlineMode,
+		)
+	}
+	if s.cfg.Bedrock.Enabled {
+		slog.Info("bedrock listener enabled",
+			"addr", s.cfg.Bedrock.Address,
+			"onlineMode", s.cfg.Bedrock.OnlineMode,
+		)
+	}
+	slog.Info("starting GoCraft server", "motd", s.cfg.MOTD)
 
 	// Spawn a small set of passive mobs near the world spawn for testing.
 	s.spawnTestMobs()
 
-	// Run the entity tick at 20 TPS alongside the network listener.
+	// Run the entity tick at 20 TPS alongside the network listeners.
 	go s.runEntityTick(ctx)
 
-	err := s.listener.Listen(ctx)
+	// Start the Bedrock listener in a separate goroutine if enabled.
+	if s.bedrockListener != nil {
+		go func() {
+			if err := s.bedrockListener.Listen(ctx); err != nil {
+				slog.Error("bedrock listener stopped", "err", err)
+			}
+		}()
+	}
+
+	// The Java listener runs on the main goroutine (blocking).
+	// If Java is disabled, block until the context is cancelled so that the
+	// Bedrock goroutine (and entity tick) keep running.
+	var err error
+	if s.cfg.JavaEnabled {
+		err = s.listener.Listen(ctx)
+	} else {
+		<-ctx.Done()
+	}
 
 	// Flush world to disk regardless of whether Listen returned cleanly.
 	if closeErr := s.world.Close(); closeErr != nil {

@@ -10,9 +10,29 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// BedrockConfig holds configuration for the Bedrock Edition UDP listener.
+type BedrockConfig struct {
+	// Enabled controls whether the Bedrock listener is started at all.
+	// Set to false to run a Java-only server.
+	Enabled bool `yaml:"enabled"`
+
+	// Address is the UDP listen address for RakNet connections.
+	// The standard Bedrock port is 19132.
+	Address string `yaml:"address"`
+
+	// OnlineMode requires connecting players to authenticate with Xbox Live.
+	// Disable only for LAN testing; unauthenticated XUIDs are NOT treated as
+	// trusted global identities.
+	OnlineMode bool `yaml:"online_mode"`
+}
+
 // Config holds all server configuration values.
 type Config struct {
-	// Network
+	// JavaEnabled controls whether the Java Edition TCP listener is started.
+	// Set to false to run a Bedrock-only server.
+	JavaEnabled bool `yaml:"java_enabled"`
+
+	// Network (Java Edition)
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
 
@@ -22,18 +42,22 @@ type Config struct {
 	VersionName     string `yaml:"version_name"`
 	ProtocolVersion int    `yaml:"protocol_version"`
 
-	// Behaviour
+	// Behaviour (Java Edition)
 	OnlineMode bool `yaml:"online_mode"`
 
 	// WorldDir is the path to the Minecraft world folder containing region/,
 	// level.dat, etc.  Leave empty to disable Anvil persistence and run with
 	// a freshly generated flat world on every startup.
 	WorldDir string `yaml:"world_dir"`
+
+	// Bedrock Edition UDP listener settings.
+	Bedrock BedrockConfig `yaml:"bedrock"`
 }
 
 // defaults returns a Config populated with sane out-of-the-box values.
 func defaults() *Config {
 	return &Config{
+		JavaEnabled:     true,
 		Host:            "0.0.0.0",
 		Port:            25565,
 		MOTD:            "A GoCraft Server",
@@ -41,6 +65,11 @@ func defaults() *Config {
 		VersionName:     "1.21.4",
 		ProtocolVersion: 769, // Minecraft Java Edition 1.21.4
 		OnlineMode:      false,
+		Bedrock: BedrockConfig{
+			Enabled:    false,
+			Address:    "0.0.0.0:19132",
+			OnlineMode: true,
+		},
 	}
 }
 
@@ -78,14 +107,19 @@ func (c *Config) Addr() string {
 
 // validate returns an error if required fields are out of range.
 func (c *Config) validate() error {
-	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("port %d is out of range 1-65535", c.Port)
+	if c.JavaEnabled {
+		if c.Port < 1 || c.Port > 65535 {
+			return fmt.Errorf("port %d is out of range 1-65535", c.Port)
+		}
+		if c.ProtocolVersion <= 0 {
+			return errors.New("protocol_version must be > 0")
+		}
 	}
 	if c.MaxPlayers < 0 {
 		return errors.New("max_players must be >= 0")
 	}
-	if c.ProtocolVersion <= 0 {
-		return errors.New("protocol_version must be > 0")
+	if c.Bedrock.Enabled && c.Bedrock.Address == "" {
+		return errors.New("bedrock.address must not be empty when bedrock is enabled")
 	}
 	return nil
 }
