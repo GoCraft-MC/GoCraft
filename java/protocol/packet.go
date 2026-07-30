@@ -193,6 +193,13 @@ func (b *Builder) Double(v float64) *Builder {
 	return b
 }
 
+// Short appends a big-endian signed 16-bit integer.
+func (b *Builder) Short(v int16) *Builder {
+	b.buf.WriteByte(byte(v >> 8))
+	b.buf.WriteByte(byte(v))
+	return b
+}
+
 // Build returns the assembled Packet.
 func (b *Builder) Build() *Packet {
 	return &Packet{ID: b.id, Data: b.buf.Bytes()}

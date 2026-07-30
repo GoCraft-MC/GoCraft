@@ -10,10 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	coreworld "GoCraft/core/world"
 	"GoCraft/core/player"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
+	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 )
 
@@ -69,7 +70,7 @@ const keepAliveTimeout = 30 * time.Second
 //	C→S  Confirm Teleport (ID 1)   (0x00)
 //	S→C  Level Chunk With Light    (0x27) × (2·viewRadius+1)² — initial burst
 //	     … keep-alive / movement / play loop …
-func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender) error {
+func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
 	if err := sendLoginPlay(conn, p); err != nil {
 		return fmt.Errorf("play: %w", err)
@@ -102,7 +103,7 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		"uuid", p.UUID,
 	)
 
-	return playLoop(conn, p, teleportID, w, sender)
+	return playLoop(conn, p, teleportID, w, sender, mgr)
 }
 
 // ── Clientbound packet helpers ────────────────────────────────────────────────
@@ -292,17 +293,32 @@ func sendForgetChunk(conn *network.ClientConn, cx, cz int32) error {
 
 // playLoop is the main body for an in-game player session.
 //
-// After the teleport is confirmed it sends the initial chunk burst, then enters
-// a tight loop that:
+// After the teleport is confirmed it registers the session with mgr, announces
+// the join to other players, sends the initial chunk burst, then enters a tight
+// loop that:
 //   - Sends periodic Keep Alive packets and validates the client's response.
 //   - Reads and dispatches incoming packets (movement, keep-alive, etc.).
+//   - Broadcasts position updates to all other sessions on every movement packet.
 //   - Streams new chunks and unloads old chunks whenever the player crosses a
 //     chunk boundary.
-func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender) error {
+//
+// On exit the session is removed from mgr and all other players are notified.
+func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
 	}
+
+	// ── Multiplayer registration ─────────────────────────────────────────────
+	// Register before announcing so ForEachExcept in onPlayerJoin can see us,
+	// and the joiner can see existing players.
+	// Defers run LIFO: onPlayerLeave fires first (broadcasts while still in map),
+	// then Remove cleans up the map entry.
+	sess := &session.Session{Player: p, Conn: conn}
+	mgr.Add(sess)
+	defer mgr.Remove(p.UUID)
+	defer onPlayerLeave(mgr, sess)
+	onPlayerJoin(mgr, sess)
 
 	// ── Initial chunk burst ──────────────────────────────────────────────────
 	chunkX := posToChunk(p.Position.X)
@@ -365,8 +381,14 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			return fmt.Errorf("play loop: reading packet: %w", err)
 		}
 
-		if err := handlePlayPacket(pkt, p, &pendingAliveID); err != nil {
+		posChanged, err := handlePlayPacket(pkt, p, &pendingAliveID)
+		if err != nil {
 			return fmt.Errorf("play loop: packet 0x%02X: %w", pkt.ID, err)
+		}
+
+		// Broadcast position/rotation to all other sessions on every movement.
+		if posChanged {
+			broadcastPosition(mgr, p)
 		}
 
 		// ── Chunk streaming on boundary crossing ─────────────────────────────
@@ -434,13 +456,15 @@ func updateChunkView(
 }
 
 // handlePlayPacket dispatches a single incoming Play-state packet.
-// Returns an error only for fatal protocol violations.
-func handlePlayPacket(pkt *protocol.Packet, p *player.Player, pendingAliveID *int64) error {
+// Returns (true, nil) when the player's position or rotation was updated so the
+// caller can broadcast the change to other sessions.
+// Returns a non-nil error only for fatal protocol violations.
+func handlePlayPacket(pkt *protocol.Packet, p *player.Player, pendingAliveID *int64) (posChanged bool, err error) {
 	switch pkt.ID {
 	case packetIDClientKeepAlive:
 		// Client echoes the Long ID we sent; validate it.
 		if len(pkt.Data) < 8 {
-			return fmt.Errorf("keep-alive packet too short: %d bytes", len(pkt.Data))
+			return false, fmt.Errorf("keep-alive packet too short: %d bytes", len(pkt.Data))
 		}
 		id := int64(binary.BigEndian.Uint64(pkt.Data[:8]))
 		if id == *pendingAliveID {
@@ -452,71 +476,74 @@ func handlePlayPacket(pkt *protocol.Packet, p *player.Player, pendingAliveID *in
 		r := pkt.Reader()
 		x, err := protocol.ReadDouble(r)
 		if err != nil {
-			return fmt.Errorf("reading position x: %w", err)
+			return false, fmt.Errorf("reading position x: %w", err)
 		}
 		y, err := protocol.ReadDouble(r)
 		if err != nil {
-			return fmt.Errorf("reading position y: %w", err)
+			return false, fmt.Errorf("reading position y: %w", err)
 		}
 		z, err := protocol.ReadDouble(r)
 		if err != nil {
-			return fmt.Errorf("reading position z: %w", err)
+			return false, fmt.Errorf("reading position z: %w", err)
 		}
 		flags, err := protocol.ReadByte(r)
 		if err != nil {
-			return fmt.Errorf("reading position flags: %w", err)
+			return false, fmt.Errorf("reading position flags: %w", err)
 		}
 		p.Position.X, p.Position.Y, p.Position.Z = x, y, z
 		p.OnGround = flags&0x01 != 0
+		return true, nil
 
 	case packetIDSetPlayerPositionAndRotation:
 		// C→S: x, y, z (Double×3), yaw, pitch (Float×2), flags (Byte)
 		r := pkt.Reader()
 		x, err := protocol.ReadDouble(r)
 		if err != nil {
-			return fmt.Errorf("reading position x: %w", err)
+			return false, fmt.Errorf("reading position x: %w", err)
 		}
 		y, err := protocol.ReadDouble(r)
 		if err != nil {
-			return fmt.Errorf("reading position y: %w", err)
+			return false, fmt.Errorf("reading position y: %w", err)
 		}
 		z, err := protocol.ReadDouble(r)
 		if err != nil {
-			return fmt.Errorf("reading position z: %w", err)
+			return false, fmt.Errorf("reading position z: %w", err)
 		}
 		yaw, err := protocol.ReadFloat(r)
 		if err != nil {
-			return fmt.Errorf("reading yaw: %w", err)
+			return false, fmt.Errorf("reading yaw: %w", err)
 		}
 		pitch, err := protocol.ReadFloat(r)
 		if err != nil {
-			return fmt.Errorf("reading pitch: %w", err)
+			return false, fmt.Errorf("reading pitch: %w", err)
 		}
 		flags, err := protocol.ReadByte(r)
 		if err != nil {
-			return fmt.Errorf("reading movement flags: %w", err)
+			return false, fmt.Errorf("reading movement flags: %w", err)
 		}
 		p.Position.X, p.Position.Y, p.Position.Z = x, y, z
 		p.Rotation.Yaw, p.Rotation.Pitch = yaw, pitch
 		p.OnGround = flags&0x01 != 0
+		return true, nil
 
 	case packetIDSetPlayerRotation:
 		// C→S: yaw, pitch (Float×2), flags (Byte)
 		r := pkt.Reader()
 		yaw, err := protocol.ReadFloat(r)
 		if err != nil {
-			return fmt.Errorf("reading yaw: %w", err)
+			return false, fmt.Errorf("reading yaw: %w", err)
 		}
 		pitch, err := protocol.ReadFloat(r)
 		if err != nil {
-			return fmt.Errorf("reading pitch: %w", err)
+			return false, fmt.Errorf("reading pitch: %w", err)
 		}
 		flags, err := protocol.ReadByte(r)
 		if err != nil {
-			return fmt.Errorf("reading rotation flags: %w", err)
+			return false, fmt.Errorf("reading rotation flags: %w", err)
 		}
 		p.Rotation.Yaw, p.Rotation.Pitch = yaw, pitch
 		p.OnGround = flags&0x01 != 0
+		return true, nil
 
 	case packetIDSetPlayerOnGround:
 		// C→S: flags (Byte; bit 0 = on_ground)
@@ -531,7 +558,7 @@ func handlePlayPacket(pkt *protocol.Packet, p *player.Player, pendingAliveID *in
 		// Silently drop all other play packets (chat, interaction, etc.).
 		// Future milestones will register handlers here.
 	}
-	return nil
+	return false, nil
 }
 
 // readConfirmTeleport reads one Confirm Teleport packet and verifies the ID.
