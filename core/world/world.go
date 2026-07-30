@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"math"
 	"sync"
+
+	"GoCraft/core/entity"
 )
 
 // World holds all chunks that have been loaded or generated, and delegates
@@ -23,6 +25,10 @@ type World struct {
 	generator Generator
 	storage   Storage // nil = no persistence
 	dirty     map[[2]int32]struct{}
+
+	// Entities holds all non-player entities (mobs, dropped items, etc.).
+	// It is initialised by New and safe for concurrent use.
+	Entities *entity.Manager
 }
 
 // New creates an empty world that generates chunks with gen on demand.
@@ -33,6 +39,7 @@ func New(gen Generator, storage Storage) *World {
 		generator: gen,
 		storage:   storage,
 		dirty:     make(map[[2]int32]struct{}),
+		Entities:  entity.NewManager(),
 	}
 }
 

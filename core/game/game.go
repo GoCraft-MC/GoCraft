@@ -42,6 +42,14 @@ func (g *Game) AddPlayer(p *player.Player) error {
 	return nil
 }
 
+// NextEntityID allocates and returns a new unique entity ID from the same
+// counter used for player entity IDs.  Use this to assign IDs to non-player
+// entities (mobs, dropped items, projectiles) so they never collide with
+// player entity IDs.
+func (g *Game) NextEntityID() int32 {
+	return g.nextEntityID.Add(1) - 1
+}
+
 // RemovePlayer deregisters the player identified by uuid.
 func (g *Game) RemovePlayer(uuid [16]byte) {
 	g.players.Delete(uuid)

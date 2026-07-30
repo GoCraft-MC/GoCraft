@@ -11,6 +11,7 @@ package handler
 // crashes or shows wrong entity behaviour after M6.
 
 import (
+	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
@@ -164,14 +165,18 @@ func spawnExistingPlayersFor(conn *network.ClientConn, mgr *session.Manager, joi
 // onPlayerJoin is called after the joining session has been added to mgr.
 // It:
 //  1. Sends the joiner info about all existing players (so they see others).
-//  2. Broadcasts the joiner's info + spawn packet to all existing players.
+//  2. Sends the joiner all currently-loaded non-player entities (mobs, etc.).
+//  3. Broadcasts the joiner's info + spawn packet to all existing players.
 //
 // Snapshots the session list so the manager lock is not held during writes.
-func onPlayerJoin(mgr *session.Manager, joining *session.Session) {
+func onPlayerJoin(mgr *session.Manager, joining *session.Session, mobs []*corentity.Entity) {
 	// Step 1 — tell the joining player about everyone already online.
 	spawnExistingPlayersFor(joining.Conn, mgr, joining.Player.UUID)
 
-	// Step 2 — tell everyone else about the joining player.
+	// Step 2 — send existing non-player entities to the joining player.
+	sendExistingMobsTo(joining.Conn, mobs)
+
+	// Step 3 — tell everyone else about the joining player.
 	infoUpdate := buildPlayerInfoUpdatePkt(joining.Player)
 	spawnPkt := buildSpawnPlayer(joining.Player)
 	for _, existing := range mgr.Snapshot(joining.Player.UUID) {

@@ -12,12 +12,16 @@ package server
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/rsa"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync/atomic"
+	"time"
 
 	"GoCraft/config"
+	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
@@ -105,6 +109,13 @@ func (s *Server) Run(ctx context.Context) error {
 		"protocol", s.cfg.ProtocolVersion,
 		"onlineMode", s.cfg.OnlineMode,
 	)
+
+	// Spawn a small set of passive mobs near the world spawn for testing.
+	s.spawnTestMobs()
+
+	// Run the entity tick at 20 TPS alongside the network listener.
+	go s.runEntityTick(ctx)
+
 	err := s.listener.Listen(ctx)
 
 	// Flush world to disk regardless of whether Listen returned cleanly.
@@ -112,6 +123,123 @@ func (s *Server) Run(ctx context.Context) error {
 		slog.Warn("server: error flushing world on shutdown", "err", closeErr)
 	}
 	return err
+}
+
+// runEntityTick fires tickEntities at 20 TPS (every 50 ms) until ctx is done.
+func (s *Server) runEntityTick(ctx context.Context) {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.tickEntities()
+		}
+	}
+}
+
+// tickEntities advances every registered non-player entity by one game tick:
+//   - Gravity is applied when the entity is airborne.
+//   - Position is integrated from velocity.
+//   - A simple flat-world ground check clamps entities at Y=64.
+//   - Dead entities are removed and despawned.
+//   - Moving entities broadcast a Teleport Entity update to all sessions.
+//
+// Horizontal drag is applied each tick so that any future momentum (knockback,
+// projectile impact) naturally decays.
+func (s *Server) tickEntities() {
+	const (
+		gravity = -0.08 // blocks/tick² downward acceleration
+		drag    = 0.98  // horizontal velocity multiplier per tick
+		groundY = 64.0  // flat-world surface: top face of Y=63 stone
+		minVel  = 1e-6  // below this magnitude, velocity is zeroed (avoid float noise)
+	)
+
+	for _, e := range s.world.Entities.Snapshot() {
+		// ── Dead entity cleanup ───────────────────────────────────────────────
+		if e.Dead {
+			s.world.Entities.Remove(e.EntityID)
+			handler.BroadcastRemoveEntity(e.EntityID, s.sessions)
+			slog.Info("entity died", "type", e.Type, "id", e.EntityID)
+			continue
+		}
+
+		// ── Gravity ───────────────────────────────────────────────────────────
+		if !e.OnGround {
+			e.VY += gravity
+		}
+
+		// ── Position integration ──────────────────────────────────────────────
+		prevX, prevY, prevZ := e.Position.X, e.Position.Y, e.Position.Z
+		e.Position.X += e.VX
+		e.Position.Y += e.VY
+		e.Position.Z += e.VZ
+
+		// ── Ground detection (flat-world approximation) ───────────────────────
+		if e.Position.Y <= groundY {
+			e.Position.Y = groundY
+			e.VY = 0
+			e.OnGround = true
+		} else {
+			e.OnGround = false
+		}
+
+		// ── Horizontal drag ───────────────────────────────────────────────────
+		e.VX *= drag
+		e.VZ *= drag
+		if math.Abs(e.VX) < minVel {
+			e.VX = 0
+		}
+		if math.Abs(e.VZ) < minVel {
+			e.VZ = 0
+		}
+
+		// ── Position broadcast ────────────────────────────────────────────────
+		moved := e.Position.X != prevX || e.Position.Y != prevY || e.Position.Z != prevZ
+		if moved {
+			handler.BroadcastEntityPosition(e, s.sessions)
+		}
+	}
+}
+
+// spawnTestMobs populates the world near the spawn point with a handful of
+// passive mobs so the entity system can be verified with a vanilla client.
+// This is removed or made config-driven in a later milestone.
+func (s *Server) spawnTestMobs() {
+	type spawn struct {
+		t       corentity.EntityType
+		x, y, z float64
+	}
+	mobs := []spawn{
+		{corentity.TypeCow, 6, 64, 0},
+		{corentity.TypeCow, -6, 64, 4},
+		{corentity.TypePig, 0, 64, 7},
+		{corentity.TypeSheep, 4, 64, -5},
+		{corentity.TypeChicken, -4, 64, -6},
+	}
+	for _, m := range mobs {
+		id := s.game.NextEntityID()
+		uuid := newRandomUUID()
+		e := corentity.New(id, uuid, m.t, m.x, m.y, m.z)
+		e.OnGround = true // spawned on the surface; skip first-tick gravity drop
+		s.world.Entities.Add(e)
+		slog.Info("spawned entity", "type", m.t, "id", id,
+			"x", m.x, "y", m.y, "z", m.z)
+	}
+}
+
+// newRandomUUID generates a random RFC 4122 version-4 UUID.
+func newRandomUUID() [16]byte {
+	var uuid [16]byte
+	if _, err := cryptorand.Read(uuid[:]); err != nil {
+		// crypto/rand failure is extremely rare; panic is acceptable here
+		// because the server cannot safely assign unique entity identities.
+		panic("server: crypto/rand failed: " + err.Error())
+	}
+	uuid[6] = (uuid[6] & 0x0f) | 0x40 // version 4
+	uuid[8] = (uuid[8] & 0x3f) | 0x80 // variant 1 (RFC 4122)
+	return uuid
 }
 
 // handleConn is called in its own goroutine for every accepted TCP connection.

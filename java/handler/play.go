@@ -325,7 +325,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	mgr.Add(sess)
 	defer mgr.Remove(p.UUID)
 	defer onPlayerLeave(mgr, sess)
-	onPlayerJoin(mgr, sess)
+	onPlayerJoin(mgr, sess, w.Entities.Snapshot())
 
 	// ── Initial chunk burst ──────────────────────────────────────────────────
 	chunkX := posToChunk(p.Position.X)
