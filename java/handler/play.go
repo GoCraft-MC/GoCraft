@@ -391,6 +391,13 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			broadcastPosition(mgr, p)
 		}
 
+		// Chat and commands need the session manager; handled separately.
+		if pkt.ID == packetIDChatMessage || pkt.ID == packetIDChatCommand {
+			if err := handleChatPacket(pkt, p, mgr); err != nil {
+				slog.Warn("chat error", "player", p.Username, "err", err)
+			}
+		}
+
 		// ── Chunk streaming on boundary crossing ─────────────────────────────
 		newChunkX := posToChunk(p.Position.X)
 		newChunkZ := posToChunk(p.Position.Z)
