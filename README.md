@@ -236,7 +236,34 @@ Please avoid adding generated binaries, credentials, player data, or private ser
 
 ## License
 
-This repository currently contains no `LICENSE` or `COPYING` file. No open-source license is granted at this time. Contact the repository owner before using, modifying, or redistributing the project.
+**Copyright © 2026 Oreo Studios — All Rights Reserved**
+
+GoCraft is a proprietary software project developed and maintained by **Oreo Studios**.
+
+This repository is intentionally public so the community can follow the development of the project. **Public visibility does not grant permission to copy, redistribute, modify, commercialize, or create derivative works from the source code.**
+
+Unless you have received **prior written permission** from Oreo Studios, you may **not**:
+
+* Copy substantial portions of the source code.
+* Redistribute or publish modified versions.
+* Create commercial or non-commercial derivatives.
+* Rebrand or represent GoCraft as your own project.
+* Use GoCraft code in another server software.
+
+If you are interested in contributing to GoCraft or collaborating with Oreo Studios, we would love to hear from you. Please open an issue or contact us before starting any work.
+
+**Company Information**
+
+**Oreo Studios — Web & Game Development Studio**
+
+SIREN: **993 823 459**
+SIRET: **993 823 459 00017**
+APE Code: **62.01Z**
+Entrepreneur individuel — France
+
+Website: https://oreostudios.fr
+
+Minecraft is a trademark of Microsoft. GoCraft is an independent project and is not affiliated with or endorsed by Mojang Studios or Microsoft.
 
 ## Credits and acknowledgements
 
