@@ -10,22 +10,6 @@ import (
 	"GoCraft/java/registry"
 )
 
-// ── Configuration state packet IDs ────────────────────────────────────────────
-
-const (
-	// Serverbound (C→S) — Configuration state
-	packetIDClientInformation     = 0x00
-	packetIDServerboundKnownPacks = 0x07
-	packetIDAcknowledgeFinish     = 0x03
-
-	// Clientbound (S→C) — Configuration state
-	packetIDConfigPluginMessage   = 0x01
-	packetIDFinishConfiguration   = 0x03
-	packetIDFeatureFlags          = 0x0C
-	packetIDUpdateTags            = 0x0D
-	packetIDClientboundKnownPacks = 0x0E
-)
-
 // HandleConfiguration drives the connection through the Configuration state.
 //
 // Protocol flow (1.21.4 / protocol 769):

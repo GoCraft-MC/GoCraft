@@ -16,37 +16,12 @@ import (
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
+	javaworld "GoCraft/java/world"
 )
 
-// ── Entity packet IDs ─────────────────────────────────────────────────────────
-
-const (
-	// packetIDSpawnEntity (S→C 0x01) — spawns any entity, including players.
-	// Stable across all 1.18+ protocol versions.
-	packetIDSpawnEntity = 0x01
-
-	// packetIDPlayerInfoRemove (S→C 0x41) — removes players from the tab list.
-	// Sequential after Player Info Update (0x40); confident.
-	packetIDPlayerInfoRemove = 0x41
-
-	// packetIDRemoveEntities (S→C) — instructs clients to despawn entity IDs.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDRemoveEntities = 0x3E
-
-	// packetIDSetHeadRotation (S→C) — sets the yaw of an entity's head.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDSetHeadRotation = 0x47
-
-	// packetIDTeleportEntity (S→C) — sets an entity's absolute position.
-	// Used for all position broadcasts in M6 (no delta tracking yet).
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDTeleportEntity = 0x6E
-
-	// playerEntityTypeID is the vanilla 1.21.4 entity type registry index for
-	// "minecraft:player".  Estimate; M13 (data-driven registries) will replace
-	// this with a lookup from Minecraft's generated reports/registries.json.
-	playerEntityTypeID = int32(130)
-)
+// playerEntityTypeID is the vanilla 1.21.4 entity type registry index for
+// "minecraft:player", resolved from the embedded registries.json at init time.
+var playerEntityTypeID = javaworld.EntityTypeID("minecraft:player")
 
 // ── Angle encoding ────────────────────────────────────────────────────────────
 
@@ -82,8 +57,8 @@ func buildSpawnPlayer(p *player.Player) *protocol.Packet {
 		Byte(degToAngle(p.Rotation.Pitch)).
 		Byte(degToAngle(p.Rotation.Yaw)).
 		Byte(degToAngle(p.Rotation.Yaw)). // head yaw = body yaw at spawn
-		VarInt(0).                         // data
-		Short(0).Short(0).Short(0).        // velocity x, y, z
+		VarInt(0). // data
+		Short(0).Short(0).Short(0). // velocity x, y, z
 		Build()
 }
 
@@ -113,8 +88,9 @@ func buildPlayerInfoUpdatePkt(p *player.Player) *protocol.Packet {
 		VarInt(1).
 		UUID(protocol.UUID(p.UUID)).
 		String(p.Username).VarInt(0). // name + 0 skin properties
-		Bool(true).                    // listed in tab
+		Bool(true). // listed in tab
 		Build()
+
 }
 
 // buildTeleportEntity builds a Teleport Entity packet with p's current position

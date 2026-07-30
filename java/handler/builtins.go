@@ -25,10 +25,6 @@ import (
 	"GoCraft/java/protocol"
 )
 
-// packetIDDisconnectPlay is the S→C Disconnect packet in the Play state.
-// Estimate for 1.21.4 (protocol 769); verify against packet dump.
-const packetIDDisconnectPlay = 0x1D
-
 // RegisterBuiltins registers all built-in GoCraft commands with d.
 func RegisterBuiltins(d *Dispatcher) {
 	d.Register("help", cmdHelp)

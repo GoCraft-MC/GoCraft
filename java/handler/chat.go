@@ -30,24 +30,6 @@ import (
 // message, matching the vanilla server's enforced limit.
 const maxChatLength = 256
 
-// ── Chat packet IDs ───────────────────────────────────────────────────────────
-
-const (
-	// packetIDChatMessage (C→S) — player sends a chat message.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDChatMessage = 0x06
-
-	// packetIDChatCommand (C→S) — player sends a slash command.
-	// The command string arrives without the leading '/'.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDChatCommand = 0x05
-
-	// packetIDSystemChatMessage (S→C) — server sends a chat or system message.
-	// Used for both broadcast chat and per-player command feedback.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDSystemChatMessage = 0x6D
-)
-
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 // handleChatPacket dispatches an incoming chat or command packet.

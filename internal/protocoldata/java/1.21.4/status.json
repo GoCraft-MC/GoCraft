@@ -1,0 +1,13 @@
+{
+  "_gocraft_version": "1.21.4",
+  "_comment": "Minecraft Java Edition 1.21.4 status-state packet IDs (protocol 769).",
+  "_source": "Derived from wiki.vg/Java_Edition_Protocol and packet captures against 1.21.4 client.",
+  "clientbound": {
+    "minecraft:status_response":           0,
+    "minecraft:pong_response":             1
+  },
+  "serverbound": {
+    "minecraft:status_request":            0,
+    "minecraft:ping_request":              1
+  }
+}

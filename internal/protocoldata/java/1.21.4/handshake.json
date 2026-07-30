@@ -1,0 +1,9 @@
+{
+  "_gocraft_version": "1.21.4",
+  "_comment": "Minecraft Java Edition 1.21.4 handshake-state packet IDs (protocol 769).",
+  "_source": "Derived from wiki.vg/Java_Edition_Protocol and packet captures against 1.21.4 client.",
+  "clientbound": {},
+  "serverbound": {
+    "minecraft:intention":                 0
+  }
+}

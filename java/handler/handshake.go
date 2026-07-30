@@ -12,9 +12,6 @@ import (
 )
 
 const (
-	// Packet IDs — Handshaking state (client → server)
-	packetIDHandshake = 0x00
-
 	// Next-state values encoded in the Handshake packet
 	nextStateStatus = 1
 	nextStateLogin  = 2

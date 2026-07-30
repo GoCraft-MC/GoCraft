@@ -28,8 +28,6 @@ package handler
 
 import "GoCraft/java/protocol"
 
-const packetIDCommands = 0x11 // S→C Play, estimate for 1.21.4
-
 // buildCommandsPacket constructs the Commands S→C packet for the GoCraft
 // built-in command set:
 //

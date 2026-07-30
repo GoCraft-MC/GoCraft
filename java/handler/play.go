@@ -18,29 +18,11 @@ import (
 	javaworld "GoCraft/java/world"
 )
 
-// ── Play state packet IDs (1.21.4 / protocol 769) ────────────────────────────
+// ── Play state constants ──────────────────────────────────────────────────────
 
 const (
-	// Clientbound (S→C) — Play state
-	packetIDPlayLogin        = 0x2C // Login (Play)
-	packetIDPlayerAbilities  = 0x3A // Player Abilities
-	packetIDPlayerInfoUpdate = 0x40 // Player Info Update (tab list)
-	packetIDSyncPosition     = 0x42 // Synchronize Player Position
-	packetIDGameEvent        = 0x23 // Game Event
-	packetIDSetCenterChunk   = 0x58 // Set Center Chunk (update_view_position)
-	packetIDSpawnPosition    = 0x5B // Set Default Spawn Position
-	packetIDServerKeepAlive  = 0x26 // Keep Alive (S→C)
-	packetIDForgetLevelChunk = 0x22 // Forget Level Chunk (S→C)
-
-	// Serverbound (C→S) — Play state
-	packetIDConfirmTeleport              = 0x00 // Confirm Teleport
-	packetIDClientKeepAlive             = 0x18 // Keep Alive (C→S)
-	packetIDSetPlayerPosition            = 0x1A // Set Player Position
-	packetIDSetPlayerPositionAndRotation = 0x1B // Set Player Position and Rotation
-	packetIDSetPlayerRotation            = 0x1C // Set Player Rotation
-	packetIDSetPlayerOnGround            = 0x1D // Set Player On Ground
-
-	// Game Event reasons
+	// Game Event reasons (not packet IDs — these are event-reason codes sent
+	// inside the Game Event packet body and do not change between versions).
 	gameEventStartWaitingForChunks = 13
 )
 

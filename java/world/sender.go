@@ -4,16 +4,14 @@ import (
 	"fmt"
 
 	coreworld "GoCraft/core/world"
+	"GoCraft/internal/protocoldata"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 )
 
 // packetIDLevelChunkWithLight is the S→C Play packet ID for
-// "Level Chunk With Light" in Minecraft Java Edition 1.21.4 (protocol 769).
-//
-// The ID may need adjustment after live testing against the vanilla client.
-// Check wiki.vg/Protocol when updating the server version.
-const packetIDLevelChunkWithLight = 0x27
+// "Level Chunk With Light", resolved from the embedded protocol data at init.
+var packetIDLevelChunkWithLight = protocoldata.MustCB("play", "minecraft:level_chunk_with_light")
 
 // Sender converts canonical Chunks into Java chunk packets and writes them
 // to a ClientConn.  It is stateless beyond the surface Y assumption used for

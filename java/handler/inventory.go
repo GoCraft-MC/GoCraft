@@ -27,30 +27,6 @@ import (
 	javaworld "GoCraft/java/world"
 )
 
-// ── Inventory packet IDs ──────────────────────────────────────────────────────
-
-const (
-	// Serverbound (C→S)
-
-	// packetIDSetHeldItem (C→S) — player scrolls the hotbar.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDSetHeldItemCS = 0x2F
-
-	// packetIDCreativeModeSetItem (C→S) — creative player sets an inventory slot.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDCreativeModeSetItem = 0x32
-
-	// Clientbound (S→C)
-
-	// packetIDSetContainerContent (S→C) — sends full inventory to the client.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDSetContainerContent = 0x13
-
-	// packetIDSetHeldItemSC (S→C) — tells the client which hotbar slot is active.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDSetHeldItemSC = 0x55
-)
-
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 // handleInventoryPacket dispatches an incoming inventory packet.

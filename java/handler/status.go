@@ -13,15 +13,6 @@ import (
 	"GoCraft/java/protocol"
 )
 
-const (
-	// Packet IDs — Status state
-	packetIDStatusRequest  = 0x00 // C→S: no body
-	packetIDStatusResponse = 0x00 // S→C: JSON string
-
-	packetIDPingRequest  = 0x01 // C→S: int64 payload
-	packetIDPongResponse = 0x01 // S→C: same int64 payload
-)
-
 // OnlineCount is the global player count used in status responses.
 // Updated atomically by the game core when players join or leave.
 var OnlineCount atomic.Int32

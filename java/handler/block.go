@@ -42,31 +42,6 @@ func digBreaksBlock(status int32, mode player.GameMode) bool {
 	}
 }
 
-// ── Block packet IDs ──────────────────────────────────────────────────────────
-
-const (
-	// Serverbound (C→S)
-
-	// packetIDPlayerAction (C→S) — reports digging events (start, cancel, finish).
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDPlayerAction = 0x23
-
-	// packetIDUseItemOn (C→S) — reports block-placement interactions.
-	// Estimate for 1.21.4; verify against packet dump.
-	packetIDUseItemOn = 0x36
-
-	// Clientbound (S→C)
-
-	// packetIDAcknowledgeBlockChange (S→C) — echoes the client's sequence ID
-	// to confirm that a block change was accepted by the server.
-	// Confident; present and stable since 1.19.
-	packetIDAcknowledgeBlockChange = 0x05
-
-	// packetIDBlockUpdate (S→C) — updates a single block in the world.
-	// Confident; present and stable since very early protocol versions.
-	packetIDBlockUpdate = 0x09
-)
-
 // Player Action status codes (field "status" in C→S Player Action).
 const (
 	actionStatusStartDigging  = 0 // block targeted — instant break in creative
