@@ -145,9 +145,17 @@ type Provider interface {
 | 2 — Login and authentication | Complete | Offline and online login, Mojang session verification, RSA and AES-CFB8 |
 | 3 — Configuration and play-state entry | Complete | Known packs, feature flags, initial play packets, teleport confirmation, keep-alive |
 | 4 — World layer and chunk streaming | Complete | Canonical Block/Chunk types, FlatGenerator, Java chunk encoding, initial chunk burst |
-| 5 — Movement and player state | Planned | Position updates, ground detection, fall physics |
-| Go-native plugin API | Planned | Event, scheduler, command, permission, and extension APIs |
-| Bedrock adapter and cross-play | Future work | RakNet/UDP transport, Bedrock login, and translation through the shared core |
+| 5 — Movement and dynamic chunk streaming | Complete | Movement packet handling, posToChunk floor-division, per-boundary chunk load/unload |
+| 6 — Multiplayer sync | Planned | Spawn/despawn entities, broadcast position and head rotation to all sessions |
+| 7 — Chat | Planned | Receive chat messages, broadcast to all players, `/` command prefix |
+| 8 — Block interaction | Planned | Break/place blocks, mutate canonical World, broadcast Block Update to all players |
+| 9 — World persistence | Planned | Anvil region-file loader, NBT reader, RegionLoader implementing Generator, chunk saving |
+| 10 — Inventory and items | Planned | Player inventory, hotbar, Click Container, Set Held Item, item drops |
+| 11 — Entity system | Planned | Canonical Entity type, entity registry, mob spawn/tick/despawn, health and damage |
+| 12 — Commands | Planned | Command dispatcher, Commands packet (tab-completion tree), /gamemode /tp /give /kick |
+| 13 — Data-driven registries | Planned | Load block state IDs and biome IDs from Minecraft's data-generator output (reports/blocks.json); replace hardcoded tables in java/world so both Java and Bedrock adapters share the same canonical ID resolution |
+| 14 — Bedrock adapter | Future work | RakNet/UDP, Xbox auth, bedrock/world encoder using M13 registries for runtime IDs, cross-play via shared core/ |
+| 15 — Go plugin API | Future work | Event bus, command registration, scheduler, permission nodes; plugins are compiled Go packages |
 
 Detailed records for completed milestones are kept in [`logs/`](logs/).
 
@@ -265,7 +273,13 @@ A Go-native plugin API is planned, but **no plugin system is implemented today**
 
 ## Bedrock and cross-play plans
 
-Bedrock support is future work. The canonical `Block` and `Chunk` types in `core/world` are deliberately edition-agnostic so a future Bedrock adapter can consume them directly. The Bedrock encoder will map canonical `Block` values to Bedrock runtime IDs independently of the Java encoder, with no changes to `core/`. The current `bedrock/` package contains only design documentation.
+Bedrock support is planned for Milestone 14, after the data-driven registry layer (M13) is in place.
+
+The canonical `Block` and `Chunk` types in `core/` carry no edition-specific IDs. M13 will load block state and biome mappings from Minecraft's own data-generator output (`reports/blocks.json`), giving both the Java adapter and the future Bedrock adapter a single shared ID-resolution path. The Bedrock encoder (`bedrock/world`) will use the same registry infrastructure to map canonical `Block` values to Bedrock runtime IDs — no separate hardcoded tables needed.
+
+This sequencing means the Bedrock adapter is a transport and translation layer (RakNet/UDP, Xbox auth, Sub Chunk packet format) rather than a second hand-maintained block table. Cross-play — Java and Bedrock clients sharing the same world — follows naturally because both adapters read from the same `core/world.World`.
+
+The current `bedrock/` package contains only design documentation. No RakNet listener, Bedrock login, packet encoding, or working cross-play exists yet.
 
 ## Contributing
 
