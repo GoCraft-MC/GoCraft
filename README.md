@@ -15,7 +15,7 @@
 
 GoCraft is a native Go implementation of a Minecraft server written from scratch. It is built around a protocol-independent game core with edition-specific network adapters at the boundary. It is not a Paper fork, does not use the JVM, and is not a drop-in replacement for an existing server.
 
-A vanilla Minecraft: Java Edition 1.21.4 client can connect, authenticate, complete configuration, enter the play state, and see a flat world of stone at Y=63. Movement, chat, and gameplay are not yet implemented.
+A vanilla Minecraft: Java Edition 1.21.4 client can connect, authenticate, complete configuration, and enter a persistent flat world. Players can move, chat, break and place blocks using items from their inventory, and see other players in real time. World changes are saved to Anvil region files and reloaded on restart.
 
 ## Compatibility
 
@@ -51,6 +51,7 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
   - Palette-based `Section` and `Chunk` types; 24 sections per column (Y=−64 to 319)
   - `FlatGenerator` producing a single layer of stone at Y=63
   - Concurrent `World` cache with on-demand chunk generation
+  - `Storage` interface with Anvil region-file implementation: NBT read/write, zlib compression, atomic `.tmp`-then-rename saves, dirty-chunk tracking, lazy load on first access
   - Architecture test that fails at compile time if any `core/` package imports `java/`
 - **Java chunk encoding** (`java/world`):
   - Java 1.21.4 global block state ID registry (hardcoded; data-driven in a future milestone)
@@ -59,14 +60,33 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
   - `PalettedContainer` encoder: indirect palette, ≥4 bits/entry, no-overflow packing
   - Level Chunk With Light packet (0x27) with full sky-light data for all 26 sections
   - `Sender.SendChunksAround`: 7×7 initial chunk burst after teleport confirmation
+- **Multiplayer** (`java/handler`):
+  - Player spawn and despawn packets broadcast to all other sessions
+  - Position and head-rotation broadcast on every movement packet
+  - Lock-free broadcast via session snapshot (no lock held during socket writes)
+- **Chat** (`java/handler`):
+  - Player chat messages broadcast to all connected players
+  - `/`-prefixed input treated as commands (no-op until M12)
+  - 256-character message length limit with client notification
+- **Block interaction** (`java/handler`):
+  - Creative instant-break on START\_DIGGING; survival break on FINISH\_DIGGING
+  - Block placement from the held item; occupied-block guard prevents overwriting solid blocks
+  - Y-bounds validation before any world mutation
+  - Block Update broadcast to all sessions; Acknowledge Block Change sequence echo
+- **Inventory and items** (`core/player`, `java/world`, `java/handler`):
+  - `ItemStack{ItemID, Count}` in `core/player` — no Java IDs in the core
+  - 46-slot player inventory with hotbar slot tracking; `HeldItem()` accessor
+  - Creative Mode Set Item handling: maps numeric item registry IDs to canonical resource locations
+  - Set Held Item tracking for hotbar scroll; initial inventory sent on join
+  - Partial item registry (~60 entries) in `java/world/items.go`; replaced by data-driven loading in M13
 - Protocol-independent player, spatial, and online-player registry types
-- YAML configuration with defaults and basic validation
+- YAML configuration with defaults and basic validation (`world_dir` for Anvil persistence)
 - Structured logging through Go's `log/slog`
 - Automated tests for authentication, cryptography, packet framing, VarInt encoding, and architecture isolation
 
 ### Not implemented
 
-Movement, chat, block interaction, inventories, entities, commands, permissions, and complete gameplay are not implemented. Paper plugin compatibility, Bedrock clients, and cross-play are not supported.
+Entities, commands, permissions, and complete gameplay are not implemented. Paper plugin compatibility, Bedrock clients, and cross-play are not supported.
 
 ## Architecture
 
@@ -146,12 +166,12 @@ type Provider interface {
 | 3 — Configuration and play-state entry | Complete | Known packs, feature flags, initial play packets, teleport confirmation, keep-alive |
 | 4 — World layer and chunk streaming | Complete | Canonical Block/Chunk types, FlatGenerator, Java chunk encoding, initial chunk burst |
 | 5 — Movement and dynamic chunk streaming | Complete | Movement packet handling, posToChunk floor-division, per-boundary chunk load/unload |
-| 6 — Multiplayer sync | Planned | Spawn/despawn entities, broadcast position and head rotation to all sessions |
-| 7 — Chat | Planned | Receive chat messages, broadcast to all players, `/` command prefix |
-| 8 — Block interaction | Planned | Break/place blocks, mutate canonical World, broadcast Block Update to all players |
-| 9 — World persistence | Planned | Anvil region-file loader, NBT reader, RegionLoader implementing Generator, chunk saving |
-| 10 — Inventory and items | Planned | Player inventory, hotbar, Click Container, Set Held Item, item drops |
-| 11 — Entity system | Planned | Canonical Entity type, entity registry, mob spawn/tick/despawn, health and damage |
+| 6 — Multiplayer sync | Complete | Player spawn/despawn, position and head-rotation broadcast, lock-free session snapshot |
+| 7 — Chat | Complete | Chat broadcast, `/` command prefix, 256-character length limit |
+| 8 — Block interaction | Complete | Creative/survival break logic, block placement from held item, Block Update broadcast, Y-bounds guard |
+| 9 — World persistence | Complete | Anvil region-file I/O, NBT read/write, atomic saves, dirty-chunk tracking, `Storage` interface |
+| 10 — Inventory and items | Complete | ItemStack, 46-slot inventory, hotbar tracking, Creative Mode Set Item, placement from held item, occupied-block guard |
+| 11 — Entity system | In progress | Canonical Entity type, entity registry, mob spawn/tick/despawn, health and damage |
 | 12 — Commands | Planned | Command dispatcher, Commands packet (tab-completion tree), /gamemode /tp /give /kick |
 | 13 — Data-driven registries | Planned | Load block state IDs and biome IDs from Minecraft's data-generator output (reports/blocks.json); replace hardcoded tables in java/world so both Java and Bedrock adapters share the same canonical ID resolution |
 | 14 — Bedrock adapter | Future work | RakNet/UDP, Xbox auth, bedrock/world encoder using M13 registries for runtime IDs, cross-play via shared core/ |
@@ -242,21 +262,29 @@ GoCraft/
 │   └── config.go              # YAML loading, defaults, and validation
 ├── core/
 │   ├── game/game.go           # Edition-neutral online-player registry
-│   ├── player/player.go       # Canonical player model
+│   ├── player/
+│   │   ├── player.go          # Canonical player model (position, inventory, game mode)
+│   │   └── item.go            # ItemStack, InventorySize, HotbarStart constants
 │   ├── spatial/spatial.go     # Position and rotation types
 │   └── world/
 │       ├── block.go           # Block{Namespace, Name, Properties} — no edition IDs
 │       ├── chunk.go           # Section and Chunk with palette-based block storage
 │       ├── generator.go       # Generator interface and FlatGenerator
-│       ├── world.go           # Concurrent world cache
+│       ├── storage.go         # Storage interface for chunk persistence
+│       ├── world.go           # Concurrent world cache with dirty-chunk tracking
 │       └── arch_test.go       # Fails build if core/ imports java/
 ├── java/
 │   ├── auth/                  # Login crypto, UUIDs, Mojang sessions
-│   ├── handler/               # Handshake, status, login, config, play
+│   ├── handler/               # Handshake, status, login, config, play, block, chat, inventory
 │   ├── network/               # TCP listener and client connections
 │   ├── protocol/              # Framing, packets, VarInts, wire types
 │   ├── registry/              # Provider interface + VanillaProvider
-│   └── world/                 # Java block state IDs, chunk encoder, Sender
+│   └── world/
+│       ├── anvil/             # Anvil region-file I/O, NBT read/write, atomic saves
+│       ├── blocks.go          # Java block state ID registry
+│       ├── items.go           # Java item ID registry and item→block mapping
+│       ├── chunk.go           # Java chunk encoder (PalettedContainer, heightmaps, light)
+│       └── sender.go          # Chunk burst sender
 ├── logs/                      # Milestone development records
 ├── server/
 │   └── server.go              # Core and Java adapter orchestration
