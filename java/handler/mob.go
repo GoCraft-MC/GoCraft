@@ -133,3 +133,37 @@ func BroadcastRemoveEntity(entityID int32, mgr *session.Manager) {
 		_ = s.Conn.WritePacket(pkt)
 	}
 }
+
+// DispatchTickBroadcast is called at the end of each entity tick to send
+// position-update and despawn packets to all connected sessions without
+// blocking the tick goroutine.
+//
+// The caller passes:
+//   - moved: entities whose position changed this tick (live pointers; read
+//     here, while still inside the tick goroutine, before any race window).
+//   - deadIDs: entity IDs that were removed from the world this tick.
+//
+// All packets are built synchronously before the goroutine is spawned.
+// The goroutine therefore only reads from immutable []byte packet buffers —
+// it never touches entity fields, so there is no data race with the next tick.
+func DispatchTickBroadcast(moved []*corentity.Entity, deadIDs []int32, mgr *session.Manager) {
+	pkts := make([]*protocol.Packet, 0, len(moved)+len(deadIDs))
+	for _, e := range moved {
+		pkts = append(pkts, buildTeleportMob(e))
+	}
+	for _, id := range deadIDs {
+		pkts = append(pkts, buildRemoveEntities(id))
+	}
+	if len(pkts) == 0 {
+		return
+	}
+	// Hand off the immutable packet slice so slow clients (10 s write deadline)
+	// cannot stall the simulation tick.
+	go func() {
+		for _, s := range mgr.SnapshotAll() {
+			for _, pkt := range pkts {
+				_ = s.Conn.WritePacket(pkt)
+			}
+		}
+	}()
+}

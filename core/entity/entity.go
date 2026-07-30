@@ -67,10 +67,20 @@ const (
 
 // Entity is the canonical server-side representation of any non-player entity.
 //
-// Fields are not individually mutex-protected; the entity tick goroutine is
-// the sole writer for Position and Velocity.  Concurrent reads for network
-// broadcasts are safe because Go's memory model allows concurrent reads.
-// Per-entity locking will be added when combat interactions are implemented.
+// # Concurrency ownership
+//
+// The entity tick goroutine in server.Server is the sole writer of the spatial
+// and health fields (Position, VX/VY/VZ, OnGround, Health, Dead).  All other
+// goroutines (player handlers, commands) must treat these fields as read-only
+// unless they hold an external lock or go through a dedicated mutation API.
+//
+// The current design is safe because:
+//   - Only the tick goroutine calls Damage/Heal and integrates velocity.
+//   - Broadcast goroutines only read from already-built protocol.Packet bytes,
+//     never from entity fields directly (see server.tickEntities).
+//
+// Per-entity locking will be added when combat or concurrent mutations are
+// introduced.
 type Entity struct {
 	// Identity
 	EntityID int32

@@ -143,24 +143,32 @@ func (s *Server) runEntityTick(ctx context.Context) {
 //   - Gravity is applied when the entity is airborne.
 //   - Position is integrated from velocity.
 //   - A simple flat-world ground check clamps entities at Y=64.
-//   - Dead entities are removed and despawned.
-//   - Moving entities broadcast a Teleport Entity update to all sessions.
+//   - Dead entities are removed from the manager this tick.
+//   - Packets for position updates and despawns are built synchronously, then
+//     handed to a goroutine so slow clients cannot stall the simulation.
 //
-// Horizontal drag is applied each tick so that any future momentum (knockback,
-// projectile impact) naturally decays.
+// Ownership: this method is the sole writer of entity spatial/health fields.
+// See the concurrency comment on core/entity.Entity for the full invariant.
 func (s *Server) tickEntities() {
+	start := time.Now()
+
 	const (
 		gravity = -0.08 // blocks/tick² downward acceleration
 		drag    = 0.98  // horizontal velocity multiplier per tick
 		groundY = 64.0  // flat-world surface: top face of Y=63 stone
-		minVel  = 1e-6  // below this magnitude, velocity is zeroed (avoid float noise)
+		minVel  = 1e-6  // below this threshold, zero velocity to avoid float noise
+	)
+
+	var (
+		moved   []*corentity.Entity // entities whose position changed this tick
+		deadIDs []int32             // entity IDs removed from the world this tick
 	)
 
 	for _, e := range s.world.Entities.Snapshot() {
 		// ── Dead entity cleanup ───────────────────────────────────────────────
 		if e.Dead {
 			s.world.Entities.Remove(e.EntityID)
-			handler.BroadcastRemoveEntity(e.EntityID, s.sessions)
+			deadIDs = append(deadIDs, e.EntityID)
 			slog.Info("entity died", "type", e.Type, "id", e.EntityID)
 			continue
 		}
@@ -195,11 +203,21 @@ func (s *Server) tickEntities() {
 			e.VZ = 0
 		}
 
-		// ── Position broadcast ────────────────────────────────────────────────
-		moved := e.Position.X != prevX || e.Position.Y != prevY || e.Position.Z != prevZ
-		if moved {
-			handler.BroadcastEntityPosition(e, s.sessions)
+		// ── Collect moved entities for broadcast ──────────────────────────────
+		if e.Position.X != prevX || e.Position.Y != prevY || e.Position.Z != prevZ {
+			moved = append(moved, e)
 		}
+	}
+
+	// Build packets and dispatch network I/O off the tick goroutine.
+	// DispatchTickBroadcast reads entity fields here (tick goroutine, sole
+	// writer) to build immutable packets before spawning the send goroutine.
+	handler.DispatchTickBroadcast(moved, deadIDs, s.sessions)
+
+	// Warn when the CPU work in a tick exceeds the tick budget.
+	// Network I/O is off-goroutine and does not count toward this budget.
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		slog.Warn("entity tick overrun", "elapsed", elapsed)
 	}
 }
 
