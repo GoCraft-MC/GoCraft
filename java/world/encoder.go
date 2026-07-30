@@ -49,14 +49,14 @@ func encodeSection(buf *bytes.Buffer, sec *coreworld.Section) {
 		// All-air section: block count = 0, single-value air, single-value biome.
 		writeInt16BE(buf, 0)
 		writeSingleValue(buf, 0) // air state ID = 0
-		writeSingleValue(buf, 1) // biome: plains = 1 (vanilla registry, approximate)
+		writeSingleValue(buf, BiomeID("minecraft:plains")) // air sections use plains biome
 		return
 	}
 
 	// Non-trivial section.
 	writeInt16BE(buf, sec.NonAir)
 	writeBlockStates(buf, sec)
-	writeSingleValue(buf, javabiomeID(sec.Biome)) // per-section biome (M4 simplification)
+	writeSingleValue(buf, BiomeID(sec.Biome)) // per-section biome
 }
 
 // writeSingleValue encodes a single-value PalettedContainer:
@@ -129,21 +129,6 @@ func writeBlockStates(buf *bytes.Buffer, sec *coreworld.Section) {
 		}
 		binary.BigEndian.PutUint64(longBuf[:], uint64(packed))
 		buf.Write(longBuf[:])
-	}
-}
-
-// javabiomeID returns the vanilla 1.21.4 biome registry ID for a canonical
-// biome name.  Unknown names fall back to 1 (minecraft:plains, approximate).
-//
-// Milestone 13 will replace this with a registry lookup.
-func javabiomeID(name string) int32 {
-	switch name {
-	case "minecraft:plains":
-		return 1
-	case "minecraft:the_void":
-		return 0
-	default:
-		return 1 // default to plains
 	}
 }
 

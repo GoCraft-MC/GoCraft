@@ -15,7 +15,7 @@
 
 GoCraft is a native Go implementation of a Minecraft server written from scratch. It is built around a protocol-independent game core with edition-specific network adapters at the boundary. It is not a Paper fork, does not use the JVM, and is not a drop-in replacement for an existing server.
 
-A vanilla Minecraft: Java Edition 1.21.4 client can connect, authenticate, complete configuration, and enter a persistent flat world. Players can move, chat, break and place blocks using items from their inventory, and see other players in real time. World changes are saved to Anvil region files and reloaded on restart.
+A vanilla Minecraft: Java Edition 1.21.4 client can connect, authenticate, complete configuration, and enter a persistent flat world. Players can move, chat, run slash commands, break and place blocks using items from their inventory, and see other players and passive mobs in real time. World changes are saved to Anvil region files and reloaded on restart.
 
 ## Compatibility
 
@@ -78,15 +78,40 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
   - 46-slot player inventory with hotbar slot tracking; `HeldItem()` accessor
   - Creative Mode Set Item handling: maps numeric item registry IDs to canonical resource locations
   - Set Held Item tracking for hotbar scroll; initial inventory sent on join
-  - Partial item registry (~60 entries) in `java/world/items.go`; replaced by data-driven loading in M13
+- **Data-driven registries** (`internal/gamedata`, `java/world`):
+  - Block state IDs, item protocol IDs, and entity-type protocol IDs loaded from JSON at init time
+  - `internal/gamedata` package embeds `java/1.21.4/blocks.json` and `java/1.21.4/registries.json` via `//go:embed`; files ship inside the binary — no external data directory required at runtime
+  - JSON format matches Minecraft's data-generator output (`--reports`); replace the embedded files and rebuild to update version or expand coverage
+  - Property-keyed block state lookup (`"minecraft:grass_block[snowy=true]"` → ID) extracted from states arrays; key sort matches `core/world.Block.Key()` so no Java IDs leak into the core
+  - Block, item, and entity-type hardcoded Go maps removed; maps populated by `registry.go` init function with structured logging of entry counts
 - Protocol-independent player, spatial, and online-player registry types
 - YAML configuration with defaults and basic validation (`world_dir` for Anvil persistence)
 - Structured logging through Go's `log/slog`
 - Automated tests for authentication, cryptography, packet framing, VarInt encoding, and architecture isolation
 
+- **Entity system** (`core/entity`, `java/handler`, `server/`):
+  - Canonical `Entity` struct with position, velocity, health, dead flag, and concurrency ownership comment
+  - `entity.Manager`: thread-safe Add / Remove / Get / Snapshot
+  - ~40 `EntityType` string constants (resource location format)
+  - 20 TPS tick loop in `server.Server`: gravity (−0.08 blocks/tick²), horizontal drag (0.98), flat-world ground clamp at Y=64, dead-entity cleanup, tick-drift warning (>50 ms)
+  - Non-blocking broadcast: packets built synchronously inside the tick goroutine (sole writer), dispatched to a goroutine for I/O so slow clients cannot stall the simulation
+  - Java entity encoding: Spawn Entity packet, Teleport Entity packet, Remove Entities packet
+  - Five passive test mobs spawned near world spawn; sent to joining players via `onPlayerJoin`
+  - `game.Game.NextEntityID()` shared atomic counter ensures player and mob IDs never collide
+- **Command system** (`java/handler`):
+  - `Dispatcher` with `Register` / `Dispatch`; unknown commands and handler errors reported to the issuing player as chat messages
+  - `CommandContext` with `Player`, `Conn`, `Args`, `World`, `Manager`, and `TeleportTo` closure
+  - Commands packet (brigadier DAG, 0x11 S→C) sent on join for client-side tab completion
+  - `/help` — list commands; `/list` — online player names and count
+  - `/gamemode <mode>` — updates canonical `Player.GameMode`, sends Game Event reason 3 + Player Abilities + tab-list update broadcast
+  - `/tp <x> <y> <z>` — teleports player, sends Synchronize Player Position, immediately streams destination chunks and unloads origin chunks via `TeleportTo` closure
+  - `/tp <player>` — player-name teleport with the same immediate chunk-streaming behaviour
+  - `/give <item> [count]` — fills first empty hotbar/inventory slot, syncs full inventory
+  - `/kick <player> [reason]` — sends Disconnect (Play) with NBT-encoded reason, closes connection
+
 ### Not implemented
 
-Entities, commands, permissions, and complete gameplay are not implemented. Paper plugin compatibility, Bedrock clients, and cross-play are not supported.
+Permissions, survival gameplay mechanics, and complete entity AI are not implemented. Paper plugin compatibility, Bedrock clients, and cross-play are not supported.
 
 ## Architecture
 
@@ -171,9 +196,9 @@ type Provider interface {
 | 8 — Block interaction | Complete | Creative/survival break logic, block placement from held item, Block Update broadcast, Y-bounds guard |
 | 9 — World persistence | Complete | Anvil region-file I/O, NBT read/write, atomic saves, dirty-chunk tracking, `Storage` interface |
 | 10 — Inventory and items | Complete | ItemStack, 46-slot inventory, hotbar tracking, Creative Mode Set Item, placement from held item, occupied-block guard |
-| 11 — Entity system | In progress | Canonical Entity type, entity registry, mob spawn/tick/despawn, health and damage |
-| 12 — Commands | Planned | Command dispatcher, Commands packet (tab-completion tree), /gamemode /tp /give /kick |
-| 13 — Data-driven registries | Planned | Load block state IDs and biome IDs from Minecraft's data-generator output (reports/blocks.json); replace hardcoded tables in java/world so both Java and Bedrock adapters share the same canonical ID resolution |
+| 11 — Entity system | Complete | Canonical Entity type, entity registry, mob spawn/tick/despawn, health and damage, 20 TPS tick loop |
+| 12 — Commands | Complete | Command dispatcher, Commands packet (tab-completion DAG), /gamemode /tp /give /kick /list /help |
+| 13 — Data-driven registries | Complete | Load block state IDs, item IDs, and entity-type IDs from Minecraft data-generator JSON (blocks.json, registries.json); embedded via go:embed; hardcoded Go maps replaced; property-keyed block state lookups |
 | 14 — Bedrock adapter | Future work | RakNet/UDP, Xbox auth, bedrock/world encoder using M13 registries for runtime IDs, cross-play via shared core/ |
 | 15 — Go plugin API | Future work | Event bus, command registration, scheduler, permission nodes; plugins are compiled Go packages |
 
@@ -261,7 +286,10 @@ GoCraft/
 ├── config/
 │   └── config.go              # YAML loading, defaults, and validation
 ├── core/
-│   ├── game/game.go           # Edition-neutral online-player registry
+│   ├── entity/
+│   │   ├── entity.go          # Canonical Entity type, EntityType constants, Damage/Heal helpers
+│   │   └── manager.go         # Thread-safe entity registry (Add/Remove/Get/Snapshot)
+│   ├── game/game.go           # Edition-neutral player registry and shared entity ID counter
 │   ├── player/
 │   │   ├── player.go          # Canonical player model (position, inventory, game mode)
 │   │   └── item.go            # ItemStack, InventorySize, HotbarStart constants
@@ -275,16 +303,24 @@ GoCraft/
 │       └── arch_test.go       # Fails build if core/ imports java/
 ├── java/
 │   ├── auth/                  # Login crypto, UUIDs, Mojang sessions
-│   ├── handler/               # Handshake, status, login, config, play, block, chat, inventory
+│   ├── handler/               # Handshake, status, login, config, play, block, chat, inventory, entity, commands
 │   ├── network/               # TCP listener and client connections
 │   ├── protocol/              # Framing, packets, VarInts, wire types
 │   ├── registry/              # Provider interface + VanillaProvider
 │   └── world/
 │       ├── anvil/             # Anvil region-file I/O, NBT read/write, atomic saves
-│       ├── blocks.go          # Java block state ID registry
-│       ├── items.go           # Java item ID registry and item→block mapping
+│       ├── blocks.go          # StateID() accessor (map populated from JSON at init)
+│       ├── entity_types.go    # EntityTypeID() accessor (map populated from JSON at init)
+│       ├── items.go           # ItemID/ItemName accessors + block-placement helpers
+│       ├── registry.go        # JSON loader; populates block, item, entity-type maps at init
 │       ├── chunk.go           # Java chunk encoder (PalettedContainer, heightmaps, light)
 │       └── sender.go          # Chunk burst sender
+├── internal/
+│   └── gamedata/
+│       ├── embed.go           # go:embed declaration for embedded JSON data
+│       └── java/1.21.4/
+│           ├── blocks.json    # Block state IDs (Minecraft data-generator format)
+│           └── registries.json# Item and entity-type protocol IDs
 ├── logs/                      # Milestone development records
 ├── server/
 │   └── server.go              # Core and Java adapter orchestration

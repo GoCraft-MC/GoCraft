@@ -29,6 +29,13 @@ type CommandContext struct {
 	Args    []string // tokens after the command name, split on whitespace
 	World   *coreworld.World
 	Manager *session.Manager
+
+	// TeleportTo moves the player to (x, y, z), sends Synchronize Player
+	// Position, updates the center-chunk anchor, and streams the destination
+	// chunks — all before returning.  Commands that reposition the player
+	// (e.g. /tp) must call this instead of mutating Player.Position directly
+	// so the client's chunk view is kept in sync.
+	TeleportTo func(x, y, z float64) error
 }
 
 // CommandFunc is the handler signature for a built-in server command.

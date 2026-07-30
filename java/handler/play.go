@@ -352,6 +352,31 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 	lastChunkX, lastChunkZ := chunkX, chunkZ
 
+	// teleportTo is given to CommandContext so /tp (and any future teleport
+	// command) can reposition the player and immediately stream destination
+	// chunks without waiting for the next movement packet.
+	//
+	// The closure captures sentChunks, lastChunkX, and lastChunkZ by reference
+	// so it keeps the play loop's chunk-tracking state consistent.  After it
+	// returns, the bottom-of-loop chunk check sees newChunkX == lastChunkX and
+	// skips a redundant re-send.
+	teleportTo := func(x, y, z float64) error {
+		p.Position.X, p.Position.Y, p.Position.Z = x, y, z
+		if err := sendSyncPosition(conn, p, 0); err != nil {
+			return fmt.Errorf("sync position: %w", err)
+		}
+		if err := sendSetCenterChunk(conn, p); err != nil {
+			return fmt.Errorf("set center chunk: %w", err)
+		}
+		newCX := posToChunk(x)
+		newCZ := posToChunk(z)
+		if err := updateChunkView(conn, w, sender, sentChunks, lastChunkX, lastChunkZ, newCX, newCZ); err != nil {
+			return fmt.Errorf("update chunk view: %w", err)
+		}
+		lastChunkX, lastChunkZ = newCX, newCZ
+		return nil
+	}
+
 	// ── Keep-alive state ─────────────────────────────────────────────────────
 	var (
 		keepAliveSeq   atomic.Int64
@@ -404,7 +429,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Chat and commands need the session manager and dispatcher.
 		if pkt.ID == packetIDChatMessage || pkt.ID == packetIDChatCommand {
-			if err := handleChatPacket(pkt, p, mgr, cmds, w, conn); err != nil {
+			if err := handleChatPacket(pkt, p, mgr, cmds, w, conn, teleportTo); err != nil {
 				slog.Warn("chat error", "player", p.Username, "err", err)
 			}
 		}

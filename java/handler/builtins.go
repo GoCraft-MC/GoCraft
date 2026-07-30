@@ -143,11 +143,8 @@ func cmdTp(ctx CommandContext) error {
 		if err != nil {
 			return fmt.Errorf("invalid z: %q", ctx.Args[2])
 		}
-		ctx.Player.Position.X = x
-		ctx.Player.Position.Y = y
-		ctx.Player.Position.Z = z
-		if err := sendSyncPosition(ctx.Conn, ctx.Player, 0); err != nil {
-			return fmt.Errorf("syncing position: %w", err)
+		if err := ctx.TeleportTo(x, y, z); err != nil {
+			return fmt.Errorf("teleporting: %w", err)
 		}
 		_ = sendSystemMessage(ctx.Conn,
 			fmt.Sprintf("Teleported to %.2f %.2f %.2f", x, y, z))
@@ -158,9 +155,9 @@ func cmdTp(ctx CommandContext) error {
 	targetName := ctx.Args[0]
 	for _, s := range ctx.Manager.SnapshotAll() {
 		if strings.EqualFold(s.Player.Username, targetName) {
-			ctx.Player.Position = s.Player.Position
-			if err := sendSyncPosition(ctx.Conn, ctx.Player, 0); err != nil {
-				return fmt.Errorf("syncing position: %w", err)
+			pos := s.Player.Position
+			if err := ctx.TeleportTo(pos.X, pos.Y, pos.Z); err != nil {
+				return fmt.Errorf("teleporting: %w", err)
 			}
 			_ = sendSystemMessage(ctx.Conn,
 				fmt.Sprintf("Teleported to %s", s.Player.Username))

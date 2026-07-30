@@ -11,7 +11,27 @@
       "Bash(go env:*)",
       "WebFetch(domain:wiki.vg)",
       "Bash(find . -name \"build.gradle.kts\" -exec grep -l \"minecraft\" {} \\\\;)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Read(//c/tmp/**)",
+      "Bash(unzip -q \"/c/Users/PC/.gradle/caches/forge_gradle/mcp_repo/de/oceanlabs/mcp/mcp_config/1.21.4-20241203.143248/joined/rename/output.jar\" \"net/minecraft/network/protocol/game/ClientboundGameEventPacket.class\")",
+      "Bash(unzip -l \"/c/Users/PC/.gradle/caches/forge_gradle/maven_downloader/net/minecraftforge/forge/1.21.4-54.1.1/forge-1.21.4-54.1.1-sources.jar\")",
+      "WebSearch",
+      "WebFetch(domain:minecraft.wiki)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:mappings.dev)",
+      "WebFetch(domain:pycraft.readthedocs.io)",
+      "Bash(cp protocol/varint.go java/protocol/varint.go)",
+      "Bash(cp protocol/types.go  java/protocol/types.go)",
+      "Bash(cp protocol/packet.go java/protocol/packet.go)",
+      "Bash(cp protocol/uuid.go   java/protocol/uuid.go)",
+      "Bash(cp protocol/varint_test.go java/protocol/varint_test.go)",
+      "Bash(find:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git:*)",
+      "Bash(go vet:*)"
     ]
   }
 }
