@@ -83,7 +83,7 @@ func handleBlockPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.Worl
 	case packetIDPlayerAction:
 		return handlePlayerAction(pkt, p, w, mgr)
 	case packetIDUseItemOn:
-		return handleUseItemOn(pkt, p, mgr)
+		return handleUseItemOn(pkt, p, w, mgr)
 	}
 	return nil
 }
@@ -136,31 +136,46 @@ func handlePlayerAction(pkt *protocol.Packet, p *player.Player, w *coreworld.Wor
 	return nil
 }
 
-// handleUseItemOn handles C→S Use Item On (block placement).
+// faceOffset maps a Use Item On face index to the (dx, dy, dz) offset of the
+// block being placed relative to the targeted block.
 //
-// In M8 we have no inventory tracking, so the packet is parsed for its
-// sequence ID and acknowledged without placing a block.  Without the
-// acknowledgement the client reverts its optimistic placement, which is
-// the correct behaviour for now.
+//	0: −Y (bottom face → place below)
+//	1: +Y (top face    → place above, most common)
+//	2: −Z (north face)
+//	3: +Z (south face)
+//	4: −X (west face)
+//	5: +X (east face)
+var faceOffset = [6][3]int32{
+	{0, -1, 0},
+	{0, +1, 0},
+	{0, 0, -1},
+	{0, 0, +1},
+	{-1, 0, 0},
+	{+1, 0, 0},
+}
+
+// handleUseItemOn handles C→S Use Item On (block placement).
 //
 // Wire layout (1.21.4, estimate):
 //
 //	VarInt    hand         (0=main hand, 1=off hand)
-//	Long      location     (packed block position)
+//	Long      location     (packed block position of the targeted block)
 //	VarInt    face         (0=−Y, 1=+Y, 2=−Z, 3=+Z, 4=−X, 5=+X)
 //	Float     cursor_x/y/z (hit position within the target face, 0.0–1.0)
 //	Bool      inside_block (player head is inside a block)
 //	VarInt    sequence
-func handleUseItemOn(pkt *protocol.Packet, p *player.Player, mgr *session.Manager) error {
+func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager) error {
 	r := pkt.Reader()
 
 	if _, err := protocol.ReadVarInt(r); err != nil { // hand
 		return fmt.Errorf("use item on: reading hand: %w", err)
 	}
-	if _, _, _, err := protocol.ReadPosition(r); err != nil { // location
+	bx, by, bz, err := protocol.ReadPosition(r)
+	if err != nil {
 		return fmt.Errorf("use item on: reading position: %w", err)
 	}
-	if _, err := protocol.ReadVarInt(r); err != nil { // face
+	face, err := protocol.ReadVarInt(r)
+	if err != nil {
 		return fmt.Errorf("use item on: reading face: %w", err)
 	}
 	if _, err := protocol.ReadFloat(r); err != nil { // cursor_x
@@ -180,8 +195,32 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, mgr *session.Manage
 		return fmt.Errorf("use item on: reading sequence: %w", err)
 	}
 
-	// Acknowledge without placing — client correctly reverts its optimistic
-	// preview since we do not send a Block Update.
+	// Resolve placement position: target block + face offset.
+	if face < 0 || int(face) >= len(faceOffset) {
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	off := faceOffset[face]
+	px, py, pz := int(bx+off[0]), int(by+off[1]), int(bz+off[2])
+
+	// Bounds-check the placement Y.
+	if py < coreworld.WorldMinY || py > coreworld.WorldMaxY {
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+
+	// Resolve the block from the held item.
+	held := p.HeldItem()
+	if held.IsEmpty() || !javaworld.IsPlaceableAsBlock(held.ItemID) {
+		// Nothing to place — acknowledge so the client reverts its preview.
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+
+	block := javaworld.ItemIDToBlock(held.ItemID)
+	slog.Info("block place", "player", p.Username,
+		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
+	applyBlockChange(px, py, pz, block, w, mgr)
 	sendAcknowledgeBlockChange(mgr, p, seq)
 	return nil
 }

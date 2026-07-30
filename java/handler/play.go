@@ -33,12 +33,12 @@ const (
 	packetIDForgetLevelChunk = 0x22 // Forget Level Chunk (S→C)
 
 	// Serverbound (C→S) — Play state
-	packetIDConfirmTeleport             = 0x00 // Confirm Teleport
-	packetIDClientKeepAlive            = 0x18 // Keep Alive (C→S)
-	packetIDSetPlayerPosition           = 0x1A // Set Player Position
+	packetIDConfirmTeleport              = 0x00 // Confirm Teleport
+	packetIDClientKeepAlive             = 0x18 // Keep Alive (C→S)
+	packetIDSetPlayerPosition            = 0x1A // Set Player Position
 	packetIDSetPlayerPositionAndRotation = 0x1B // Set Player Position and Rotation
-	packetIDSetPlayerRotation           = 0x1C // Set Player Rotation
-	packetIDSetPlayerOnGround           = 0x1D // Set Player On Ground
+	packetIDSetPlayerRotation            = 0x1C // Set Player Rotation
+	packetIDSetPlayerOnGround            = 0x1D // Set Player On Ground
 
 	// Game Event reasons
 	gameEventStartWaitingForChunks = 13
@@ -96,6 +96,13 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 	if err := sendGameEvent(conn, gameEventStartWaitingForChunks, 0); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
+	// Send initial inventory state and confirm the active hotbar slot.
+	if err := sendSetContainerContent(conn, p, 1); err != nil {
+		return fmt.Errorf("play: %w", err)
+	}
+	if err := sendSetHeldItem(conn, p.HeldSlot); err != nil {
+		return fmt.Errorf("play: %w", err)
+	}
 
 	slog.Info("player entered play state",
 		"remote", conn.RemoteAddr(),
@@ -137,7 +144,7 @@ func sendLoginPlay(conn *network.ClientConn, p *player.Player) error {
 	pkt := protocol.NewBuilder(packetIDPlayLogin).
 		Int(p.EntityID).
 		Bool(false).                    // is_hardcore
-		VarInt(0).                      // gamemode: 0 = survival
+		VarInt(int32(p.GameMode)).      // gamemode (0=survival, 1=creative, etc.)
 		Byte(0xFF).                     // prev_gamemode: 0xFF = signed -1 = undefined
 		VarInt(1).                      // dimension count
 		String("minecraft:overworld").  // dimension names[0]
@@ -402,6 +409,13 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if pkt.ID == packetIDPlayerAction || pkt.ID == packetIDUseItemOn {
 			if err := handleBlockPacket(pkt, p, w, mgr); err != nil {
 				slog.Warn("block interaction error", "player", p.Username, "err", err)
+			}
+		}
+
+		// Inventory management (held item, creative set item).
+		if pkt.ID == packetIDSetHeldItemCS || pkt.ID == packetIDCreativeModeSetItem {
+			if err := handleInventoryPacket(pkt, p); err != nil {
+				slog.Warn("inventory error", "player", p.Username, "err", err)
 			}
 		}
 

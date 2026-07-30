@@ -48,6 +48,15 @@ func WriteString(w io.Writer, s string) error {
 	return err
 }
 
+// ReadShort reads a big-endian signed 16-bit integer.
+func ReadShort(r io.Reader) (int16, error) {
+	var buf [2]byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, fmt.Errorf("protocol: reading short: %w", err)
+	}
+	return int16(binary.BigEndian.Uint16(buf[:])), nil
+}
+
 // ReadUShort reads a big-endian unsigned 16-bit integer.
 func ReadUShort(r io.Reader) (uint16, error) {
 	var buf [2]byte

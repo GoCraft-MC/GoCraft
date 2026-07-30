@@ -54,15 +54,29 @@ type Player struct {
 	// EntityID is the server-assigned entity ID used in packets.
 	// It is assigned by the game core when the player joins.
 	EntityID int32
+
+	// Inventory holds the player's item slots.
+	// See the InventorySize / HotbarStart constants for the slot layout.
+	Inventory [InventorySize]ItemStack
+
+	// HeldSlot is the currently selected hotbar slot (0–8).
+	HeldSlot int
+}
+
+// HeldItem returns the ItemStack in the currently selected hotbar slot.
+func (p *Player) HeldItem() ItemStack {
+	return p.Inventory[HotbarStart+p.HeldSlot]
 }
 
 // New creates a Player with sensible defaults.
+// Game mode defaults to Creative so that block interaction works out-of-the-box
+// for testing.  A config-driven game-mode option will be added in a later milestone.
 func New(uuid [16]byte, username string, edition ClientEdition) *Player {
 	return &Player{
 		UUID:     uuid,
 		Username: username,
 		Edition:  edition,
 		Position: spatial.DefaultSpawnPos,
-		GameMode: GameModeSurvival,
+		GameMode: GameModeCreative,
 	}
 }
