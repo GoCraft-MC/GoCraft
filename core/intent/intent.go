@@ -1,40 +1,89 @@
 // Package intent defines the message types that network adapter goroutines
-// (Java, Bedrock) post to the core simulation loop.
+// (Java, Bedrock) post to the core simulation loop, and the Bus that routes
+// them.
 //
-// Architecture:
+// # Architecture
 //
 //	Java handler goroutine  ──┐
-//	                          ├──> intent.Queue ──> core simulation tick
+//	                          ├──> intent.Bus ──> core simulation tick
 //	Bedrock handler goroutine ──┘
 //
 // Handlers must NOT mutate core/player or core/world state directly.
-// They post an Intent; the simulation/tick goroutine applies it and then
-// publishes immutable outbound events to all session writers.
+// They post an Intent; the simulation/tick goroutine drains the Bus and applies
+// each intent, then publishes immutable outbound events to session writers.
 //
-// This invariant ensures that Java and Bedrock adapters cannot race on shared
-// world state, and that the tick goroutine remains the sole writer of all
-// mutable simulation state (matching the non-player-entity ownership model
-// established in M11).
+// # Priority and backpressure
+//
+// The Bus uses three independent paths, matched to each intent's priority:
+//
+//   - Lifecycle (Join, Disconnect): blocking Post; never silently dropped.
+//     Lifecycle events are rare, so occasional blocking is acceptable.
+//     The caller should always combine Post with a context timeout.
+//
+//   - Moves: coalesced per player via sync.Map. Each UpdateMove call replaces
+//     the previous pending position; the tick only sees the newest position.
+//     High-frequency movement never fills a channel or blocks a goroutine.
+//
+//   - Gameplay (Chat, Teleport): non-blocking TryPost; drops are counted and
+//     logged via slog. A full gameplay channel indicates an overloaded tick
+//     loop, not a programming error.
 package intent
 
-import "GoCraft/core/spatial"
+import (
+	"log/slog"
+	"sync"
+	"sync/atomic"
 
-// Intent is the sealed interface for all network → simulation messages.
-type Intent interface{ intentKind() }
+	"GoCraft/core/spatial"
+)
 
-// JoinIntent is posted when a player successfully authenticates and wants to
-// enter the world.  The simulation assigns an entity ID and notifies all
-// session writers.
-type JoinIntent struct {
-	PlayerUUID [16]byte
-	Username   string
-	// Edition is "java" or "bedrock".
-	Edition string
+// ── Intent types ──────────────────────────────────────────────────────────────
+
+// LifecycleIntent is the sealed interface for Join and Disconnect intents.
+// External packages can hold and type-switch on LifecycleIntent values but
+// cannot implement the interface, keeping the set of lifecycle events closed.
+type LifecycleIntent interface{ isLifecycle() }
+
+// GameplayIntent is the sealed interface for Chat and Teleport intents.
+type GameplayIntent interface{ isGameplay() }
+
+// JoinResult is the simulation's synchronous response to a JoinIntent.
+type JoinResult struct {
+	EntityID int32
+	Position spatial.Vec3
+	// Err is non-nil if the join was rejected (e.g. duplicate UUID).
+	Err error
 }
 
-// MoveIntent carries a position/rotation update from a client.
-// The simulation applies it to player.Position and broadcasts to all other
-// sessions.
+// JoinIntent requests that a player enter the world.
+//
+// Done must be a buffered channel with capacity ≥ 1. The simulation sends
+// exactly one JoinResult to Done and never blocks, even if the caller has
+// already timed out. Callers must always drain Done (use select with context
+// cancellation or a timeout).
+//
+// TrustedIdentity must be false when the session is unauthenticated (Bedrock
+// online_mode=false or Java online_mode=false). The simulation must never
+// grant authority (operator status, XUID-based lookup) to untrusted identities.
+type JoinIntent struct {
+	PlayerUUID      [16]byte
+	Username        string
+	Edition         string // "java" or "bedrock"
+	TrustedIdentity bool
+	Done            chan<- JoinResult // buffered(1); never nil
+}
+
+// DisconnectIntent notifies the simulation that a player's connection closed.
+// The simulation removes the player from the world and broadcasts despawn to
+// remaining sessions.
+type DisconnectIntent struct {
+	PlayerUUID [16]byte
+	Reason     string
+}
+
+// MoveIntent carries a player's latest position update. High-frequency; the
+// Bus coalesces pending moves per player so the tick always sees only the
+// newest position, regardless of how many packets arrived between ticks.
 type MoveIntent struct {
 	PlayerUUID [16]byte
 	Position   spatial.Vec3
@@ -42,76 +91,156 @@ type MoveIntent struct {
 	OnGround   bool
 }
 
-// ChatIntent carries a chat message from a client.
-// The simulation broadcasts it to all sessions.
+// ChatIntent carries a player chat message. Posted to the gameplay channel;
+// the tick broadcasts it to all active sessions.
 type ChatIntent struct {
-	PlayerUUID [16]byte
-	Message    string
+	PlayerUUID  [16]byte
+	DisplayName string // pre-resolved display name for broadcast formatting
+	Message     string
 }
 
-// DisconnectIntent is posted when a client connection closes (cleanly or not).
-// The simulation removes the player from the world and notifies other sessions.
-type DisconnectIntent struct {
-	PlayerUUID [16]byte
-	Reason     string
-}
-
-// TeleportIntent requests an authoritative server-side teleport.
-// The simulation moves the player and triggers chunk streaming if needed.
+// TeleportIntent requests a server-authoritative teleport. The simulation
+// moves the player and triggers chunk streaming as needed.
 type TeleportIntent struct {
 	PlayerUUID [16]byte
 	X, Y, Z   float64
 }
 
-func (JoinIntent) intentKind()       {}
-func (MoveIntent) intentKind()       {}
-func (ChatIntent) intentKind()       {}
-func (DisconnectIntent) intentKind() {}
-func (TeleportIntent) intentKind()   {}
+// Implement sealed interfaces.
+func (JoinIntent) isLifecycle()       {}
+func (DisconnectIntent) isLifecycle() {}
+func (ChatIntent) isGameplay()        {}
+func (TeleportIntent) isGameplay()    {}
 
-// Queue is a buffered channel through which adapter goroutines submit Intents
-// to the simulation tick.
+// ── Bus ───────────────────────────────────────────────────────────────────────
+
+// Bus is the intent routing hub shared by all adapter goroutines.
+// Construct with NewBus; do not copy after first use.
+type Bus struct {
+	lifecycle       chan LifecycleIntent
+	moves           sync.Map       // map[[16]byte]MoveIntent, latest wins
+	gameplay        chan GameplayIntent
+	droppedGameplay atomic.Int64
+}
+
+// NewBus creates a Bus with the given channel capacities.
 //
-// Post blocks if the queue is full, providing natural back-pressure on
-// runaway clients.  The simulation drains the queue each tick via Drain.
-type Queue struct {
-	ch chan Intent
+// Recommended defaults:
+//   - lifecycleCapacity = 64   (Join/Disconnect are rare; 64 is ample headroom)
+//   - gameplayCapacity  = 512  (Chat bursts are bounded per player per tick)
+func NewBus(lifecycleCapacity, gameplayCapacity int) *Bus {
+	return &Bus{
+		lifecycle: make(chan LifecycleIntent, lifecycleCapacity),
+		gameplay:  make(chan GameplayIntent, gameplayCapacity),
+	}
 }
 
-// NewQueue creates a Queue with the given buffer capacity.
-// A capacity of 256–1024 is typical for a server handling tens of players.
-func NewQueue(capacity int) *Queue {
-	return &Queue{ch: make(chan Intent, capacity)}
+// PostJoin submits a JoinIntent. Blocks if the lifecycle channel is full.
+//
+// Because JoinIntents are rare (one per player login) and must not be dropped,
+// blocking is intentional. Callers should hold a context timeout to avoid
+// indefinite blocking when the simulation is stalled:
+//
+//	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+//	defer cancel()
+//	select {
+//	case bus.Lifecycle() <- i:
+//	case <-ctx.Done():
+//	    return ctx.Err()
+//	}
+//
+// Use PostJoin for convenience when no timeout handling is needed.
+func (b *Bus) PostJoin(i JoinIntent) {
+	b.lifecycle <- i
 }
 
-// Post submits an intent.  Blocks if the queue is full.
-func (q *Queue) Post(i Intent) {
-	q.ch <- i
+// PostDisconnect submits a DisconnectIntent. Blocks if the channel is full.
+// Never silently drops.
+func (b *Bus) PostDisconnect(i DisconnectIntent) {
+	b.lifecycle <- i
 }
 
-// TryPost submits an intent without blocking.  Returns false if the queue is
-// full (the intent is dropped).  Prefer Post for authoritative mutations;
-// TryPost is appropriate for high-frequency movement updates where a single
-// dropped frame is acceptable.
-func (q *Queue) TryPost(i Intent) bool {
+// UpdateMove stores the latest position for a player. If a move for this
+// player is already pending, it is atomically replaced (coalesced) without
+// waking the tick goroutine or allocating a channel send.
+//
+// This is safe to call from multiple goroutines for the same player UUID; the
+// last write wins.
+func (b *Bus) UpdateMove(i MoveIntent) {
+	b.moves.Store(i.PlayerUUID, i)
+}
+
+// PostChat submits a chat message. Returns false if the gameplay channel is
+// full (message dropped). Drops are counted and logged via slog.
+func (b *Bus) PostChat(i ChatIntent) bool {
+	return b.tryGameplay(i)
+}
+
+// PostTeleport submits a server-authoritative teleport. Returns false if the
+// gameplay channel is full.
+func (b *Bus) PostTeleport(i TeleportIntent) bool {
+	return b.tryGameplay(i)
+}
+
+func (b *Bus) tryGameplay(i GameplayIntent) bool {
 	select {
-	case q.ch <- i:
+	case b.gameplay <- i:
 		return true
 	default:
+		n := b.droppedGameplay.Add(1)
+		// Log on first drop and every 100th thereafter to avoid log spam.
+		if n == 1 || n%100 == 0 {
+			slog.Warn("intent.Bus: gameplay channel full; intent dropped",
+				"dropped_total", n)
+		}
 		return false
 	}
 }
 
-// Drain removes and returns all queued intents without blocking.
-// Call once per simulation tick to collect pending mutations.
-func (q *Queue) Drain() []Intent {
-	n := len(q.ch)
-	if n == 0 {
-		return nil
-	}
-	out := make([]Intent, 0, n)
+// ── Drain ─────────────────────────────────────────────────────────────────────
+
+// DrainResult holds all intents collected for one simulation tick.
+type DrainResult struct {
+	// Lifecycle contains all pending JoinIntent and DisconnectIntent values,
+	// in FIFO order.  Type-switch on the concrete types to handle each kind.
+	Lifecycle []LifecycleIntent
+	// Moves contains the latest pending MoveIntent for each player. At most
+	// one entry per player UUID; intermediate positions are discarded.
+	Moves []MoveIntent
+	// Gameplay contains all pending ChatIntent and TeleportIntent values, in
+	// approximate FIFO order.
+	Gameplay []GameplayIntent
+}
+
+// Drain collects all pending intents without blocking.
+// Call exactly once per simulation tick, from the tick goroutine only.
+//
+// The returned slices are freshly allocated and safe to hold across ticks.
+func (b *Bus) Drain() DrainResult {
+	var result DrainResult
+
+	// Lifecycle: drain entire buffered channel non-blockingly.
+	n := len(b.lifecycle)
+	result.Lifecycle = make([]LifecycleIntent, 0, n)
 	for range n {
-		out = append(out, <-q.ch)
+		result.Lifecycle = append(result.Lifecycle, <-b.lifecycle)
 	}
-	return out
+
+	// Moves: swap the sync.Map for a fresh snapshot.
+	// Delete-then-collect is safe: new moves posted after this point are
+	// picked up on the next tick, never lost.
+	b.moves.Range(func(key, value any) bool {
+		b.moves.Delete(key)
+		result.Moves = append(result.Moves, value.(MoveIntent))
+		return true
+	})
+
+	// Gameplay: drain entire buffered channel non-blockingly.
+	n = len(b.gameplay)
+	result.Gameplay = make([]GameplayIntent, 0, n)
+	for range n {
+		result.Gameplay = append(result.Gameplay, <-b.gameplay)
+	}
+
+	return result
 }

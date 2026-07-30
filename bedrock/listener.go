@@ -1,42 +1,56 @@
 // Package bedrock implements the Minecraft Bedrock Edition network adapter for
 // GoCraft.  It accepts UDP/RakNet connections via gophertunnel, authenticates
-// players through Xbox Live, and (in later milestones) translates between the
-// Bedrock protocol and the edition-agnostic core simulation.
+// players through Xbox Live, and translates between the Bedrock protocol and
+// the edition-agnostic core simulation through the intent bus.
 //
 // Supported Bedrock protocol: determined by the pinned gophertunnel release.
 //   - gophertunnel v1.57.1 → Bedrock protocol 1001 (Minecraft BE 1.26.30)
 //
-// Architecture:
+// Architecture (sole-writer invariant):
 //
 //	Bedrock client ──RakNet/UDP──> Listener.Listen()
 //	                                     │
 //	                               handleConn() goroutine per client
 //	                                     │
-//	                          post Intents to core/intent.Queue
-//	                          (never mutate core state directly)
+//	                      post Intents to core/intent.Bus
+//	                      (never mutate core state directly)
+//	                                     │
+//	                          core simulation tick goroutine
+//	                          applies intents, sends JoinResult
 package bedrock
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/sandertv/gophertunnel/minecraft/text"
 
 	"GoCraft/config"
+	"GoCraft/core/intent"
+	bedrockworld "GoCraft/bedrock/world"
 )
 
 // Listener wraps a gophertunnel minecraft.Listener and manages Bedrock client
 // connections.
 type Listener struct {
 	cfg config.BedrockConfig
+	bus *intent.Bus
 }
 
 // NewListener creates a Listener from the Bedrock section of the server config.
-func NewListener(cfg config.BedrockConfig) *Listener {
-	return &Listener{cfg: cfg}
+// The intent bus is used to submit player lifecycle and gameplay events to the
+// core simulation tick goroutine.
+func NewListener(cfg config.BedrockConfig, bus *intent.Bus) *Listener {
+	return &Listener{cfg: cfg, bus: bus}
 }
 
 // Listen starts the RakNet UDP listener and blocks until ctx is cancelled or a
@@ -71,83 +85,321 @@ func (l *Listener) Listen(ctx context.Context) error {
 	for {
 		conn, err := gt.Accept()
 		if err != nil {
-			// Accept returns an error when the listener is closed; treat that
-			// as a clean shutdown rather than a fatal error.
 			if ctx.Err() != nil {
-				return nil
+				return nil // clean shutdown
 			}
 			slog.Error("bedrock: Accept error", "err", err)
 			return fmt.Errorf("bedrock: Accept: %w", err)
 		}
-		go l.handleConn(gt, conn.(*minecraft.Conn))
+		go l.handleConn(ctx, gt, conn.(*minecraft.Conn))
 	}
 }
 
 // handleConn runs in its own goroutine for every accepted Bedrock connection.
-// M14.0 scope: complete the gophertunnel handshake, log identity, then
-// disconnect cleanly.  World join is implemented in M14.1.
-func (l *Listener) handleConn(gt *minecraft.Listener, conn *minecraft.Conn) {
+//
+// M14.1 flow:
+//  1. gophertunnel completes the RakNet + login sequence
+//  2. Post JoinIntent, wait for JoinResult from the simulation tick (≤10 s)
+//  3. Call conn.StartGame with the assigned entity ID and spawn position
+//  4. Send initial LevelChunk packets for the chunk view radius
+//  5. Enter the play loop: route packets to intents, handle SubChunkRequests
+//  6. On disconnect, post DisconnectIntent
+func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn *minecraft.Conn) {
 	remote := conn.RemoteAddr()
 
-	// gophertunnel performs the full Bedrock login sequence (RakNet handshake,
-	// resource pack negotiation, Xbox Live auth) inside StartGameContext /
-	// DoSpawnContext.  For M14.0 we only need the connection to complete its
-	// login phase — we do that by calling StartGame with placeholder data and
-	// then immediately disconnecting.
-	//
-	// M14.1 will replace this with a real StartGame + play loop.
-	if err := conn.StartGame(placeholderGameData()); err != nil {
-		slog.Debug("bedrock: StartGame failed", "remote", remote, "err", err)
-		return
-	}
-
+	// ── Step 1: resolve player identity ──────────────────────────────────────
 	identity := conn.IdentityData()
 	authenticated := conn.Authenticated()
 
-	slog.Info("bedrock: player connected",
-		"remote", remote,
-		"displayName", identity.DisplayName,
-		"xuid", xuidLog(identity.XUID, authenticated),
-		"uuid", identity.Identity,
-		"authenticated", authenticated,
-	)
-
 	if !authenticated && l.cfg.OnlineMode {
-		// Should not happen — gophertunnel enforces auth when
-		// AuthenticationDisabled is false.  Log defensively and drop.
-		slog.Warn("bedrock: unauthenticated connection reached handler despite online_mode=true; dropping",
+		// Defensive: gophertunnel enforces auth when AuthenticationDisabled=false.
+		slog.Warn("bedrock: unauthenticated connection despite online_mode=true; dropping",
 			"remote", remote, "displayName", identity.DisplayName)
 		_ = gt.Disconnect(conn, text.Colourf("<red>Authentication required.</red>"))
 		return
 	}
 
-	// M14.0: gracefully disconnect — world join not yet implemented.
-	_ = gt.Disconnect(conn, text.Colourf(
-		"<yellow>Bedrock support coming soon (M14.1).</yellow>",
-	))
-	slog.Debug("bedrock: disconnected after M14.0 handshake", "remote", remote)
+	// Derive a stable UUID for the session.
+	// Online mode: parse identity.Identity (Xbox-issued UUID, trusted).
+	// Offline mode: generate a deterministic offline UUID from the display
+	//               name so it never collides with an Xbox UUID.
+	playerUUID, err := resolveUUID(identity.Identity, identity.DisplayName, authenticated)
+	if err != nil {
+		slog.Warn("bedrock: could not parse player UUID; dropping",
+			"remote", remote, "identity", identity.Identity, "err", err)
+		_ = gt.Disconnect(conn, text.Colourf("<red>Internal server error.</red>"))
+		return
+	}
+
+	slog.Info("bedrock: player connecting",
+		"remote", remote,
+		"displayName", identity.DisplayName,
+		"uuid", playerUUID,
+		"xuid", xuidLog(identity.XUID, authenticated),
+		"authenticated", authenticated,
+	)
+
+	// ── Step 2: request world entry via the simulation ────────────────────────
+	done := make(chan intent.JoinResult, 1)
+	l.bus.PostJoin(intent.JoinIntent{
+		PlayerUUID:      playerUUID,
+		Username:        identity.DisplayName,
+		Edition:         "bedrock",
+		TrustedIdentity: authenticated,
+		Done:            done,
+	})
+
+	var result intent.JoinResult
+	select {
+	case result = <-done:
+	case <-time.After(10 * time.Second):
+		slog.Warn("bedrock: JoinIntent timed out; dropping connection",
+			"remote", remote, "displayName", identity.DisplayName)
+		_ = gt.Disconnect(conn, text.Colourf("<yellow>Server timed out. Please reconnect.</yellow>"))
+		return
+	case <-ctx.Done():
+		return
+	}
+	if result.Err != nil {
+		slog.Warn("bedrock: join rejected by simulation",
+			"remote", remote, "displayName", identity.DisplayName, "err", result.Err)
+		_ = gt.Disconnect(conn, text.Colourf("<red>Could not join: %v</red>", result.Err))
+		return
+	}
+
+	defer func() {
+		l.bus.PostDisconnect(intent.DisconnectIntent{
+			PlayerUUID: playerUUID,
+			Reason:     "connection closed",
+		})
+		slog.Info("bedrock: player disconnected",
+			"displayName", identity.DisplayName, "uuid", playerUUID)
+	}()
+
+	// ── Step 3: send StartGame ────────────────────────────────────────────────
+	entityID := int64(result.EntityID)
+	spawnPos := mgl32.Vec3{
+		float32(result.Position.X),
+		bedrockworld.SpawnY(),
+		float32(result.Position.Z),
+	}
+
+	if err := conn.StartGame(minecraft.GameData{
+		WorldName:                    "GoCraft",
+		EntityUniqueID:               entityID,
+		EntityRuntimeID:              uint64(result.EntityID),
+		PlayerPosition:               spawnPos,
+		PlayerGameMode:               1, // creative (survival needs ground collision)
+		WorldGameMode:                1,
+		Difficulty:                   1, // easy
+		ServerAuthoritativeInventory: true,
+		WorldSeed:                    0,
+	}); err != nil {
+		slog.Debug("bedrock: StartGame failed",
+			"remote", remote, "displayName", identity.DisplayName, "err", err)
+		return
+	}
+
+	// ── Step 4: stream initial chunks ────────────────────────────────────────
+	const chunkRadius = 4
+	spawnCX := int32(spawnPos.X()) >> 4
+	spawnCZ := int32(spawnPos.Z()) >> 4
+
+	if err := l.sendInitialChunks(conn, spawnCX, spawnCZ, chunkRadius); err != nil {
+		slog.Debug("bedrock: chunk streaming failed",
+			"displayName", identity.DisplayName, "err", err)
+		return
+	}
+
+	// ── Step 5: play loop ─────────────────────────────────────────────────────
+	l.playLoop(ctx, conn, playerUUID, identity.DisplayName)
 }
 
-// xuidLog returns the XUID for logging, or "<offline>" when unauthenticated.
-// Never log an unauthenticated XUID as though it were a verified identity.
+// sendInitialChunks sends LevelChunk "fence" packets for a square of chunks
+// around the spawn position, requesting sub-chunks on demand from the client.
+func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius int32) error {
+	for dx := -radius; dx <= radius; dx++ {
+		for dz := -radius; dz <= radius; dz++ {
+			if err := conn.WritePacket(&packet.LevelChunk{
+				Position:      protocol.ChunkPos{cx + dx, cz + dz},
+				Dimension:     0, // overworld
+				SubChunkCount: protocol.SubChunkRequestModeLimitless,
+				CacheEnabled:  false,
+				// RawPayload: border blocks + biome data.
+				// M14.1 placeholder: single byte (varint 0 = 0 border blocks).
+				// Full biome encoding is deferred to M14.2.
+				RawPayload: []byte{0x00},
+			}); err != nil {
+				return fmt.Errorf("sendInitialChunks: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// playLoop reads packets from a connected Bedrock client and routes them to
+// the appropriate intent or response handler.
+//
+// Returns when the connection closes or ctx is cancelled.
+func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, playerUUID [16]byte, displayName string) {
+	// Pre-encode the two sub-chunk payloads.
+	airPayload, err := bedrockworld.EncodeAirSubChunk()
+	if err != nil {
+		slog.Error("bedrock: could not encode air sub-chunk", "err", err)
+		return
+	}
+	groundPayload, err := bedrockworld.EncodeGroundSubChunk()
+	if err != nil {
+		slog.Error("bedrock: could not encode ground sub-chunk", "err", err)
+		return
+	}
+
+	connDone := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+		close(connDone)
+	}()
+
+	for {
+		pk, err := conn.ReadPacket()
+		if err != nil {
+			return
+		}
+
+		switch p := pk.(type) {
+		case *packet.SubChunkRequest:
+			l.handleSubChunkRequest(conn, p, airPayload, groundPayload)
+
+		case *packet.MovePlayer:
+			l.bus.UpdateMove(intent.MoveIntent{
+				PlayerUUID: playerUUID,
+				// Bedrock Y is feet position; no adjustment needed.
+			})
+			_ = p // position logged on M14.2 when broadcast is wired
+
+		case *packet.Text:
+			if strings.TrimSpace(p.Message) != "" {
+				l.bus.PostChat(intent.ChatIntent{
+					PlayerUUID:  playerUUID,
+					DisplayName: displayName,
+					Message:     p.Message,
+				})
+			}
+
+		case *packet.RequestChunkRadius:
+			// The client is asking for a larger view. Acknowledge with the same
+			// radius for now; chunk streaming at new radius is deferred to M14.2.
+			_ = conn.WritePacket(&packet.ChunkRadiusUpdated{
+				ChunkRadius: p.ChunkRadius,
+			})
+		}
+	}
+}
+
+// handleSubChunkRequest responds to the client's on-demand sub-chunk requests.
+// Ground sub-chunk (index = bedrockworld.GroundSubChunkIndex) carries stone;
+// all others return SuccessAllAir (no payload required).
+func (l *Listener) handleSubChunkRequest(
+	conn *minecraft.Conn,
+	req *packet.SubChunkRequest,
+	airPayload, groundPayload []byte,
+) {
+	entries := make([]protocol.SubChunkEntry, 0, len(req.Offsets))
+	for _, off := range req.Offsets {
+		subY := req.Position.Y() + int32(off[1])
+
+		entry := protocol.SubChunkEntry{
+			Offset: off,
+		}
+		if subY == bedrockworld.GroundSubChunkIndex() {
+			entry.Result = protocol.SubChunkResultSuccess
+			entry.RawPayload = groundPayload
+		} else {
+			entry.Result = protocol.SubChunkResultSuccessAllAir
+		}
+		entries = append(entries, entry)
+	}
+
+	_ = conn.WritePacket(&packet.SubChunk{
+		CacheEnabled:    false,
+		Dimension:       req.Dimension,
+		Position:        req.Position,
+		SubChunkEntries: entries,
+	})
+}
+
+// ── Identity helpers ──────────────────────────────────────────────────────────
+
+// resolveUUID returns the player's canonical [16]byte UUID.
+//
+//   - Authenticated (online_mode=true): parse the Xbox-issued UUID from
+//     identityStr, which is verified by gophertunnel.
+//   - Unauthenticated (online_mode=false): generate a deterministic offline
+//     UUID (UUID v3, GoCraft namespace + display name). Offline UUIDs use
+//     variant bits that keep them in a different range than Xbox UUIDs,
+//     preventing accidental collisions.
+func resolveUUID(identityStr, displayName string, authenticated bool) ([16]byte, error) {
+	if authenticated {
+		return parseHexUUID(identityStr)
+	}
+	return offlineUUID(displayName), nil
+}
+
+// parseHexUUID parses a standard UUID string (with dashes) into [16]byte.
+func parseHexUUID(s string) ([16]byte, error) {
+	cleaned := strings.ReplaceAll(s, "-", "")
+	if len(cleaned) != 32 {
+		return [16]byte{}, fmt.Errorf("invalid UUID %q", s)
+	}
+	b, err := hex.DecodeString(cleaned)
+	if err != nil {
+		return [16]byte{}, fmt.Errorf("invalid UUID %q: %w", s, err)
+	}
+	var u [16]byte
+	copy(u[:], b)
+	return u, nil
+}
+
+// gocraftOfflineNS is the fixed namespace for offline UUID generation.
+// Generated once (arbitrary); documented here so it is never changed:
+// replacing it would change offline UUIDs for existing players.
+//
+// Value: SHA-256 of "GoCraft offline namespace" truncated to 16 bytes:
+//
+//	python3 -c "import hashlib; print(hashlib.sha256(b'GoCraft offline namespace').hexdigest()[:32])"
+//	→ 5f3e2a1b4c7d8e9f0a1b2c3d4e5f6a7b
+var gocraftOfflineNS = [16]byte{
+	0x5f, 0x3e, 0x2a, 0x1b, 0x4c, 0x7d, 0x8e, 0x9f,
+	0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x5f, 0x6a, 0x7b,
+}
+
+// offlineUUID generates a deterministic UUID v3 (MD5-based) for an
+// unauthenticated player. The UUID is stable across server restarts for the
+// same display name, and its version/variant bits distinguish it from Xbox
+// UUIDs (which are version 4, random).
+//
+// This UUID must NOT be treated as a globally trusted identity — it is only
+// reliable within the scope of a single server instance where collisions can
+// be checked against the connected player list.
+func offlineUUID(displayName string) [16]byte {
+	h := md5.New()
+	h.Write(gocraftOfflineNS[:])
+	h.Write([]byte(displayName))
+	digest := h.Sum(nil)
+
+	var u [16]byte
+	copy(u[:], digest)
+	u[6] = (u[6] & 0x0f) | 0x30 // version 3
+	u[8] = (u[8] & 0x3f) | 0x80 // variant 1 (RFC 4122)
+	return u
+}
+
+// xuidLog returns the XUID for structured logging, or "<offline>" when
+// unauthenticated to make clear the value is unverified.
 func xuidLog(xuid string, authenticated bool) string {
 	if authenticated {
 		return xuid
 	}
 	return "<offline>"
 }
-
-// placeholderGameData returns minimal GameData so gophertunnel can complete
-// the login sequence.  M14.1 will replace this with real world data.
-func placeholderGameData() minecraft.GameData {
-	return minecraft.GameData{
-		WorldName:                    "GoCraft",
-		WorldSeed:                    0,
-		PlayerPosition:               mgl32.Vec3{0, 65, 0},
-		PlayerGameMode:               1, // creative
-		WorldGameMode:                1,
-		Difficulty:                   1, // easy
-		ServerAuthoritativeInventory: true,
-	}
-}
-

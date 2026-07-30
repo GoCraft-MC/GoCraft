@@ -111,6 +111,13 @@ func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 
 // ── Send helpers ──────────────────────────────────────────────────────────────
 
+// BroadcastSystemMessage sends a plain-text System Chat Message to every
+// currently-online Java session.  Exported for use by the server simulation
+// layer (e.g. applyChat, which processes intents from both adapters).
+func BroadcastSystemMessage(mgr *session.Manager, text string) {
+	broadcastSystemMessage(mgr, text)
+}
+
 // broadcastSystemMessage sends a plain-text System Chat Message to every
 // currently-online session.  Snapshots the session list so the manager lock
 // is not held during packet writes.

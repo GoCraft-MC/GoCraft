@@ -1,4 +1,4 @@
-
+java_enabled: true
 host: 0.0.0.0
 port: 25565
 motd: A GoCraft Server
@@ -6,3 +6,8 @@ max_players: 20
 version_name: 1.21.4
 protocol_version: 769
 online_mode: false
+world_dir: ""
+bedrock:
+    enabled: false
+    address: 0.0.0.0:19132
+    online_mode: true

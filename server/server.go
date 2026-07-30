@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,7 +29,9 @@ import (
 	"GoCraft/config"
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
+	"GoCraft/core/intent"
 	"GoCraft/core/player"
+	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/auth"
 	"GoCraft/java/handler"
@@ -63,6 +66,11 @@ type Server struct {
 	// Bedrock adapter (nil when bedrock.enabled = false).
 	bedrockListener *bedrock.Listener
 
+	// intentBus is the cross-adapter simulation command bus.
+	// Both Java (M14.1+) and Bedrock handlers post intents here; the tick
+	// goroutine drains and applies them once per tick.
+	intentBus *intent.Bus
+
 	// connCount tracks the number of active TCP connections (Java).
 	connCount atomic.Int64
 }
@@ -96,6 +104,8 @@ func New(cfg *config.Config) (*Server, error) {
 	cmds := handler.NewDispatcher()
 	handler.RegisterBuiltins(cmds)
 
+	bus := intent.NewBus(64, 512)
+
 	s := &Server{
 		cfg:         cfg,
 		game:        game.New(),
@@ -106,18 +116,20 @@ func New(cfg *config.Config) (*Server, error) {
 		chunkSender: javaworld.DefaultSender,
 		sessions:    session.NewManager(),
 		cmds:        cmds,
+		intentBus:   bus,
 	}
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
 	s.listener = network.NewListener(cfg.Addr(), s.handleConn)
 
 	if cfg.Bedrock.Enabled {
-		s.bedrockListener = bedrock.NewListener(cfg.Bedrock)
+		s.bedrockListener = bedrock.NewListener(cfg.Bedrock, bus)
 	}
 	return s, nil
 }
 
 // Run starts the server and blocks until ctx is cancelled or a fatal error occurs.
-// When the listeners stop, all dirty chunks are flushed to disk before returning.
+// All background goroutines are tracked with a WaitGroup and are joined before
+// the world is flushed to disk, ensuring clean shutdown of both listeners.
 func (s *Server) Run(ctx context.Context) error {
 	if s.cfg.JavaEnabled {
 		slog.Info("java listener enabled",
@@ -138,36 +150,45 @@ func (s *Server) Run(ctx context.Context) error {
 	// Spawn a small set of passive mobs near the world spawn for testing.
 	s.spawnTestMobs()
 
-	// Run the entity tick at 20 TPS alongside the network listeners.
-	go s.runEntityTick(ctx)
+	var wg sync.WaitGroup
 
-	// Start the Bedrock listener in a separate goroutine if enabled.
+	// Entity tick + intent processing at 20 TPS.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.runEntityTick(ctx)
+	}()
+
+	// Bedrock UDP listener (when enabled).
 	if s.bedrockListener != nil {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			if err := s.bedrockListener.Listen(ctx); err != nil {
-				slog.Error("bedrock listener stopped", "err", err)
+				slog.Error("bedrock listener stopped with error", "err", err)
 			}
 		}()
 	}
 
-	// The Java listener runs on the main goroutine (blocking).
-	// If Java is disabled, block until the context is cancelled so that the
-	// Bedrock goroutine (and entity tick) keep running.
-	var err error
+	// Java TCP listener on the main goroutine, or block on ctx if disabled.
+	var listenErr error
 	if s.cfg.JavaEnabled {
-		err = s.listener.Listen(ctx)
+		listenErr = s.listener.Listen(ctx)
 	} else {
 		<-ctx.Done()
 	}
 
-	// Flush world to disk regardless of whether Listen returned cleanly.
+	// ctx is now done: wait for entity tick and Bedrock listener to finish.
+	wg.Wait()
+
+	// Flush world to disk regardless of shutdown cause.
 	if closeErr := s.world.Close(); closeErr != nil {
 		slog.Warn("server: error flushing world on shutdown", "err", closeErr)
 	}
-	return err
+	return listenErr
 }
 
-// runEntityTick fires tickEntities at 20 TPS (every 50 ms) until ctx is done.
+// runEntityTick fires tickEntities and tickIntents at 20 TPS until ctx is done.
 func (s *Server) runEntityTick(ctx context.Context) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -176,9 +197,86 @@ func (s *Server) runEntityTick(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.tickIntents()
 			s.tickEntities()
 		}
 	}
+}
+
+// tickIntents drains the intent bus and applies each intent to world/player state.
+// This is the sole point of mutating player state from adapter goroutines.
+func (s *Server) tickIntents() {
+	dr := s.intentBus.Drain()
+
+	for _, l := range dr.Lifecycle {
+		switch i := l.(type) {
+		case intent.JoinIntent:
+			s.applyJoin(i)
+		case intent.DisconnectIntent:
+			s.applyDisconnect(i)
+		}
+	}
+
+	for _, m := range dr.Moves {
+		s.applyMove(m)
+	}
+
+	for _, g := range dr.Gameplay {
+		switch i := g.(type) {
+		case intent.ChatIntent:
+			s.applyChat(i)
+		}
+	}
+}
+
+// applyJoin creates a canonical Player, registers it with the game core, and
+// sends a JoinResult to the waiting adapter goroutine.
+func (s *Server) applyJoin(i intent.JoinIntent) {
+	edition := player.ClientEditionBedrock
+	if i.Edition == "java" {
+		edition = player.ClientEditionJava
+	}
+
+	p := player.New(i.PlayerUUID, i.Username, edition)
+	if err := s.game.AddPlayer(p); err != nil {
+		slog.Warn("applyJoin: duplicate player UUID",
+			"name", i.Username, "uuid", i.PlayerUUID, "err", err)
+		i.Done <- intent.JoinResult{Err: err}
+		return
+	}
+
+	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
+	slog.Info("player joined via intent",
+		"name", p.Username, "uuid", p.UUID,
+		"edition", i.Edition, "trusted", i.TrustedIdentity,
+		"entityID", p.EntityID)
+
+	i.Done <- intent.JoinResult{
+		EntityID: p.EntityID,
+		Position: spatial.Vec3{X: 0, Y: 65, Z: 0},
+	}
+}
+
+// applyDisconnect removes a player from the game core and logs the event.
+func (s *Server) applyDisconnect(i intent.DisconnectIntent) {
+	s.game.RemovePlayer(i.PlayerUUID)
+	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
+	slog.Info("player disconnected via intent",
+		"uuid", i.PlayerUUID, "reason", i.Reason)
+}
+
+// applyMove updates a player's position. The player object is looked up from
+// the session manager so that broadcast can follow on the same tick.
+func (s *Server) applyMove(m intent.MoveIntent) {
+	// TODO(M14.2): look up the bedrock session by UUID and broadcast
+	// position to other sessions. For M14.1 the move is accepted and dropped.
+	_ = m
+}
+
+// applyChat broadcasts a chat message to all active Java sessions.
+func (s *Server) applyChat(i intent.ChatIntent) {
+	msg := fmt.Sprintf("<%s> %s", i.DisplayName, i.Message)
+	handler.BroadcastSystemMessage(s.sessions, msg)
 }
 
 // tickEntities advances every registered non-player entity by one game tick:
