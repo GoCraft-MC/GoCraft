@@ -36,14 +36,19 @@ func SectionMinY(i int) int { return WorldMinY + i*SectionSize }
 // appear are stored; every grid position holds a compact palette index.
 // Index 0 in the palette is always the Air block.
 //
+// Palette deduplication uses Block.Key() as the map key, which sorts properties
+// alphabetically so two Block values with the same properties in different
+// insertion order are guaranteed to map to the same palette entry.
+//
 // The Java encoder (java/world/encoder.go) reads BlockPalette() and BlockData()
 // to build the PalettedContainer wire format.  It maps each canonical Block to a
 // Java global state ID via its own registry — the core never touches Java IDs.
 // A future Bedrock encoder will do the same with Bedrock runtime IDs.
 type Section struct {
-	blockPalette []Block      // canonical Block values; [0] = Air
-	blockData    [4096]uint16 // palette index per position: y*256 + z*16 + x
-	NonAir       int16        // count of non-air blocks (required for Java wire format)
+	blockPalette []Block           // canonical Block values; [0] = Air
+	paletteIndex map[string]uint16 // Block.Key() → palette index, for O(1) dedup
+	blockData    [4096]uint16      // palette index per position: y*256 + z*16 + x
+	NonAir       int16             // count of non-air blocks (required for Java wire format)
 
 	// Biome is the canonical biome resource location for all cells in this section.
 	// A future milestone will store per-cell biome data.
@@ -52,8 +57,10 @@ type Section struct {
 
 // NewSection returns an all-air section with a single-entry palette containing Air.
 func NewSection() *Section {
+	airKey := Air.Key()
 	return &Section{
 		blockPalette: []Block{Air},
+		paletteIndex: map[string]uint16{airKey: 0},
 		Biome:        "minecraft:plains",
 	}
 }
@@ -68,25 +75,25 @@ func (s *Section) At(x, y, z int) Block {
 }
 
 // Set places a block at section-local coordinates.
-// It grows the palette on first use of a new Block value.
+// Uses Block.Key() for deduplication so blocks with identical properties are
+// always treated as the same palette entry regardless of map insertion order.
 func (s *Section) Set(x, y, z int, block Block) {
-	idx := y*256 + z*16 + x
+	gridIdx := y*256 + z*16 + x
+	key := block.Key()
 
-	// Search existing palette entries.
-	for i, p := range s.blockPalette {
-		if p.Equal(block) {
-			old := s.blockData[idx]
-			s.blockData[idx] = uint16(i)
-			s.updateNonAir(old, uint16(i))
-			return
-		}
+	if i, ok := s.paletteIndex[key]; ok {
+		old := s.blockData[gridIdx]
+		s.blockData[gridIdx] = i
+		s.updateNonAir(old, i)
+		return
 	}
 
-	// New block value — append to palette.
+	// New block value — append to palette and index.
+	newIdx := uint16(len(s.blockPalette))
 	s.blockPalette = append(s.blockPalette, block)
-	newIdx := uint16(len(s.blockPalette) - 1)
-	old := s.blockData[idx]
-	s.blockData[idx] = newIdx
+	s.paletteIndex[key] = newIdx
+	old := s.blockData[gridIdx]
+	s.blockData[gridIdx] = newIdx
 	s.updateNonAir(old, newIdx)
 }
 

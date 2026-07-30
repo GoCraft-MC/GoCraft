@@ -4,6 +4,11 @@
 // a future Bedrock adapter will do the same independently.
 package world
 
+import (
+	"sort"
+	"strings"
+)
+
 // Block is the canonical, edition-agnostic representation of a placed block.
 //
 // Identity is defined by Namespace, Name, and Properties together:
@@ -52,7 +57,7 @@ func (b Block) ResourceLocation() string {
 }
 
 // Equal reports whether b and other represent exactly the same block state,
-// including all properties.
+// including all properties. Map iteration order does not affect the result.
 func (b Block) Equal(other Block) bool {
 	if b.Namespace != other.Namespace || b.Name != other.Name {
 		return false
@@ -66,4 +71,31 @@ func (b Block) Equal(other Block) bool {
 		}
 	}
 	return true
+}
+
+// Key returns the canonical string key for this block state, suitable for use
+// in maps, hash tables, palette deduplication, and registry lookups.
+//
+// Format:
+//
+//	"namespace:name"                           — default state (no properties)
+//	"namespace:name[prop1=val1,prop2=val2]"    — with properties sorted A→Z
+//
+// Two Block values that represent the same state always produce the same Key
+// regardless of the order their Properties map was populated.
+func (b Block) Key() string {
+	rl := b.ResourceLocation()
+	if len(b.Properties) == 0 {
+		return rl
+	}
+	propKeys := make([]string, 0, len(b.Properties))
+	for k := range b.Properties {
+		propKeys = append(propKeys, k)
+	}
+	sort.Strings(propKeys)
+	pairs := make([]string, len(propKeys))
+	for i, k := range propKeys {
+		pairs[i] = k + "=" + b.Properties[k]
+	}
+	return rl + "[" + strings.Join(pairs, ",") + "]"
 }

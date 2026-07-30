@@ -55,11 +55,27 @@ var javaStateIDs = map[string]int32{
 	"minecraft:gravel": 68,
 }
 
-// StateID returns the Java 1.21.4 global block state ID for the given canonical
-// Block.  The lookup uses the block's resource location (namespace:name); property-
-// specific state IDs will be supported in a future milestone once the data-driven
-// registry is in place.  Returns 0 (air) for unrecognised blocks.
+// StateID returns the Java 1.21.4 global block state ID for the given canonical Block.
+//
+// Lookup order:
+//  1. Full canonical key  "namespace:name[prop1=val1,…]"  — property-specific state ID.
+//     Properties are sorted alphabetically by Block.Key() so insertion order never
+//     affects the result; two Block values with the same properties always resolve
+//     to the same Java ID regardless of how the map was constructed.
+//  2. Resource location   "namespace:name"                 — default state fallback.
+//
+// This lets javaStateIDs carry both default-state entries (most blocks) and
+// property-specific overrides (e.g. "minecraft:grass_block[snowy=true]") without
+// any special casing in the calling code.
+//
+// Returns 0 (air) for unrecognised blocks so unknown blocks render as invisible
+// rather than crashing the client.
 func StateID(b coreworld.Block) int32 {
+	// Try the full canonical key first (property-specific override).
+	if id, ok := javaStateIDs[b.Key()]; ok {
+		return id
+	}
+	// Fall back to default state (resource location only).
 	if id, ok := javaStateIDs[b.ResourceLocation()]; ok {
 		return id
 	}
