@@ -217,6 +217,12 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		return nil
 	}
 
+	// Refuse to overwrite an occupied block.
+	if existing := w.GetBlock(px, py, pz); !existing.IsAir() {
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+
 	block := javaworld.ItemIDToBlock(held.ItemID)
 	slog.Info("block place", "player", p.Username,
 		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
