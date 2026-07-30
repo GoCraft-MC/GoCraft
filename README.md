@@ -132,10 +132,10 @@ type Provider interface {
 
 `VanillaProvider` uses the Known-Packs shortcut (zero registry packets for vanilla 1.21.4). A future `ExplicitProvider` will send full registry data for custom dimensions, custom biomes, additional Java versions, and Java-to-Bedrock ID translation.
 
-- **GoCraft core (`core/`)** owns edition-neutral block, chunk, world, player, game-registry, and spatial models. It never imports `java/` or `bedrock/`.
-- **Java adapter (`java/`)** implements the TCP protocol, packet handling, login authentication, encryption, configuration, chunk encoding, and play-state lifecycle.
-- **Bedrock adapter (`bedrock/`)** is a documentation-only placeholder. UDP/RakNet, Bedrock authentication, packet translation, and cross-play remain future work.
-- **Server layer (`server/`)** wires configuration, the core, and the Java adapter into the executable.
+- **GoCraft core (`core/`)** owns the edition-neutral game state: blocks, chunks, world, entities, players, inventories, and spatial types. It never imports `java/` or `bedrock/`.
+- **Java adapter (`java/`)** reads from `core/` and produces native Java Edition packets: TCP framing, login auth, encryption, chunk encoding, and play-state management. It does not know Bedrock exists.
+- **Bedrock adapter (`bedrock/`)** will read from the same `core/` and produce native Bedrock Edition packets independently: RakNet/UDP, Xbox auth, Sub Chunk format, Bedrock runtime IDs. It does not consume Java packets and is not a proxy.
+- **Server layer (`server/`)** wires configuration, the core, and the active adapters into the executable.
 
 ## Development status
 
@@ -275,9 +275,27 @@ A Go-native plugin API is planned, but **no plugin system is implemented today**
 
 Bedrock support is planned for Milestone 14, after the data-driven registry layer (M13) is in place.
 
-The canonical `Block` and `Chunk` types in `core/` carry no edition-specific IDs. M13 will load block state and biome mappings from Minecraft's own data-generator output (`reports/blocks.json`), giving both the Java adapter and the future Bedrock adapter a single shared ID-resolution path. The Bedrock encoder (`bedrock/world`) will use the same registry infrastructure to map canonical `Block` values to Bedrock runtime IDs — no separate hardcoded tables needed.
+### What "adapter" means here
 
-This sequencing means the Bedrock adapter is a transport and translation layer (RakNet/UDP, Xbox auth, Sub Chunk packet format) rather than a second hand-maintained block table. Cross-play — Java and Bedrock clients sharing the same world — follows naturally because both adapters read from the same `core/world.World`.
+GoCraft is **not** a protocol translator like Geyser. The Bedrock adapter does not consume Java packets and re-encode them for Bedrock clients. Instead, both adapters independently read from the same canonical game state in `core/` and produce their own native wire format:
+
+```
+                    ┌─────────────────────────────┐
+                    │         core/               │
+                    │  World · Entity · Inventory │  ← no Java, no Bedrock
+                    └────────────┬────────────────┘
+                                 │ canonical state
+               ┌─────────────────┴──────────────────┐
+               ▼                                    ▼
+   ┌───────────────────────┐          ┌───────────────────────┐
+   │     java/ adapter     │          │   bedrock/ adapter    │
+   │  native Java packets  │          │  native Bedrock packets│
+   │  Java state IDs       │          │  Bedrock runtime IDs  │
+   └───────────────────────┘          └───────────────────────┘
+         Java client                       Bedrock client
+```
+
+A Java client and a Bedrock client in the same world are both looking at the same `core/world.World`. Each adapter converts that world into its own protocol independently — they never talk to each other. This is why M13 (data-driven registries) must come first: both adapters need to resolve canonical `Block` values to their own edition-specific IDs, and they should share the same registry infrastructure rather than maintaining separate hardcoded tables.
 
 The current `bedrock/` package contains only design documentation. No RakNet listener, Bedrock login, packet encoding, or working cross-play exists yet.
 
