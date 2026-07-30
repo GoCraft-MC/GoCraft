@@ -23,6 +23,25 @@ import (
 	javaworld "GoCraft/java/world"
 )
 
+// digBreaksBlock reports whether the given Player Action status should break
+// the targeted block for a player in the given game mode.
+//
+// Creative mode breaks on START_DIGGING (status 0) because the client does
+// not run a mining animation — the block disappears immediately.
+// Survival mode (and adventure) breaks on FINISH_DIGGING (status 2) after the
+// full mining animation completes.
+//
+// In both cases CANCEL_DIGGING (status 1) is left to the caller; no world
+// change is made.
+func digBreaksBlock(status int32, mode player.GameMode) bool {
+	switch mode {
+	case player.GameModeCreative:
+		return status == actionStatusStartDigging
+	default: // survival, adventure
+		return status == actionStatusFinishDigging
+	}
+}
+
 // ── Block packet IDs ──────────────────────────────────────────────────────────
 
 const (
@@ -98,16 +117,18 @@ func handlePlayerAction(pkt *protocol.Packet, p *player.Player, w *coreworld.Wor
 		return fmt.Errorf("player action: reading sequence: %w", err)
 	}
 
-	switch status {
-	case actionStatusStartDigging, actionStatusFinishDigging:
-		// START_DIGGING covers instant-break (creative mode).
-		// FINISH_DIGGING covers the end of a mining animation (survival).
-		// Both signal that the block should be removed.
+	// Reject out-of-bounds Y before touching the world.
+	if int(by) < coreworld.WorldMinY || int(by) > coreworld.WorldMaxY {
+		slog.Warn("player action: Y out of bounds", "player", p.Username, "y", by)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+
+	if digBreaksBlock(status, p.GameMode) {
 		slog.Info("block break", "player", p.Username,
-			"x", bx, "y", by, "z", bz, "status", status)
+			"x", bx, "y", by, "z", bz,
+			"mode", p.GameMode, "status", status)
 		applyBlockChange(int(bx), int(by), int(bz), coreworld.Air, w, mgr)
-	case actionStatusCancelDigging:
-		// Player interrupted digging — no block change needed.
 	}
 
 	// Always acknowledge so the client does not roll back its optimistic update.
