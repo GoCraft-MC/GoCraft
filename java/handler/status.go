@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 
 	"GoCraft/config"
-	"GoCraft/network"
-	"GoCraft/protocol"
+	"GoCraft/java/network"
+	"GoCraft/java/protocol"
 )
 
 const (
@@ -22,9 +22,9 @@ const (
 	packetIDPongResponse = 0x01 // S→C: same int64 payload
 )
 
-// onlineCount is the global player count used in status responses.
-// Milestone 2 (login) will update this via atomic operations.
-var onlineCount atomic.Int32
+// OnlineCount is the global player count used in status responses.
+// Updated atomically by the game core when players join or leave.
+var OnlineCount atomic.Int32
 
 // statusVersion mirrors the "version" field in the status JSON.
 type statusVersion struct {
@@ -34,9 +34,9 @@ type statusVersion struct {
 
 // statusPlayers mirrors the "players" field in the status JSON.
 type statusPlayers struct {
-	Max    int              `json:"max"`
-	Online int              `json:"online"`
-	Sample []statusSample   `json:"sample"`
+	Max    int            `json:"max"`
+	Online int            `json:"online"`
+	Sample []statusSample `json:"sample"`
 }
 
 // statusSample is one entry in the player sample list shown on the multiplayer screen.
@@ -138,7 +138,7 @@ func buildStatusJSON(cfg *config.Config) ([]byte, error) {
 		},
 		Players: statusPlayers{
 			Max:    cfg.MaxPlayers,
-			Online: int(onlineCount.Load()),
+			Online: int(OnlineCount.Load()),
 			Sample: []statusSample{},
 		},
 		Description: statusDescription{

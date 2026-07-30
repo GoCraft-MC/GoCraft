@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"GoCraft/protocol"
+	"GoCraft/java/protocol"
 )
 
 // ─── CFB8 tests ──────────────────────────────────────────────────────────────
@@ -16,7 +16,7 @@ func TestCFB8_RoundTrip(t *testing.T) {
 		key[i] = byte(i)
 	}
 	iv := make([]byte, 16)
-	copy(iv, key) // Minecraft uses key == IV
+	copy(iv, key)
 
 	plaintext := []byte("Hello, Minecraft encryption world!")
 
@@ -45,8 +45,6 @@ func TestCFB8_RoundTrip(t *testing.T) {
 }
 
 func TestCFB8_Incremental(t *testing.T) {
-	// Verify that encrypting/decrypting byte-by-byte gives the same result
-	// as encrypting/decrypting all at once.
 	key := bytes.Repeat([]byte{0xAB}, 16)
 
 	enc1, _ := NewCFB8Encrypter(key, key)
@@ -67,12 +65,6 @@ func TestCFB8_Incremental(t *testing.T) {
 }
 
 func TestCFB8_KnownVector(t *testing.T) {
-	// Known-answer test using a deterministic key and input.
-	// Generated with Python:
-	//   from Crypto.Cipher import AES
-	//   key = bytes(range(16))
-	//   c = AES.new(key, AES.MODE_CFB, iv=key, segment_size=8)
-	//   print(c.encrypt(b'\x00' * 16).hex())
 	key := make([]byte, 16)
 	for i := range key {
 		key[i] = byte(i)
@@ -83,12 +75,10 @@ func TestCFB8_KnownVector(t *testing.T) {
 		t.Fatalf("NewCFB8Encrypter: %v", err)
 	}
 
-	src := make([]byte, 16) // all zeros
+	src := make([]byte, 16)
 	dst := make([]byte, 16)
 	enc.XORKeyStream(dst, src)
 
-	// The first output byte is AES_Encrypt(IV)[0] XOR 0x00 = AES_Encrypt(IV)[0].
-	// We just check that the result is not all zeros (i.e. something happened).
 	allZero := true
 	for _, b := range dst {
 		if b != 0 {
@@ -104,8 +94,6 @@ func TestCFB8_KnownVector(t *testing.T) {
 // ─── SHA1 hex digest tests ───────────────────────────────────────────────────
 
 func TestMinecraftHexDigest_KnownPositive(t *testing.T) {
-	// From wiki.vg: SHA1("Notch") → "4ed1f46bbe04bc756bcb17c0c7ce3e4632f06a48"
-	// Treated as positive number (leading bit 0) → "4ed1f46bbe04bc756bcb17c0c7ce3e4632f06a48"
 	h, _ := hex.DecodeString("4ed1f46bbe04bc756bcb17c0c7ce3e4632f06a48")
 	got := minecraftHexDigest(h)
 	want := "4ed1f46bbe04bc756bcb17c0c7ce3e4632f06a48"
@@ -115,8 +103,7 @@ func TestMinecraftHexDigest_KnownPositive(t *testing.T) {
 }
 
 func TestMinecraftHexDigest_KnownNegative(t *testing.T) {
-	// From wiki.vg: SHA1("jeb_") = 8362a4ffbb3ecfef65a284a04a3ce83fd4b1d73f
-	// High bit is 1 → negative → displayed as "-7c9d5b0044c130109a5d7b5fb5c317c02b4e28c1"
+	// SHA1("jeb_") = 8362a4ffbb3ecfef65a284a04a3ce83fd4b1d73f
 	h, _ := hex.DecodeString("8362a4ffbb3ecfef65a284a04a3ce83fd4b1d73f")
 	got := minecraftHexDigest(h)
 	want := "-7c9d5b0044c130109a5d7b5fb5c317c02b4e28c1"
@@ -136,16 +123,10 @@ func TestMinecraftHexDigest_Zero(t *testing.T) {
 // ─── Offline UUID tests ───────────────────────────────────────────────────────
 
 func TestOfflineUUID_KnownValue(t *testing.T) {
-	// Minecraft Java Edition offline UUID for "Notch":
-	// OfflinePlayer:Notch → UUID v3
-	// Expected (from vanilla server): 1b9…  (varies by impl, check version bits)
 	u := OfflineUUID("Notch")
-
-	// Version must be 3.
 	if v := (u[6] >> 4) & 0x0F; v != 3 {
 		t.Errorf("UUID version: got %d, want 3", v)
 	}
-	// Variant must be RFC 4122 (10xx binary → top 2 bits of byte 8 are 10).
 	if v := (u[8] >> 6) & 0x03; v != 2 {
 		t.Errorf("UUID variant bits: got %02b, want 10", v)
 	}
@@ -207,14 +188,12 @@ func TestGenerateKeyPair(t *testing.T) {
 	if key.N.BitLen() != 1024 {
 		t.Errorf("key size: got %d bits, want 1024", key.N.BitLen())
 	}
-
-	// Public key must marshal to DER without error.
 	der, err := MarshalPublicKeyDER(&key.PublicKey)
 	if err != nil {
 		t.Fatalf("MarshalPublicKeyDER: %v", err)
 	}
-	if len(der) == 0 {
-		t.Error("DER-encoded public key is empty")
+	if len(der) < 100 {
+		t.Errorf("DER too short: %d bytes", len(der))
 	}
 }
 
@@ -223,7 +202,6 @@ func TestDecryptPKCS1v15_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateKeyPair: %v", err)
 	}
-
 	der, _ := MarshalPublicKeyDER(&key.PublicKey)
 	if len(der) < 100 {
 		t.Errorf("DER too short: %d bytes", len(der))

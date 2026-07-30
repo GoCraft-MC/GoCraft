@@ -9,24 +9,24 @@ import (
 	"io"
 	"log/slog"
 
-	"GoCraft/auth"
 	"GoCraft/config"
-	"GoCraft/network"
-	"GoCraft/protocol"
+	"GoCraft/java/auth"
+	"GoCraft/java/network"
+	"GoCraft/java/protocol"
 )
 
 // ── Packet IDs — Login state ──────────────────────────────────────────────────
 
 const (
 	// Client → Server
-	packetIDLoginStart            = 0x00
-	packetIDEncryptionResponse    = 0x01
-	packetIDLoginAcknowledged     = 0x03
+	packetIDLoginStart         = 0x00
+	packetIDEncryptionResponse = 0x01
+	packetIDLoginAcknowledged  = 0x03
 
 	// Server → Client
-	packetIDLoginDisconnect       = 0x00
-	packetIDEncryptionRequest     = 0x01
-	packetIDLoginSuccess          = 0x02
+	packetIDLoginDisconnect   = 0x00
+	packetIDEncryptionRequest = 0x01
+	packetIDLoginSuccess      = 0x02
 )
 
 // LoginResult carries everything the rest of the server needs after a

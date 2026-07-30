@@ -1,4 +1,4 @@
-// Package network manages raw TCP connections to Minecraft clients.
+// Package network manages raw TCP connections to Minecraft Java Edition clients.
 package network
 
 import (
@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"GoCraft/auth"
-	"GoCraft/protocol"
+	"GoCraft/java/auth"
+	"GoCraft/java/protocol"
 )
 
 // State represents the connection's current protocol phase.
@@ -49,10 +49,11 @@ const (
 // After EnableEncryption is called, all reads go through an AES-128-CFB8
 // decrypter and all writes go through an AES-128-CFB8 encrypter.
 type ClientConn struct {
-	conn      net.Conn
-	reader    *bufio.Reader
-	writer    io.Writer // net.Conn before encryption, encryptedWriter after
-	State     State
+	conn   net.Conn
+	reader *bufio.Reader
+	writer io.Writer // net.Conn before encryption, encryptedWriter after
+
+	State State
 
 	writeMu   sync.Mutex
 	closeOnce sync.Once
@@ -146,6 +147,7 @@ func (c *ClientConn) Close() error {
 
 // encryptedReader wraps a net.Conn with a CFB8 decrypter.
 // It first serves any bytes that were buffered before encryption was enabled.
+
 type encryptedReader struct {
 	conn    net.Conn
 	stream  cipher.Stream

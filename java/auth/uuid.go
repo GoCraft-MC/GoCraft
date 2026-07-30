@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"GoCraft/protocol"
+	"GoCraft/java/protocol"
 )
 
 // OfflineUUID generates the deterministic offline-mode UUID for a player name.

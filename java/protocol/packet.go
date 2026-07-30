@@ -163,6 +163,36 @@ func (b *Builder) UUID(u UUID) *Builder {
 	return b
 }
 
+// Int appends a big-endian int32 field.
+func (b *Builder) Int(v int32) *Builder {
+	if err := WriteInt(&b.buf, v); err != nil {
+		panic(fmt.Sprintf("Builder.Int: %v", err))
+	}
+	return b
+}
+
+// Byte appends a single byte field.
+func (b *Builder) Byte(v byte) *Builder {
+	b.buf.WriteByte(v)
+	return b
+}
+
+// Float appends a big-endian IEEE 754 single-precision float.
+func (b *Builder) Float(v float32) *Builder {
+	if err := WriteFloat(&b.buf, v); err != nil {
+		panic(fmt.Sprintf("Builder.Float: %v", err))
+	}
+	return b
+}
+
+// Double appends a big-endian IEEE 754 double-precision float.
+func (b *Builder) Double(v float64) *Builder {
+	if err := WriteDouble(&b.buf, v); err != nil {
+		panic(fmt.Sprintf("Builder.Double: %v", err))
+	}
+	return b
+}
+
 // Build returns the assembled Packet.
 func (b *Builder) Build() *Packet {
 	return &Packet{ID: b.id, Data: b.buf.Bytes()}

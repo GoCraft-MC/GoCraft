@@ -1,32 +1,42 @@
-// Package server wires together the network listener, configuration, and
-// protocol handlers into a runnable Minecraft server.
+// Package server wires together the game core, Java network listener,
+// configuration, and protocol handlers into a runnable GoCraft server.
+//
+// Architecture:
+//
+//	server.Server
+//	  ├─ core/game.Game          — edition-agnostic player registry
+//	  └─ java adapter            — TCP listener + Java protocol handlers
+//	       ├─ java/network       — ClientConn, Listener
+//	       └─ java/handler       — Handshake, Status, Login, Config, Play
 package server
 
 import (
 	"context"
 	"crypto/rsa"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
 
-	"GoCraft/auth"
 	"GoCraft/config"
-	"GoCraft/handler"
-	"GoCraft/network"
-	"GoCraft/protocol"
+	"GoCraft/core/game"
+	"GoCraft/core/player"
+	"GoCraft/java/auth"
+	"GoCraft/java/handler"
+	"GoCraft/java/network"
 )
 
-// Server is the top-level object that owns the listener and dispatches connections.
+// Server owns the game core and the Java Edition TCP listener.
 type Server struct {
-	cfg      *config.Config
+	cfg  *config.Config
+	game *game.Game
+
+	// Java adapter resources
 	listener *network.Listener
 
 	// RSA keypair — generated once at startup, shared across all connections.
 	privKey   *rsa.PrivateKey
 	pubKeyDER []byte
 
-	// loginHandler is initialised from the keypair and reused for every login.
 	loginHandler *handler.LoginHandler
 
 	// connCount tracks the number of active TCP connections.
@@ -34,7 +44,7 @@ type Server struct {
 }
 
 // New creates a Server with the given configuration.
-// It generates the RSA keypair needed for online-mode authentication.
+// It initialises the game core and generates the RSA keypair for online-mode auth.
 func New(cfg *config.Config) (*Server, error) {
 	privKey, err := auth.GenerateKeyPair()
 	if err != nil {
@@ -47,6 +57,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	s := &Server{
 		cfg:       cfg,
+		game:      game.New(),
 		privKey:   privKey,
 		pubKeyDER: pubKeyDER,
 	}
@@ -77,12 +88,8 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 	// ── Handshake ────────────────────────────────────────────────────────────
 	_, err := handler.Handshake(conn, s.cfg)
 	if err != nil {
-		if errors.Is(err, handler.ErrLoginNotImplemented) {
-			// Fall through — login IS now implemented below.
-		} else {
-			slog.Debug("handshake failed", "remote", remote, "err", err)
-			return
-		}
+		slog.Debug("handshake failed", "remote", remote, "err", err)
+		return
 	}
 
 	// ── Route by state ───────────────────────────────────────────────────────
@@ -98,42 +105,51 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 			slog.Debug("login error", "remote", remote, "err", err)
 			return
 		}
-		// Login completed, conn is now in StateConfiguration.
-		// Configuration state (Milestone 3) is not yet implemented.
-		// Send a friendly disconnect so the client shows a readable message.
-		s.sendConfigurationDisconnect(conn, result)
+
+		// ── Configuration state ──────────────────────────────────────────────
+		if err := handler.HandleConfiguration(conn); err != nil {
+			slog.Debug("configuration error", "remote", remote, "err", err)
+			return
+		}
+
+		// ── Play state ───────────────────────────────────────────────────────
+		p := s.registerPlayer(result)
+		defer s.game.RemovePlayer(p.UUID)
+
+		if err := handler.HandlePlay(conn, p); err != nil {
+			slog.Debug("play error", "remote", remote, "err", err)
+		}
 
 	default:
 		slog.Warn("unhandled state after handshake", "remote", remote, "state", conn.State)
 	}
 }
 
-// sendConfigurationDisconnect sends a Disconnect packet in the Configuration
-// state so the client displays a message instead of a raw connection drop.
-//
-// Configuration Disconnect (0x02 S→C):
-//
-//	String  reason  JSON text component
-func (s *Server) sendConfigurationDisconnect(conn *network.ClientConn, result *handler.LoginResult) {
-	msg := fmt.Sprintf(
-		`{"text":"Welcome, %s! GoCraft is still starting up — Configuration state (Milestone 3) is not yet implemented. Please reconnect later.","color":"yellow"}`,
-		result.Name,
-	)
-	pkt := protocol.NewBuilder(0x02).String(msg).Build()
-	if err := conn.WritePacket(pkt); err != nil {
-		slog.Debug("configuration disconnect send failed",
-			"remote", conn.RemoteAddr(), "err", err)
+// registerPlayer creates a core Player from a LoginResult, assigns an entity ID
+// via the game core, and updates the global online count used in status pings.
+func (s *Server) registerPlayer(result *handler.LoginResult) *player.Player {
+	// protocol.UUID is [16]byte — convertible to the core's raw [16]byte UUID.
+	p := player.New([16]byte(result.UUID), result.Name, player.ClientEditionJava)
+
+	if err := s.game.AddPlayer(p); err != nil {
+		// Duplicate UUID — extremely rare; log and continue with assigned ID.
+		slog.Warn("duplicate player UUID", "name", p.Username, "uuid", p.UUID, "err", err)
 	}
-	slog.Info("player greeted and disconnected (awaiting Milestone 3)",
-		"name", result.Name,
-		"uuid", result.UUID,
-		"remote", conn.RemoteAddr(),
-	)
+
+	// Update the status-ping online count.
+	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
+	slog.Info("player joined", "name", p.Username, "uuid", p.UUID, "entityID", p.EntityID)
+	return p
 }
 
 // ActiveConns returns the current number of open TCP connections.
 func (s *Server) ActiveConns() int64 {
 	return s.connCount.Load()
+}
+
+// OnlineCount returns the number of players registered with the game core.
+func (s *Server) OnlineCount() int {
+	return s.game.OnlineCount()
 }
 
 // Config returns the server's configuration (read-only).

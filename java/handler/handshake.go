@@ -3,13 +3,12 @@
 package handler
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 
 	"GoCraft/config"
-	"GoCraft/network"
-	"GoCraft/protocol"
+	"GoCraft/java/network"
+	"GoCraft/java/protocol"
 )
 
 const (
@@ -20,10 +19,6 @@ const (
 	nextStateStatus = 1
 	nextStateLogin  = 2
 )
-
-// ErrLoginNotImplemented is returned when the client requests login mode.
-// Login support is planned for Milestone 2.
-var ErrLoginNotImplemented = errors.New("handler: login state is not yet implemented")
 
 // HandshakeData contains the fields decoded from the client's Handshake packet.
 type HandshakeData struct {

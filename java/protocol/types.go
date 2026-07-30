@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"unsafe"
 )
 
 const (
@@ -158,5 +159,43 @@ func WriteByteArray(w io.Writer, data []byte) error {
 		return nil
 	}
 	_, err := w.Write(data)
+	return err
+}
+
+// ReadFloat reads a big-endian IEEE 754 single-precision float.
+func ReadFloat(r io.Reader) (float32, error) {
+	var buf [4]byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, fmt.Errorf("protocol: reading float: %w", err)
+	}
+	bits := binary.BigEndian.Uint32(buf[:])
+	return *(*float32)(unsafe.Pointer(&bits)), nil
+}
+
+// WriteFloat writes a big-endian IEEE 754 single-precision float.
+func WriteFloat(w io.Writer, v float32) error {
+	bits := *(*uint32)(unsafe.Pointer(&v))
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], bits)
+	_, err := w.Write(buf[:])
+	return err
+}
+
+// ReadDouble reads a big-endian IEEE 754 double-precision float.
+func ReadDouble(r io.Reader) (float64, error) {
+	var buf [8]byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, fmt.Errorf("protocol: reading double: %w", err)
+	}
+	bits := binary.BigEndian.Uint64(buf[:])
+	return *(*float64)(unsafe.Pointer(&bits)), nil
+}
+
+// WriteDouble writes a big-endian IEEE 754 double-precision float.
+func WriteDouble(w io.Writer, v float64) error {
+	bits := *(*uint64)(unsafe.Pointer(&v))
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], bits)
+	_, err := w.Write(buf[:])
 	return err
 }
