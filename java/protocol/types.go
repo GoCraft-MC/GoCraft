@@ -181,6 +181,20 @@ func WriteFloat(w io.Writer, v float32) error {
 	return err
 }
 
+// ReadPosition reads a Minecraft packed Position (Long, 64-bit).
+//
+// Bit layout: X(26) | Z(26) | Y(12), all signed via arithmetic right-shift.
+func ReadPosition(r io.Reader) (x, y, z int32, err error) {
+	packed, err := ReadLong(r)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("protocol: reading position: %w", err)
+	}
+	x = int32(packed >> 38)
+	z = int32((packed << 26) >> 38)
+	y = int32((packed << 52) >> 52)
+	return x, y, z, nil
+}
+
 // ReadDouble reads a big-endian IEEE 754 double-precision float.
 func ReadDouble(r io.Reader) (float64, error) {
 	var buf [8]byte

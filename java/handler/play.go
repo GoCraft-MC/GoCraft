@@ -398,6 +398,13 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 		}
 
+		// Block interaction needs both the world and the session manager.
+		if pkt.ID == packetIDPlayerAction || pkt.ID == packetIDUseItemOn {
+			if err := handleBlockPacket(pkt, p, w, mgr); err != nil {
+				slog.Warn("block interaction error", "player", p.Username, "err", err)
+			}
+		}
+
 		// ── Chunk streaming on boundary crossing ─────────────────────────────
 		newChunkX := posToChunk(p.Position.X)
 		newChunkZ := posToChunk(p.Position.Z)
