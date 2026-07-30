@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(go version:*)",
+      "Read(//c/Users/PC/GolandProjects/**)",
+      "Bash(go get:*)",
+      "Bash(go mod:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go env:*)",
+      "WebFetch(domain:wiki.vg)",
+      "Bash(find . -name \"build.gradle.kts\" -exec grep -l \"minecraft\" {} \\\\;)",
+      "Bash(python3:*)"
+    ]
+  }
+}
