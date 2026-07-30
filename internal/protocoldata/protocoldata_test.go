@@ -2,37 +2,37 @@ package protocoldata_test
 
 // Validation tests for the embedded protocol-data packet tables.
 //
-// These tests catch problems that would otherwise surface only at runtime or
-// after a player connects:
+// Each test targets a distinct invariant:
 //
-//   - Duplicate numeric IDs within the same state+direction pair.
-//   - Duplicate semantic names within the same state+direction pair.
-//   - IDs outside the single-byte VarInt range (0–127); Minecraft uses at
-//     most two VarInt bytes for packet IDs but practically all IDs in current
-//     versions fit in one byte.
-//   - The _scope metadata key is present and non-empty on every state file,
-//     so nobody mistakes a partial table for a complete protocol spec.
-//   - Every packet referenced in packets.go (the handler layer) resolves
-//     through MustCB / MustSB without panicking, which is verified indirectly
-//     by importing the handler package in the test binary's init graph.
+//   TestVersionMetadata        — _gocraft_version present and matches expected
+//   TestScopeMetadataPresent   — _scope is present and non-empty
+//   TestPacketNameFormat        — all names start with "minecraft:" and contain no whitespace
+//   TestBothDirectionsPresent   — every state file has both clientbound and serverbound maps
+//   TestNoDuplicateIDs          — no two names share a numeric ID in the same direction
+//   TestIDRange                 — all IDs within [0, maxPacketID]
+//   TestReferencedPacketsResolve— every packet used by GoCraft resolves through MustCB/MustSB
 //
 // Running `go test ./internal/protocoldata/...` catches all of the above.
 
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"GoCraft/internal/protocoldata"
 )
 
 // maxPacketID is the largest packet ID this test will accept.
-// Java Edition packet IDs fit in a VarInt; in practice no vanilla state has
-// more than ~130 packets, so IDs ≥ 256 always indicate a data entry error.
+// In Java Edition 1.21.4 no play-state direction exceeds ~130 packets,
+// so IDs ≥ 256 always indicate a data-entry error.
 const maxPacketID = 255
 
-// stateFileRaw is used only for test-level introspection — we re-parse the
-// JSON that the package already validated at init so we can iterate entries.
+// expectedVersion must match the _gocraft_version field in every JSON file.
+const expectedVersion = "1.21.4"
+
+// stateFileRaw is used for test-level introspection — we re-parse the embedded
+// JSON so we can iterate every entry individually.
 type stateFileRaw struct {
 	GoCraftVersion string           `json:"_gocraft_version"`
 	Scope          string           `json:"_scope"`
@@ -43,35 +43,76 @@ type stateFileRaw struct {
 // allStates lists every protocol state that has an embedded JSON file.
 var allStates = []string{"play", "configuration", "login", "status", "handshake"}
 
-// TestPacketTableIntegrity validates every embedded state file.
-func TestPacketTableIntegrity(t *testing.T) {
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+// TestVersionMetadata verifies that every file declares the expected version
+// string, catching accidental use of a wrong-version data file.
+func TestVersionMetadata(t *testing.T) {
 	for _, state := range allStates {
-		state := state // capture
+		state := state
 		t.Run(state, func(t *testing.T) {
 			sf := mustParseStateFile(t, state)
-			checkDirection(t, state, "clientbound", sf.Clientbound)
-			checkDirection(t, state, "serverbound", sf.Serverbound)
+			if sf.GoCraftVersion == "" {
+				t.Errorf("state %q: missing _gocraft_version key", state)
+			} else if sf.GoCraftVersion != expectedVersion {
+				t.Errorf("state %q: _gocraft_version is %q, want %q",
+					state, sf.GoCraftVersion, expectedVersion)
+			}
 		})
 	}
 }
 
-// TestScopeMetadataPresent ensures every file carries a non-empty _scope key,
-// so it is clear that the tables are partial rather than complete specs.
+// TestScopeMetadataPresent ensures every file carries a non-empty _scope key
+// so it is unambiguous that the tables are partial, not complete protocol specs.
 func TestScopeMetadataPresent(t *testing.T) {
 	for _, state := range allStates {
 		state := state
 		t.Run(state, func(t *testing.T) {
 			sf := mustParseStateFile(t, state)
 			if sf.Scope == "" {
-				t.Errorf("state %q: missing or empty _scope key — add a human-readable note about coverage", state)
+				t.Errorf("state %q: missing or empty _scope — add a human-readable coverage note", state)
+			}
+		})
+	}
+}
+
+// TestPacketNameFormat checks that every semantic packet name:
+//   - starts with "minecraft:" (namespace required)
+//   - contains no ASCII whitespace (a common copy-paste mistake)
+func TestPacketNameFormat(t *testing.T) {
+	const prefix = "minecraft:"
+	for _, state := range allStates {
+		state := state
+		t.Run(state, func(t *testing.T) {
+			sf := mustParseStateFile(t, state)
+			checkNameFormat(t, state, "clientbound", sf.Clientbound, prefix)
+			checkNameFormat(t, state, "serverbound", sf.Serverbound, prefix)
+		})
+	}
+}
+
+// TestBothDirectionsPresent verifies that every state file has both
+// "clientbound" and "serverbound" top-level maps, even if one is empty
+// (e.g. handshake has no clientbound packets).  A missing key would silently
+// leave one direction unresolvable.
+func TestBothDirectionsPresent(t *testing.T) {
+	for _, state := range allStates {
+		state := state
+		t.Run(state, func(t *testing.T) {
+			sf := mustParseStateFile(t, state)
+			if sf.Clientbound == nil {
+				t.Errorf("state %q: missing \"clientbound\" map (use {} for empty)", state)
+			}
+			if sf.Serverbound == nil {
+				t.Errorf("state %q: missing \"serverbound\" map (use {} for empty)", state)
 			}
 		})
 	}
 }
 
 // TestNoDuplicateIDs checks that no two semantic names map to the same numeric
-// ID within the same state+direction, which would silently route packets to
-// the wrong handler.
+// ID within the same state+direction, which would silently route packets to the
+// wrong handler.
 func TestNoDuplicateIDs(t *testing.T) {
 	for _, state := range allStates {
 		state := state
@@ -96,18 +137,11 @@ func TestIDRange(t *testing.T) {
 }
 
 // TestReferencedPacketsResolve verifies that every packet name referenced by
-// the handler layer's packets.go can be resolved through MustCB / MustSB.
-// If any name is missing from the JSON, MustCB/MustSB panicked during init
-// and the test binary would have crashed before reaching this function.
-// This test therefore documents the known-referenced set explicitly so that
-// adding a new packet to packets.go without a matching JSON entry is caught
-// by the test output (init panic) rather than only at server startup.
+// GoCraft's handler layer (packets.go) resolves through MustCB / MustSB.
+// A missing JSON entry surfaces as a panic+FAIL here instead of only at server
+// startup, making CI the gate rather than a production incident.
 func TestReferencedPacketsResolve(t *testing.T) {
-	type entry struct {
-		state string
-		dir   string
-		name  string
-	}
+	type entry struct{ state, dir, name string }
 	refs := []entry{
 		// Handshake
 		{"handshake", "serverbound", "minecraft:intention"},
@@ -179,7 +213,7 @@ func TestReferencedPacketsResolve(t *testing.T) {
 				defer func() {
 					if rv := recover(); rv != nil {
 						panicked = true
-						t.Errorf("MustCB/MustSB panicked for %s/%s/%q: %v", r.state, r.dir, r.name, rv)
+						t.Errorf("panicked for %s/%s/%q: %v", r.state, r.dir, r.name, rv)
 					}
 				}()
 				if r.dir == "clientbound" {
@@ -189,7 +223,7 @@ func TestReferencedPacketsResolve(t *testing.T) {
 				}
 			}()
 			if !panicked && (id < 0 || id > maxPacketID) {
-				t.Errorf("%s/%s/%q: resolved ID %d is out of range [0, %d]",
+				t.Errorf("%s/%s/%q: resolved ID %d outside valid range [0, %d]",
 					r.state, r.dir, r.name, id, maxPacketID)
 			}
 		})
@@ -201,7 +235,6 @@ func TestReferencedPacketsResolve(t *testing.T) {
 func mustParseStateFile(t *testing.T, state string) stateFileRaw {
 	t.Helper()
 	path := fmt.Sprintf("java/1.21.4/%s.json", state)
-	// Read via the embedded FS exposed by protocoldata for test access.
 	data, err := protocoldata.ReadFile(path)
 	if err != nil {
 		t.Fatalf("cannot read embedded file %q: %v", path, err)
@@ -213,11 +246,14 @@ func mustParseStateFile(t *testing.T, state string) stateFileRaw {
 	return sf
 }
 
-func checkDirection(t *testing.T, state, dir string, entries map[string]int32) {
+func checkNameFormat(t *testing.T, state, dir string, entries map[string]int32, prefix string) {
 	t.Helper()
-	for name, id := range entries {
-		if id < 0 || id > maxPacketID {
-			t.Errorf("%s/%s/%q: ID %d out of range [0, %d]", state, dir, name, id, maxPacketID)
+	for name := range entries {
+		if !strings.HasPrefix(name, prefix) {
+			t.Errorf("%s/%s: name %q must start with %q", state, dir, name, prefix)
+		}
+		if strings.ContainsAny(name, " \t\n\r") {
+			t.Errorf("%s/%s: name %q contains whitespace", state, dir, name)
 		}
 	}
 }

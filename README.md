@@ -198,7 +198,8 @@ type Provider interface {
 | 10 — Inventory and items | Complete | ItemStack, 46-slot inventory, hotbar tracking, Creative Mode Set Item, placement from held item, occupied-block guard |
 | 11 — Entity system | Complete | Canonical Entity type, entity registry, mob spawn/tick/despawn, health and damage, 20 TPS tick loop |
 | 12 — Commands | Complete | Command dispatcher, Commands packet (tab-completion DAG), /gamemode /tp /give /kick /list /help |
-| 13 — Data-driven registries | Complete | Load block state IDs, item IDs, and entity-type IDs from Minecraft data-generator JSON (blocks.json, registries.json); embedded via go:embed; hardcoded Go maps replaced; property-keyed block state lookups |
+| 13 — Data-driven registries | Complete | Load block state IDs, item IDs, entity-type IDs, and biome IDs from Minecraft data-generator JSON (blocks.json, registries.json); embedded via go:embed; hardcoded Go maps replaced; property-keyed block state lookups; unknown IDs warn once via sync.Map |
+| 13.1 — Data-driven packet IDs | Complete | Semantic packet names (minecraft:login etc.) in versioned JSON; internal/protocoldata MustCB/MustSB panic at startup on missing names; all handler hex constants removed; validation test suite (7 distinct invariants); GitHub Actions CI on ubuntu-latest |
 | 14 — Bedrock adapter | Future work | RakNet/UDP, Xbox auth, bedrock/world encoder using M13 registries for runtime IDs, cross-play via shared core/ |
 | 15 — Go plugin API | Future work | Event bus, command registration, scheduler, permission nodes; plugins are compiled Go packages |
 
@@ -316,11 +317,16 @@ GoCraft/
 │       ├── chunk.go           # Java chunk encoder (PalettedContainer, heightmaps, light)
 │       └── sender.go          # Chunk burst sender
 ├── internal/
-│   └── gamedata/
-│       ├── embed.go           # go:embed declaration for embedded JSON data
-│       └── java/1.21.4/
-│           ├── blocks.json    # Block state IDs (Minecraft data-generator format)
-│           └── registries.json# Item and entity-type protocol IDs
+│   ├── gamedata/
+│   │   ├── embed.go           # go:embed declaration for embedded JSON data
+│   │   └── java/1.21.4/
+│   │       ├── blocks.json    # Block state IDs (Minecraft data-generator format)
+│   │       └── registries.json# Item, entity-type, and biome protocol IDs
+│   └── protocoldata/
+│       ├── protocoldata.go    # MustCB/MustSB packet ID resolver; panics on unknown names
+│       ├── protocoldata_test.go # 7-invariant validation test suite
+│       └── java/1.21.4/       # Packet ID JSON files (play, configuration, login, status, handshake)
+├── .github/workflows/ci.yml   # GitHub Actions: build + vet + test on ubuntu-latest
 ├── logs/                      # Milestone development records
 ├── server/
 │   └── server.go              # Core and Java adapter orchestration
