@@ -24,6 +24,11 @@ type Config struct {
 
 	// Behaviour
 	OnlineMode bool `yaml:"online_mode"`
+
+	// WorldDir is the path to the Minecraft world folder containing region/,
+	// level.dat, etc.  Leave empty to disable Anvil persistence and run with
+	// a freshly generated flat world on every startup.
+	WorldDir string `yaml:"world_dir"`
 }
 
 // defaults returns a Config populated with sane out-of-the-box values.

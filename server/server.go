@@ -27,6 +27,7 @@ import (
 	"GoCraft/java/registry"
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
+	"GoCraft/java/world/anvil"
 )
 
 // Server owns the game core and the Java Edition TCP listener.
@@ -65,12 +66,26 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("server: marshalling public key: %w", err)
 	}
 
+	// Open Anvil persistence when WorldDir is configured; fall back to a
+	// generation-only flat world otherwise.
+	var storage coreworld.Storage
+	if cfg.WorldDir != "" {
+		st, err := anvil.NewStorage(cfg.WorldDir)
+		if err != nil {
+			slog.Warn("server: could not open Anvil storage; running without persistence",
+				"worldDir", cfg.WorldDir, "err", err)
+		} else {
+			storage = st
+			slog.Info("server: opened Anvil world", "worldDir", cfg.WorldDir)
+		}
+	}
+
 	s := &Server{
 		cfg:         cfg,
 		game:        game.New(),
 		privKey:     privKey,
 		pubKeyDER:   pubKeyDER,
-		world:       coreworld.New(&coreworld.FlatGenerator{}),
+		world:       coreworld.New(&coreworld.FlatGenerator{}, storage),
 		regProvider: &registry.VanillaProvider{},
 		chunkSender: javaworld.DefaultSender,
 		sessions:    session.NewManager(),
@@ -81,6 +96,7 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 // Run starts the server and blocks until ctx is cancelled or a fatal error occurs.
+// When the listener stops, all dirty chunks are flushed to disk before returning.
 func (s *Server) Run(ctx context.Context) error {
 	slog.Info("starting GoCraft server",
 		"addr", s.cfg.Addr(),
@@ -89,7 +105,13 @@ func (s *Server) Run(ctx context.Context) error {
 		"protocol", s.cfg.ProtocolVersion,
 		"onlineMode", s.cfg.OnlineMode,
 	)
-	return s.listener.Listen(ctx)
+	err := s.listener.Listen(ctx)
+
+	// Flush world to disk regardless of whether Listen returned cleanly.
+	if closeErr := s.world.Close(); closeErr != nil {
+		slog.Warn("server: error flushing world on shutdown", "err", closeErr)
+	}
+	return err
 }
 
 // handleConn is called in its own goroutine for every accepted TCP connection.
