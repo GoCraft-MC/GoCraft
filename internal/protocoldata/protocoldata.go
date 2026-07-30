@@ -32,6 +32,12 @@ const expectedVersion = "1.21.4"
 //go:embed java/1.21.4/play.json java/1.21.4/configuration.json java/1.21.4/login.json java/1.21.4/status.json java/1.21.4/handshake.json
 var fs embed.FS
 
+// ReadFile exposes the embedded protocol-data FS for use in tests.
+// Production code should use MustCB / MustSB rather than parsing the files directly.
+func ReadFile(path string) ([]byte, error) {
+	return fs.ReadFile(path)
+}
+
 // ── In-memory tables ──────────────────────────────────────────────────────────
 
 // packetTable maps "state\x00direction\x00name" → numeric packet ID.
@@ -42,6 +48,7 @@ var packetTable map[string]int32
 
 type stateFile struct {
 	GoCraftVersion string           `json:"_gocraft_version"`
+	Scope          string           `json:"_scope"`
 	Clientbound    map[string]int32 `json:"clientbound"`
 	Serverbound    map[string]int32 `json:"serverbound"`
 }

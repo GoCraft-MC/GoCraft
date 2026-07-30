@@ -32,7 +32,8 @@
       "Bash(git push:*)",
       "Bash(git:*)",
       "Bash(go vet:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(go tool:*)"
     ]
   }
 }
