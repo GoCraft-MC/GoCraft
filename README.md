@@ -5,33 +5,33 @@
 <h1 align="center">GoCraft</h1>
 
 <p align="center">
-  An experimental Minecraft: Java Edition server implementation built from scratch in Go.
+  A native-Go Minecraft server built from scratch around an edition-agnostic core.
 </p>
 
 > [!WARNING]
-> GoCraft is early experimental software. It is **not production-ready**, does not provide a complete playable world, and should not be exposed as a public server. Expect incomplete protocol handling, breaking changes, and data-model changes during development.
+> GoCraft is early experimental software. It is **not production-ready** and should not be exposed as a public server. Expect breaking changes and data-model changes during development.
 
 ## Overview
 
-GoCraft is a native Go implementation of a Minecraft server. It is being developed from scratch around a protocol-independent game core, with edition-specific network adapters at the boundary. It is not a Paper fork, does not use the JVM, and does not currently replace Paper or another full Minecraft server.
+GoCraft is a native Go implementation of a Minecraft server written from scratch. It is built around a protocol-independent game core with edition-specific network adapters at the boundary. It is not a Paper fork, does not use the JVM, and is not a drop-in replacement for an existing server.
 
-The current implementation focuses on the connection lifecycle for Minecraft: Java Edition 1.21.4: status discovery, authentication, configuration, entry into the play state, and connection keep-alives. World data and complete gameplay are not implemented.
+A vanilla Minecraft: Java Edition 1.21.4 client can connect, authenticate, complete configuration, enter the play state, and see a flat world of stone at Y=63. Movement, chat, and gameplay are not yet implemented.
 
 ## Compatibility
 
 | Client | Current status |
 | --- | --- |
 | Minecraft: Java Edition 1.21.4 | Active development target |
-| Java protocol 769 | Implemented target |
+| Java protocol 769 | Implemented |
 | Other Java Edition versions | Not supported |
 | Minecraft: Bedrock Edition | Planned; no adapter exists yet |
 
-Changing `version_name` or `protocol_version` in `server.yml` changes the advertised status metadata; it does not add protocol compatibility.
+Changing `version_name` or `protocol_version` in `server.yml` changes the advertised status metadata only; it does not add protocol compatibility.
 
 ## Implemented
 
 - Native Go entry point and executable
-- TCP listener, per-connection handling, and graceful process shutdown
+- TCP listener, per-connection goroutines, and graceful process shutdown
 - Minecraft packet framing, VarInt/VarLong encoding, UUIDs, and common wire types
 - Handshake routing to status or login state
 - Server-list status response with MOTD, version, and player limits
@@ -40,46 +40,101 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
 - Online-mode authentication through the Mojang session server
 - RSA key exchange and AES-128-CFB8 encrypted connections
 - Java configuration state:
-  - known-packs negotiation for `minecraft:core` 1.21.4
-  - `minecraft:brand` plugin message
-  - vanilla feature flags and configuration completion
+  - Known-packs negotiation via a `registry.Provider` interface (`VanillaProvider` uses the vanilla 1.21.4 shortcut; future providers can send full registry data for custom content or Bedrock translation)
+  - `minecraft:brand` plugin message, vanilla feature flags, and configuration completion
 - Entry into the Java play state:
-  - play login, abilities, spawn position, and initial position
-  - player tab-list entry and center-chunk marker
-  - teleport confirmation
-  - periodic keep-alive requests and response validation
+  - Login, abilities, default spawn, tab-list entry, position sync, center-chunk marker
+  - Teleport confirmation
+  - Periodic keep-alive requests and response validation
+- **Canonical world layer** (`core/world`):
+  - Edition-agnostic `Block` type with `Namespace`, `Name`, and `Properties` — no Java or Bedrock IDs in the core
+  - Palette-based `Section` and `Chunk` types; 24 sections per column (Y=−64 to 319)
+  - `FlatGenerator` producing a single layer of stone at Y=63
+  - Concurrent `World` cache with on-demand chunk generation
+  - Architecture test that fails at compile time if any `core/` package imports `java/`
+- **Java chunk encoding** (`java/world`):
+  - Java 1.21.4 global block state ID registry (hardcoded; data-driven in a future milestone)
+  - `Block → Java state ID` lookup at the adapter boundary — the core never touches Java IDs
+  - Network-NBT heightmap encoding (root compound without name, 1.20.2+ format)
+  - `PalettedContainer` encoder: indirect palette, ≥4 bits/entry, no-overflow packing
+  - Level Chunk With Light packet (0x27) with full sky-light data for all 26 sections
+  - `Sender.SendChunksAround`: 7×7 initial chunk burst after teleport confirmation
 - Protocol-independent player, spatial, and online-player registry types
 - YAML configuration with defaults and basic validation
 - Structured logging through Go's `log/slog`
-- Automated authentication, cryptography, packet, and VarInt tests
+- Automated tests for authentication, cryptography, packet framing, VarInt encoding, and architecture isolation
 
 ### Not implemented
 
-GoCraft does not yet send world or chunk data, process movement or chat, implement blocks, inventories, entities, commands, permissions, or provide complete gameplay. It does not support Paper plugins, Bedrock clients, or cross-play.
+Movement, chat, block interaction, inventories, entities, commands, permissions, and complete gameplay are not implemented. Paper plugin compatibility, Bedrock clients, and cross-play are not supported.
 
 ## Architecture
 
 ```text
                          ┌──────────────────────────┐
 Java Edition client ───▶ │ Java protocol adapter    │
-                         │ network/auth/handlers    │
-                         └────────────┬─────────────┘
-                                      │
-                         ┌────────────▼─────────────┐
-                         │ Protocol-independent     │
+                         │ java/network             │
+                         │ java/handler             │
+                         │ java/world  ─┐           │
+                         │ java/registry│           │
+                         └──────────────┼───────────┘
+                                        │ canonical Block / Chunk
+                         ┌──────────────▼───────────┐
                          │ GoCraft core             │
-                         │ players/game/spatial     │
-                         └────────────▲─────────────┘
-                                      │
-                         ┌────────────┴─────────────┐
+                         │ core/world               │  ← no Java or Bedrock imports
+                         │ core/player              │
+                         │ core/game                │
+                         │ core/spatial             │
+                         └──────────────┬───────────┘
+                                        │ canonical Block / Chunk
+                         ┌──────────────▼───────────┐
 Bedrock client ─ ─ ─ ─ ▶ │ Future Bedrock adapter  │
-                         │ not implemented          │
+                         │ bedrock/world (planned)  │
                          └──────────────────────────┘
 ```
 
-- **GoCraft core (`core/`)** owns edition-neutral player, game-registry, and spatial models. It does not import Java- or Bedrock-specific packages.
-- **Java adapter (`java/`)** implements the current TCP protocol, packet handling, login authentication, encryption, configuration, and limited play-state lifecycle.
-- **Bedrock adapter (`bedrock/`)** is currently a documentation-only placeholder. UDP/RakNet, Bedrock authentication, packet translation, and cross-play remain future work.
+### Block identity
+
+The canonical block type carries no edition-specific IDs:
+
+```go
+// core/world — shared by all adapters
+type Block struct {
+    Namespace  string            // "minecraft"
+    Name       string            // "stone", "grass_block", …
+    Properties map[string]string // {"snowy": "false"}, nil = default state
+}
+```
+
+Edition-specific IDs are resolved entirely at the adapter boundary:
+
+```
+Canonical Block
+       │
+┌──────┴──────┐
+▼             ▼
+Java global   Bedrock runtime
+state ID      ID (future)
+```
+
+This means only the encoder packages need to change when updating Java versions or adding Bedrock support; `core/` is untouched. The architecture test in `core/world/arch_test.go` enforces this by failing the build if any `core/` file imports `GoCraft/java`.
+
+### Registry abstraction
+
+Known-packs negotiation and registry delivery are behind a `registry.Provider` interface:
+
+```go
+type Provider interface {
+    Packs() []Pack
+    SendRegistries(conn *network.ClientConn) error
+}
+```
+
+`VanillaProvider` uses the Known-Packs shortcut (zero registry packets for vanilla 1.21.4). A future `ExplicitProvider` will send full registry data for custom dimensions, custom biomes, additional Java versions, and Java-to-Bedrock ID translation.
+
+- **GoCraft core (`core/`)** owns edition-neutral block, chunk, world, player, game-registry, and spatial models. It never imports `java/` or `bedrock/`.
+- **Java adapter (`java/`)** implements the TCP protocol, packet handling, login authentication, encryption, configuration, chunk encoding, and play-state lifecycle.
+- **Bedrock adapter (`bedrock/`)** is a documentation-only placeholder. UDP/RakNet, Bedrock authentication, packet translation, and cross-play remain future work.
 - **Server layer (`server/`)** wires configuration, the core, and the Java adapter into the executable.
 
 ## Development status
@@ -89,11 +144,12 @@ Bedrock client ─ ─ ─ ─ ▶ │ Future Bedrock adapter  │
 | 1 — Handshake and status ping | Complete | Handshake, server-list response, ping/pong, YAML configuration |
 | 2 — Login and authentication | Complete | Offline and online login, Mojang session verification, RSA and AES-CFB8 |
 | 3 — Configuration and play-state entry | Complete | Known packs, feature flags, initial play packets, teleport confirmation, keep-alive |
-| World, chunks, and gameplay | Not implemented | World storage/generation, chunk delivery, movement, chat, blocks, inventories, entities |
+| 4 — World layer and chunk streaming | Complete | Canonical Block/Chunk types, FlatGenerator, Java chunk encoding, initial chunk burst |
+| 5 — Movement and player state | Planned | Position updates, ground detection, fall physics |
 | Go-native plugin API | Planned | Event, scheduler, command, permission, and extension APIs |
 | Bedrock adapter and cross-play | Future work | RakNet/UDP transport, Bedrock login, and translation through the shared core |
 
-Detailed records for the completed milestones are kept in [`logs/`](logs/).
+Detailed records for completed milestones are kept in [`logs/`](logs/).
 
 ## Requirements
 
@@ -116,17 +172,7 @@ go test ./...
 go build -o gocraft.exe .
 ```
 
-### Linux
-
-```bash
-git clone https://github.com/el211/GoCraft.git
-cd GoCraft
-go mod download
-go test ./...
-go build -o gocraft .
-```
-
-### macOS
+### Linux / macOS
 
 ```bash
 git clone https://github.com/el211/GoCraft.git
@@ -166,21 +212,13 @@ If `server.yml` is absent, GoCraft creates it with defaults. Offline mode does n
 
 Run the server from the repository root so it can find `server.yml`.
 
-### Windows PowerShell
-
 ```powershell
+# Windows
 .\gocraft.exe
 ```
 
-### Linux
-
 ```bash
-./gocraft
-```
-
-### macOS
-
-```bash
+# Linux / macOS
 ./gocraft
 ```
 
@@ -197,12 +235,20 @@ GoCraft/
 ├── core/
 │   ├── game/game.go           # Edition-neutral online-player registry
 │   ├── player/player.go       # Canonical player model
-│   └── spatial/spatial.go     # Position and rotation types
+│   ├── spatial/spatial.go     # Position and rotation types
+│   └── world/
+│       ├── block.go           # Block{Namespace, Name, Properties} — no edition IDs
+│       ├── chunk.go           # Section and Chunk with palette-based block storage
+│       ├── generator.go       # Generator interface and FlatGenerator
+│       ├── world.go           # Concurrent world cache
+│       └── arch_test.go       # Fails build if core/ imports java/
 ├── java/
 │   ├── auth/                  # Login crypto, UUIDs, Mojang sessions
 │   ├── handler/               # Handshake, status, login, config, play
 │   ├── network/               # TCP listener and client connections
-│   └── protocol/              # Framing, packets, VarInts, wire types
+│   ├── protocol/              # Framing, packets, VarInts, wire types
+│   ├── registry/              # Provider interface + VanillaProvider
+│   └── world/                 # Java block state IDs, chunk encoder, Sender
 ├── logs/                      # Milestone development records
 ├── server/
 │   └── server.go              # Core and Java adapter orchestration
@@ -215,11 +261,11 @@ GoCraft/
 
 ## Plugin API plans
 
-A Go-native plugin API is planned, but **no plugin system is implemented today**. The intended direction includes events, scheduling, commands, permissions, and extension points built for GoCraft's own core. Paper, Bukkit, and Spigot plugin compatibility is not currently supported and should not be assumed.
+A Go-native plugin API is planned, but **no plugin system is implemented today**. The intended direction includes events, scheduling, commands, permissions, and extension points built for GoCraft's own core. Paper, Bukkit, and Spigot plugin compatibility is not supported and should not be assumed.
 
 ## Bedrock and cross-play plans
 
-Bedrock support is future work. The planned design is a separate Bedrock protocol adapter that translates Bedrock connections into the same canonical core state used by the Java adapter. The current `bedrock` package contains only design documentation—there is no RakNet listener, Bedrock login, packet implementation, or working cross-play.
+Bedrock support is future work. The canonical `Block` and `Chunk` types in `core/world` are deliberately edition-agnostic so a future Bedrock adapter can consume them directly. The Bedrock encoder will map canonical `Block` values to Bedrock runtime IDs independently of the Java encoder, with no changes to `core/`. The current `bedrock/` package contains only design documentation.
 
 ## Contributing
 
@@ -227,10 +273,11 @@ GoCraft is still establishing its protocol and core boundaries. Before submittin
 
 1. Open an issue or discussion for large features or architecture changes.
 2. Keep edition-independent code in `core/` and protocol-specific behavior in its adapter.
-3. Do not claim compatibility without a test or reproducible client trace.
-4. Add or update tests for protocol encoding, authentication, and state transitions.
-5. Run `go fmt ./...`, `go test ./...`, and `go build ./...`.
-6. Keep pull requests focused and document any protocol version assumptions.
+3. Never store edition-specific IDs (Java state IDs, Bedrock runtime IDs) in `core/` types.
+4. Do not claim compatibility without a test or reproducible client trace.
+5. Add or update tests for protocol encoding, authentication, and state transitions.
+6. Run `go fmt ./...`, `go test ./...`, and `go build ./...`.
+7. Keep pull requests focused and document any protocol version assumptions.
 
 Please avoid adding generated binaries, credentials, player data, or private server logs.
 

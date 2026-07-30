@@ -4,18 +4,66 @@
 // a future Bedrock adapter will do the same independently.
 package world
 
-// BlockState identifies a block by its canonical Minecraft resource location.
-// Future milestones will add a Properties map for block state variants
-// (e.g. {"facing":"north","waterlogged":"false"}).
-type BlockState struct {
-	// Name is the canonical Minecraft identifier, e.g. "minecraft:stone".
+// Block is the canonical, edition-agnostic representation of a placed block.
+//
+// Identity is defined by Namespace, Name, and Properties together:
+//   - Two blocks with the same Namespace and Name but different Properties
+//     are different block states (e.g. grass_block[snowy=false] vs [snowy=true]).
+//   - A block with nil or empty Properties is the default state for that type.
+//
+// Edition-specific IDs are determined entirely at the adapter boundary:
+//
+//	Canonical Block
+//	       │
+//	┌──────┴──────┐
+//	▼             ▼
+//	Java global   Bedrock runtime
+//	state ID      ID
+//
+// The core never stores, imports, or depends on any edition-specific ID.
+// Only the encoder packages (java/world, future bedrock/world) know IDs.
+type Block struct {
+	// Namespace is the resource-location namespace; almost always "minecraft".
+	Namespace string
+	// Name is the block identifier without namespace, e.g. "stone", "grass_block".
 	Name string
+	// Properties holds block-state key/value pairs, e.g. {"facing": "north"}.
+	// nil and empty map are both treated as the default state.
+	Properties map[string]string
 }
 
-// Air is the canonical air block used to represent empty space.
-var Air = BlockState{Name: "minecraft:air"}
+// Air is the canonical air block representing empty space.
+var Air = Block{Namespace: "minecraft", Name: "air"}
 
-// IsAir returns true for the air block or the zero value.
-func (b BlockState) IsAir() bool {
-	return b.Name == "" || b.Name == "minecraft:air"
+// IsAir reports whether b represents empty space.
+// The zero value (empty Block) and minecraft:air with no properties are both air.
+func (b Block) IsAir() bool {
+	return (b.Namespace == "" && b.Name == "") ||
+		(b.Namespace == "minecraft" && b.Name == "air" && len(b.Properties) == 0)
+}
+
+// ResourceLocation returns the "namespace:name" identifier, e.g. "minecraft:stone".
+// Properties are not included — use this for registry lookups that key on block type.
+func (b Block) ResourceLocation() string {
+	if b.Namespace == "" {
+		return b.Name
+	}
+	return b.Namespace + ":" + b.Name
+}
+
+// Equal reports whether b and other represent exactly the same block state,
+// including all properties.
+func (b Block) Equal(other Block) bool {
+	if b.Namespace != other.Namespace || b.Name != other.Name {
+		return false
+	}
+	if len(b.Properties) != len(other.Properties) {
+		return false
+	}
+	for k, v := range b.Properties {
+		if other.Properties[k] != v {
+			return false
+		}
+	}
+	return true
 }

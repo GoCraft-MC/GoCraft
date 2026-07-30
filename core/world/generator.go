@@ -13,6 +13,9 @@ type Generator interface {
 // loading, configurable presets, and proper layering.
 type FlatGenerator struct{}
 
+// stone is the canonical block placed by FlatGenerator.
+var stone = Block{Namespace: "minecraft", Name: "stone"}
+
 // Generate returns a chunk with stone at Y=63 and air everywhere else.
 func (g *FlatGenerator) Generate(x, z int32) *Chunk {
 	c := &Chunk{X: x, Z: z}
@@ -26,7 +29,7 @@ func (g *FlatGenerator) Generate(x, z int32) *Chunk {
 	sec.Biome = "minecraft:plains"
 	for bx := 0; bx < SectionSize; bx++ {
 		for bz := 0; bz < SectionSize; bz++ {
-			sec.Set(bx, groundLocalY, bz, "minecraft:stone")
+			sec.Set(bx, groundLocalY, bz, stone)
 		}
 	}
 	c.Sections[groundSectionIdx] = sec

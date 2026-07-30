@@ -32,48 +32,49 @@ func SectionMinY(i int) int { return WorldMinY + i*SectionSize }
 
 // Section is one 16×16×16 cube of blocks within a chunk.
 //
-// Internally it uses a palette so that only the block names that actually
-// appear are stored; all positions hold a 16-bit palette index.
-// Index 0 in the palette is always "minecraft:air".
+// Internally it uses a palette so that only distinct Block values that actually
+// appear are stored; every grid position holds a compact palette index.
+// Index 0 in the palette is always the Air block.
 //
 // The Java encoder (java/world/encoder.go) reads BlockPalette() and BlockData()
-// to build the PalettedContainer wire format without touching this package's
-// internals — keeping the canonical and Java-specific layers separate.
+// to build the PalettedContainer wire format.  It maps each canonical Block to a
+// Java global state ID via its own registry — the core never touches Java IDs.
+// A future Bedrock encoder will do the same with Bedrock runtime IDs.
 type Section struct {
-	blockPalette []string     // canonical block names; [0] = "minecraft:air"
-	blockData    [4096]uint16 // palette index per block: y*256 + z*16 + x
+	blockPalette []Block      // canonical Block values; [0] = Air
+	blockData    [4096]uint16 // palette index per position: y*256 + z*16 + x
 	NonAir       int16        // count of non-air blocks (required for Java wire format)
 
-	// Biome is the canonical biome name for all 64 biome cells in this section.
+	// Biome is the canonical biome resource location for all cells in this section.
 	// A future milestone will store per-cell biome data.
 	Biome string
 }
 
-// NewSection returns an all-air section with a single-entry palette.
+// NewSection returns an all-air section with a single-entry palette containing Air.
 func NewSection() *Section {
 	return &Section{
-		blockPalette: []string{"minecraft:air"},
+		blockPalette: []Block{Air},
 		Biome:        "minecraft:plains",
 	}
 }
 
-// At returns the canonical block name at section-local coordinates (0–15 each).
-// Returns "minecraft:air" for nil sections.
-func (s *Section) At(x, y, z int) string {
+// At returns the canonical Block at section-local coordinates (0–15 each).
+// Returns Air for nil sections.
+func (s *Section) At(x, y, z int) Block {
 	if s == nil || len(s.blockPalette) == 0 {
-		return "minecraft:air"
+		return Air
 	}
 	return s.blockPalette[s.blockData[y*256+z*16+x]]
 }
 
 // Set places a block at section-local coordinates.
-// It grows the palette on first use of a block name.
-func (s *Section) Set(x, y, z int, name string) {
+// It grows the palette on first use of a new Block value.
+func (s *Section) Set(x, y, z int, block Block) {
 	idx := y*256 + z*16 + x
 
 	// Search existing palette entries.
 	for i, p := range s.blockPalette {
-		if p == name {
+		if p.Equal(block) {
 			old := s.blockData[idx]
 			s.blockData[idx] = uint16(i)
 			s.updateNonAir(old, uint16(i))
@@ -81,8 +82,8 @@ func (s *Section) Set(x, y, z int, name string) {
 		}
 	}
 
-	// New block name — append to palette.
-	s.blockPalette = append(s.blockPalette, name)
+	// New block value — append to palette.
+	s.blockPalette = append(s.blockPalette, block)
 	newIdx := uint16(len(s.blockPalette) - 1)
 	old := s.blockData[idx]
 	s.blockData[idx] = newIdx
@@ -101,10 +102,11 @@ func (s *Section) updateNonAir(old, new uint16) {
 	}
 }
 
-// BlockPalette returns the canonical block name palette.
-// The Java encoder uses this to look up Java global state IDs.
-func (s *Section) BlockPalette() []string { return s.blockPalette }
+// BlockPalette returns the canonical Block palette for this section.
+// The Java encoder maps each Block to a Java global state ID via its own registry.
+// A future Bedrock encoder will map to Bedrock runtime IDs independently.
+func (s *Section) BlockPalette() []Block { return s.blockPalette }
 
 // BlockData returns the raw palette-index array (position: y*256+z*16+x).
-// The Java encoder uses this to pack the PalettedContainer bit array.
+// Each value is an index into the slice returned by BlockPalette.
 func (s *Section) BlockData() [4096]uint16 { return s.blockData }

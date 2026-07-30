@@ -86,10 +86,12 @@ func writeSingleValue(buf *bytes.Buffer, value int32) {
 func writeBlockStates(buf *bytes.Buffer, sec *coreworld.Section) {
 	palette := sec.BlockPalette()
 
-	// Build Java state ID palette.
+	// Map each canonical Block to its Java 1.21.4 global state ID.
+	// The StateID lookup is purely a Java-adapter concern; the core palette
+	// holds canonical Block values with no knowledge of Java IDs.
 	javaIDs := make([]int32, len(palette))
-	for i, name := range palette {
-		javaIDs[i] = StateID(name)
+	for i, block := range palette {
+		javaIDs[i] = StateID(block)
 	}
 
 	// Determine bits per entry: minimum 4 for Java block states.

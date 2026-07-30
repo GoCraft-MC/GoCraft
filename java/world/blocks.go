@@ -6,40 +6,43 @@
 // bedrock/world without touching this package.
 package world
 
-// javaStateIDs maps canonical block names to their global block state IDs
-// in Minecraft Java Edition 1.21.4 (protocol 769).
+import coreworld "GoCraft/core/world"
+
+// javaStateIDs maps canonical resource locations to their default global block
+// state IDs in Minecraft Java Edition 1.21.4 (protocol 769).
+//
+// Keys are "namespace:name" strings (no properties).  For blocks whose default
+// state is unambiguous (stone, bedrock, sand…) a single entry suffices.
+// Blocks with property-dependent IDs (e.g. grass_block[snowy=false/true]) will
+// be extended to a property-keyed sub-table in a later milestone.
 //
 // These IDs are hardcoded for the current vanilla version.  They are stable
 // within a version but change between versions as new blocks are inserted.
 //
-// Milestone 13 will replace this table with a data-driven registry loaded
-// from the Minecraft data generator output (reports/blocks.json), which will
-// also support older/newer versions and enable Java-to-Bedrock ID translation.
+// Milestone 13 will replace this table with a data-driven registry loaded from
+// the Minecraft data generator output (reports/blocks.json).  At that point the
+// table will also cover every property combination and support older/newer
+// Java versions without touching any core/ types.
 //
-// Sources used to derive IDs:
-//   - minecraft:air   → 0  (guaranteed by the Minecraft protocol specification)
-//   - minecraft:stone → 1  (first non-air block in the 1.21.4 vanilla registry)
-//
-// When a block name is not found, StateID returns 0 (air), so unrecognised
-// blocks render as invisible rather than crashing the client.
+// When a block is not found, StateID returns 0 (air), so unrecognised blocks
+// render as invisible rather than crashing the client.
 var javaStateIDs = map[string]int32{
 	// ── Air ──────────────────────────────────────────────────────────────────
 	"minecraft:air":  0,
 	"minecraft:void": 0, // alias
 
 	// ── Stone family ─────────────────────────────────────────────────────────
-	// These IDs are stable across all 1.16+ releases.
 	"minecraft:stone":    1,
 	"minecraft:granite":  2,
 	"minecraft:diorite":  4,
 	"minecraft:andesite": 6,
 
 	// ── Grass / dirt ─────────────────────────────────────────────────────────
-	// Grass block has two states (snowy=false, snowy=true).
-	"minecraft:grass_block": 8,  // snowy=false
-	"minecraft:dirt":        10, // single state
+	// Default state IDs (snowy=false, etc.).  Property variants handled later.
+	"minecraft:grass_block": 8,  // default: snowy=false
+	"minecraft:dirt":        10,
 	"minecraft:coarse_dirt": 11,
-	"minecraft:podzol":      12, // snowy=false
+	"minecraft:podzol":      12, // default: snowy=false
 
 	// ── Bedrock ──────────────────────────────────────────────────────────────
 	"minecraft:bedrock": 25,
@@ -52,10 +55,12 @@ var javaStateIDs = map[string]int32{
 	"minecraft:gravel": 68,
 }
 
-// StateID returns the Java 1.21.4 global block state ID for the given
-// canonical block name.  Returns 0 (air) for unrecognised names.
-func StateID(name string) int32 {
-	if id, ok := javaStateIDs[name]; ok {
+// StateID returns the Java 1.21.4 global block state ID for the given canonical
+// Block.  The lookup uses the block's resource location (namespace:name); property-
+// specific state IDs will be supported in a future milestone once the data-driven
+// registry is in place.  Returns 0 (air) for unrecognised blocks.
+func StateID(b coreworld.Block) int32 {
+	if id, ok := javaStateIDs[b.ResourceLocation()]; ok {
 		return id
 	}
 	return 0 // unknown → air
