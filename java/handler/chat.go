@@ -23,6 +23,12 @@ import (
 	"GoCraft/java/session"
 )
 
+// ── Chat limits ───────────────────────────────────────────────────────────────
+
+// maxChatLength is the maximum number of Unicode code points allowed in a chat
+// message, matching the vanilla server's enforced limit.
+const maxChatLength = 256
+
 // ── Chat packet IDs ───────────────────────────────────────────────────────────
 
 const (
@@ -76,6 +82,13 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 	}
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
+		return nil
+	}
+	if len([]rune(msg)) > maxChatLength {
+		if sess, ok := mgr.Get(p.UUID); ok {
+			_ = sendSystemMessage(sess.Conn,
+				fmt.Sprintf("Message too long (max %d characters)", maxChatLength))
+		}
 		return nil
 	}
 
@@ -151,12 +164,13 @@ func dispatchCommand(cmd string, p *player.Player, mgr *session.Manager) error {
 // ── Send helpers ──────────────────────────────────────────────────────────────
 
 // broadcastSystemMessage sends a plain-text System Chat Message to every
-// currently-online session.
+// currently-online session.  Snapshots the session list so the manager lock
+// is not held during packet writes.
 func broadcastSystemMessage(mgr *session.Manager, text string) {
 	pkt := buildSystemChatMessage(text, false)
-	mgr.ForEach(func(s *session.Session) {
+	for _, s := range mgr.SnapshotAll() {
 		_ = s.Conn.WritePacket(pkt)
-	})
+	}
 }
 
 // sendSystemMessage sends a plain-text System Chat Message to one connection.

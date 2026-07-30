@@ -153,17 +153,20 @@ func buildSetHeadRotation(p *player.Player) *protocol.Packet {
 // spawnExistingPlayersFor sends Player Info Update + Spawn Entity for every
 // session in mgr (except the joining player) to the joiner's connection, so
 // they immediately see all currently-online players.
+// Snapshots the session list so the manager lock is not held during writes.
 func spawnExistingPlayersFor(conn *network.ClientConn, mgr *session.Manager, joinerUUID [16]byte) {
-	mgr.ForEachExcept(joinerUUID, func(s *session.Session) {
+	for _, s := range mgr.Snapshot(joinerUUID) {
 		_ = conn.WritePacket(buildPlayerInfoUpdatePkt(s.Player))
 		_ = conn.WritePacket(buildSpawnPlayer(s.Player))
-	})
+	}
 }
 
 // onPlayerJoin is called after the joining session has been added to mgr.
 // It:
 //  1. Sends the joiner info about all existing players (so they see others).
 //  2. Broadcasts the joiner's info + spawn packet to all existing players.
+//
+// Snapshots the session list so the manager lock is not held during writes.
 func onPlayerJoin(mgr *session.Manager, joining *session.Session) {
 	// Step 1 — tell the joining player about everyone already online.
 	spawnExistingPlayersFor(joining.Conn, mgr, joining.Player.UUID)
@@ -171,28 +174,34 @@ func onPlayerJoin(mgr *session.Manager, joining *session.Session) {
 	// Step 2 — tell everyone else about the joining player.
 	infoUpdate := buildPlayerInfoUpdatePkt(joining.Player)
 	spawnPkt := buildSpawnPlayer(joining.Player)
-	mgr.ForEachExcept(joining.Player.UUID, func(existing *session.Session) {
+	for _, existing := range mgr.Snapshot(joining.Player.UUID) {
 		_ = existing.Conn.WritePacket(infoUpdate)
 		_ = existing.Conn.WritePacket(spawnPkt)
-	})
+	}
 }
 
 // onPlayerLeave is called before the leaving session is removed from mgr.
 // It broadcasts Remove Entities and Player Info Remove to all remaining sessions.
+// Snapshots the session list so the manager lock is not held during writes.
 func onPlayerLeave(mgr *session.Manager, leaving *session.Session) {
 	removePkt := buildRemoveEntities(leaving.Player.EntityID)
 	infoRemove := buildPlayerInfoRemove(leaving.Player.UUID)
-	mgr.ForEachExcept(leaving.Player.UUID, func(s *session.Session) {
+	for _, s := range mgr.Snapshot(leaving.Player.UUID) {
 		_ = s.Conn.WritePacket(removePkt)
 		_ = s.Conn.WritePacket(infoRemove)
-	})
+	}
 }
 
 // broadcastPosition sends Teleport Entity and Set Head Rotation for p to all
 // sessions except p's own.  Called on every movement packet from the client.
+// BroadcastExcept already snapshots internally, so the lock is not held during
+// the two write passes.
 func broadcastPosition(mgr *session.Manager, p *player.Player) {
 	teleport := buildTeleportEntity(p)
 	headRot := buildSetHeadRotation(p)
-	mgr.BroadcastExcept(p.UUID, teleport)
-	mgr.BroadcastExcept(p.UUID, headRot)
+	// Snapshot once and reuse to avoid two independent lock acquisitions.
+	for _, s := range mgr.Snapshot(p.UUID) {
+		_ = s.Conn.WritePacket(teleport)
+		_ = s.Conn.WritePacket(headRot)
+	}
 }

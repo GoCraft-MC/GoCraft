@@ -74,11 +74,40 @@ func (m *Manager) ForEach(fn func(*Session)) {
 	}
 }
 
+// Snapshot returns a slice of all sessions except excludeUUID, captured under
+// the read lock. The caller may iterate the slice and write to connections
+// without holding any lock.
+func (m *Manager) Snapshot(excludeUUID [16]byte) []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Session, 0, len(m.sessions))
+	for uuid, s := range m.sessions {
+		if uuid != excludeUUID {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// SnapshotAll returns a slice of all sessions, captured under the read lock.
+// The caller may iterate the slice and write to connections without holding
+// any lock.
+func (m *Manager) SnapshotAll() []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		out = append(out, s)
+	}
+	return out
+}
+
 // BroadcastExcept writes pkt to every session except excludeUUID.
+// It snapshots the session list first so the lock is not held during writes.
 // Write errors are silently ignored; each connection's own goroutine handles
 // cleanup when the next read or write fails.
 func (m *Manager) BroadcastExcept(excludeUUID [16]byte, pkt *protocol.Packet) {
-	m.ForEachExcept(excludeUUID, func(s *Session) {
+	for _, s := range m.Snapshot(excludeUUID) {
 		_ = s.Conn.WritePacket(pkt)
-	})
+	}
 }
