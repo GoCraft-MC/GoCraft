@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"strings"
 
+	coreworld "GoCraft/core/world"
 	"GoCraft/core/player"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
@@ -52,12 +53,12 @@ const (
 // handleChatPacket dispatches an incoming chat or command packet.
 // Called from the play loop after handlePlayPacket for packets that need
 // access to the session manager.
-func handleChatPacket(pkt *protocol.Packet, p *player.Player, mgr *session.Manager) error {
+func handleChatPacket(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn) error {
 	switch pkt.ID {
 	case packetIDChatMessage:
-		return handleChatMessage(pkt, p, mgr)
+		return handleChatMessage(pkt, p, mgr, cmds, w, conn)
 	case packetIDChatCommand:
-		return handleChatCommand(pkt, p, mgr)
+		return handleChatCommand(pkt, p, mgr, cmds, w, conn)
 	}
 	return nil
 }
@@ -74,7 +75,7 @@ func handleChatPacket(pkt *protocol.Packet, p *player.Player, mgr *session.Manag
 //	Byte[]  signature (256 bytes, only if has_signature)
 //	VarInt  message_count
 //	Fixed BitSet (20 bits) acknowledged
-func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Manager) error {
+func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn) error {
 	r := pkt.Reader()
 	msg, err := protocol.ReadString(r)
 	if err != nil {
@@ -85,10 +86,8 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 		return nil
 	}
 	if len([]rune(msg)) > maxChatLength {
-		if sess, ok := mgr.Get(p.UUID); ok {
-			_ = sendSystemMessage(sess.Conn,
-				fmt.Sprintf("Message too long (max %d characters)", maxChatLength))
-		}
+		_ = sendSystemMessage(conn,
+			fmt.Sprintf("Message too long (max %d characters)", maxChatLength))
 		return nil
 	}
 
@@ -96,7 +95,8 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 	// 1.19+ has a dedicated Chat Command packet. Handle both paths.
 	if strings.HasPrefix(msg, "/") {
 		slog.Info("command (via chat)", "player", p.Username, "input", msg)
-		return dispatchCommand(strings.TrimPrefix(msg, "/"), p, mgr)
+		cmds.Dispatch(msg, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr})
+		return nil
 	}
 
 	text := fmt.Sprintf("<%s> %s", p.Username, msg)
@@ -116,48 +116,14 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 //	…       argument signatures × argument_count (ignored)
 //	VarInt  message_count
 //	Fixed BitSet (20 bits) acknowledged
-func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Manager) error {
+func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn) error {
 	r := pkt.Reader()
 	cmd, err := protocol.ReadString(r)
 	if err != nil {
 		return fmt.Errorf("reading chat command string: %w", err)
 	}
 	slog.Info("command", "player", p.Username, "command", cmd)
-	return dispatchCommand(cmd, p, mgr)
-}
-
-// ── Command dispatcher ────────────────────────────────────────────────────────
-
-// dispatchCommand parses and executes a server-side command.
-// cmd is the command line without the leading '/'.
-// M12 will replace this with a proper command tree and Commands packet.
-func dispatchCommand(cmd string, p *player.Player, mgr *session.Manager) error {
-	parts := strings.Fields(strings.TrimSpace(cmd))
-	if len(parts) == 0 {
-		return nil
-	}
-
-	sess, ok := mgr.Get(p.UUID)
-	if !ok {
-		return nil // player already disconnected
-	}
-
-	switch strings.ToLower(parts[0]) {
-	case "help", "?":
-		_ = sendSystemMessage(sess.Conn, "Commands: /help, /list")
-
-	case "list":
-		var names []string
-		mgr.ForEach(func(s *session.Session) {
-			names = append(names, s.Player.Username)
-		})
-		_ = sendSystemMessage(sess.Conn,
-			fmt.Sprintf("Online (%d): %s", len(names), strings.Join(names, ", ")))
-
-	default:
-		_ = sendSystemMessage(sess.Conn,
-			fmt.Sprintf("Unknown command: /%s", parts[0]))
-	}
+	cmds.Dispatch(cmd, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr})
 	return nil
 }
 

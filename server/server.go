@@ -53,6 +53,7 @@ type Server struct {
 	regProvider  registry.Provider
 	chunkSender  *javaworld.Sender
 	sessions     *session.Manager
+	cmds         *handler.Dispatcher
 
 	// connCount tracks the number of active TCP connections.
 	connCount atomic.Int64
@@ -84,6 +85,9 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 	}
 
+	cmds := handler.NewDispatcher()
+	handler.RegisterBuiltins(cmds)
+
 	s := &Server{
 		cfg:         cfg,
 		game:        game.New(),
@@ -93,6 +97,7 @@ func New(cfg *config.Config) (*Server, error) {
 		regProvider: &registry.VanillaProvider{},
 		chunkSender: javaworld.DefaultSender,
 		sessions:    session.NewManager(),
+		cmds:        cmds,
 	}
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
 	s.listener = network.NewListener(cfg.Addr(), s.handleConn)
@@ -298,7 +303,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 		p := s.registerPlayer(result)
 		defer s.game.RemovePlayer(p.UUID)
 
-		if err := handler.HandlePlay(conn, p, s.world, s.chunkSender, s.sessions); err != nil {
+		if err := handler.HandlePlay(conn, p, s.world, s.chunkSender, s.sessions, s.cmds); err != nil {
 			slog.Debug("play error", "remote", remote, "err", err)
 		}
 

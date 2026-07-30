@@ -70,7 +70,7 @@ const keepAliveTimeout = 30 * time.Second
 //	C→S  Confirm Teleport (ID 1)   (0x00)
 //	S→C  Level Chunk With Light    (0x27) × (2·viewRadius+1)² — initial burst
 //	     … keep-alive / movement / play loop …
-func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager) error {
+func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
 	if err := sendLoginPlay(conn, p); err != nil {
 		return fmt.Errorf("play: %w", err)
@@ -103,6 +103,10 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 	if err := sendSetHeldItem(conn, p.HeldSlot); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
+	// Send command graph for tab completion.
+	if err := conn.WritePacket(buildCommandsPacket()); err != nil {
+		return fmt.Errorf("play: %w", err)
+	}
 
 	slog.Info("player entered play state",
 		"remote", conn.RemoteAddr(),
@@ -110,7 +114,7 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		"uuid", p.UUID,
 	)
 
-	return playLoop(conn, p, teleportID, w, sender, mgr)
+	return playLoop(conn, p, teleportID, w, sender, mgr, cmds)
 }
 
 // ── Clientbound packet helpers ────────────────────────────────────────────────
@@ -310,7 +314,7 @@ func sendForgetChunk(conn *network.ClientConn, cx, cz int32) error {
 //     chunk boundary.
 //
 // On exit the session is removed from mgr and all other players are notified.
-func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager) error {
+func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
@@ -398,9 +402,9 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			broadcastPosition(mgr, p)
 		}
 
-		// Chat and commands need the session manager; handled separately.
+		// Chat and commands need the session manager and dispatcher.
 		if pkt.ID == packetIDChatMessage || pkt.ID == packetIDChatCommand {
-			if err := handleChatPacket(pkt, p, mgr); err != nil {
+			if err := handleChatPacket(pkt, p, mgr, cmds, w, conn); err != nil {
 				slog.Warn("chat error", "player", p.Username, "err", err)
 			}
 		}
