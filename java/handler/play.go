@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -28,14 +29,23 @@ const (
 	packetIDSetCenterChunk   = 0x58 // Set Center Chunk (update_view_position)
 	packetIDSpawnPosition    = 0x5B // Set Default Spawn Position
 	packetIDServerKeepAlive  = 0x26 // Keep Alive (S→C)
+	packetIDForgetLevelChunk = 0x22 // Forget Level Chunk (S→C)
 
 	// Serverbound (C→S) — Play state
-	packetIDConfirmTeleport = 0x00 // Confirm Teleport
-	packetIDClientKeepAlive = 0x18 // Keep Alive (C→S)
+	packetIDConfirmTeleport             = 0x00 // Confirm Teleport
+	packetIDClientKeepAlive            = 0x18 // Keep Alive (C→S)
+	packetIDSetPlayerPosition           = 0x1A // Set Player Position
+	packetIDSetPlayerPositionAndRotation = 0x1B // Set Player Position and Rotation
+	packetIDSetPlayerRotation           = 0x1C // Set Player Rotation
+	packetIDSetPlayerOnGround           = 0x1D // Set Player On Ground
 
 	// Game Event reasons
 	gameEventStartWaitingForChunks = 13
 )
+
+// viewRadius is the number of chunks in each direction to load around the player.
+// A radius of 3 gives a 7×7 = 49 chunk view square.
+const viewRadius = int32(3)
 
 // keepAliveInterval is how often the server sends a Keep Alive to the client.
 const keepAliveInterval = 10 * time.Second
@@ -57,8 +67,8 @@ const keepAliveTimeout = 30 * time.Second
 //	S→C  Set Center Chunk          (0x58) — chunk streaming anchor
 //	S→C  Game Event reason=13      (0x23) — "start waiting for level chunks"
 //	C→S  Confirm Teleport (ID 1)   (0x00)
-//	S→C  Level Chunk With Light    (0x27) × (2r+1)² — initial chunk burst
-//	     … keep-alive / play loop …
+//	S→C  Level Chunk With Light    (0x27) × (2·viewRadius+1)² — initial burst
+//	     … keep-alive / movement / play loop …
 func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
 	if err := sendLoginPlay(conn, p); err != nil {
@@ -247,8 +257,8 @@ func sendSyncPosition(conn *network.ClientConn, p *player.Player, teleportID int
 // This tells the client which chunk the player is in, controlling which
 // chunks are loaded / unloaded around them.
 func sendSetCenterChunk(conn *network.ClientConn, p *player.Player) error {
-	chunkX := int32(p.Position.X) >> 4
-	chunkZ := int32(p.Position.Z) >> 4
+	chunkX := posToChunk(p.Position.X)
+	chunkZ := posToChunk(p.Position.Z)
 	pkt := protocol.NewBuilder(packetIDSetCenterChunk).
 		VarInt(chunkX).
 		VarInt(chunkZ).
@@ -270,25 +280,52 @@ func sendGameEvent(conn *network.ClientConn, reason byte, value float32) error {
 	return conn.WritePacket(pkt)
 }
 
+// sendForgetChunk sends Forget Level Chunk (0x22 S→C), instructing the client
+// to unload the given chunk column.
+// Wire order for this packet is Z then X.
+func sendForgetChunk(conn *network.ClientConn, cx, cz int32) error {
+	return conn.WritePacket(protocol.NewBuilder(packetIDForgetLevelChunk).
+		Int(cz).Int(cx).Build())
+}
+
 // ── Play loop ─────────────────────────────────────────────────────────────────
 
 // playLoop is the main body for an in-game player session.
-// It reads incoming packets and dispatches them, while a ticker sends
-// periodic Keep Alive packets to the client.
+//
+// After the teleport is confirmed it sends the initial chunk burst, then enters
+// a tight loop that:
+//   - Sends periodic Keep Alive packets and validates the client's response.
+//   - Reads and dispatches incoming packets (movement, keep-alive, etc.).
+//   - Streams new chunks and unloads old chunks whenever the player crosses a
+//     chunk boundary.
 func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
 	}
 
-	// Send initial chunk burst (radius 3 → 7×7 = 49 chunks) so the client
-	// sees the world immediately after teleport confirmation.
-	chunkX := int32(p.Position.X) >> 4
-	chunkZ := int32(p.Position.Z) >> 4
-	if err := sender.SendChunksAround(conn, w, chunkX, chunkZ, 3); err != nil {
-		return fmt.Errorf("play loop: sending initial chunks: %w", err)
+	// ── Initial chunk burst ──────────────────────────────────────────────────
+	chunkX := posToChunk(p.Position.X)
+	chunkZ := posToChunk(p.Position.Z)
+
+	// sentChunks tracks which chunk columns the client currently has loaded.
+	// Keyed by [cx, cz] for O(1) membership tests on boundary crossings.
+	sentChunks := make(map[[2]int32]struct{})
+
+	for dx := -viewRadius; dx <= viewRadius; dx++ {
+		for dz := -viewRadius; dz <= viewRadius; dz++ {
+			cx, cz := chunkX+dx, chunkZ+dz
+			c := w.Chunk(cx, cz)
+			if err := sender.SendChunk(conn, c); err != nil {
+				return fmt.Errorf("play loop: initial chunk (%d,%d): %w", cx, cz, err)
+			}
+			sentChunks[[2]int32{cx, cz}] = struct{}{}
+		}
 	}
 
+	lastChunkX, lastChunkZ := chunkX, chunkZ
+
+	// ── Keep-alive state ─────────────────────────────────────────────────────
 	var (
 		keepAliveSeq   atomic.Int64
 		lastKASent     time.Time
@@ -299,6 +336,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	ticker := time.NewTicker(keepAliveInterval)
 	defer ticker.Stop()
 
+	// ── Main loop ────────────────────────────────────────────────────────────
 	for {
 		// Check keep-alive timeout.
 		if pendingAliveID >= 0 && time.Since(lastKASent) > keepAliveTimeout {
@@ -327,15 +365,77 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			return fmt.Errorf("play loop: reading packet: %w", err)
 		}
 
-		if err := handlePlayPacket(pkt, &pendingAliveID); err != nil {
+		if err := handlePlayPacket(pkt, p, &pendingAliveID); err != nil {
 			return fmt.Errorf("play loop: packet 0x%02X: %w", pkt.ID, err)
+		}
+
+		// ── Chunk streaming on boundary crossing ─────────────────────────────
+		newChunkX := posToChunk(p.Position.X)
+		newChunkZ := posToChunk(p.Position.Z)
+		if newChunkX != lastChunkX || newChunkZ != lastChunkZ {
+			if err := sendSetCenterChunk(conn, p); err != nil {
+				return fmt.Errorf("play loop: center chunk: %w", err)
+			}
+			if err := updateChunkView(conn, w, sender, sentChunks, lastChunkX, lastChunkZ, newChunkX, newChunkZ); err != nil {
+				return fmt.Errorf("play loop: streaming chunks: %w", err)
+			}
+			lastChunkX, lastChunkZ = newChunkX, newChunkZ
 		}
 	}
 }
 
+// updateChunkView sends chunks newly entering the view square and unloads
+// chunks leaving it when the player moves from (oldCX,oldCZ) to (newCX,newCZ).
+//
+// Only chunks that are in the new square but not in the sent set are sent.
+// Only chunks that are in the old square but no longer in the new square are
+// forgotten. This keeps network traffic proportional to movement speed rather
+// than reloading the entire view on every step.
+func updateChunkView(
+	conn *network.ClientConn,
+	w *coreworld.World,
+	sender *javaworld.Sender,
+	sent map[[2]int32]struct{},
+	oldCX, oldCZ, newCX, newCZ int32,
+) error {
+	// Send chunks that entered the view.
+	for dx := -viewRadius; dx <= viewRadius; dx++ {
+		for dz := -viewRadius; dz <= viewRadius; dz++ {
+			key := [2]int32{newCX + dx, newCZ + dz}
+			if _, ok := sent[key]; ok {
+				continue // already loaded on the client
+			}
+			c := w.Chunk(key[0], key[1])
+			if err := sender.SendChunk(conn, c); err != nil {
+				return fmt.Errorf("chunk (%d,%d): %w", key[0], key[1], err)
+			}
+			sent[key] = struct{}{}
+		}
+	}
+
+	// Unload chunks that left the view.
+	for dx := -viewRadius; dx <= viewRadius; dx++ {
+		for dz := -viewRadius; dz <= viewRadius; dz++ {
+			key := [2]int32{oldCX + dx, oldCZ + dz}
+			if _, ok := sent[key]; !ok {
+				continue
+			}
+			// Still within the new view square?
+			if abs32(key[0]-newCX) <= viewRadius && abs32(key[1]-newCZ) <= viewRadius {
+				continue
+			}
+			if err := sendForgetChunk(conn, key[0], key[1]); err != nil {
+				return fmt.Errorf("forgetting chunk (%d,%d): %w", key[0], key[1], err)
+			}
+			delete(sent, key)
+		}
+	}
+	return nil
+}
+
 // handlePlayPacket dispatches a single incoming Play-state packet.
 // Returns an error only for fatal protocol violations.
-func handlePlayPacket(pkt *protocol.Packet, pendingAliveID *int64) error {
+func handlePlayPacket(pkt *protocol.Packet, p *player.Player, pendingAliveID *int64) error {
 	switch pkt.ID {
 	case packetIDClientKeepAlive:
 		// Client echoes the Long ID we sent; validate it.
@@ -347,11 +447,88 @@ func handlePlayPacket(pkt *protocol.Packet, pendingAliveID *int64) error {
 			*pendingAliveID = -1
 		}
 
+	case packetIDSetPlayerPosition:
+		// C→S: x, y, z (Double×3), flags (Byte; bit 0 = on_ground)
+		r := pkt.Reader()
+		x, err := protocol.ReadDouble(r)
+		if err != nil {
+			return fmt.Errorf("reading position x: %w", err)
+		}
+		y, err := protocol.ReadDouble(r)
+		if err != nil {
+			return fmt.Errorf("reading position y: %w", err)
+		}
+		z, err := protocol.ReadDouble(r)
+		if err != nil {
+			return fmt.Errorf("reading position z: %w", err)
+		}
+		flags, err := protocol.ReadByte(r)
+		if err != nil {
+			return fmt.Errorf("reading position flags: %w", err)
+		}
+		p.Position.X, p.Position.Y, p.Position.Z = x, y, z
+		p.OnGround = flags&0x01 != 0
+
+	case packetIDSetPlayerPositionAndRotation:
+		// C→S: x, y, z (Double×3), yaw, pitch (Float×2), flags (Byte)
+		r := pkt.Reader()
+		x, err := protocol.ReadDouble(r)
+		if err != nil {
+			return fmt.Errorf("reading position x: %w", err)
+		}
+		y, err := protocol.ReadDouble(r)
+		if err != nil {
+			return fmt.Errorf("reading position y: %w", err)
+		}
+		z, err := protocol.ReadDouble(r)
+		if err != nil {
+			return fmt.Errorf("reading position z: %w", err)
+		}
+		yaw, err := protocol.ReadFloat(r)
+		if err != nil {
+			return fmt.Errorf("reading yaw: %w", err)
+		}
+		pitch, err := protocol.ReadFloat(r)
+		if err != nil {
+			return fmt.Errorf("reading pitch: %w", err)
+		}
+		flags, err := protocol.ReadByte(r)
+		if err != nil {
+			return fmt.Errorf("reading movement flags: %w", err)
+		}
+		p.Position.X, p.Position.Y, p.Position.Z = x, y, z
+		p.Rotation.Yaw, p.Rotation.Pitch = yaw, pitch
+		p.OnGround = flags&0x01 != 0
+
+	case packetIDSetPlayerRotation:
+		// C→S: yaw, pitch (Float×2), flags (Byte)
+		r := pkt.Reader()
+		yaw, err := protocol.ReadFloat(r)
+		if err != nil {
+			return fmt.Errorf("reading yaw: %w", err)
+		}
+		pitch, err := protocol.ReadFloat(r)
+		if err != nil {
+			return fmt.Errorf("reading pitch: %w", err)
+		}
+		flags, err := protocol.ReadByte(r)
+		if err != nil {
+			return fmt.Errorf("reading rotation flags: %w", err)
+		}
+		p.Rotation.Yaw, p.Rotation.Pitch = yaw, pitch
+		p.OnGround = flags&0x01 != 0
+
+	case packetIDSetPlayerOnGround:
+		// C→S: flags (Byte; bit 0 = on_ground)
+		if len(pkt.Data) >= 1 {
+			p.OnGround = pkt.Data[0]&0x01 != 0
+		}
+
 	case packetIDConfirmTeleport:
 		// Late teleport confirm — ignore, already processed.
 
 	default:
-		// Silently drop all other play packets (movement, chat, etc.).
+		// Silently drop all other play packets (chat, interaction, etc.).
 		// Future milestones will register handlers here.
 	}
 	return nil
@@ -380,4 +557,20 @@ func readConfirmTeleport(conn *network.ClientConn, wantID int32) error {
 // sendKeepAlive sends a Keep Alive packet (0x26 S→C) with the given ID.
 func sendKeepAlive(conn *network.ClientConn, id int64) error {
 	return conn.WritePacket(protocol.NewBuilder(packetIDServerKeepAlive).Long(id).Build())
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+// posToChunk converts a world coordinate to a chunk coordinate using floor
+// division so that negative positions map correctly (e.g. X=-1 → chunk -1).
+func posToChunk(pos float64) int32 {
+	return int32(math.Floor(pos)) >> 4
+}
+
+// abs32 returns the absolute value of n.
+func abs32(n int32) int32 {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
