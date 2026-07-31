@@ -13,8 +13,8 @@ import (
 
 // Anvil region file constants.
 const (
-	sectorSize    = 4096              // bytes per sector
-	headerSectors = 2                 // header occupies sectors 0 and 1
+	sectorSize    = 4096 // bytes per sector
+	headerSectors = 2    // header occupies sectors 0 and 1
 	headerSize    = headerSectors * sectorSize
 )
 
@@ -26,7 +26,7 @@ func regionCoords(cx, cz int32) (rx, rz int32) {
 
 // chunkIndex returns the 0-based index of chunk (cx, cz) within its region file.
 func chunkIndex(cx, cz int32) int {
-	return int((cx&31) + (cz&31)*32)
+	return int((cx & 31) + (cz&31)*32)
 }
 
 // regionPath builds the file path for a region file.
@@ -200,6 +200,9 @@ func saveChunkToRegion(worldDir string, cx, cz int32, nbt []byte) error {
 // to path.  rawChunks[i] holds the raw bytes (compression byte + payload) for
 // chunk index i, or nil if the chunk is absent.
 func writeRegionFile(path string, rawChunks [][]byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("anvil: creating region directory for %s: %w", path, err)
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("anvil: creating region file %s: %w", path, err)

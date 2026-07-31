@@ -5,7 +5,7 @@ import coreworld "GoCraft/core/world"
 // itemIDs maps canonical item resource locations to their numeric protocol IDs
 // for Minecraft Java Edition 1.21.4 (protocol 769).
 //
-// Populated at init time by registry.go from the embedded registries.json.
+// Populated at init time by registry.go from the embedded items.json.
 // Replacing the JSON file with the full Minecraft data-generator output updates
 // all IDs without changing Go source.
 var itemIDs map[string]int32

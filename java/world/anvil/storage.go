@@ -20,7 +20,8 @@ type Storage struct {
 	mu       sync.Mutex
 	// pending maps chunk coords to ready-to-write compressed bytes.
 	// Key: [cx, cz]; Value: [compression=2, zlib-data…].
-	pending map[[2]int32][]byte
+	pending  map[[2]int32][]byte
+	original map[[2]int32]map[string]Tag
 }
 
 // NewStorage returns a Storage rooted at worldDir.
@@ -30,6 +31,7 @@ func NewStorage(worldDir string) (*Storage, error) {
 	return &Storage{
 		worldDir: worldDir,
 		pending:  make(map[[2]int32][]byte),
+		original: make(map[[2]int32]map[string]Tag),
 	}, nil
 }
 
@@ -47,6 +49,11 @@ func (s *Storage) LoadChunk(x, z int32) (*coreworld.Chunk, error) {
 	if err != nil {
 		return nil, fmt.Errorf("anvil storage: decoding chunk (%d,%d): %w", x, z, err)
 	}
+	if c != nil {
+		s.mu.Lock()
+		s.original[[2]int32{x, z}] = cloneCompound(root)
+		s.mu.Unlock()
+	}
 	return c, nil
 }
 
@@ -54,7 +61,14 @@ func (s *Storage) LoadChunk(x, z int32) (*coreworld.Chunk, error) {
 // for the next Flush.  Repeated calls for the same chunk coordinate replace
 // the earlier buffered version.
 func (s *Storage) SaveChunk(c *coreworld.Chunk) error {
+	key := [2]int32{c.X, c.Z}
+	s.mu.Lock()
+	base := s.original[key]
+	s.mu.Unlock()
 	nbt := encodeChunkNBT(c)
+	if base != nil {
+		nbt = encodeChunkNBTWithBase(c, base)
+	}
 
 	// Compress now so the work happens on the caller's goroutine rather than
 	// delaying the eventual Flush.
@@ -68,7 +82,7 @@ func (s *Storage) SaveChunk(c *coreworld.Chunk) error {
 	copy(raw[1:], compressed)
 
 	s.mu.Lock()
-	s.pending[[2]int32{c.X, c.Z}] = raw
+	s.pending[key] = raw
 	s.mu.Unlock()
 	return nil
 }

@@ -9,24 +9,19 @@ import (
 	"GoCraft/java/protocol"
 )
 
-// packetIDLevelChunkWithLight is the S→C Play packet ID for
+// packetIDLevelChunkWithLight is the server-to-client Play packet ID for
 // "Level Chunk With Light", resolved from the embedded protocol data at init.
 var packetIDLevelChunkWithLight = protocoldata.MustCB("play", "minecraft:level_chunk_with_light")
 
-// Sender converts canonical Chunks into Java chunk packets and writes them
-// to a ClientConn.  It is stateless beyond the surface Y assumption used for
-// heightmaps.
-//
-// The surface Y (currently hardcoded to 63, matching FlatGenerator) will
-// become per-chunk once region-file loading is implemented.
+// Sender converts canonical chunks into Java chunk packets. Heightmaps are
+// derived from each chunk's actual block columns.
 type Sender struct {
-	// SurfaceY is the absolute Y coordinate of the highest solid block, used
-	// to compute MOTION_BLOCKING and WORLD_SURFACE heightmaps.
-	// Defaults to 63 (one block below the Y=64 spawn in FlatGenerator).
+	// SurfaceY is retained for source compatibility with older callers.
+	// It is deprecated and no longer used during chunk encoding.
 	SurfaceY int
 }
 
-// DefaultSender is a Sender pre-configured for the flat world (surface at Y=63).
+// DefaultSender encodes canonical chunks for Java Edition.
 var DefaultSender = &Sender{SurfaceY: 63}
 
 // SendChunk encodes c and sends it to conn as a Level Chunk With Light packet.
@@ -37,57 +32,157 @@ var DefaultSender = &Sender{SurfaceY: 63}
 //	Int        Chunk Z
 //	NBT        Heightmaps (MOTION_BLOCKING + WORLD_SURFACE long arrays)
 //	ByteArray  Data (24 encoded sections)
-//	VarInt     Block entity count (0 for M4)
-//	— Light update fields —
-//	BitSet     Sky Light Mask   (all 26 sections → fully lit)
+//	VarInt     Block entity count, followed by encoded block entities
+//	-- Light update fields --
+//	BitSet     Sky Light Mask (only sections containing sky light)
 //	BitSet     Block Light Mask (empty)
-//	BitSet     Empty Sky Light Mask  (empty — we provide actual data)
-//	BitSet     Empty Block Light Mask (all 26 → zero block light)
-//	VarInt     Sky Light array count (26)
-//	ByteArray  × 26  (each 2048 bytes of 0xFF = max sky light)
+//	BitSet     Empty Sky Light Mask (sections with zero sky light)
+//	BitSet     Empty Block Light Mask (all 26 sections)
+//	VarInt     Sky Light array count
+//	ByteArray  One 2048-byte nibble array per non-empty sky section
 //	VarInt     Block Light array count (0)
 func (s *Sender) SendChunk(conn *network.ClientConn, c *coreworld.Chunk) error {
-	heightmapNBT := EncodeHeightmaps(s.SurfaceY)
+	heightmapNBT := EncodeChunkHeightmaps(c)
 	chunkData := EncodeChunk(c)
+	skyMask, emptySkyMask, skyArrays := buildSkyLight(c)
 
-	// All-sections sky light mask: 26 bits set (sections -1 to 24 inclusive).
-	// Stored as a single long in the BitSet wire format: VarInt(1) + Long(mask).
-	const allSectionsMask = int64((int64(1) << 26) - 1) // 0x3FFFFFF
-
-	// Build a sky light array: 2048 bytes of 0xFF (nibble pairs, each = 15 = max).
-	fullLight := make([]byte, 2048)
-	for i := range fullLight {
-		fullLight[i] = 0xFF
+	type encodedBlockEntity struct {
+		entity coreworld.BlockEntity
+		typeID int32
+	}
+	blockEntities := make([]encodedBlockEntity, 0, len(c.BlockEntities))
+	for _, entity := range c.BlockEntities {
+		if typeID, ok := BlockEntityTypeID(entity.Type); ok && len(entity.Data) > 0 {
+			blockEntities = append(blockEntities, encodedBlockEntity{entity: entity, typeID: typeID})
+		}
 	}
 
+	const allSectionsMask = int64((int64(1) << 26) - 1)
 	b := protocol.NewBuilder(packetIDLevelChunkWithLight).
 		Int(c.X).
 		Int(c.Z).
-		// Heightmaps NBT (self-delimiting, no length prefix)
 		Bytes(heightmapNBT).
-		// Chunk section data (VarInt-prefixed byte array)
 		ByteArray(chunkData).
-		// Block entities
-		VarInt(0).
-		// Sky Light Mask BitSet: 1 long, all 26 section bits set
-		VarInt(1).Long(allSectionsMask).
-		// Block Light Mask BitSet: empty (no block light data provided)
-		VarInt(0).
-		// Empty Sky Light Mask BitSet: empty (we ARE providing sky light data)
-		VarInt(0).
-		// Empty Block Light Mask BitSet: all 26 sections have zero block light
-		VarInt(1).Long(allSectionsMask).
-		// Sky Light arrays: 26 × 2048 bytes of 0xFF
-		VarInt(26)
+		VarInt(int32(len(blockEntities)))
+	for _, encoded := range blockEntities {
+		entity := encoded.entity
+		packedXZ := byte((entity.X&15)<<4 | (entity.Z & 15))
+		b.Byte(packedXZ).Short(int16(entity.Y)).VarInt(encoded.typeID).Bytes(entity.Data)
+	}
+	b.VarInt(1).Long(skyMask).
+		VarInt(0). // block light mask
+		VarInt(1).Long(emptySkyMask).
+		VarInt(1).Long(allSectionsMask). // empty block light mask
+		VarInt(int32(len(skyArrays)))
+	for _, light := range skyArrays {
+		b.ByteArray(light)
+	}
+	b.VarInt(0) // no block-light arrays
+	return conn.WritePacket(b.Build())
+}
 
-	for i := 0; i < 26; i++ {
-		b.ByteArray(fullLight)
+// buildSkyLight returns protocol masks and 2048-byte nibble arrays for the 24
+// world sections plus the two boundary light sections. Terrain and caves below
+// the highest opaque block receive zero sky light; open sky receives level 15.
+func buildSkyLight(c *coreworld.Chunk) (skyMask, emptyMask int64, arrays [][]byte) {
+	var opaqueTop [coreworld.SectionSize * coreworld.SectionSize]int
+	for z := 0; z < coreworld.SectionSize; z++ {
+		for x := 0; x < coreworld.SectionSize; x++ {
+			top := coreworld.WorldMinY - 1
+			for sectionIndex := coreworld.SectionCount - 1; sectionIndex >= 0 && top < coreworld.WorldMinY; sectionIndex-- {
+				section := c.Sections[sectionIndex]
+				if section == nil || section.NonAir == 0 {
+					continue
+				}
+				for y := coreworld.SectionSize - 1; y >= 0; y-- {
+					material := section.At(x, y, z)
+					if !isSkyTransparent(material.ResourceLocation()) {
+						top = coreworld.SectionMinY(sectionIndex) + y
+						break
+					}
+				}
+			}
+			opaqueTop[z*coreworld.SectionSize+x] = top
+		}
 	}
 
-	// Block Light arrays: none
-	b.VarInt(0)
+	// Bottom boundary section has no sky light.
+	emptyMask |= 1
+	for sectionIndex := 0; sectionIndex < coreworld.SectionCount; sectionIndex++ {
+		light := make([]byte, 2048)
+		nonZero := false
+		for y := 0; y < 16; y++ {
+			worldY := coreworld.SectionMinY(sectionIndex) + y
+			for z := 0; z < 16; z++ {
+				for x := 0; x < 16; x++ {
+					if worldY <= opaqueTop[z*16+x] {
+						continue
+					}
+					index := y*256 + z*16 + x
+					byteIndex := index >> 1
+					if index&1 == 0 {
+						light[byteIndex] |= 0x0f
+					} else {
+						light[byteIndex] |= 0xf0
+					}
+					nonZero = true
+				}
+			}
+		}
+		bit := int64(1) << (sectionIndex + 1)
+		if nonZero {
+			skyMask |= bit
+			arrays = append(arrays, light)
+		} else {
+			emptyMask |= bit
+		}
+	}
 
-	return conn.WritePacket(b.Build())
+	// Top boundary section is full daylight.
+	full := make([]byte, 2048)
+	for i := range full {
+		full[i] = 0xff
+	}
+	skyMask |= int64(1) << 25
+	arrays = append(arrays, full)
+	return skyMask, emptyMask, arrays
+}
+
+func isSkyTransparent(resourceLocation string) bool {
+	switch resourceLocation {
+	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
+		"minecraft:water", "minecraft:glass", "minecraft:ice",
+		// Leaves
+		"minecraft:oak_leaves", "minecraft:birch_leaves", "minecraft:spruce_leaves",
+		"minecraft:acacia_leaves", "minecraft:jungle_leaves",
+		"minecraft:dark_oak_leaves", "minecraft:cherry_leaves",
+		"minecraft:azalea_leaves", "minecraft:flowering_azalea_leaves",
+		"minecraft:mangrove_leaves",
+		// Short plants / ground cover (let sky light pass through)
+		"minecraft:short_grass", "minecraft:grass", "minecraft:fern",
+		"minecraft:dead_bush", "minecraft:seagrass",
+		// Tall plants (both halves)
+		"minecraft:tall_grass", "minecraft:large_fern",
+		"minecraft:tall_seagrass",
+		// Flowers
+		"minecraft:dandelion", "minecraft:poppy", "minecraft:allium",
+		"minecraft:azure_bluet", "minecraft:red_tulip", "minecraft:orange_tulip",
+		"minecraft:white_tulip", "minecraft:pink_tulip", "minecraft:oxeye_daisy",
+		"minecraft:cornflower", "minecraft:lily_of_the_valley", "minecraft:blue_orchid",
+		"minecraft:wither_rose", "minecraft:torchflower", "minecraft:pitcher_plant",
+		// Double-tall flowers
+		"minecraft:sunflower", "minecraft:lilac", "minecraft:rose_bush", "minecraft:peony",
+		// Other transparent / non-full-block
+		"minecraft:sugar_cane", "minecraft:bamboo", "minecraft:lily_pad",
+		"minecraft:brown_mushroom", "minecraft:red_mushroom",
+		"minecraft:vine", "minecraft:moss_carpet",
+		"minecraft:torch", "minecraft:wall_torch",
+		"minecraft:ladder", "minecraft:rail",
+		"minecraft:powered_rail", "minecraft:detector_rail", "minecraft:activator_rail":
+		return true
+	default:
+		return false
+	}
 }
 
 // SendChunksAround sends all chunks in a square of radius r centred on chunk

@@ -65,28 +65,35 @@ func writeNBTLongArray(w io.Writer, name string, longs []int64) {
 //   - Entries are stored from the least-significant bit upward within each long.
 //   - Entries do NOT span long boundaries (remaining high bits are zero).
 func packHeightmap(surfaceY int) []int64 {
+	var surfaceYs [256]int
+	for i := range surfaceYs {
+		surfaceYs[i] = surfaceY
+	}
+	return packHeightmapValues(surfaceYs)
+}
+
+// packHeightmapValues packs one absolute surface Y for each x/z column.
+// Entries use index z*16+x, matching the chunk heightmap wire order.
+func packHeightmapValues(surfaceYs [256]int) []int64 {
 	const (
 		worldMinY      = -64
 		bitsPerEntry   = 9
-		entriesPerLong = 64 / bitsPerEntry // 7
-		totalEntries   = 256               // 16×16 columns
-		numLongs       = (totalEntries + entriesPerLong - 1) / entriesPerLong // 37
+		entriesPerLong = 64 / bitsPerEntry
+		totalEntries   = 256
+		numLongs       = (totalEntries + entriesPerLong - 1) / entriesPerLong
 	)
 
-	// value = Y of first non-solid block above the surface = surfaceY + 1
-	// stored relative to WorldMinY
-	value := int64(surfaceY+1) - int64(worldMinY)
-
 	longs := make([]int64, numLongs)
-	for i := range longs {
-		var packed int64
-		for j := 0; j < entriesPerLong; j++ {
-			entryIdx := i*entriesPerLong + j
-			if entryIdx < totalEntries {
-				packed |= value << (j * bitsPerEntry)
-			}
+	for entryIndex, surfaceY := range surfaceYs {
+		value := int64(surfaceY+1) - int64(worldMinY)
+		if value < 0 {
+			value = 0
+		} else if value > (1<<bitsPerEntry)-1 {
+			value = (1 << bitsPerEntry) - 1
 		}
-		longs[i] = packed
+		longIndex := entryIndex / entriesPerLong
+		bitOffset := (entryIndex % entriesPerLong) * bitsPerEntry
+		longs[longIndex] |= value << bitOffset
 	}
 	return longs
 }

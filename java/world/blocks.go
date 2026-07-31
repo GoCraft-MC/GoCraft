@@ -28,6 +28,9 @@ var javaStateIDs map[string]int32
 // Populated at init time by registry.go from the embedded registries.json.
 var biomeIDs map[string]int32
 
+// blockEntityTypeIDs maps Java block entity resource locations to protocol IDs.
+var blockEntityTypeIDs map[string]int32
+
 // StateID returns the Java 1.21.4 global block state ID for the given canonical Block.
 //
 // Lookup order:
@@ -36,6 +39,12 @@ var biomeIDs map[string]int32
 //
 // Logs a one-time warning for blocks not found in the registry, then returns 0
 // (air) so unknown blocks render as invisible rather than crashing the client.
+// HasExactState reports whether the complete property-bearing state exists in
+// the embedded 1.21.4 report. It does not apply the default-state fallback.
+func HasExactState(b coreworld.Block) bool {
+	_, ok := javaStateIDs[b.Key()]
+	return ok
+}
 func StateID(b coreworld.Block) int32 {
 	if id, ok := javaStateIDs[b.Key()]; ok {
 		return id
@@ -52,6 +61,11 @@ func StateID(b coreworld.Block) int32 {
 //
 // Logs a one-time warning for biomes not found in the registry, then returns
 // the ID for "minecraft:plains" (1) as a safe fallback.
+// BlockEntityTypeID resolves a Java 1.21.4 block entity type.
+func BlockEntityTypeID(name string) (int32, bool) {
+	id, ok := blockEntityTypeIDs[name]
+	return id, ok
+}
 func BiomeID(name string) int32 {
 	if id, ok := biomeIDs[name]; ok {
 		return id

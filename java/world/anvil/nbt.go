@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 )
 
 // ── Tag types ─────────────────────────────────────────────────────────────────
@@ -291,6 +292,95 @@ func readMUTF8(r io.Reader) (string, error) {
 // into a bytes.Buffer where writes cannot fail, so errors are silently
 // swallowed there; the helpers are kept generic for correctness.
 
+// WriteRootCompound writes a standard named-root NBT compound. Keys are sorted
+// recursively so round-trip fixtures are deterministic.
+func WriteRootCompound(w io.Writer, root map[string]Tag) {
+	wByte(w, byte(tagCompound))
+	writeMUTF8(w, "")
+	writeCompoundPayload(w, root)
+}
+
+func writeCompoundPayload(w io.Writer, compound map[string]Tag) {
+	keys := make([]string, 0, len(compound))
+	for key := range compound {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		entry := compound[key]
+		if entry.typ == tagEnd {
+			continue
+		}
+		writeNamedHeader(w, entry.typ, key)
+		writePayload(w, entry)
+	}
+	writeCompoundEnd(w)
+}
+
+func writePayload(w io.Writer, tag Tag) {
+	switch tag.typ {
+	case tagByte:
+		wByte(w, byte(tag.byteV))
+	case tagShort:
+		wUint16BE(w, uint16(tag.shortV))
+	case tagInt:
+		wUint32BE(w, uint32(tag.intV))
+	case tagLong:
+		wUint64BE(w, uint64(tag.longV))
+	case tagFloat:
+		wUint32BE(w, math.Float32bits(tag.floatV))
+	case tagDouble:
+		wUint64BE(w, math.Float64bits(tag.doubleV))
+	case tagByteArr:
+		wUint32BE(w, uint32(len(tag.bytesV)))
+		wBytes(w, tag.bytesV)
+	case tagString:
+		writeMUTF8(w, tag.strV)
+	case tagList:
+		wByte(w, byte(tag.listElem))
+		wUint32BE(w, uint32(len(tag.listV)))
+		for _, entry := range tag.listV {
+			writePayload(w, entry)
+		}
+	case tagCompound:
+		writeCompoundPayload(w, tag.compound)
+	case tagIntArr:
+		wUint32BE(w, uint32(len(tag.intsV)))
+		for _, value := range tag.intsV {
+			wUint32BE(w, uint32(value))
+		}
+	case tagLongArr:
+		wUint32BE(w, uint32(len(tag.longsV)))
+		for _, value := range tag.longsV {
+			wUint64BE(w, uint64(value))
+		}
+	}
+}
+
+func cloneCompound(source map[string]Tag) map[string]Tag {
+	cloned := make(map[string]Tag, len(source))
+	for key, value := range source {
+		cloned[key] = cloneTag(value)
+	}
+	return cloned
+}
+
+func cloneTag(source Tag) Tag {
+	cloned := source
+	cloned.bytesV = append([]byte(nil), source.bytesV...)
+	cloned.intsV = append([]int32(nil), source.intsV...)
+	cloned.longsV = append([]int64(nil), source.longsV...)
+	if source.listV != nil {
+		cloned.listV = make([]Tag, len(source.listV))
+		for i, entry := range source.listV {
+			cloned.listV[i] = cloneTag(entry)
+		}
+	}
+	if source.compound != nil {
+		cloned.compound = cloneCompound(source.compound)
+	}
+	return cloned
+}
 func wByte(w io.Writer, b byte) {
 	//nolint:errcheck
 	w.Write([]byte{b})

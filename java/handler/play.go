@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
+	"GoCraft/java/registry"
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 )
@@ -26,9 +29,7 @@ const (
 	gameEventStartWaitingForChunks = 13
 )
 
-// viewRadius is the number of chunks in each direction to load around the player.
-// A radius of 3 gives a 7×7 = 49 chunk view square.
-const viewRadius = int32(3)
+const overworldDimensionName = "minecraft:overworld"
 
 // keepAliveInterval is how often the server sends a Keep Alive to the client.
 const keepAliveInterval = 10 * time.Second
@@ -50,11 +51,21 @@ const keepAliveTimeout = 30 * time.Second
 //	S→C  Set Center Chunk          (0x58) — chunk streaming anchor
 //	S→C  Game Event reason=13      (0x23) — "start waiting for level chunks"
 //	C→S  Confirm Teleport (ID 1)   (0x00)
-//	S→C  Level Chunk With Light    (0x27) × (2·viewRadius+1)² — initial burst
+//	S→C  Level Chunk With Light    (0x28) × (2·viewRadius+1)² — initial burst
 //	     … keep-alive / movement / play loop …
-func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher) error {
+func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, reg registry.Provider, worldSeed int64, viewDistance, preGenerateRadius int32) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
-	if err := sendLoginPlay(conn, p); err != nil {
+	if viewDistance < 2 {
+		viewDistance = 2
+	}
+	if preGenerateRadius < viewDistance+2 {
+		preGenerateRadius = viewDistance + 2
+	}
+	dimensionTypeID, err := reg.DimensionTypeID(overworldDimensionName)
+	if err != nil {
+		return fmt.Errorf("play: resolving overworld dimension type: %w", err)
+	}
+	if err := sendLoginPlay(conn, p, dimensionTypeID, obfuscateSeed(worldSeed), viewDistance); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
 	if err := sendPlayerAbilities(conn, p); err != nil {
@@ -72,6 +83,12 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		return fmt.Errorf("play: %w", err)
 	}
 	if err := sendSetCenterChunk(conn, p); err != nil {
+		return fmt.Errorf("play: %w", err)
+	}
+	if err := sendViewDistance(conn, viewDistance); err != nil {
+		return fmt.Errorf("play: %w", err)
+	}
+	if err := sendSimulationDistance(conn, viewDistance); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
 	// Tell the client to stop waiting for chunks and show the world.
@@ -96,61 +113,101 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		"uuid", p.UUID,
 	)
 
-	return playLoop(conn, p, teleportID, w, sender, mgr, cmds)
+	return playLoop(conn, p, teleportID, w, sender, mgr, cmds, viewDistance, preGenerateRadius)
 }
 
 // ── Clientbound packet helpers ────────────────────────────────────────────────
 
-// sendLoginPlay sends the Login (Play) packet (0x2C S→C).
+// sendLoginPlay sends the Login (Play) packet (S→C, minecraft:login).
 //
-// Fields (1.21.4 / protocol 769):
+// Field order for 1.21.4 / protocol 769 (Prismarine protocol.json and Mojang codec):
 //
 //	Int     entity_id
 //	Bool    is_hardcore
-//	VarInt  game_mode        (0 = survival)
-//	Byte    prev_game_mode   (0xFF = signed -1 = undefined)
-//	VarInt  dimension_count  (1)
-//	String  dimension_names[0]  "minecraft:overworld"
-//	String  dimension_type      "minecraft:overworld"
-//	String  dimension_name      "minecraft:overworld"
-//	Long    hashed_seed     (0)
-//	VarInt  max_players     (informational)
-//	VarInt  view_distance   (10)
-//	VarInt  sim_distance    (10)
-//	Bool    reduced_debug_info  false
-//	Bool    enable_respawn_screen  true
-//	Bool    do_limited_crafting   false
-//	Bool    is_debug         false
-//	Bool    is_flat          false
-//	Bool    has_death_location   false
-//	VarInt  portal_cooldown  0
-//	VarInt  sea_level        63  (overworld sea level)
-//	Bool    enforce_secure_chat  false
-func sendLoginPlay(conn *network.ClientConn, p *player.Player) error {
-	pkt := protocol.NewBuilder(packetIDPlayLogin).
+//	VarInt  dimension_count           (1)
+//	String  dimension_names[0]        "minecraft:overworld"
+//	VarInt  max_players               (informational)
+//	VarInt  view_distance
+//	VarInt  simulation_distance
+//	Bool    reduced_debug_info
+//	Bool    enable_respawn_screen
+//	Bool    do_limited_crafting
+//	VarInt  dimension_type            registry index (0 = overworld); NOT a string
+//	String  dimension_name            current world identifier
+//	Long    hashed_seed
+//	Byte    game_mode                 raw signed byte (0=survival 1=creative …)
+//	Byte    prev_game_mode            raw byte; 0xFF = −1 = undefined
+//	Bool    is_debug
+//	Bool    is_flat
+//	Bool    has_death_location        false → no following death position
+//	VarInt  portal_cooldown
+//	VarInt  sea_level                 63 for the overworld
+//	Bool    enforce_secure_chat
+func sendLoginPlay(conn *network.ClientConn, p *player.Player, dimensionTypeID int32, hashedSeed int64, viewDistances ...int32) error {
+	if conn.State != network.StatePlay {
+		return fmt.Errorf("refusing to send clientbound/minecraft:login in %s state", conn.State)
+	}
+
+	viewDistance := int32(10)
+	if len(viewDistances) > 0 {
+		viewDistance = viewDistances[0]
+	}
+	pkt := buildLoginPlayWithDistances(p, dimensionTypeID, hashedSeed, viewDistance, viewDistance)
+	frame, err := protocol.MarshalPacket(pkt)
+	if err != nil {
+		return fmt.Errorf("framing clientbound/minecraft:login: %w", err)
+	}
+
+	slog.Info("java packet diagnostic",
+		"semanticName", "clientbound/minecraft:login",
+		"packetID", pkt.ID,
+		"payloadLength", len(pkt.Data),
+		"payloadHex", hex.EncodeToString(pkt.Data),
+		"framedPacketHex", hex.EncodeToString(frame),
+		"compressionEnabled", conn.CompressionEnabled(),
+		"protocolState", conn.State.String(),
+	)
+	return conn.WritePacket(pkt)
+}
+
+func buildLoginPlay(p *player.Player, dimensionTypeID int32, hashedSeed int64) *protocol.Packet {
+	return buildLoginPlayWithDistances(p, dimensionTypeID, hashedSeed, 10, 10)
+}
+
+func buildLoginPlayWithDistances(p *player.Player, dimensionTypeID int32, hashedSeed int64, viewDistance, simulationDistance int32) *protocol.Packet {
+	return protocol.NewBuilder(packetIDPlayLogin).
 		Int(p.EntityID).
 		Bool(false).                    // is_hardcore
-		VarInt(int32(p.GameMode)).      // gamemode (0=survival, 1=creative, etc.)
-		Byte(0xFF).                     // prev_gamemode: 0xFF = signed -1 = undefined
 		VarInt(1).                      // dimension count
-		String("minecraft:overworld").  // dimension names[0]
-		String("minecraft:overworld").  // dimension_type (registry key)
-		String("minecraft:overworld").  // dimension_name (world name)
-		Long(0).                        // hashed_seed
+		String(overworldDimensionName). // dimension names[0]
 		VarInt(20).                     // max_players (informational)
-		VarInt(10).                     // view_distance
-		VarInt(10).                     // simulation_distance
+		VarInt(viewDistance).           // view_distance
+		VarInt(simulationDistance).     // simulation_distance
 		Bool(false).                    // reduced_debug_info
 		Bool(true).                     // enable_respawn_screen
 		Bool(false).                    // do_limited_crafting
-		Bool(false).                    // is_debug (debug world?)
-		Bool(false).                    // is_flat (superflat?)
-		Bool(false).                    // has_death_location
+		VarInt(dimensionTypeID).        // direct dimension_type registry ID
+		String(overworldDimensionName). // dimension_name
+		Long(hashedSeed).               // SHA-256-obfuscated world seed
+		Byte(byte(p.GameMode)).         // game_mode (raw signed byte on wire)
+		Byte(0xFF).                     // previous_game_mode: raw 0xFF = -1
+		Bool(false).                    // is_debug
+		Bool(false).                    // is_flat
+		Bool(false).                    // no last_death_location follows
 		VarInt(0).                      // portal_cooldown
-		VarInt(63).                     // sea_level (overworld = 63)
-		Bool(false).                    // enforce_secure_chat
+		VarInt(63).                     // sea_level (present in protocol 769)
+		Bool(false).                    // enforces_secure_chat
 		Build()
-	return conn.WritePacket(pkt)
+}
+
+// obfuscateSeed matches BiomeManager.obfuscateSeed in Minecraft 1.21.4:
+// SHA-256 over the seed's little-endian bytes, interpreted from the digest's
+// first eight bytes as a big-endian signed long.
+func obfuscateSeed(seed int64) int64 {
+	var input [8]byte
+	binary.LittleEndian.PutUint64(input[:], uint64(seed))
+	digest := sha256.Sum256(input[:])
+	return int64(binary.BigEndian.Uint64(digest[:8]))
 }
 
 // sendPlayerAbilities sends the Player Abilities packet (0x3A S→C).
@@ -210,8 +267,8 @@ func sendPlayerInfoUpdate(conn *network.ClientConn, p *player.Player) error {
 
 	b := protocol.NewBuilder(packetIDPlayerInfoUpdate).
 		Byte(actions).
-		VarInt(1).                        // 1 player entry
-		UUID(protocol.UUID(p.UUID))       // player UUID
+		VarInt(1).                  // 1 player entry
+		UUID(protocol.UUID(p.UUID)) // player UUID
 
 	// ADD_PLAYER (0x01) data: name + 0 properties
 	b.String(p.Username).VarInt(0)
@@ -224,15 +281,16 @@ func sendPlayerInfoUpdate(conn *network.ClientConn, p *player.Player) error {
 
 // sendSyncPosition sends Synchronize Player Position (0x42 S→C).
 //
-// Fields (1.21.4):
+// Fields (1.21.4 / protocol 769) — Teleport ID moved to FIRST since 1.21.2:
 //
+//	VarInt  teleport_id
 //	Double  x, y, z
 //	Double  velocity_x, velocity_y, velocity_z
 //	Float   yaw, pitch
 //	Int     flags (bitmask; 0 = all absolute)
-//	VarInt  teleport_id
 func sendSyncPosition(conn *network.ClientConn, p *player.Player, teleportID int32) error {
 	pkt := protocol.NewBuilder(packetIDSyncPosition).
+		VarInt(teleportID).
 		Double(p.Position.X).
 		Double(p.Position.Y).
 		Double(p.Position.Z).
@@ -242,7 +300,6 @@ func sendSyncPosition(conn *network.ClientConn, p *player.Player, teleportID int
 		Float(p.Rotation.Yaw).
 		Float(p.Rotation.Pitch).
 		Int(0). // flags: 0 = absolute position
-		VarInt(teleportID).
 		Build()
 	return conn.WritePacket(pkt)
 }
@@ -258,6 +315,23 @@ func sendSetCenterChunk(conn *network.ClientConn, p *player.Player) error {
 		VarInt(chunkZ).
 		Build()
 	return conn.WritePacket(pkt)
+}
+
+// sendViewDistance advertises the actual server chunk radius to the client.
+func sendViewDistance(conn *network.ClientConn, radius int32) error {
+	return conn.WritePacket(protocol.NewBuilder(packetIDSetViewDistance).VarInt(radius).Build())
+}
+
+func sendSimulationDistance(conn *network.ClientConn, radius int32) error {
+	return conn.WritePacket(protocol.NewBuilder(packetIDSimulationDistance).VarInt(radius).Build())
+}
+
+func sendChunkBatchStart(conn *network.ClientConn) error {
+	return conn.WritePacket(protocol.NewBuilder(packetIDChunkBatchStart).Build())
+}
+
+func sendChunkBatchFinished(conn *network.ClientConn, count int32) error {
+	return conn.WritePacket(protocol.NewBuilder(packetIDChunkBatchFinished).VarInt(count).Build())
 }
 
 // sendGameEvent sends a Game Event packet (0x23 S→C).
@@ -296,7 +370,7 @@ func sendForgetChunk(conn *network.ClientConn, cx, cz int32) error {
 //     chunk boundary.
 //
 // On exit the session is removed from mgr and all other players are notified.
-func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher) error {
+func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, viewRadius, preGenerateRadius int32) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
@@ -317,21 +391,25 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	chunkX := posToChunk(p.Position.X)
 	chunkZ := posToChunk(p.Position.Z)
 
+	// Warm a larger area before the foreground streamer asks for it.
+	w.QueuePregeneration(chunkX, chunkZ, preGenerateRadius)
+
 	// sentChunks tracks which chunk columns the client currently has loaded.
-	// Keyed by [cx, cz] for O(1) membership tests on boundary crossings.
 	sentChunks := make(map[[2]int32]struct{})
-
-	for dx := -viewRadius; dx <= viewRadius; dx++ {
-		for dz := -viewRadius; dz <= viewRadius; dz++ {
-			cx, cz := chunkX+dx, chunkZ+dz
-			c := w.Chunk(cx, cz)
-			if err := sender.SendChunk(conn, c); err != nil {
-				return fmt.Errorf("play loop: initial chunk (%d,%d): %w", cx, cz, err)
-			}
-			sentChunks[[2]int32{cx, cz}] = struct{}{}
-		}
+	initialKeys := chunkKeysAround(chunkX, chunkZ, viewRadius)
+	if err := sendChunkBatchStart(conn); err != nil {
+		return fmt.Errorf("play loop: starting initial chunk batch: %w", err)
 	}
-
+	for _, key := range initialKeys {
+		c := w.Chunk(key[0], key[1])
+		if err := sender.SendChunk(conn, c); err != nil {
+			return fmt.Errorf("play loop: initial chunk (%d,%d): %w", key[0], key[1], err)
+		}
+		sentChunks[key] = struct{}{}
+	}
+	if err := sendChunkBatchFinished(conn, int32(len(initialKeys))); err != nil {
+		return fmt.Errorf("play loop: finishing initial chunk batch: %w", err)
+	}
 	lastChunkX, lastChunkZ := chunkX, chunkZ
 
 	// teleportTo is given to CommandContext so /tp (and any future teleport
@@ -352,7 +430,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		}
 		newCX := posToChunk(x)
 		newCZ := posToChunk(z)
-		if err := updateChunkView(conn, w, sender, sentChunks, lastChunkX, lastChunkZ, newCX, newCZ); err != nil {
+		if err := updateChunkView(conn, w, sender, sentChunks, newCX, newCZ, viewRadius, preGenerateRadius); err != nil {
 			return fmt.Errorf("update chunk view: %w", err)
 		}
 		lastChunkX, lastChunkZ = newCX, newCZ
@@ -418,8 +496,15 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Block interaction needs both the world and the session manager.
 		if pkt.ID == packetIDPlayerAction || pkt.ID == packetIDUseItemOn {
-			if err := handleBlockPacket(pkt, p, w, mgr); err != nil {
+			if err := handleBlockPacket(pkt, p, w, mgr, conn); err != nil {
 				slog.Warn("block interaction error", "player", p.Username, "err", err)
+			}
+		}
+
+		// Entity interaction (right-click mob) — used for villager trading.
+		if pkt.ID == packetIDInteract {
+			if err := handleInteractPacket(pkt, w, conn); err != nil {
+				slog.Warn("interact error", "player", p.Username, "err", err)
 			}
 		}
 
@@ -437,7 +522,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			if err := sendSetCenterChunk(conn, p); err != nil {
 				return fmt.Errorf("play loop: center chunk: %w", err)
 			}
-			if err := updateChunkView(conn, w, sender, sentChunks, lastChunkX, lastChunkZ, newChunkX, newChunkZ); err != nil {
+			if err := updateChunkView(conn, w, sender, sentChunks, newChunkX, newChunkZ, viewRadius, preGenerateRadius); err != nil {
 				return fmt.Errorf("play loop: streaming chunks: %w", err)
 			}
 			lastChunkX, lastChunkZ = newChunkX, newChunkZ
@@ -457,41 +542,62 @@ func updateChunkView(
 	w *coreworld.World,
 	sender *javaworld.Sender,
 	sent map[[2]int32]struct{},
-	oldCX, oldCZ, newCX, newCZ int32,
+	newCX, newCZ, viewRadius, preGenerateRadius int32,
 ) error {
-	// Send chunks that entered the view.
-	for dx := -viewRadius; dx <= viewRadius; dx++ {
-		for dz := -viewRadius; dz <= viewRadius; dz++ {
-			key := [2]int32{newCX + dx, newCZ + dz}
-			if _, ok := sent[key]; ok {
-				continue // already loaded on the client
-			}
+	w.QueuePregeneration(newCX, newCZ, preGenerateRadius)
+
+	newKeys := make([][2]int32, 0)
+	for _, key := range chunkKeysAround(newCX, newCZ, viewRadius) {
+		if _, ok := sent[key]; !ok {
+			newKeys = append(newKeys, key)
+		}
+	}
+	if len(newKeys) > 0 {
+		if err := sendChunkBatchStart(conn); err != nil {
+			return fmt.Errorf("starting chunk batch: %w", err)
+		}
+		for _, key := range newKeys {
 			c := w.Chunk(key[0], key[1])
 			if err := sender.SendChunk(conn, c); err != nil {
 				return fmt.Errorf("chunk (%d,%d): %w", key[0], key[1], err)
 			}
 			sent[key] = struct{}{}
 		}
-	}
-
-	// Unload chunks that left the view.
-	for dx := -viewRadius; dx <= viewRadius; dx++ {
-		for dz := -viewRadius; dz <= viewRadius; dz++ {
-			key := [2]int32{oldCX + dx, oldCZ + dz}
-			if _, ok := sent[key]; !ok {
-				continue
-			}
-			// Still within the new view square?
-			if abs32(key[0]-newCX) <= viewRadius && abs32(key[1]-newCZ) <= viewRadius {
-				continue
-			}
-			if err := sendForgetChunk(conn, key[0], key[1]); err != nil {
-				return fmt.Errorf("forgetting chunk (%d,%d): %w", key[0], key[1], err)
-			}
-			delete(sent, key)
+		if err := sendChunkBatchFinished(conn, int32(len(newKeys))); err != nil {
+			return fmt.Errorf("finishing chunk batch: %w", err)
 		}
 	}
+
+	// Keep two extra rings behind the player. This hysteresis prevents chunks
+	// disappearing the instant they cross the advertised view edge.
+	retainRadius := viewRadius + 2
+	for key := range sent {
+		if abs32(key[0]-newCX) <= retainRadius && abs32(key[1]-newCZ) <= retainRadius {
+			continue
+		}
+		if err := sendForgetChunk(conn, key[0], key[1]); err != nil {
+			return fmt.Errorf("forgetting chunk (%d,%d): %w", key[0], key[1], err)
+		}
+		delete(sent, key)
+	}
 	return nil
+}
+
+// chunkKeysAround returns centre-first Chebyshev rings. Nearby terrain reaches
+// the client before distant terrain in each chunk batch.
+func chunkKeysAround(cx, cz, radius int32) [][2]int32 {
+	keys := make([][2]int32, 0, int((radius*2+1)*(radius*2+1)))
+	for ring := int32(0); ring <= radius; ring++ {
+		for dx := -ring; dx <= ring; dx++ {
+			for dz := -ring; dz <= ring; dz++ {
+				if ring > 0 && abs32(dx) != ring && abs32(dz) != ring {
+					continue
+				}
+				keys = append(keys, [2]int32{cx + dx, cz + dz})
+			}
+		}
+	}
+	return keys
 }
 
 // handlePlayPacket dispatches a single incoming Play-state packet.

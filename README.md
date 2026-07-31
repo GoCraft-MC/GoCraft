@@ -15,7 +15,7 @@
 
 GoCraft is a native Go implementation of a Minecraft server written from scratch. It is built around a protocol-independent game core with edition-specific network adapters at the boundary. It is not a Paper fork, does not use the JVM, and is not a drop-in replacement for an existing server.
 
-A vanilla Minecraft: Java Edition 1.21.4 client can connect, authenticate, complete configuration, and enter a persistent flat world. Players can move, chat, run slash commands, break and place blocks using items from their inventory, and see other players and passive mobs in real time. World changes are saved to Anvil region files and reloaded on restart.
+A vanilla Minecraft: Java Edition 1.21.4 client can connect, authenticate, complete configuration, and enter a persistent seed-driven world. Players can move, chat, run slash commands, break and place blocks using items from their inventory, and see other players and passive mobs in real time. World changes are saved to Anvil region files and reloaded on restart.
 
 ## Compatibility
 
@@ -49,17 +49,17 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
 - **Canonical world layer** (`core/world`):
   - Edition-agnostic `Block` type with `Namespace`, `Name`, and `Properties` — no Java or Bedrock IDs in the core
   - Palette-based `Section` and `Chunk` types; 24 sections per column (Y=−64 to 319)
-  - `FlatGenerator` producing a single layer of stone at Y=63
-  - Concurrent `World` cache with on-demand chunk generation
+  - Deterministic seeded terrain with oceans, mountains, cliffs, climate biomes, caves, ores, and vegetation
+  - Concurrent World cache with on-demand generation and configurable background pregeneration
   - `Storage` interface with Anvil region-file implementation: NBT read/write, zlib compression, atomic `.tmp`-then-rename saves, dirty-chunk tracking, lazy load on first access
   - Architecture test that fails at compile time if any `core/` package imports `java/`
 - **Java chunk encoding** (`java/world`):
-  - Java 1.21.4 global block state ID registry (hardcoded; data-driven in a future milestone)
+  - Data-driven Java 1.21.4 global block state ID registry
   - `Block → Java state ID` lookup at the adapter boundary — the core never touches Java IDs
   - Network-NBT heightmap encoding (root compound without name, 1.20.2+ format)
   - `PalettedContainer` encoder: indirect palette, ≥4 bits/entry, no-overflow packing
-  - Level Chunk With Light packet (0x27) with full sky-light data for all 26 sections
-  - `Sender.SendChunksAround`: 7×7 initial chunk burst after teleport confirmation
+  - Level Chunk With Light packets with height-aware sky-light masks and block entities
+  - Center-first chunk batches, configurable view distance, unload hysteresis, and background pregeneration
 - **Multiplayer** (`java/handler`):
   - Player spawn and despawn packets broadcast to all other sessions
   - Position and head-rotation broadcast on every movement packet
@@ -73,6 +73,7 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
   - Block placement from the held item; occupied-block guard prevents overwriting solid blocks
   - Y-bounds validation before any world mutation
   - Block Update broadcast to all sessions; Acknowledge Block Change sequence echo
+  - Container menus and processing (crafting tables, furnaces, chests) are not implemented yet; loaded block-entity NBT is preserved
 - **Inventory and items** (`core/player`, `java/world`, `java/handler`):
   - `ItemStack{ItemID, Count}` in `core/player` — no Java IDs in the core
   - 46-slot player inventory with hotbar slot tracking; `HeldItem()` accessor
@@ -85,7 +86,7 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
   - Property-keyed block state lookup (`"minecraft:grass_block[snowy=true]"` → ID) extracted from states arrays; key sort matches `core/world.Block.Key()` so no Java IDs leak into the core
   - Block, item, and entity-type hardcoded Go maps removed; maps populated by `registry.go` init function with structured logging of entry counts
 - Protocol-independent player, spatial, and online-player registry types
-- YAML configuration with defaults and basic validation (`world_dir` for Anvil persistence)
+- YAML configuration with defaults and validation (`world_dir` for Anvil persistence and `world_seed` for deterministic terrain)
 - Structured logging through Go's `log/slog`
 - Automated tests for authentication, cryptography, packet framing, VarInt encoding, and architecture isolation
 
@@ -189,7 +190,7 @@ type Provider interface {
 | 1 — Handshake and status ping | Complete | Handshake, server-list response, ping/pong, YAML configuration |
 | 2 — Login and authentication | Complete | Offline and online login, Mojang session verification, RSA and AES-CFB8 |
 | 3 — Configuration and play-state entry | Complete | Known packs, feature flags, initial play packets, teleport confirmation, keep-alive |
-| 4 — World layer and chunk streaming | Complete | Canonical Block/Chunk types, FlatGenerator, Java chunk encoding, initial chunk burst |
+| 4 — World layer and chunk streaming | Complete | Canonical Block/Chunk types, seeded terrain, Java chunk encoding, batched streaming and pregeneration |
 | 5 — Movement and dynamic chunk streaming | Complete | Movement packet handling, posToChunk floor-division, per-boundary chunk load/unload |
 | 6 — Multiplayer sync | Complete | Player spawn/despawn, position and head-rotation broadcast, lock-free session snapshot |
 | 7 — Chat | Complete | Chat broadcast, `/` command prefix, 256-character length limit |
@@ -198,7 +199,7 @@ type Provider interface {
 | 10 — Inventory and items | Complete | ItemStack, 46-slot inventory, hotbar tracking, Creative Mode Set Item, placement from held item, occupied-block guard |
 | 11 — Entity system | Complete | Canonical Entity type, entity registry, mob spawn/tick/despawn, health and damage, 20 TPS tick loop |
 | 12 — Commands | Complete | Command dispatcher, Commands packet (tab-completion DAG), /gamemode /tp /give /kick /list /help |
-| 13 — Data-driven registries | Complete | Load block state IDs, item IDs, entity-type IDs, and biome IDs from Minecraft data-generator JSON (blocks.json, registries.json); embedded via go:embed; hardcoded Go maps replaced; property-keyed block state lookups; unknown IDs warn once via sync.Map |
+| 13 — Data-driven registries | Complete | Load block state IDs, item IDs, entity-type IDs, and biome IDs from versioned JSON (`blocks.json`, `items.json`, `registries.json`); embedded via go:embed; hardcoded Go maps replaced; unknown IDs warn once via sync.Map |
 | 13.1 — Data-driven packet IDs | Complete | Semantic packet names (minecraft:login etc.) in versioned JSON; internal/protocoldata MustCB/MustSB panic at startup on missing names; all handler hex constants removed; validation test suite (7 distinct invariants); GitHub Actions CI on ubuntu-latest |
 | 14 — Bedrock adapter | Future work | RakNet/UDP, Xbox auth, bedrock/world encoder using M13 registries for runtime IDs, cross-play via shared core/ |
 | 15 — Go plugin API | Future work | Event bus, command registration, scheduler, permission nodes; plugins are compiled Go packages |
@@ -248,6 +249,10 @@ max_players: 20
 version_name: 1.21.4
 protocol_version: 769
 online_mode: false
+world_dir: world
+world_seed: 0
+view_distance: 8
+pregenerate_radius: 12
 ```
 
 | Setting | Meaning |
@@ -259,6 +264,12 @@ online_mode: false
 | `version_name` | Advertised version name; currently `1.21.4` |
 | `protocol_version` | Advertised protocol number; currently `769` |
 | `online_mode` | Enables Mojang session authentication and encrypted login |
+| `world_dir` | Anvil world folder used to load and persist modified chunks |
+| `world_seed` | Signed 64-bit seed for deterministic overworld terrain |
+| `view_distance` | Java chunk radius sent to each client (`2`-`32`) |
+| `pregenerate_radius` | Larger background cache radius (`view_distance`-`64`) |
+
+Changing `world_seed` affects newly generated chunks only. Use a new `world_dir` when changing seeds to avoid terrain seams. The built-in generator creates continents, climate biomes, oceans, beaches, mountains, caves, ores, and biome vegetation. It is an original generator and is not block-for-block seed-compatible with Mojang's noise router. For exact Java terrain, point `world_dir` at a world generated by vanilla/Paper 1.21.4; GoCraft reads its `level.dat`, full biome palettes, block states, and Anvil chunks.
 
 If `server.yml` is absent, GoCraft creates it with defaults. Offline mode does not verify player identities; use it only in a trusted development environment.
 
@@ -298,7 +309,7 @@ GoCraft/
 │   └── world/
 │       ├── block.go           # Block{Namespace, Name, Properties} — no edition IDs
 │       ├── chunk.go           # Section and Chunk with palette-based block storage
-│       ├── generator.go       # Generator interface and FlatGenerator
+│       ├── generator.go       # Generator interface and seeded OverworldGenerator
 │       ├── storage.go         # Storage interface for chunk persistence
 │       ├── world.go           # Concurrent world cache with dirty-chunk tracking
 │       └── arch_test.go       # Fails build if core/ imports java/

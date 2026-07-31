@@ -1,6 +1,7 @@
 package anvil
 
 import (
+	"bytes"
 	"fmt"
 	"math/bits"
 	"strings"
@@ -80,10 +81,83 @@ func chunkFromNBT(root map[string]Tag, cx, cz int32) (*coreworld.Chunk, error) {
 			}
 		}
 
+		if err := decodeBiomeData(section, c["biomes"]); err != nil {
+			return nil, fmt.Errorf("anvil: chunk (%d,%d) section %d biomes: %w", cx, cz, sIdx, err)
+		}
 		chunk.Sections[sIdx] = section
 	}
 
+	chunk.BlockEntities = decodeBlockEntities(root["block_entities"])
 	return chunk, nil
+}
+
+func decodeBlockEntities(list Tag) []coreworld.BlockEntity {
+	if list.typ != tagList {
+		return nil
+	}
+	entities := make([]coreworld.BlockEntity, 0, len(list.listV))
+	for _, entry := range list.listV {
+		if entry.typ != tagCompound {
+			continue
+		}
+		data := cloneCompound(entry.compound)
+		entityType := data["id"].Str()
+		x, y, z := int(data["x"].Int()), int(data["y"].Int()), int(data["z"].Int())
+		delete(data, "id")
+		delete(data, "x")
+		delete(data, "y")
+		delete(data, "z")
+		var payload bytes.Buffer
+		wByte(&payload, byte(tagCompound))
+		writeCompoundPayload(&payload, data)
+		entities = append(entities, coreworld.BlockEntity{X: x, Y: y, Z: z, Type: entityType, Data: payload.Bytes()})
+	}
+	return entities
+}
+
+// decodeBiomeData reads the modern 4x4x4 biome paletted container stored in
+// each section. Anvil uses compact, non-crossing longs just like block states,
+// but biome palettes have a one-bit minimum and exactly 64 entries.
+func decodeBiomeData(section *coreworld.Section, biomesTag Tag) error {
+	if biomesTag.typ != tagCompound {
+		return nil
+	}
+	paletteTag := biomesTag.compound["palette"]
+	if paletteTag.typ != tagList || len(paletteTag.listV) == 0 {
+		return nil
+	}
+	palette := make([]string, len(paletteTag.listV))
+	for i, entry := range paletteTag.listV {
+		if entry.typ != tagString || entry.Str() == "" {
+			return fmt.Errorf("palette entry %d is not a biome string", i)
+		}
+		palette[i] = entry.Str()
+	}
+	section.SetUniformBiome(palette[0])
+	if len(palette) == 1 {
+		return nil
+	}
+	dataTag := biomesTag.compound["data"]
+	if dataTag.typ != tagLongArr || len(dataTag.longsV) == 0 {
+		return fmt.Errorf("multi-entry palette has no data")
+	}
+	bitsPerEntry := max(1, bits.Len(uint(len(palette)-1)))
+	entriesPerLong := 64 / bitsPerEntry
+	mask := int64((1 << bitsPerEntry) - 1)
+	for cell := 0; cell < 64; cell++ {
+		longIndex := cell / entriesPerLong
+		if longIndex >= len(dataTag.longsV) {
+			return fmt.Errorf("data ended at cell %d", cell)
+		}
+		bitOffset := (cell % entriesPerLong) * bitsPerEntry
+		paletteIndex := int((dataTag.longsV[longIndex] >> bitOffset) & mask)
+		if paletteIndex < 0 || paletteIndex >= len(palette) {
+			return fmt.Errorf("palette index %d out of range %d", paletteIndex, len(palette))
+		}
+		x, z, y := cell&3, (cell>>2)&3, cell>>4
+		section.SetBiomeCell(x, y, z, palette[paletteIndex])
+	}
+	return nil
 }
 
 // decodePalette converts a TAG_List of TAG_Compound block-state descriptors

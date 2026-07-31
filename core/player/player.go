@@ -68,6 +68,36 @@ func (p *Player) HeldItem() ItemStack {
 	return p.Inventory[HotbarStart+p.HeldSlot]
 }
 
+// GiveItem adds item to the first available inventory slot, merging into an
+// existing partial stack when possible.  Returns true if all items were placed,
+// false if the inventory was full.
+func (p *Player) GiveItem(item ItemStack) bool {
+	if item.IsEmpty() {
+		return true
+	}
+	// Priority: hotbar first, then main inventory.
+	ranges := [][2]int{{HotbarStart, InventorySize - 1}, {9, HotbarStart}}
+	for _, stackFirst := range []bool{true, false} {
+		for _, r := range ranges {
+			for i := r[0]; i < r[1]; i++ {
+				slot := &p.Inventory[i]
+				if stackFirst {
+					if slot.ItemID == item.ItemID && slot.Count < 64 {
+						slot.Count += item.Count
+						return true
+					}
+				} else {
+					if slot.IsEmpty() {
+						*slot = item
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // New creates a Player with sensible defaults.
 // Game mode defaults to Creative so that block interaction works out-of-the-box
 // for testing.  A config-driven game-mode option will be added in a later milestone.

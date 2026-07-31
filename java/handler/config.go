@@ -12,53 +12,48 @@ import (
 
 // HandleConfiguration drives the connection through the Configuration state.
 //
-// Protocol flow (1.21.4 / protocol 769):
+// Protocol flow (1.21.4 / protocol 769), matching Mojang's configuration tasks:
 //
-//	S→C  Known Packs (0x0E)        — server declares "minecraft:core" v1.21.4
-//	C→S  Client Information (0x00) — client settings (may arrive first or after Known Packs)
-//	C→S  Known Packs (0x07)        — client confirms cached pack knowledge
 //	S→C  Plugin Message (0x01)     — server brand "GoCraft" on "minecraft:brand"
 //	S→C  Feature Flags (0x0C)      — enable "minecraft:vanilla" feature set
-//	S→C  Update Tags (0x0D)        — empty (client uses cached tags from known pack)
+//	S→C  Known Packs (0x0E)        — server declares "minecraft:core" v1.21.4
+//	C→S  Client Information (0x00) — client settings (may arrive before Known Packs response)
+//	C→S  Known Packs (0x07)        — client confirms cached pack knowledge
+//	S→C  Registry Data (0x07)      — all 12 synchronized registries; values from known pack
+//	S→C  Update Tags (0x0D)        — complete network-safe tag snapshot using assigned IDs
 //	S→C  Finish Configuration (0x03)
 //	C→S  Acknowledge Finish (0x03)
 func HandleConfiguration(conn *network.ClientConn, reg registry.Provider) error {
-	// ── Step 1: Advertise known data packs ──────────────────────────────────
-	if err := sendKnownPacks(conn, reg.Packs()); err != nil {
-		return fmt.Errorf("config: %w", err)
-	}
-	// Send any explicit registry data (no-op for VanillaProvider).
-	if err := reg.SendRegistries(conn); err != nil {
-		return fmt.Errorf("config: sending registries: %w", err)
-	}
-
-	// ── Step 2: Drain client packets until we see Known Packs response ──────
-	// The client may send Client Information before or after replying to Known Packs.
-	if err := readUntilKnownPacks(conn); err != nil {
-		return fmt.Errorf("config: %w", err)
-	}
-
-	// ── Step 3: Server brand ─────────────────────────────────────────────────
+	// Mojang sends brand and enabled features before starting the registry
+	// synchronization task and Known Packs negotiation.
 	if err := sendConfigPluginMessage(conn, "minecraft:brand", "GoCraft"); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-
-	// ── Step 4: Feature flags — vanilla feature set ───────────────────────────
 	if err := sendFeatureFlags(conn); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	// ── Step 5: Update Tags — empty (client uses cached data from known pack) ─
-	if err := sendUpdateTags(conn); err != nil {
+	if err := sendKnownPacks(conn, reg.Packs()); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	selectedPacks, err := readUntilKnownPacks(conn)
+	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	// ── Step 6: Signal end of configuration ──────────────────────────────────
+	// Known Packs permits entry NBT to be omitted, but the complete registry
+	// and tag snapshots are still required before the client can freeze them.
+	if err := reg.SendRegistries(conn, selectedPacks); err != nil {
+		return fmt.Errorf("config: sending registries: %w", err)
+	}
+	if err := reg.SendTags(conn); err != nil {
+		return fmt.Errorf("config: sending tags: %w", err)
+	}
+
 	if err := conn.WritePacket(protocol.NewBuilder(packetIDFinishConfiguration).Build()); err != nil {
 		return fmt.Errorf("config: sending finish configuration: %w", err)
 	}
 
-	// ── Step 7: Wait for Acknowledge Finish Configuration (0x03 C→S) ─────────
 	pkt, err := conn.ReadPacket()
 	if err != nil {
 		return fmt.Errorf("config: reading acknowledge finish: %w", err)
@@ -125,17 +120,6 @@ func sendFeatureFlags(conn *network.ClientConn) error {
 	return conn.WritePacket(pkt)
 }
 
-// sendUpdateTags sends the Update Tags packet (0x0D S→C) with zero tag registries.
-//
-// Because we advertised the "minecraft:core" known pack and the client confirmed
-// knowledge of it, the client already has all tag data cached locally.
-func sendUpdateTags(conn *network.ClientConn) error {
-	pkt := protocol.NewBuilder(packetIDUpdateTags).
-		VarInt(0). // registry count = 0
-		Build()
-	return conn.WritePacket(pkt)
-}
-
 // ── Serverbound helpers ───────────────────────────────────────────────────────
 
 // readUntilKnownPacks reads incoming Configuration-state packets, discarding
@@ -145,22 +129,59 @@ func sendUpdateTags(conn *network.ClientConn) error {
 //
 //	C→S Client Information (0x00)  — client display and locale settings
 //	C→S Known Packs (0x07)         — acknowledgement of server's known packs
-func readUntilKnownPacks(conn *network.ClientConn) error {
+func readUntilKnownPacks(conn *network.ClientConn) ([]registry.Pack, error) {
 	for {
 		pkt, err := conn.ReadPacket()
 		if err != nil {
-			return fmt.Errorf("reading configuration client packet: %w", err)
+			return nil, fmt.Errorf("reading configuration client packet: %w", err)
 		}
 		switch pkt.ID {
 		case packetIDClientInformation:
 			slog.Debug("client information received (configuration)", "remote", conn.RemoteAddr())
 			// No fields need to be parsed for basic play; just acknowledge receipt.
 		case packetIDServerboundKnownPacks:
-			slog.Debug("client known packs acknowledged", "remote", conn.RemoteAddr())
-			return nil
+			packs, err := decodeKnownPacks(pkt.Data)
+			if err != nil {
+				return nil, fmt.Errorf("decoding Known Packs response: %w", err)
+			}
+			slog.Info("client known packs acknowledged",
+				"remote", conn.RemoteAddr(), "packs", len(packs))
+			return packs, nil
 		default:
 			slog.Debug("unexpected configuration packet (ignoring)",
 				"remote", conn.RemoteAddr(), "id", fmt.Sprintf("0x%02X", pkt.ID))
 		}
 	}
+}
+
+func decodeKnownPacks(data []byte) ([]registry.Pack, error) {
+	r := bytes.NewReader(data)
+	count, err := protocol.ReadVarInt(r)
+	if err != nil {
+		return nil, fmt.Errorf("reading pack count: %w", err)
+	}
+	if count < 0 || count > 64 {
+		return nil, fmt.Errorf("invalid pack count %d", count)
+	}
+
+	packs := make([]registry.Pack, 0, count)
+	for i := int32(0); i < count; i++ {
+		namespace, err := protocol.ReadString(r)
+		if err != nil {
+			return nil, fmt.Errorf("pack %d namespace: %w", i, err)
+		}
+		id, err := protocol.ReadString(r)
+		if err != nil {
+			return nil, fmt.Errorf("pack %d id: %w", i, err)
+		}
+		version, err := protocol.ReadString(r)
+		if err != nil {
+			return nil, fmt.Errorf("pack %d version: %w", i, err)
+		}
+		packs = append(packs, registry.Pack{Namespace: namespace, ID: id, Version: version})
+	}
+	if r.Len() != 0 {
+		return nil, fmt.Errorf("%d trailing bytes after Known Packs response", r.Len())
+	}
+	return packs, nil
 }

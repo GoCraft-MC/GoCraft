@@ -257,13 +257,16 @@ func (h *LoginHandler) readEncryptionResponse(conn *network.ClientConn, challeng
 
 // sendLoginSuccess writes the Login Success packet (0x02 S→C).
 //
-// Fields (1.21.4):
+// Fields (1.21.4 / protocol 769):
 //
 //	UUID     playerUUID
-//	String   username
+//	String   username       (max 16 chars)
 //	VarInt   numProperties
-//	[]       properties  { String name, String value, Bool signed, String? sig }
-//	Bool     strictErrorHandling   false
+//	[]       properties     { String name, String value, Bool isSigned, String? signature }
+//
+// Note: the "strictErrorHandling" boolean that appeared in 1.20.5 snapshots
+// was removed before the 1.21.x stable series.  Do not write it — the client
+// has no field for it and will reject the packet with "1 bytes extra".
 func (h *LoginHandler) sendLoginSuccess(conn *network.ClientConn, uuid protocol.UUID, name string, props []auth.ProfileProperty) error {
 	b := protocol.NewBuilder(packetIDLoginSuccess).
 		UUID(uuid).
@@ -277,8 +280,6 @@ func (h *LoginHandler) sendLoginSuccess(conn *network.ClientConn, uuid protocol.
 			b.String(p.Signature)
 		}
 	}
-
-	b.Bool(false) // strictErrorHandling — false for permissive mode
 
 	return conn.WritePacket(b.Build())
 }

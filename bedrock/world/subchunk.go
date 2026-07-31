@@ -20,6 +20,14 @@ import (
 const (
 	groundSubChunkIndex = int32(8) // contains Y=64..79
 	spawnY              = float32(65)
+
+	// overworldSubChunkCount is the number of sub-chunks in the 1.18+ overworld
+	// (Y range −64 to 319 = 384 blocks = 24 sub-chunks).
+	overworldSubChunkCount = 24
+
+	// biomePlains is the Bedrock runtime biome ID for the plains biome.
+	// Biome IDs are fixed numeric constants defined by the game; plains = 1.
+	biomePlains = uint32(1)
 )
 
 // SpawnY returns the Y coordinate players should spawn at in the flat world.
@@ -107,6 +115,45 @@ func EncodeGroundSubChunk() ([]byte, error) {
 	buf.Write(airNBT)
 	buf.Write(stoneNBT)
 	return buf.Bytes(), nil
+}
+
+// EncodeLevelChunkPayload returns the RawPayload for a LevelChunk packet
+// sent with SubChunkCount = SubChunkRequestModeLimitless (CacheEnabled=false).
+//
+// In this mode sub-chunk block data is NOT included — sub-chunks are requested
+// individually via SubChunkRequest packets.  The payload contains only:
+//
+//  1. 3D biome palette storage for each overworld sub-chunk
+//     (24 × single-value plains storage, 9 bytes each = 216 bytes)
+//  2. Border block count varint (0x00 — no border blocks)
+//
+// Biome palette storage format (runtime, not persistent):
+//
+//	byte:    (bitsPerBlock << 1) | 0   →  0x00 for single-value
+//	uint32:  palette count = 1
+//	uint32:  biome runtime ID (1 = plains)
+func EncodeLevelChunkPayload() []byte {
+	var buf bytes.Buffer
+	buf.Grow(overworldSubChunkCount*9 + 1)
+
+	// One biome palette entry per sub-chunk: all plains.
+	entry := makeSingleValueBiomeStorage(biomePlains)
+	for range overworldSubChunkCount {
+		buf.Write(entry)
+	}
+
+	buf.WriteByte(0x00) // border block count varint (0 = none)
+	return buf.Bytes()
+}
+
+// makeSingleValueBiomeStorage encodes a single-value runtime palette storage
+// (bitsPerBlock=0) for the given biome ID.  The returned slice is 9 bytes.
+func makeSingleValueBiomeStorage(biomeID uint32) []byte {
+	b := make([]byte, 9)
+	b[0] = 0x00                                    // (bitsPerBlock=0 << 1) | runtime=0
+	binary.LittleEndian.PutUint32(b[1:5], 1)       // palette count = 1
+	binary.LittleEndian.PutUint32(b[5:9], biomeID) // plains runtime ID
+	return b
 }
 
 // marshalBlockState serialises a Bedrock block state to Network Little Endian

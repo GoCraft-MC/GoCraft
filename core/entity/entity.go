@@ -10,59 +10,94 @@ import "GoCraft/core/spatial"
 // e.g. "minecraft:cow".
 type EntityType string
 
-// Common entity types.  Expand as needed; Milestone 13 (data-driven
-// registries) will load the full list from Minecraft's generated output.
+// All known entity types (complete list for Minecraft 1.21.4 / protocol 769).
 const (
-	// Passive mobs
-	TypeBat     EntityType = "minecraft:bat"
-	TypeChicken EntityType = "minecraft:chicken"
-	TypeCow     EntityType = "minecraft:cow"
-	TypeDonkey  EntityType = "minecraft:donkey"
-	TypeFox     EntityType = "minecraft:fox"
-	TypeFrog    EntityType = "minecraft:frog"
-	TypeGoat    EntityType = "minecraft:goat"
-	TypeHorse   EntityType = "minecraft:horse"
-	TypeMule    EntityType = "minecraft:mule"
-	TypeOcelot  EntityType = "minecraft:ocelot"
-	TypePanda   EntityType = "minecraft:panda"
-	TypeParrot  EntityType = "minecraft:parrot"
-	TypePig     EntityType = "minecraft:pig"
-	TypeRabbit  EntityType = "minecraft:rabbit"
-	TypeSheep   EntityType = "minecraft:sheep"
-	TypeSniffer EntityType = "minecraft:sniffer"
-	TypeSquid   EntityType = "minecraft:squid"
-	TypeTurtle  EntityType = "minecraft:turtle"
-	TypeWolf    EntityType = "minecraft:wolf"
+	// ── Passive mobs ─────────────────────────────────────────────────────────
+	TypeAllay          EntityType = "minecraft:allay"
+	TypeArmadillo      EntityType = "minecraft:armadillo"
+	TypeAxolotl        EntityType = "minecraft:axolotl"
+	TypeBat            EntityType = "minecraft:bat"
+	TypeCamel          EntityType = "minecraft:camel"
+	TypeCat            EntityType = "minecraft:cat"
+	TypeChicken        EntityType = "minecraft:chicken"
+	TypeCod            EntityType = "minecraft:cod"
+	TypeCow            EntityType = "minecraft:cow"
+	TypeDonkey         EntityType = "minecraft:donkey"
+	TypeFox            EntityType = "minecraft:fox"
+	TypeFrog           EntityType = "minecraft:frog"
+	TypeGlowSquid      EntityType = "minecraft:glow_squid"
+	TypeGoat           EntityType = "minecraft:goat"
+	TypeHorse          EntityType = "minecraft:horse"
+	TypeMooshroom      EntityType = "minecraft:mooshroom"
+	TypeMule           EntityType = "minecraft:mule"
+	TypeOcelot         EntityType = "minecraft:ocelot"
+	TypePanda          EntityType = "minecraft:panda"
+	TypeParrot         EntityType = "minecraft:parrot"
+	TypePig            EntityType = "minecraft:pig"
+	TypePufferfish     EntityType = "minecraft:pufferfish"
+	TypeRabbit         EntityType = "minecraft:rabbit"
+	TypeSalmon         EntityType = "minecraft:salmon"
+	TypeSheep          EntityType = "minecraft:sheep"
+	TypeSkeletonHorse  EntityType = "minecraft:skeleton_horse"
+	TypeSniffer        EntityType = "minecraft:sniffer"
+	TypeSquid          EntityType = "minecraft:squid"
+	TypeTadpole        EntityType = "minecraft:tadpole"
+	TypeTropicalFish   EntityType = "minecraft:tropical_fish"
+	TypeTurtle         EntityType = "minecraft:turtle"
+	TypeVillager       EntityType = "minecraft:villager"
+	TypeWanderingTrader EntityType = "minecraft:wandering_trader"
+	TypeZombieHorse    EntityType = "minecraft:zombie_horse"
 
-	// Hostile mobs
-	TypeBlaze      EntityType = "minecraft:blaze"
-	TypeCaveSpider EntityType = "minecraft:cave_spider"
-	TypeCreeper    EntityType = "minecraft:creeper"
-	TypeDrowned    EntityType = "minecraft:drowned"
-	TypeEnderman   EntityType = "minecraft:enderman"
-	TypeGhast      EntityType = "minecraft:ghast"
-	TypeGuardian   EntityType = "minecraft:guardian"
-	TypeHusk       EntityType = "minecraft:husk"
-	TypeMagmaCube  EntityType = "minecraft:magma_cube"
-	TypePhantom    EntityType = "minecraft:phantom"
-	TypePiglin     EntityType = "minecraft:piglin"
-	TypePillager   EntityType = "minecraft:pillager"
-	TypeRavager    EntityType = "minecraft:ravager"
-	TypeSilverfish EntityType = "minecraft:silverfish"
-	TypeSkeleton   EntityType = "minecraft:skeleton"
-	TypeSlime      EntityType = "minecraft:slime"
-	TypeSpider     EntityType = "minecraft:spider"
-	TypeVex        EntityType = "minecraft:vex"
-	TypeVindicator EntityType = "minecraft:vindicator"
-	TypeWarden     EntityType = "minecraft:warden"
-	TypeWitch      EntityType = "minecraft:witch"
-	TypeZombie     EntityType = "minecraft:zombie"
+	// ── Neutral / tameable mobs ───────────────────────────────────────────────
+	TypeBee           EntityType = "minecraft:bee"
+	TypeDolphin       EntityType = "minecraft:dolphin"
+	TypeIronGolem     EntityType = "minecraft:iron_golem"
+	TypeLlama         EntityType = "minecraft:llama"
+	TypePolarBear     EntityType = "minecraft:polar_bear"
+	TypeSnowGolem     EntityType = "minecraft:snow_golem"
+	TypeStrider       EntityType = "minecraft:strider"
+	TypeTraderLlama   EntityType = "minecraft:trader_llama"
+	TypeWolf          EntityType = "minecraft:wolf"
+	TypeZombifiedPiglin EntityType = "minecraft:zombified_piglin"
 
-	// Neutral mobs
-	TypeIronGolem EntityType = "minecraft:iron_golem"
-	TypePolarBear EntityType = "minecraft:polar_bear"
-	TypeSnowGolem EntityType = "minecraft:snow_golem"
-	TypeStrider   EntityType = "minecraft:strider"
+	// ── Hostile mobs ─────────────────────────────────────────────────────────
+	TypeBlaze          EntityType = "minecraft:blaze"
+	TypeBogged         EntityType = "minecraft:bogged"
+	TypeBreeze         EntityType = "minecraft:breeze"
+	TypeCaveSpider     EntityType = "minecraft:cave_spider"
+	TypeCreaker        EntityType = "minecraft:creaking"
+	TypeCreeper        EntityType = "minecraft:creeper"
+	TypeDrowned        EntityType = "minecraft:drowned"
+	TypeElderGuardian  EntityType = "minecraft:elder_guardian"
+	TypeEnderman       EntityType = "minecraft:enderman"
+	TypeEndermite      EntityType = "minecraft:endermite"
+	TypeEvoker         EntityType = "minecraft:evoker"
+	TypeGhast          EntityType = "minecraft:ghast"
+	TypeGuardian       EntityType = "minecraft:guardian"
+	TypeHoglin         EntityType = "minecraft:hoglin"
+	TypeHusk           EntityType = "minecraft:husk"
+	TypeIllusioner     EntityType = "minecraft:illusioner"
+	TypeMagmaCube      EntityType = "minecraft:magma_cube"
+	TypePhantom        EntityType = "minecraft:phantom"
+	TypePiglin         EntityType = "minecraft:piglin"
+	TypePiglinBrute    EntityType = "minecraft:piglin_brute"
+	TypePillager       EntityType = "minecraft:pillager"
+	TypeRavager        EntityType = "minecraft:ravager"
+	TypeShulker        EntityType = "minecraft:shulker"
+	TypeSilverfish     EntityType = "minecraft:silverfish"
+	TypeSkeleton       EntityType = "minecraft:skeleton"
+	TypeSlime          EntityType = "minecraft:slime"
+	TypeSpider         EntityType = "minecraft:spider"
+	TypeStray          EntityType = "minecraft:stray"
+	TypeVex            EntityType = "minecraft:vex"
+	TypeVindicator     EntityType = "minecraft:vindicator"
+	TypeWarden         EntityType = "minecraft:warden"
+	TypeWitch          EntityType = "minecraft:witch"
+	TypeWither         EntityType = "minecraft:wither"
+	TypeWitherSkeleton EntityType = "minecraft:wither_skeleton"
+	TypeZoglin         EntityType = "minecraft:zoglin"
+	TypeZombie         EntityType = "minecraft:zombie"
+	TypeZombieVillager EntityType = "minecraft:zombie_villager"
 )
 
 // Entity is the canonical server-side representation of any non-player entity.
@@ -112,50 +147,110 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	}
 }
 
-// defaultMaxHealth returns the base max health for well-known entity types.
+// defaultMaxHealth returns the base max health for all entity types.
 // Unknown types default to 20 (10 hearts).
 func defaultMaxHealth(t EntityType) float32 {
 	switch t {
-	case TypeChicken:
-		return 4
-	case TypeRabbit:
+	// Passive — low health
+	case TypeChicken, TypeCod, TypeSalmon, TypeTropicalFish, TypePufferfish:
+		return 3
+	case TypeRabbit, TypeTadpole:
 		return 3
 	case TypeBat:
 		return 6
-	case TypeCow, TypePig, TypeDonkey, TypeMule:
+	case TypeParrot:
+		return 6
+	case TypeOcelot, TypeCat:
 		return 10
-	case TypeSheep, TypeOcelot, TypeParrot:
+	case TypeSheep, TypeDolphin:
 		return 8
-	case TypeFox, TypeGoat, TypePanda, TypePolarBear, TypeStrider:
+	case TypeCow, TypeMooshroom, TypePig, TypeDonkey, TypeMule,
+		TypeGlowSquid, TypeSquid, TypeAllay, TypeArmadillo:
+		return 10
+	case TypeFox:
+		return 10
+	case TypeGoat:
+		return 10
+	case TypePanda:
 		return 20
-	case TypeWolf:
-		return 8
-	case TypeHorse:
-		return 30
+	case TypeLlama, TypeTraderLlama:
+		return 22 // average of 15–30 range
+	case TypeHorse, TypeSkeletonHorse, TypeZombieHorse:
+		return 26 // average of 15–30 range
+	case TypeCamel:
+		return 32
 	case TypeSniffer:
 		return 14
-	case TypeCaveSpider:
-		return 12
-	case TypeSilverfish, TypeSlime:
+	case TypeTurtle:
+		return 30
+	case TypeBee:
+		return 10
+	case TypeAxolotl:
+		return 14
+	case TypeWanderingTrader:
+		return 20
+
+	// Neutral
+	case TypeWolf:
 		return 8
+	case TypePolarBear:
+		return 30
+	case TypeStrider:
+		return 20
+	case TypeZombifiedPiglin:
+		return 20
+
+	// Hostile
 	case TypeZombie, TypeSkeleton, TypeCreeper, TypeEnderman,
 		TypeSpider, TypeHusk, TypeDrowned, TypePhantom, TypeVex,
-		TypePiglin, TypePillager, TypeVindicator, TypeWitch, TypeBlaze:
+		TypePiglin, TypePillager, TypeVindicator, TypeWitch, TypeBlaze,
+		TypeStray, TypeBogged, TypeZombieVillager, TypeZoglin:
 		return 20
+	case TypeCaveSpider:
+		return 12
+	case TypeSilverfish, TypeSlime, TypeEndermite:
+		return 8
 	case TypeGuardian:
 		return 30
+	case TypeElderGuardian:
+		return 80
 	case TypeGhast:
 		return 10
 	case TypeMagmaCube:
 		return 16
 	case TypeRavager:
 		return 100
+	case TypeHoglin:
+		return 40
+	case TypePiglinBrute:
+		return 50
+	case TypeShulker:
+		return 30
+	case TypeBreeze:
+		return 30
+	case TypeCreaker:
+		return 1 // effectively invulnerable; simplified
+	case TypeEvoker:
+		return 24
+	case TypeIllusioner:
+		return 32
 	case TypeWarden:
 		return 500
+	case TypeWither:
+		return 300
+	case TypeWitherSkeleton:
+		return 20
+
+	// Iron/Snow Golem
 	case TypeIronGolem:
 		return 100
 	case TypeSnowGolem:
 		return 4
+
+	// Villager
+	case TypeVillager:
+		return 20
+
 	default:
 		return 20
 	}

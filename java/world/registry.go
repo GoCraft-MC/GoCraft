@@ -7,9 +7,10 @@ package world
 // JSON formats (matching Minecraft's data generator output):
 //
 //	blocks.json      — map[blockName]blockEntry
-//	registries.json  — map[registryName]registryEntry
+//	items.json       — complete item name-to-protocol-ID registry
+//	registries.json  — remaining registry data
 //
-// Both files must carry a "_gocraft_version" string key.  At init the loader
+// All files must carry a "_gocraft_version" string key.  At init the loader
 // verifies this matches the constant expectedVersion; a mismatch panics so
 // a wrong-version data file is never silently accepted.
 //
@@ -121,8 +122,38 @@ func loadBlockRegistry() {
 		"version", expectedVersion, "blocks", defaults, "states", states)
 }
 
-// loadRegistries parses registries.json and populates itemIDs, itemNames,
-// entityTypeIDs, and biomeIDs.
+// loadItemRegistry parses the complete protocol-769 item table generated from
+// PrismarineJS's version-specific items.json.
+func loadItemRegistry() (map[string]int32, map[int32]string) {
+	data, err := gamedata.FS.ReadFile("java/1.21.4/items.json")
+	if err != nil {
+		panic(fmt.Sprintf("gamedata: reading items.json: %v", err))
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		panic(fmt.Sprintf("gamedata: parsing items.json: %v", err))
+	}
+	validateVersion(raw, "items.json")
+	entriesRaw, ok := raw["entries"]
+	if !ok {
+		panic("gamedata: items.json missing entries")
+	}
+	var nameToID map[string]int32
+	if err := json.Unmarshal(entriesRaw, &nameToID); err != nil {
+		panic(fmt.Sprintf("gamedata: parsing items.json entries: %v", err))
+	}
+	idToName := make(map[int32]string, len(nameToID))
+	for name, id := range nameToID {
+		if previous, exists := idToName[id]; exists {
+			panic(fmt.Sprintf("gamedata: duplicate item protocol ID %d for %s and %s", id, previous, name))
+		}
+		idToName[id] = name
+	}
+	return nameToID, idToName
+}
+
+// loadRegistries loads the complete item table, then parses registries.json
+// for entity-type and biome IDs.
 func loadRegistries() {
 	data, err := gamedata.FS.ReadFile("java/1.21.4/registries.json")
 	if err != nil {
@@ -135,17 +166,20 @@ func loadRegistries() {
 	}
 	validateVersion(raw, "registries.json")
 
-	itemIDs, itemNames = loadRegistry(raw, "minecraft:item", "registries.json")
+	itemIDs, itemNames = loadItemRegistry()
 	etMap, _ := loadRegistry(raw, "minecraft:entity_type", "registries.json")
 	entityTypeIDs = etMap
 	biomeMap, _ := loadRegistry(raw, "minecraft:worldgen/biome", "registries.json")
 	biomeIDs = biomeMap
+	blockEntityMap, _ := loadRegistry(raw, "minecraft:block_entity_type", "registries.json")
+	blockEntityTypeIDs = blockEntityMap
 
 	slog.Info("gamedata: loaded registries",
 		"version", expectedVersion,
 		"items", len(itemIDs),
 		"entityTypes", len(entityTypeIDs),
-		"biomes", len(biomeIDs))
+		"biomes", len(biomeIDs),
+		"blockEntityTypes", len(blockEntityTypeIDs))
 }
 
 // loadRegistry extracts one named registry from the top-level registries map

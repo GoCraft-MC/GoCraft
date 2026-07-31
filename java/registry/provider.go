@@ -34,8 +34,8 @@ type Pack struct {
 //
 // Two implementations are planned:
 //
-//   - VanillaProvider — Known Packs shortcut; sends zero Registry Data packets
-//     for vanilla 1.21.4 clients.
+//   - VanillaProvider — Known Packs shortcut; sends ordered Registry Data keys
+//     while omitting vanilla entry NBT for vanilla 1.21.4 clients.
 //
 //   - ExplicitProvider (future, Milestone 13) — advertises no packs and sends
 //     full Registry Data for every required registry (dimension types, biomes,
@@ -46,8 +46,16 @@ type Provider interface {
 	// Returning an empty slice forces the client to download explicit registry data.
 	Packs() []Pack
 
-	// SendRegistries sends any Registry Data packets (0x07 S→C) that the server
-	// must provide after the client's Known Packs response.
-	// VanillaProvider sends none; a future ExplicitProvider sends everything.
-	SendRegistries(conn *network.ClientConn) error
+	// SendRegistries sends Registry Data packets (0x07 S→C) after the client
+	// responds to Known Packs. Entries covered by selected packs may omit NBT,
+	// but their registry and ordered keys must still be sent to assign IDs.
+	SendRegistries(conn *network.ClientConn, selected []Pack) error
+
+	// SendTags sends Update Tags (0x0D S→C) using IDs assigned by the
+	// synchronized and built-in registries for this protocol version.
+	SendTags(conn *network.ClientConn) error
+
+	// DimensionTypeID returns the ID assigned to name by the dimension_type
+	// registry sent for this provider during Configuration.
+	DimensionTypeID(name string) (int32, error)
 }

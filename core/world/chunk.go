@@ -25,6 +25,39 @@ type Chunk struct {
 	// Sections holds one Section per 16-block-tall slice, bottom first.
 	// A nil entry represents an all-air section (saves memory for empty columns).
 	Sections [SectionCount]*Section
+
+	// BlockEntities contains position, type, and opaque NBT payload for blocks
+	// such as chests, furnaces, signs, and spawners. Edition adapters may ignore
+	// payloads they do not understand while preserving them on disk.
+	BlockEntities []BlockEntity
+}
+
+// BlockEntity is a canonical positioned block entity. Data contains an
+// anonymous network-NBT compound when loaded from Java Anvil storage.
+type BlockEntity struct {
+	X, Y, Z int
+	Type    string
+	Data    []byte
+}
+
+// HighestBlockY returns the highest non-air block in the local x/z column.
+// WorldMinY-1 is returned for a completely empty column.
+func (c *Chunk) HighestBlockY(x, z int) int {
+	if x < 0 || x >= SectionSize || z < 0 || z >= SectionSize {
+		return WorldMinY - 1
+	}
+	for sectionIndex := SectionCount - 1; sectionIndex >= 0; sectionIndex-- {
+		section := c.Sections[sectionIndex]
+		if section == nil || section.NonAir == 0 {
+			continue
+		}
+		for localY := SectionSize - 1; localY >= 0; localY-- {
+			if !section.At(x, localY, z).IsAir() {
+				return SectionMinY(sectionIndex) + localY
+			}
+		}
+	}
+	return WorldMinY - 1
 }
 
 // SectionMinY returns the absolute minimum Y coordinate of section index i.
@@ -50,9 +83,13 @@ type Section struct {
 	blockData    [4096]uint16      // palette index per position: y*256 + z*16 + x
 	NonAir       int16             // count of non-air blocks (required for Java wire format)
 
-	// Biome is the canonical biome resource location for all cells in this section.
-	// A future milestone will store per-cell biome data.
-	Biome string
+	// Biome is retained as the representative/first biome for compatibility with
+	// older adapters. The palette below stores the real 4x4x4 biome cells used by
+	// modern Java chunks.
+	Biome        string
+	biomePalette []string
+	biomeIndex   map[string]uint16
+	biomeData    [64]uint16
 }
 
 // NewSection returns an all-air section with a single-entry palette containing Air.
@@ -62,6 +99,8 @@ func NewSection() *Section {
 		blockPalette: []Block{Air},
 		paletteIndex: map[string]uint16{airKey: 0},
 		Biome:        "minecraft:plains",
+		biomePalette: []string{"minecraft:plains"},
+		biomeIndex:   map[string]uint16{"minecraft:plains": 0},
 	}
 }
 
@@ -117,3 +156,64 @@ func (s *Section) BlockPalette() []Block { return s.blockPalette }
 // BlockData returns the raw palette-index array (position: y*256+z*16+x).
 // Each value is an index into the slice returned by BlockPalette.
 func (s *Section) BlockData() [4096]uint16 { return s.blockData }
+
+// SetUniformBiome fills all 4x4x4 biome cells with one resource location.
+func (s *Section) SetUniformBiome(biome string) {
+	if biome == "" {
+		biome = "minecraft:plains"
+	}
+	s.Biome = biome
+	s.biomePalette = []string{biome}
+	s.biomeIndex = map[string]uint16{biome: 0}
+	s.biomeData = [64]uint16{}
+}
+
+// SetBiomeCell sets one Java biome quart-cell (coordinates 0-3 on each axis).
+func (s *Section) SetBiomeCell(x, y, z int, biome string) {
+	if x < 0 || x >= 4 || y < 0 || y >= 4 || z < 0 || z >= 4 {
+		return
+	}
+	if biome == "" {
+		biome = "minecraft:plains"
+	}
+	if s.biomeIndex == nil {
+		s.SetUniformBiome(s.Biome)
+	}
+	index, ok := s.biomeIndex[biome]
+	if !ok {
+		index = uint16(len(s.biomePalette))
+		s.biomePalette = append(s.biomePalette, biome)
+		s.biomeIndex[biome] = index
+	}
+	s.biomeData[y*16+z*4+x] = index
+	if len(s.biomePalette) > 0 {
+		s.Biome = s.biomePalette[0]
+	}
+}
+
+// BiomeAtCell returns a biome quart-cell, defaulting to plains.
+func (s *Section) BiomeAtCell(x, y, z int) string {
+	if s == nil || x < 0 || x >= 4 || y < 0 || y >= 4 || z < 0 || z >= 4 || len(s.biomePalette) == 0 {
+		return "minecraft:plains"
+	}
+	index := int(s.biomeData[y*16+z*4+x])
+	if index < 0 || index >= len(s.biomePalette) {
+		return s.biomePalette[0]
+	}
+	return s.biomePalette[index]
+}
+
+// BiomePalette and BiomeData expose a read-only snapshot to edition adapters.
+func (s *Section) BiomePalette() []string {
+	if s == nil || len(s.biomePalette) == 0 {
+		return []string{"minecraft:plains"}
+	}
+	return s.biomePalette
+}
+
+func (s *Section) BiomeData() [64]uint16 {
+	if s == nil {
+		return [64]uint16{}
+	}
+	return s.biomeData
+}

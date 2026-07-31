@@ -4,8 +4,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -45,10 +47,23 @@ type Config struct {
 	// Behaviour (Java Edition)
 	OnlineMode bool `yaml:"online_mode"`
 
+	// Villagers controls whether villager entities are spawned in villages.
+	// Set to false to disable NPC spawning (structures still generate).
+	Villagers bool `yaml:"villagers"`
+
 	// WorldDir is the path to the Minecraft world folder containing region/,
 	// level.dat, etc.  Leave empty to disable Anvil persistence and run with
-	// a freshly generated flat world on every startup.
+	// seeded overworld generation without persistence.
 	WorldDir string `yaml:"world_dir"`
+
+	// WorldSeed controls deterministic overworld terrain generation for chunks
+	// absent from Anvil storage. The same seed always produces the same terrain.
+	WorldSeed int64 `yaml:"world_seed"`
+
+	// ViewDistance is the radius, in chunks, sent to Java clients. PreGenerateRadius
+	// warms a larger square in the background so movement rarely waits on worldgen.
+	ViewDistance      int `yaml:"view_distance"`
+	PreGenerateRadius int `yaml:"pregenerate_radius"`
 
 	// Bedrock Edition UDP listener settings.
 	Bedrock BedrockConfig `yaml:"bedrock"`
@@ -57,14 +72,17 @@ type Config struct {
 // defaults returns a Config populated with sane out-of-the-box values.
 func defaults() *Config {
 	return &Config{
-		JavaEnabled:     true,
-		Host:            "0.0.0.0",
-		Port:            25565,
-		MOTD:            "A GoCraft Server",
-		MaxPlayers:      20,
-		VersionName:     "1.21.4",
-		ProtocolVersion: 769, // Minecraft Java Edition 1.21.4
-		OnlineMode:      false,
+		JavaEnabled:       true,
+		Host:              "0.0.0.0",
+		Port:              25565,
+		MOTD:              "A GoCraft Server",
+		MaxPlayers:        20,
+		VersionName:       "1.21.4",
+		ProtocolVersion:   769, // Minecraft Java Edition 1.21.4
+		OnlineMode:        false,
+		Villagers:         true,
+		ViewDistance:      8,
+		PreGenerateRadius: 12,
 		Bedrock: BedrockConfig{
 			Enabled:    false,
 			Address:    "0.0.0.0:19132",
@@ -118,10 +136,144 @@ func (c *Config) validate() error {
 	if c.MaxPlayers < 0 {
 		return errors.New("max_players must be >= 0")
 	}
+	if c.ViewDistance < 2 || c.ViewDistance > 32 {
+		return fmt.Errorf("view_distance %d is out of range 2-32", c.ViewDistance)
+	}
+	if c.PreGenerateRadius < c.ViewDistance || c.PreGenerateRadius > 64 {
+		return fmt.Errorf("pregenerate_radius %d must be between view_distance (%d) and 64", c.PreGenerateRadius, c.ViewDistance)
+	}
 	if c.Bedrock.Enabled && c.Bedrock.Address == "" {
 		return errors.New("bedrock.address must not be empty when bedrock is enabled")
 	}
 	return nil
+}
+
+// ApplyEnvOverrides reads well-known environment variables and overrides any
+// YAML values that are present.  Call this after Load() and before passing
+// Config to the server.  Validation is re-run after applying overrides so
+// an invalid combination (e.g. GOCRAFT_JAVA_PORT=0) is caught early.
+//
+// Environment variables (all optional; empty = no override):
+//
+//	GOCRAFT_JAVA_HOST         Java TCP bind host          (default: 0.0.0.0)
+//	GOCRAFT_JAVA_PORT         Java TCP port number        (default: 25565)
+//	GOCRAFT_JAVA_ENABLED      "true"/"false"              (default: true)
+//	GOCRAFT_ONLINE_MODE       Java auth required          (default: false)
+//	GOCRAFT_MOTD              Server MOTD string
+//	GOCRAFT_MAX_PLAYERS       Max concurrent players
+//	GOCRAFT_WORLD_DIR         Anvil world directory path
+//	GOCRAFT_WORLD_SEED        Signed 64-bit terrain seed
+//	GOCRAFT_VIEW_DISTANCE     Java chunk view radius        (default: 8)
+//	GOCRAFT_PREGENERATE_RADIUS Background generation radius (default: 12)
+//	GOCRAFT_BEDROCK_ENABLED   "true"/"false"              (default: false)
+//	GOCRAFT_BEDROCK_ADDR      Bedrock UDP address         (default: 0.0.0.0:19132)
+//	GOCRAFT_BEDROCK_ONLINE_MODE Xbox Live auth required   (default: true)
+func (c *Config) ApplyEnvOverrides() error {
+	if v := os.Getenv("GOCRAFT_JAVA_HOST"); v != "" {
+		c.Host = v
+	}
+	if v := os.Getenv("GOCRAFT_JAVA_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_JAVA_PORT %q: %w", v, err)
+		}
+		c.Port = n
+	}
+	if v := os.Getenv("GOCRAFT_JAVA_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_JAVA_ENABLED %q: %w", v, err)
+		}
+		c.JavaEnabled = b
+	}
+	if v := os.Getenv("GOCRAFT_ONLINE_MODE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_ONLINE_MODE %q: %w", v, err)
+		}
+		c.OnlineMode = b
+	}
+	if v := os.Getenv("GOCRAFT_MOTD"); v != "" {
+		c.MOTD = v
+	}
+	if v := os.Getenv("GOCRAFT_MAX_PLAYERS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_MAX_PLAYERS %q: %w", v, err)
+		}
+		c.MaxPlayers = n
+	}
+	if v := os.Getenv("GOCRAFT_WORLD_DIR"); v != "" {
+		c.WorldDir = v
+	}
+	if v := os.Getenv("GOCRAFT_WORLD_SEED"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_WORLD_SEED %q: %w", v, err)
+		}
+		c.WorldSeed = n
+	}
+	if v := os.Getenv("GOCRAFT_VIEW_DISTANCE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_VIEW_DISTANCE %q: %w", v, err)
+		}
+		c.ViewDistance = n
+	}
+	if v := os.Getenv("GOCRAFT_PREGENERATE_RADIUS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_PREGENERATE_RADIUS %q: %w", v, err)
+		}
+		c.PreGenerateRadius = n
+	}
+	if v := os.Getenv("GOCRAFT_BEDROCK_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_BEDROCK_ENABLED %q: %w", v, err)
+		}
+		c.Bedrock.Enabled = b
+	}
+	if v := os.Getenv("GOCRAFT_BEDROCK_ADDR"); v != "" {
+		c.Bedrock.Address = v
+	}
+	if v := os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_BEDROCK_ONLINE_MODE %q: %w", v, err)
+		}
+		c.Bedrock.OnlineMode = b
+	}
+
+	// Log any active overrides so operators can see what the container injected.
+	logEnvOverrides(c)
+
+	// Re-validate after overrides — env vars can produce invalid combinations.
+	return c.validate()
+}
+
+// logEnvOverrides logs which values were overridden by environment variables.
+func logEnvOverrides(c *Config) {
+	vars := []struct{ key, val string }{
+		{"GOCRAFT_JAVA_HOST", os.Getenv("GOCRAFT_JAVA_HOST")},
+		{"GOCRAFT_JAVA_PORT", os.Getenv("GOCRAFT_JAVA_PORT")},
+		{"GOCRAFT_JAVA_ENABLED", os.Getenv("GOCRAFT_JAVA_ENABLED")},
+		{"GOCRAFT_ONLINE_MODE", os.Getenv("GOCRAFT_ONLINE_MODE")},
+		{"GOCRAFT_MOTD", os.Getenv("GOCRAFT_MOTD")},
+		{"GOCRAFT_MAX_PLAYERS", os.Getenv("GOCRAFT_MAX_PLAYERS")},
+		{"GOCRAFT_WORLD_DIR", os.Getenv("GOCRAFT_WORLD_DIR")},
+		{"GOCRAFT_WORLD_SEED", os.Getenv("GOCRAFT_WORLD_SEED")},
+		{"GOCRAFT_VIEW_DISTANCE", os.Getenv("GOCRAFT_VIEW_DISTANCE")},
+		{"GOCRAFT_PREGENERATE_RADIUS", os.Getenv("GOCRAFT_PREGENERATE_RADIUS")},
+		{"GOCRAFT_BEDROCK_ENABLED", os.Getenv("GOCRAFT_BEDROCK_ENABLED")},
+		{"GOCRAFT_BEDROCK_ADDR", os.Getenv("GOCRAFT_BEDROCK_ADDR")},
+		{"GOCRAFT_BEDROCK_ONLINE_MODE", os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE")},
+	}
+	for _, v := range vars {
+		if v.val != "" {
+			slog.Info("config: env override applied", "var", v.key, "value", v.val)
+		}
+	}
 }
 
 // save marshals cfg to YAML and writes it to path, creating parent directories.

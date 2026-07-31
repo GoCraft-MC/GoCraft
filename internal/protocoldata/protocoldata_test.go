@@ -163,6 +163,7 @@ func TestReferencedPacketsResolve(t *testing.T) {
 		{"configuration", "serverbound", "minecraft:finish_configuration"},
 		{"configuration", "clientbound", "minecraft:custom_payload"},
 		{"configuration", "clientbound", "minecraft:finish_configuration"},
+		{"configuration", "clientbound", "minecraft:registry_data"},
 		{"configuration", "clientbound", "minecraft:update_enabled_features"},
 		{"configuration", "clientbound", "minecraft:update_tags"},
 		{"configuration", "clientbound", "minecraft:select_known_packs"},
@@ -231,6 +232,68 @@ func TestReferencedPacketsResolve(t *testing.T) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// TestProtocol769PlayPacketIDs pins every implemented Play packet to the
+// protocol-769 mapper in PrismarineJS minecraft-data data/pc/1.21.4/protocol.json.
+// In particular, level_chunk_with_light is 0x28; 0x27 is keep_alive.
+func TestProtocol769PlayPacketIDs(t *testing.T) {
+	tests := []struct {
+		direction string
+		name      string
+		want      int32
+	}{
+		{"clientbound", "minecraft:bundle_delimiter", 0x00},
+		{"clientbound", "minecraft:spawn_entity", 0x01},
+		{"clientbound", "minecraft:acknowledge_block_change", 0x05},
+		{"clientbound", "minecraft:block_update", 0x09},
+		{"clientbound", "minecraft:commands", 0x11},
+		{"clientbound", "minecraft:set_container_content", 0x13},
+		{"clientbound", "minecraft:disconnect", 0x1d},
+		{"clientbound", "minecraft:forget_level_chunk", 0x22},
+		{"clientbound", "minecraft:game_event", 0x23},
+		{"clientbound", "minecraft:keep_alive", 0x27},
+		{"clientbound", "minecraft:level_chunk_with_light", 0x28},
+		{"clientbound", "minecraft:login", 0x2c},
+		{"clientbound", "minecraft:player_abilities", 0x3a},
+		{"clientbound", "minecraft:player_info_remove", 0x3f},
+		{"clientbound", "minecraft:player_info_update", 0x40},
+		{"clientbound", "minecraft:player_position", 0x42},
+		{"clientbound", "minecraft:remove_entities", 0x47},
+		{"clientbound", "minecraft:rotate_head", 0x4d},
+		{"clientbound", "minecraft:set_chunk_cache_center", 0x58},
+		{"clientbound", "minecraft:set_default_spawn_position", 0x5b},
+		{"clientbound", "minecraft:set_held_slot", 0x63},
+		{"clientbound", "minecraft:system_chat", 0x73},
+		{"clientbound", "minecraft:teleport_entity", 0x77},
+		{"serverbound", "minecraft:accept_teleportation", 0x00},
+		{"serverbound", "minecraft:chat_command", 0x05},
+		{"serverbound", "minecraft:chat", 0x07},
+		{"serverbound", "minecraft:keep_alive", 0x1a},
+		{"serverbound", "minecraft:move_player_pos", 0x1c},
+		{"serverbound", "minecraft:move_player_pos_rot", 0x1d},
+		{"serverbound", "minecraft:move_player_rot", 0x1e},
+		{"serverbound", "minecraft:move_player_status_only", 0x1f},
+		{"serverbound", "minecraft:player_action", 0x27},
+		{"serverbound", "minecraft:set_carried_item", 0x33},
+		{"serverbound", "minecraft:set_creative_mode_slot", 0x36},
+		{"serverbound", "minecraft:use_item_on", 0x3c},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(fmt.Sprintf("%s/%s", tc.direction, tc.name), func(t *testing.T) {
+			var got int32
+			if tc.direction == "clientbound" {
+				got = protocoldata.MustCB("play", tc.name)
+			} else {
+				got = protocoldata.MustSB("play", tc.name)
+			}
+			if got != tc.want {
+				t.Fatalf("protocol 769 packet ID = 0x%02x, want 0x%02x", got, tc.want)
+			}
+		})
+	}
+}
 
 func mustParseStateFile(t *testing.T, state string) stateFileRaw {
 	t.Helper()

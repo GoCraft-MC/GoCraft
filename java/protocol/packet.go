@@ -75,27 +75,33 @@ func ReadPacket(r io.Reader) (*Packet, error) {
 //	VarInt  packetID
 //	[]byte  data
 func WritePacket(w io.Writer, pkt *Packet) error {
+	frame, err := MarshalPacket(pkt)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(frame)
+	return err
+}
+
+// MarshalPacket returns the complete uncompressed protocol frame:
+// VarInt frame length, VarInt packet ID, then the packet payload.
+func MarshalPacket(pkt *Packet) ([]byte, error) {
 	// Encode the packet ID first so we know its byte width.
 	var idBuf bytes.Buffer
 	if err := WriteVarInt(&idBuf, pkt.ID); err != nil {
-		return fmt.Errorf("packet: encoding packet ID: %w", err)
+		return nil, fmt.Errorf("packet: encoding packet ID: %w", err)
 	}
 
 	totalLen := int32(idBuf.Len() + len(pkt.Data))
 
-	// Assemble the full frame in a local buffer, then write in one shot
-	// to avoid partial writes on the TCP stream.
 	var frame bytes.Buffer
 	frame.Grow(VarIntSize(totalLen) + int(totalLen))
-
 	if err := WriteVarInt(&frame, totalLen); err != nil {
-		return fmt.Errorf("packet: encoding length: %w", err)
+		return nil, fmt.Errorf("packet: encoding length: %w", err)
 	}
 	frame.Write(idBuf.Bytes())
 	frame.Write(pkt.Data)
-
-	_, err := w.Write(frame.Bytes())
-	return err
+	return frame.Bytes(), nil
 }
 
 // Builder is a helper for constructing a packet's Data field incrementally.

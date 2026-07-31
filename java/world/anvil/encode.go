@@ -3,6 +3,7 @@ package anvil
 import (
 	"bytes"
 	"math/bits"
+	"sort"
 
 	coreworld "GoCraft/core/world"
 )
@@ -44,6 +45,19 @@ func encodeChunkNBT(c *coreworld.Chunk) []byte {
 		encodeSectionPayload(&buf, sIdx, sec)
 	}
 
+	// Heightmaps are required for tool compatibility and are recomputed from
+	// the canonical block columns rather than copied from a generator preset.
+	packedHeightmap := packChunkHeightmap(c)
+	writeCompoundOpen(&buf, "Heightmaps")
+	writeTagLongArray(&buf, "MOTION_BLOCKING", packedHeightmap)
+	writeTagLongArray(&buf, "WORLD_SURFACE", packedHeightmap)
+	writeCompoundEnd(&buf)
+
+	// Persist the complete opaque block-entity payload alongside its canonical
+	// Java type and absolute position.
+	writeNamedHeader(&buf, tagList, "block_entities")
+	writePayload(&buf, blockEntitiesTag(c.BlockEntities))
+
 	// Close root compound.
 	writeCompoundEnd(&buf)
 
@@ -66,9 +80,9 @@ func encodeSectionPayload(buf *bytes.Buffer, sIdx int, sec *coreworld.Section) {
 	encodeBlockStates(buf, sec)
 	writeCompoundEnd(buf)
 
-	// biomes TAG_Compound (minimal — single biome for the whole section)
+	// biomes TAG_Compound (full 4x4x4 paletted container)
 	writeCompoundOpen(buf, "biomes")
-	writeBiomes(buf, sec.Biome)
+	writeBiomes(buf, sec)
 	writeCompoundEnd(buf)
 
 	// Close the section compound.
@@ -113,10 +127,15 @@ func encodePaletteEntry(buf *bytes.Buffer, blk coreworld.Block) {
 	writeTagString(buf, "Name", blk.ResourceLocation())
 
 	if len(blk.Properties) > 0 {
-		// Properties TAG_Compound: each property is a named TAG_String.
+		// Sort property names for deterministic fixtures and region diffs.
 		writeCompoundOpen(buf, "Properties")
-		for k, v := range blk.Properties {
-			writeTagString(buf, k, v)
+		keys := make([]string, 0, len(blk.Properties))
+		for key := range blk.Properties {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			writeTagString(buf, key, blk.Properties[key])
 		}
 		writeCompoundEnd(buf)
 	}
@@ -125,13 +144,25 @@ func encodePaletteEntry(buf *bytes.Buffer, blk coreworld.Block) {
 	writeCompoundEnd(buf)
 }
 
-// writeBiomes writes a minimal biomes section: a single-entry palette mapping
-// the whole section to one biome resource location.
-func writeBiomes(buf *bytes.Buffer, biome string) {
-	if biome == "" {
-		biome = "minecraft:plains"
+// writeBiomes serialises the section's 4x4x4 biome paletted container.
+func writeBiomes(buf *bytes.Buffer, section *coreworld.Section) {
+	palette := section.BiomePalette()
+	data := section.BiomeData()
+	writeListHeader(buf, "palette", tagString, len(palette))
+	for _, biome := range palette {
+		writeMUTF8(buf, biome)
 	}
-	writeListHeader(buf, "palette", tagString, 1)
-	writeMUTF8(buf, biome)
-	// No "data" array needed for a single-entry palette.
+	if len(palette) <= 1 {
+		return
+	}
+	bitsPerEntry := max(1, bits.Len(uint(len(palette)-1)))
+	entriesPerLong := 64 / bitsPerEntry
+	numLongs := (64 + entriesPerLong - 1) / entriesPerLong
+	longs := make([]int64, numLongs)
+	for cell, value := range data {
+		longIndex := cell / entriesPerLong
+		bitOffset := (cell % entriesPerLong) * bitsPerEntry
+		longs[longIndex] |= int64(value) << bitOffset
+	}
+	writeTagLongArray(buf, "data", longs)
 }

@@ -60,6 +60,15 @@ func buildSpawnMob(e *corentity.Entity) (*protocol.Packet, bool) {
 
 // buildTeleportMob constructs a Teleport Entity packet for a non-player entity.
 // Uses the same packet ID and layout as buildTeleportEntity (players).
+//
+// Wire layout (1.21.4 teleport_entity / entity_position_sync):
+//
+//	VarInt  entity_id
+//	Double  x, y, z
+//	Double  velocity_x, velocity_y, velocity_z
+//	Float   yaw   (4-byte float, same as player teleport)
+//	Float   pitch (4-byte float, same as player teleport)
+//	Bool    on_ground
 func buildTeleportMob(e *corentity.Entity) *protocol.Packet {
 	return protocol.NewBuilder(packetIDTeleportEntity).
 		VarInt(e.EntityID).
@@ -71,6 +80,7 @@ func buildTeleportMob(e *corentity.Entity) *protocol.Packet {
 		Double(e.VZ).
 		Float(e.Yaw).
 		Float(e.Pitch).
+		Int(0). // relative movement flags
 		Bool(e.OnGround).
 		Build()
 }

@@ -6,6 +6,7 @@
   "clientbound": {
     "minecraft:custom_payload":            1,
     "minecraft:finish_configuration":      3,
+    "minecraft:registry_data":             7,
     "minecraft:update_enabled_features":   12,
     "minecraft:update_tags":               13,
     "minecraft:select_known_packs":        14

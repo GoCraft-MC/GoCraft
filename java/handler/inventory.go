@@ -15,7 +15,7 @@ package handler
 // Creative Mode Set Item packets are fully framed — unread component bytes are
 // dropped at packet end, so partial reads are safe and don't desync the stream.
 //
-// All packet IDs are estimates for 1.21.4 (protocol 769).
+// Packet IDs are resolved from the protocol-769 data table.
 
 import (
 	"fmt"
@@ -104,8 +104,8 @@ func handleCreativeModeSetItem(pkt *protocol.Packet, p *player.Player) error {
 	// Map numeric item type to a canonical resource location.
 	itemName := javaworld.ItemName(itemType)
 	if itemName == "" {
-		// Item not in our partial table — store a placeholder so at least the
-		// count is tracked.  Placement will be skipped for unknown items.
+		// Unknown numeric IDs are retained as placeholders. This should only
+		// occur when the client and embedded registry versions disagree.
 		itemName = fmt.Sprintf("unknown:%d", itemType)
 		slog.Debug("creative set item: unknown item type",
 			"player", p.Username, "type", itemType, "slot", slot)
@@ -134,8 +134,8 @@ func handleCreativeModeSetItem(pkt *protocol.Packet, p *player.Player) error {
 // Each non-empty Slot is: VarInt(count) VarInt(item_type) VarInt(0) VarInt(0).
 func sendSetContainerContent(conn *network.ClientConn, p *player.Player, stateID int32) error {
 	b := protocol.NewBuilder(packetIDSetContainerContent).
-		VarInt(0).        // container_id: 0 = player inventory
-		VarInt(stateID).  // state_id
+		VarInt(0).       // container_id: 0 = player inventory
+		VarInt(stateID). // state_id
 		VarInt(player.InventorySize)
 
 	for i := 0; i < player.InventorySize; i++ {

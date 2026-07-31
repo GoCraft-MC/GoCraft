@@ -34,9 +34,9 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/sandertv/gophertunnel/minecraft/text"
 
+	bedrockworld "GoCraft/bedrock/world"
 	"GoCraft/config"
 	"GoCraft/core/intent"
-	bedrockworld "GoCraft/bedrock/world"
 )
 
 // Listener wraps a gophertunnel minecraft.Listener and manages Bedrock client
@@ -141,20 +141,37 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 
 	// ── Step 2: request world entry via the simulation ────────────────────────
 	done := make(chan intent.JoinResult, 1)
-	l.bus.PostJoin(intent.JoinIntent{
+	joinCtx, joinCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer joinCancel()
+
+	if err := l.bus.PostJoin(joinCtx, intent.JoinIntent{
 		PlayerUUID:      playerUUID,
 		Username:        identity.DisplayName,
 		Edition:         "bedrock",
 		TrustedIdentity: authenticated,
 		Done:            done,
-	})
+	}); err != nil {
+		// ctx cancelled (server shutting down) or 10 s posting timeout.
+		slog.Warn("bedrock: PostJoin failed; dropping connection",
+			"remote", remote, "displayName", identity.DisplayName, "err", err)
+		_ = gt.Disconnect(conn, text.Colourf("<yellow>Server timed out. Please reconnect.</yellow>"))
+		return
+	}
 
 	var result intent.JoinResult
 	select {
 	case result = <-done:
+		// Join was processed by the tick goroutine.
 	case <-time.After(10 * time.Second):
-		slog.Warn("bedrock: JoinIntent timed out; dropping connection",
+		// The intent was queued but the tick goroutine did not respond in time.
+		// Post a DisconnectIntent so the tick cleans up the player if it was
+		// already added (lifecycle channel is FIFO, so disconnect follows join).
+		slog.Warn("bedrock: JoinResult timed out; posting cleanup disconnect",
 			"remote", remote, "displayName", identity.DisplayName)
+		_ = l.bus.PostDisconnect(ctx, intent.DisconnectIntent{
+			PlayerUUID: playerUUID,
+			Reason:     "join response timeout",
+		})
 		_ = gt.Disconnect(conn, text.Colourf("<yellow>Server timed out. Please reconnect.</yellow>"))
 		return
 	case <-ctx.Done():
@@ -168,7 +185,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 	}
 
 	defer func() {
-		l.bus.PostDisconnect(intent.DisconnectIntent{
+		_ = l.bus.PostDisconnect(ctx, intent.DisconnectIntent{
 			PlayerUUID: playerUUID,
 			Reason:     "connection closed",
 		})
@@ -215,9 +232,12 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 	l.playLoop(ctx, conn, playerUUID, identity.DisplayName)
 }
 
-// sendInitialChunks sends LevelChunk "fence" packets for a square of chunks
-// around the spawn position, requesting sub-chunks on demand from the client.
+// sendInitialChunks sends LevelChunk packets for a square of chunks around the
+// spawn position, using SubChunkRequestModeLimitless so the client requests
+// block sub-chunks on demand.  Each packet carries the minimum valid biome
+// payload (24 sub-chunks of plains biome data + border block count of 0).
 func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius int32) error {
+	biomePayload := bedrockworld.EncodeLevelChunkPayload()
 	for dx := -radius; dx <= radius; dx++ {
 		for dz := -radius; dz <= radius; dz++ {
 			if err := conn.WritePacket(&packet.LevelChunk{
@@ -225,10 +245,7 @@ func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius int32)
 				Dimension:     0, // overworld
 				SubChunkCount: protocol.SubChunkRequestModeLimitless,
 				CacheEnabled:  false,
-				// RawPayload: border blocks + biome data.
-				// M14.1 placeholder: single byte (varint 0 = 0 border blocks).
-				// Full biome encoding is deferred to M14.2.
-				RawPayload: []byte{0x00},
+				RawPayload:    biomePayload,
 			}); err != nil {
 				return fmt.Errorf("sendInitialChunks: %w", err)
 			}

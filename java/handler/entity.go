@@ -57,8 +57,8 @@ func buildSpawnPlayer(p *player.Player) *protocol.Packet {
 		Byte(degToAngle(p.Rotation.Pitch)).
 		Byte(degToAngle(p.Rotation.Yaw)).
 		Byte(degToAngle(p.Rotation.Yaw)). // head yaw = body yaw at spawn
-		VarInt(0). // data
-		Short(0).Short(0).Short(0). // velocity x, y, z
+		VarInt(0).                        // data
+		Short(0).Short(0).Short(0).       // velocity x, y, z
 		Build()
 }
 
@@ -88,7 +88,7 @@ func buildPlayerInfoUpdatePkt(p *player.Player) *protocol.Packet {
 		VarInt(1).
 		UUID(protocol.UUID(p.UUID)).
 		String(p.Username).VarInt(0). // name + 0 skin properties
-		Bool(true). // listed in tab
+		Bool(true).                   // listed in tab
 		Build()
 
 }
@@ -112,6 +112,7 @@ func buildTeleportEntity(p *player.Player) *protocol.Packet {
 		Double(0).Double(0).Double(0). // velocity
 		Float(p.Rotation.Yaw).
 		Float(p.Rotation.Pitch).
+		Int(0). // relative movement flags
 		Bool(p.OnGround).
 		Build()
 }

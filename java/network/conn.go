@@ -31,6 +31,23 @@ const (
 	StatePlay
 )
 
+func (s State) String() string {
+	switch s {
+	case StateHandshaking:
+		return "handshaking"
+	case StateStatus:
+		return "status"
+	case StateLogin:
+		return "login"
+	case StateConfiguration:
+		return "configuration"
+	case StatePlay:
+		return "play"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(s))
+	}
+}
+
 const (
 	// readDeadline is the maximum idle time before a connection is closed.
 	readDeadline = 30 * time.Second
@@ -55,6 +72,8 @@ type ClientConn struct {
 
 	State State
 
+	compressionEnabled bool
+
 	writeMu   sync.Mutex
 	closeOnce sync.Once
 }
@@ -72,6 +91,13 @@ func NewClientConn(conn net.Conn) *ClientConn {
 // RemoteAddr returns the remote address of the underlying TCP connection.
 func (c *ClientConn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
+}
+
+// CompressionEnabled reports whether Set Compression has activated compressed
+// packet framing. GoCraft currently never sends Set Compression, so this stays
+// false and every packet uses the uncompressed frame format.
+func (c *ClientConn) CompressionEnabled() bool {
+	return c.compressionEnabled
 }
 
 // ReadPacket reads the next packet from the connection.

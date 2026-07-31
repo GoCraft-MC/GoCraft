@@ -30,6 +30,7 @@
 package intent
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -103,7 +104,7 @@ type ChatIntent struct {
 // moves the player and triggers chunk streaming as needed.
 type TeleportIntent struct {
 	PlayerUUID [16]byte
-	X, Y, Z   float64
+	X, Y, Z    float64
 }
 
 // Implement sealed interfaces.
@@ -118,7 +119,7 @@ func (TeleportIntent) isGameplay()    {}
 // Construct with NewBus; do not copy after first use.
 type Bus struct {
 	lifecycle       chan LifecycleIntent
-	moves           sync.Map       // map[[16]byte]MoveIntent, latest wins
+	moves           sync.Map // map[[16]byte]MoveIntent, latest wins
 	gameplay        chan GameplayIntent
 	droppedGameplay atomic.Int64
 }
@@ -135,29 +136,40 @@ func NewBus(lifecycleCapacity, gameplayCapacity int) *Bus {
 	}
 }
 
-// PostJoin submits a JoinIntent. Blocks if the lifecycle channel is full.
+// PostJoin submits a JoinIntent and blocks until the intent is queued or ctx
+// is cancelled.  Returns ctx.Err() if the context expires before the intent
+// can be queued.
 //
-// Because JoinIntents are rare (one per player login) and must not be dropped,
-// blocking is intentional. Callers should hold a context timeout to avoid
-// indefinite blocking when the simulation is stalled:
+// Because JoinIntents are rare (one per player login) and must not be silently
+// dropped, blocking is intentional.  Callers must always supply a context with
+// a deadline to avoid blocking forever when the tick goroutine is stalled:
 //
-//	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+//	ctx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
 //	defer cancel()
-//	select {
-//	case bus.Lifecycle() <- i:
-//	case <-ctx.Done():
-//	    return ctx.Err()
-//	}
-//
-// Use PostJoin for convenience when no timeout handling is needed.
-func (b *Bus) PostJoin(i JoinIntent) {
-	b.lifecycle <- i
+//	if err := bus.PostJoin(ctx, intent); err != nil { … }
+func (b *Bus) PostJoin(ctx context.Context, i JoinIntent) error {
+	select {
+	case b.lifecycle <- i:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
-// PostDisconnect submits a DisconnectIntent. Blocks if the channel is full.
-// Never silently drops.
-func (b *Bus) PostDisconnect(i DisconnectIntent) {
-	b.lifecycle <- i
+// PostDisconnect submits a DisconnectIntent and blocks until queued or ctx is
+// cancelled.  Returns ctx.Err() on cancellation.
+//
+// Disconnect intents must not be silently dropped — a missed disconnect leaves
+// a ghost player in the game core.  Callers should pass the server context
+// (which has a very long or no deadline) to avoid spurious drops, and reserve
+// short deadlines for tests.
+func (b *Bus) PostDisconnect(ctx context.Context, i DisconnectIntent) error {
+	select {
+	case b.lifecycle <- i:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // UpdateMove stores the latest position for a player. If a move for this

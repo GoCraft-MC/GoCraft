@@ -27,6 +27,24 @@ func EncodeHeightmaps(surfaceY int) []byte {
 	return buf.Bytes()
 }
 
+// EncodeChunkHeightmaps derives both required heightmaps from the actual block
+// columns in c. This supports generated hills, oceans, and loaded Anvil chunks.
+func EncodeChunkHeightmaps(c *coreworld.Chunk) []byte {
+	var surfaceYs [256]int
+	for z := 0; z < coreworld.SectionSize; z++ {
+		for x := 0; x < coreworld.SectionSize; x++ {
+			surfaceYs[z*coreworld.SectionSize+x] = c.HighestBlockY(x, z)
+		}
+	}
+	longs := packHeightmapValues(surfaceYs)
+	var buf bytes.Buffer
+	writeNetworkNBTCompound(&buf, func(w io.Writer) {
+		writeNBTLongArray(w, "MOTION_BLOCKING", longs)
+		writeNBTLongArray(w, "WORLD_SURFACE", longs)
+	})
+	return buf.Bytes()
+}
+
 // EncodeChunk converts a canonical Chunk into the raw byte slice that is sent
 // as the Data (VarInt-prefixed ByteArray) field of Level Chunk With Light.
 //
@@ -45,18 +63,71 @@ func EncodeChunk(c *coreworld.Chunk) []byte {
 
 // encodeSection writes one 16×16×16 section into buf.
 func encodeSection(buf *bytes.Buffer, sec *coreworld.Section) {
-	if sec == nil || sec.NonAir == 0 {
-		// All-air section: block count = 0, single-value air, single-value biome.
+	if sec == nil {
 		writeInt16BE(buf, 0)
-		writeSingleValue(buf, 0) // air state ID = 0
-		writeSingleValue(buf, BiomeID("minecraft:plains")) // air sections use plains biome
+		writeSingleValue(buf, 0)
+		writeSingleValue(buf, BiomeID("minecraft:plains"))
 		return
 	}
 
-	// Non-trivial section.
 	writeInt16BE(buf, sec.NonAir)
-	writeBlockStates(buf, sec)
-	writeSingleValue(buf, BiomeID(sec.Biome)) // per-section biome
+	if sec.NonAir == 0 {
+		writeSingleValue(buf, 0)
+	} else {
+		writeBlockStates(buf, sec)
+	}
+	writeBiomeStates(buf, sec)
+}
+
+// writeBiomeStates encodes the section's real 4x4x4 biome container. Java
+// permits an indirect palette up to 3 bits; larger palettes use 6-bit global
+// biome IDs directly.
+func writeBiomeStates(buf *bytes.Buffer, sec *coreworld.Section) {
+	palette := sec.BiomePalette()
+	data := sec.BiomeData()
+	if len(palette) <= 1 {
+		writeSingleValue(buf, BiomeID(palette[0]))
+		return
+	}
+
+	bitsPerEntry := bitsNeeded(len(palette))
+	if bitsPerEntry < 1 {
+		bitsPerEntry = 1
+	}
+	values := make([]int32, 64)
+	if bitsPerEntry <= 3 {
+		buf.WriteByte(byte(bitsPerEntry))
+		writeVarInt(buf, int32(len(palette)))
+		for _, biome := range palette {
+			writeVarInt(buf, BiomeID(biome))
+		}
+		for i, paletteIndex := range data {
+			values[i] = int32(paletteIndex)
+		}
+	} else {
+		bitsPerEntry = 6
+		buf.WriteByte(byte(bitsPerEntry))
+		for i, paletteIndex := range data {
+			if int(paletteIndex) >= len(palette) {
+				paletteIndex = 0
+			}
+			values[i] = BiomeID(palette[paletteIndex])
+		}
+	}
+
+	entriesPerLong := 64 / bitsPerEntry
+	dataLen := (64 + entriesPerLong - 1) / entriesPerLong
+	writeVarInt(buf, int32(dataLen))
+	var longBuf [8]byte
+	for longIndex := 0; longIndex < dataLen; longIndex++ {
+		var packed uint64
+		base := longIndex * entriesPerLong
+		for entry := 0; entry < entriesPerLong && base+entry < 64; entry++ {
+			packed |= uint64(values[base+entry]) << (entry * bitsPerEntry)
+		}
+		binary.BigEndian.PutUint64(longBuf[:], packed)
+		buf.Write(longBuf[:])
+	}
 }
 
 // writeSingleValue encodes a single-value PalettedContainer:
