@@ -1,16 +1,16 @@
 package handler
 
 import (
-	`testing`
+	"testing"
 
-	`GoCraft/core/player`
-	`GoCraft/java/session`
+	"GoCraft/core/player"
+	"GoCraft/java/session"
 )
 
 func TestAdministrativeCommandsRequireOperator(t *testing.T) {
 	dispatcher := NewDispatcher()
 	RegisterBuiltins(dispatcher)
-	for _, name := range []string{`gamemode`, `tp`, `give`, `kill`, `fly`, `god`, `ungod`, `heal`, `effect`} {
+	for _, name := range []string{`gamemode`, `tp`, `tphere`, `give`, `kill`, `fly`, `god`, `ungod`, `heal`, `effect`} {
 		command, ok := dispatcher.cmds[name]
 		if !ok {
 			t.Errorf(`administrative command %q is not registered`, name)

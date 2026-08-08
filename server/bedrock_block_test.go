@@ -59,11 +59,19 @@ func TestBedrockPlayerStateAcceptsSurvivalSprintButRejectsFlight(t *testing.T) {
 		State:      intent.PlayerStateFlying,
 		Enabled:    true,
 	})
+	s.applyBedrockPlayerState(intent.PlayerStateIntent{
+		PlayerUUID: p.UUID,
+		State:      intent.PlayerStateSneaking,
+		Enabled:    true,
+	})
 	if !p.Sprinting {
 		t.Fatal(`Bedrock sprint transition was not accepted`)
 	}
 	if p.Flying {
 		t.Fatal(`survival Bedrock player was allowed to fly`)
+	}
+	if !p.Sneaking {
+		t.Fatal(`Bedrock sneak transition was not accepted`)
 	}
 }
 

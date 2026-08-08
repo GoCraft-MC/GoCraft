@@ -79,16 +79,13 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 
 	// BFS propagation: iterate until stable (no more changes).
 	var result RedstoneResult
-	visited := make(map[[3]int]struct{})
 	queue := positions
+	processed := 0
 
-	for len(queue) > 0 {
+	for len(queue) > 0 && processed < 65536 {
 		pos := queue[0]
 		queue = queue[1:]
-		if _, seen := visited[pos]; seen {
-			continue
-		}
-		visited[pos] = struct{}{}
+		processed++
 
 		x, y, z := pos[0], pos[1], pos[2]
 		block := re.world.GetBlock(x, y, z)
@@ -117,9 +114,7 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 				result.PoweredLoads = append(result.PoweredLoads, pos)
 			}
 			for _, nb := range neighbors6(x, y, z) {
-				if _, seen := visited[nb]; !seen {
-					queue = append(queue, nb)
-				}
+				queue = append(queue, nb)
 			}
 		} else {
 			re.mu.Unlock()
@@ -202,7 +197,9 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		return 0
 
 	default:
-		// Solid blocks carry strong power if directly adjacent to a source.
+		// Loads and solid blocks accept both direct source power and power
+		// carried by dust/repeaters. Without the conductor branch, a lamp next
+		// to powered wire would never light even though the wire state changed.
 		best := 0
 		for _, nb := range neighbors6(x, y, z) {
 			nbBlock := re.world.GetBlock(nb[0], nb[1], nb[2])
@@ -210,6 +207,10 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 			if IsRedstoneSource(nbName) {
 				p := re.powerFromSource(nb[0], nb[1], nb[2], nbBlock)
 				if p > best {
+					best = p
+				}
+			} else if IsRedstoneConductor(nbName) {
+				if p := re.PowerAt(nb[0], nb[1], nb[2]); p > best {
 					best = p
 				}
 			}
@@ -245,8 +246,13 @@ func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 		if strings.HasSuffix(name, "_button") && block.Properties["powered"] == "true" {
 			return 15
 		}
-		if strings.HasSuffix(name, "_pressure_plate") && block.Properties["powered"] == "true" {
-			return 15
+		if strings.HasSuffix(name, "_pressure_plate") {
+			if block.Properties["powered"] == "true" {
+				return 15
+			}
+			if power := atoi(block.Properties["power"]); power > 0 {
+				return power
+			}
 		}
 	}
 	return 0
@@ -346,6 +352,17 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return s
+}
+
+func atoi(value string) int {
+	n := 0
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }
 
 func orDefault(s, def string) string {

@@ -352,7 +352,37 @@ func New(cfg *config.Config) (*Server, error) {
 		})
 		worldInstance.SetBlockObserver(s.bedrockListener.BroadcastBlockChange)
 	}
+	cmds.SetPlayerTeleporter(s.teleportPlayer)
 	return s, nil
+}
+
+// teleportPlayer routes a command teleport through the adapter that owns the
+// target player. This keeps Java chunk tracking and Bedrock authoritative
+// movement state in sync for cross-edition commands.
+func (s *Server) teleportPlayer(target *player.Player, x, y, z float64) error {
+	if target == nil {
+		return fmt.Errorf("target player is unavailable")
+	}
+	position := spatial.Vec3{X: x, Y: y, Z: z}
+	switch target.Edition {
+	case player.ClientEditionJava:
+		targetSession, ok := s.sessions.Get(target.UUID)
+		if !ok || targetSession.TeleportTo == nil {
+			return fmt.Errorf("Java player session is unavailable")
+		}
+		return targetSession.TeleportTo(x, y, z)
+	case player.ClientEditionBedrock:
+		if s.bedrockListener == nil {
+			return fmt.Errorf("Bedrock player session is unavailable")
+		}
+		target.Position = position
+		target.FallDistance = 0
+		target.OnGround = false
+		s.bedrockListener.TeleportPlayer(target, position, uint64(s.worldAge))
+		return nil
+	default:
+		return fmt.Errorf("unsupported player edition")
+	}
 }
 
 // Run starts the server and blocks until ctx is cancelled or a fatal error occurs.
@@ -706,6 +736,8 @@ func (s *Server) applyBedrockPlayerState(i intent.PlayerStateIntent) {
 	case intent.PlayerStateFlying:
 		allowed := p.AllowFlying || p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator
 		p.Flying = allowed && i.Enabled
+	case intent.PlayerStateSneaking:
+		p.Sneaking = i.Enabled
 	}
 }
 
@@ -1017,6 +1049,10 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			s.world.SetBlock(x, partnerY, z, coreworld.Air)
 			handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: partnerY, Z: z, Block: coreworld.Air}, s.sessions)
 		}
+		s.breakBedrockLinkedBlock(x, y, z, block)
+		if block.ResourceLocation() == "minecraft:redstone_wire" {
+			s.refreshBedrockWireConnections(x, y, z)
+		}
 		if p.GameMode != player.GameModeCreative {
 			drop := player.ItemStack{ItemID: block.ResourceLocation(), Count: 1}
 			if !p.GiveItem(drop) {
@@ -1028,14 +1064,23 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 	case intent.BlockActionUse:
 		held := p.HeldItem()
 		clicked := s.world.GetBlock(x, y, z)
-		if s.bedrockListener != nil {
+		// Item behaviour has priority over the clicked block, matching vanilla
+		// and Pumpkin (for example, a hoe tills dirt before placement is tried).
+		if s.applyBedrockItemAction(p, i, clicked) {
+			return
+		}
+		bypassActivation := p.Sneaking && !held.IsEmpty()
+		if !bypassActivation && s.applyBedrockBlockActivation(p, i.Position, clicked) {
+			return
+		}
+		if !bypassActivation && s.bedrockListener != nil {
 			if s.bedrockListener.OpenContainerBlock(p.UUID, int32(x), int32(y), int32(z), clicked.ResourceLocation()) {
 				p.OpenContainerKind = clicked.ResourceLocation()
 				p.OpenContainerID = 1
 				return
 			}
 		}
-		if strings.HasSuffix(clicked.ResourceLocation(), "_bed") {
+		if !bypassActivation && strings.HasSuffix(clicked.ResourceLocation(), "_bed") {
 			p.SpawnPoint = spatial.BlockPos{X: int32(x), Y: int32(y), Z: int32(z)}
 			p.HasSpawnPoint = true
 			if s.bedrockListener != nil {
@@ -1067,27 +1112,7 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			}
 			return
 		}
-		block, ok := placementBlockForItem(held.ItemID)
-		if !ok {
-			return
-		}
-		if !s.world.GetBlock(x, y, z).IsAir() {
-			dx, dy, dz := bedrockFaceOffset(i.Face)
-			x, y, z = x+dx, y+dy, z+dz
-		}
-		if y < coreworld.WorldMinY || y > coreworld.WorldMaxY || !s.world.GetBlock(x, y, z).IsAir() {
-			return
-		}
-		s.world.SetBlock(x, y, z, block)
-		change := coreworld.BlockChange{X: x, Y: y, Z: z, Block: block}
-		handler.BroadcastBlockChange(change, s.sessions)
-		if p.GameMode != player.GameModeCreative {
-			slot := player.HotbarStart + p.HeldSlot
-			p.Inventory[slot].Count--
-			if p.Inventory[slot].Count <= 0 {
-				p.Inventory[slot] = player.ItemStack{}
-			}
-		}
+		s.placeBedrockHeldBlock(p, i, clicked)
 	}
 }
 
@@ -1427,6 +1452,12 @@ func (s *Server) damageBedrockHeldItem(p *player.Player, amount int) {
 }
 
 func placementBlockForItem(itemID string) (coreworld.Block, bool) {
+	if itemID == "minecraft:redstone" {
+		itemID = "minecraft:redstone_wire"
+	}
+	if itemID == "minecraft:light_block" || strings.HasPrefix(itemID, "minecraft:light_block_") {
+		itemID = "minecraft:light"
+	}
 	parts := strings.SplitN(itemID, ":", 2)
 	if len(parts) != 2 || parts[0] != "minecraft" {
 		return coreworld.Block{}, false
@@ -3082,6 +3113,12 @@ func (s *Server) tickBlockPhysics() {
 			s.processFireUpdate(u.X, u.Y, u.Z, &blockChanges)
 		case coreworld.UpdateIce:
 			s.processIceUpdate(u.X, u.Y, u.Z, &blockChanges)
+		case coreworld.UpdateButton:
+			s.processButtonUpdate(u.X, u.Y, u.Z, &blockChanges)
+		case coreworld.UpdateComposter:
+			s.processComposterUpdate(u.X, u.Y, u.Z, &blockChanges)
+		case coreworld.UpdatePressurePlate:
+			s.processPressurePlateUpdate(u.X, u.Y, u.Z, &blockChanges)
 		}
 	}
 
@@ -3101,6 +3138,71 @@ func (s *Server) tickBlockPhysics() {
 	for _, bc := range blockChanges {
 		handler.BroadcastBlockChange(bc, s.sessions)
 	}
+}
+
+func (s *Server) processButtonUpdate(x, y, z int, changes *[]coreworld.BlockChange) {
+	block := s.world.GetBlock(x, y, z)
+	if !strings.HasSuffix(block.ResourceLocation(), "_button") || block.Properties["powered"] != "true" {
+		return
+	}
+	block = bedrockCopyBlock(block)
+	block.Properties["powered"] = "false"
+	s.world.SetBlock(x, y, z, block)
+	*changes = append(*changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: block})
+}
+
+func (s *Server) processComposterUpdate(x, y, z int, changes *[]coreworld.BlockChange) {
+	block := s.world.GetBlock(x, y, z)
+	if block.ResourceLocation() != "minecraft:composter" || block.Properties["level"] != "7" {
+		return
+	}
+	block = bedrockCopyBlock(block)
+	block.Properties["level"] = "8"
+	s.world.SetBlock(x, y, z, block)
+	*changes = append(*changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: block})
+}
+
+func (s *Server) processPressurePlateUpdate(x, y, z int, changes *[]coreworld.BlockChange) {
+	block := s.world.GetBlock(x, y, z)
+	name := block.ResourceLocation()
+	if !strings.HasSuffix(name, "_pressure_plate") {
+		return
+	}
+	occupants := 0
+	if s.game != nil {
+		s.game.OnlinePlayers(func(p *player.Player) {
+			if !p.Dead && p.GameMode != player.GameModeSpectator && p.Position.X >= float64(x) && p.Position.X < float64(x+1) &&
+				p.Position.Z >= float64(z) && p.Position.Z < float64(z+1) && p.Position.Y >= float64(y) && p.Position.Y < float64(y)+1.5 {
+				occupants++
+			}
+		})
+	}
+	for _, entity := range s.world.Entities.Snapshot() {
+		if entity.Position.X >= float64(x) && entity.Position.X < float64(x+1) && entity.Position.Z >= float64(z) &&
+			entity.Position.Z < float64(z+1) && entity.Position.Y >= float64(y) && entity.Position.Y < float64(y)+1.5 {
+			occupants++
+		}
+	}
+	replacement := bedrockCopyBlock(block)
+	changed := false
+	if name == "minecraft:light_weighted_pressure_plate" || name == "minecraft:heavy_weighted_pressure_plate" {
+		power := min(occupants, 15)
+		if name == "minecraft:heavy_weighted_pressure_plate" && occupants > 0 {
+			power = max(1, (occupants*15+149)/150)
+		}
+		next := strconv.Itoa(power)
+		changed = block.Properties["power"] != next
+		replacement.Properties["power"] = next
+	} else {
+		next := strconv.FormatBool(occupants > 0)
+		changed = block.Properties["powered"] != next
+		replacement.Properties["powered"] = next
+	}
+	if changed {
+		s.world.SetBlock(x, y, z, replacement)
+		*changes = append(*changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: replacement})
+	}
+	s.world.BlockPhysics.SchedulePressurePlate(x, y, z, s.worldAge, 2)
 }
 
 // processFallUpdate converts a gravity block to a FallingBlock entity if it

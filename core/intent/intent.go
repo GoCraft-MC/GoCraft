@@ -116,6 +116,9 @@ type BlockInteractIntent struct {
 	Position   spatial.BlockPos
 	Face       int32
 	HotbarSlot int32
+	ClickX     float32
+	ClickY     float32
+	ClickZ     float32
 }
 
 // ConsumeFoodIntent requests consumption of the currently selected Bedrock
@@ -154,6 +157,7 @@ type HotbarIntent struct {
 const (
 	PlayerStateSprinting uint8 = iota + 1
 	PlayerStateFlying
+	PlayerStateSneaking
 )
 
 // PlayerStateIntent carries a Bedrock movement-state transition that must be

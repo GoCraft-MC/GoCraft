@@ -3,9 +3,12 @@ package handler
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/player"
+	"GoCraft/core/spatial"
 	"GoCraft/java/protocol"
 )
 
@@ -20,7 +23,7 @@ func TestBuiltinsRegisterNavigationVersionAndSummonCommands(t *testing.T) {
 	RegisterBuiltins(dispatcher)
 
 	for _, name := range []string{
-		"gm", "tp", "xyz", "locate", "summon", "version", "ver",
+		"gm", "tp", "tphere", "xyz", "locate", "summon", "version", "ver",
 		"give", "get", "fly", "potioneffect", "walkspeed", "flyspeed",
 	} {
 		if _, ok := dispatcher.cmds[name]; !ok {
@@ -52,6 +55,46 @@ func TestVersionAliasesUseEditionNeutralReply(t *testing.T) {
 	}
 }
 
+func TestTpHereTeleportsCrossEditionTargetToOperator(t *testing.T) {
+	dispatcher := NewDispatcher()
+	issuer := player.New([16]byte{1}, "BedrockOp", player.ClientEditionBedrock)
+	issuer.Operator = true
+	issuer.Position = spatial.Vec3{X: 12.5, Y: 71, Z: -8.25}
+	target := player.New([16]byte{2}, "JavaTarget", player.ClientEditionJava)
+	dispatcher.SetPlayerFinder(func(name string) *player.Player {
+		if strings.EqualFold(name, target.Username) {
+			return target
+		}
+		return nil
+	})
+
+	var teleported *player.Player
+	var x, y, z float64
+	dispatcher.SetPlayerTeleporter(func(candidate *player.Player, tx, ty, tz float64) error {
+		teleported, x, y, z = candidate, tx, ty, tz
+		return nil
+	})
+	RegisterBuiltins(dispatcher)
+
+	var reply string
+	dispatcher.Dispatch("/tphere javatarget", CommandContext{
+		Player: issuer,
+		Reply: func(message string) error {
+			reply = message
+			return nil
+		},
+	})
+	if teleported != target {
+		t.Fatalf("teleported target = %p, want %p", teleported, target)
+	}
+	if x != issuer.Position.X || y != issuer.Position.Y || z != issuer.Position.Z {
+		t.Fatalf("teleport position = (%v, %v, %v), want %v", x, y, z, issuer.Position)
+	}
+	if reply != "Teleported JavaTarget to you" {
+		t.Fatalf("reply = %q", reply)
+	}
+}
+
 func TestEverySummonCompletionBuildsAJavaSpawnPacket(t *testing.T) {
 	for _, name := range summonableMobNames {
 		entity := corentity.New(1, [16]byte{}, corentity.EntityType("minecraft:"+name), 0, 64, 0)
@@ -72,12 +115,16 @@ func TestCommandsPacketTabCompletesLocateSummonAndVersion(t *testing.T) {
 
 	top := commandTestChildrenByName(t, nodes, nodes[root])
 	for _, name := range []string{
-		"gm", "tp", "xyz", "locate", "summon", "version", "ver",
+		"gm", "tp", "tphere", "xyz", "locate", "summon", "version", "ver",
 		"give", "get", "fly", "potioneffect", "walkspeed", "flyspeed",
 	} {
 		if _, ok := top[name]; !ok {
 			t.Errorf("top-level command %q is missing from tab completion", name)
 		}
+	}
+	tpHereTarget := commandTestChildrenByName(t, nodes, top["tphere"])["player"]
+	if tpHereTarget.flags&commandExecutable == 0 {
+		t.Error("/tphere <player> is not executable")
 	}
 
 	locate := top["locate"]

@@ -472,7 +472,22 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	// and the joiner can see existing players.
 	// Defers run LIFO: onPlayerLeave fires first (broadcasts while still in map),
 	// then Remove cleans up the map entry.
-	sess := &session.Session{Player: p, Conn: conn}
+	// Foreign command goroutines enqueue teleports here. The target's own play
+	// loop applies them so chunk maps and teleport-confirmation state remain
+	// single-threaded.
+	teleportRequests := make(chan spatial.Vec3, 8)
+	sess := &session.Session{
+		Player: p,
+		Conn:   conn,
+		TeleportTo: func(x, y, z float64) error {
+			select {
+			case teleportRequests <- spatial.Vec3{X: x, Y: y, Z: z}:
+				return nil
+			default:
+				return fmt.Errorf("player teleport queue is full")
+			}
+		},
+	}
 	mgr.Add(sess)
 	defer mgr.Remove(p.UUID)
 	defer onPlayerLeave(mgr, sess)
@@ -523,6 +538,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	teleportTo := func(x, y, z float64) error {
 		pendingRespawnChunks = nil
 		p.Position.X, p.Position.Y, p.Position.Z = x, y, z
+		p.FallDistance = 0
 		nextTeleportID++
 		if err := sendSyncPosition(conn, p, nextTeleportID); err != nil {
 			return fmt.Errorf("sync position: %w", err)
@@ -558,7 +574,6 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		lastChunkX, lastChunkZ = newCX, newCZ
 		return nil
 	}
-
 	// ── Keep-alive state ─────────────────────────────────────────────────────
 	var (
 		keepAliveSeq   atomic.Int64
@@ -572,6 +587,13 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 	// ── Main loop ────────────────────────────────────────────────────────────
 	for {
+		select {
+		case destination := <-teleportRequests:
+			if err := teleportTo(destination.X, destination.Y, destination.Z); err != nil {
+				return fmt.Errorf("play loop: applying queued teleport: %w", err)
+			}
+		default:
+		}
 		broadcastGeneratedEntities(w, mgr)
 		if len(pendingRespawnChunks) > 0 {
 			batchSize := 16

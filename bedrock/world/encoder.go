@@ -115,7 +115,7 @@ func (e *Encoder) resolve(block coreworld.Block) uint32 {
 		return 0
 	}
 
-	wanted := translateProperties(block.Properties)
+	wanted := translateBlockProperties(block)
 	best, bestScore := candidates[0], -1<<30
 	for _, candidate := range candidates {
 		score := stateScore(candidate.props, wanted)
@@ -147,7 +147,7 @@ func (e *Encoder) resolveState(block coreworld.Block) (string, map[string]any) {
 		return "minecraft:air", map[string]any{}
 	}
 
-	wanted := translateProperties(block.Properties)
+	wanted := translateBlockProperties(block)
 	best, bestScore := candidates[0], -1<<30
 	for _, candidate := range candidates {
 		score := stateScore(candidate.props, wanted)
@@ -168,16 +168,41 @@ func (e *Encoder) resolveState(block coreworld.Block) (string, map[string]any) {
 // stacked on top of each other. A single short_grass at the lower position is
 // the closest equivalent that renders consistently; the upper half is hidden.
 func bedrockVisualBlock(block coreworld.Block) coreworld.Block {
-	if block.ResourceLocation() != "minecraft:tall_grass" {
-		return block
+	switch block.ResourceLocation() {
+	case "minecraft:tall_grass":
+		if block.Properties["half"] == "upper" {
+			return coreworld.Air
+		}
+		return coreworld.Block{Namespace: "minecraft", Name: "short_grass"}
+	case "minecraft:light":
+		level, _ := strconv.Atoi(block.Properties["level"])
+		if level < 0 {
+			level = 0
+		} else if level > 15 {
+			level = 15
+		}
+		return coreworld.Block{Namespace: "minecraft", Name: "light_block_" + strconv.Itoa(level)}
+	case "minecraft:snow":
+		block.Name = "snow_layer"
+	case "minecraft:redstone_torch", "minecraft:redstone_wall_torch":
+		if block.Properties["lit"] == "false" {
+			block.Name = "unlit_redstone_torch"
+		}
 	}
-	if block.Properties["half"] == "upper" {
-		return coreworld.Air
-	}
-	return coreworld.Block{Namespace: "minecraft", Name: "short_grass"}
+	return block
 }
 
 func alternateBlockNames(name string) []string {
+	switch name {
+	case "minecraft:wall_torch":
+		return []string{"minecraft:torch"}
+	case "minecraft:soul_wall_torch":
+		return []string{"minecraft:soul_torch"}
+	case "minecraft:redstone_wall_torch":
+		return []string{"minecraft:redstone_torch"}
+	case "minecraft:snow_block":
+		return []string{"minecraft:snow"}
+	}
 	if strings.HasSuffix(name, `_bed`) {
 		return []string{`minecraft:bed`}
 	}
@@ -204,7 +229,8 @@ func alternateBlockNames(name string) []string {
 	return nil
 }
 
-func translateProperties(properties map[string]string) map[string]any {
+func translateBlockProperties(block coreworld.Block) map[string]any {
+	properties := block.Properties
 	out := make(map[string]any, len(properties)*2)
 	for key, raw := range properties {
 		value := propertyValue(raw)
@@ -217,8 +243,16 @@ func translateProperties(properties map[string]string) map[string]any {
 			if direction, ok := cardinalDirection(raw); ok {
 				out["direction"] = direction
 			}
+			if direction, ok := bedrockFacingDirection(raw); ok {
+				out["facing_direction"] = direction
+			}
 			if direction, ok := stairDirection(raw); ok {
 				out["weirdo_direction"] = direction
+			}
+			if raw == "up" {
+				out["torch_facing_direction"] = "top"
+			} else {
+				out["torch_facing_direction"] = raw
 			}
 		case "part":
 			out["head_piece_bit"] = boolByte(raw == "head")
@@ -228,9 +262,12 @@ func translateProperties(properties map[string]string) map[string]any {
 			out["open_bit"] = boolByte(raw == "true")
 		case "powered":
 			out["powered_bit"] = boolByte(raw == "true")
+			out["open_bit"] = boolByte(raw == "true")
+			out["button_pressed_bit"] = boolByte(raw == "true")
 		case "half":
 			out["upper_block_bit"] = boolByte(raw == "upper")
 			out["vertical_half"] = raw
+			out["upside_down_bit"] = boolByte(raw == "top")
 		case "hinge":
 			out["door_hinge_bit"] = boolByte(raw == "right")
 		case "type":
@@ -246,10 +283,70 @@ func translateProperties(properties map[string]string) map[string]any {
 			out["moisturized_amount"] = intProperty(raw)
 		case "level":
 			out["liquid_depth"] = intProperty(raw)
+			out["block_light_level"] = intProperty(raw)
+			out["fill_level"] = intProperty(raw)
+			out["composter_fill_level"] = intProperty(raw)
+		case "power":
+			out["redstone_signal"] = intProperty(raw)
+		case "rotation":
+			out["ground_sign_direction"] = intProperty(raw)
+		case "delay":
+			out["repeater_delay"] = intProperty(raw)
+		case "lit":
+			out["lit_bit"] = boolByte(raw == "true")
+			out["output_lit_bit"] = boolByte(raw == "true")
+			out["extinguished"] = boolByte(raw != "true")
+		case "in_wall":
+			out["in_wall_bit"] = boolByte(raw == "true")
+		case "extended":
+			out["extended_bit"] = boolByte(raw == "true")
+		case "locked":
+			out["repeater_locked"] = boolByte(raw == "true")
+		case "mode":
+			out["output_subtract_bit"] = boolByte(raw == "subtract")
+		case "hanging":
+			out["hanging"] = boolByte(raw == "true")
+		case "layers":
+			layers := intProperty(raw)
+			if layers > 0 {
+				layers--
+			}
+			out["height"] = layers
+		case "charges":
+			out["respawn_anchor_charge"] = intProperty(raw)
+		case "shape":
+			if direction, ok := bedrockRailDirection(raw); ok {
+				out["rail_direction"] = direction
+			}
 		case "snowy":
 			out["covered_bit"] = boolByte(raw == "true")
 		case "persistent":
 			out["persistent_bit"] = boolByte(raw == "true")
+		}
+	}
+	if block.ResourceLocation() == "minecraft:lever" {
+		face, facing := properties["face"], properties["facing"]
+		switch face {
+		case "floor":
+			if facing == "north" || facing == "south" {
+				out["lever_direction"] = "up_north_south"
+			} else {
+				out["lever_direction"] = "up_east_west"
+			}
+		case "ceiling":
+			if facing == "north" || facing == "south" {
+				out["lever_direction"] = "down_north_south"
+			} else {
+				out["lever_direction"] = "down_east_west"
+			}
+		default:
+			out["lever_direction"] = facing
+		}
+	}
+	if block.ResourceLocation() == "minecraft:candle" || strings.HasSuffix(block.ResourceLocation(), "_candle") {
+		candles, _ := strconv.Atoi(properties["candles"])
+		if candles > 0 {
+			out["candles"] = int32(candles - 1)
 		}
 	}
 	return out
@@ -290,6 +387,52 @@ func cardinalDirection(value string) (int32, bool) {
 		return 2, true
 	case "east":
 		return 3, true
+	default:
+		return 0, false
+	}
+}
+
+func bedrockFacingDirection(value string) (int32, bool) {
+	switch value {
+	case "down":
+		return 0, true
+	case "up":
+		return 1, true
+	case "north":
+		return 2, true
+	case "south":
+		return 3, true
+	case "west":
+		return 4, true
+	case "east":
+		return 5, true
+	default:
+		return 0, false
+	}
+}
+
+func bedrockRailDirection(shape string) (int32, bool) {
+	switch shape {
+	case "north_south":
+		return 0, true
+	case "east_west":
+		return 1, true
+	case "ascending_east":
+		return 2, true
+	case "ascending_west":
+		return 3, true
+	case "ascending_north":
+		return 4, true
+	case "ascending_south":
+		return 5, true
+	case "south_east":
+		return 6, true
+	case "south_west":
+		return 7, true
+	case "north_west":
+		return 8, true
+	case "north_east":
+		return 9, true
 	default:
 		return 0, false
 	}

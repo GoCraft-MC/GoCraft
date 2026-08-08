@@ -37,6 +37,11 @@ type CommandContext struct {
 	// so the client's chunk view is kept in sync.
 	TeleportTo func(x, y, z float64) error
 
+	// TeleportPlayer moves an arbitrary online player through the network
+	// adapter that owns that player. Cross-edition commands such as /tphere
+	// must use this callback instead of mutating the target's position directly.
+	TeleportPlayer func(target *player.Player, x, y, z float64) error
+
 	// NextEntityID allocates an ID shared with players and naturally spawned
 	// mobs. It is supplied by the dispatcher for commands such as /summon.
 	NextEntityID func() int32
@@ -70,12 +75,13 @@ type registeredCommand struct {
 // Dispatcher maps command names (lower-case) to their implementations.
 // All methods are safe for concurrent use.
 type Dispatcher struct {
-	mu           sync.RWMutex
-	cmds         map[string]registeredCommand
-	nextEntityID func() int32
-	findPlayer   func(string) *player.Player
-	listPlayers  func() []*player.Player
-	maxPlayers   int
+	mu             sync.RWMutex
+	cmds           map[string]registeredCommand
+	nextEntityID   func() int32
+	findPlayer     func(string) *player.Player
+	listPlayers    func() []*player.Player
+	teleportPlayer func(*player.Player, float64, float64, float64) error
+	maxPlayers     int
 }
 
 // NewDispatcher returns an empty, ready-to-use Dispatcher.
@@ -135,6 +141,14 @@ func (d *Dispatcher) SetPlayerLister(list func() []*player.Player) {
 	d.mu.Unlock()
 }
 
+// SetPlayerTeleporter installs the edition-neutral target-side teleport
+// bridge used by commands such as /tphere.
+func (d *Dispatcher) SetPlayerTeleporter(teleport func(*player.Player, float64, float64, float64) error) {
+	d.mu.Lock()
+	d.teleportPlayer = teleport
+	d.mu.Unlock()
+}
+
 // SetMaxPlayers publishes the configured player capacity to commands.
 func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 	d.mu.Lock()
@@ -164,11 +178,13 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	allocateEntityID := d.nextEntityID
 	findPlayer := d.findPlayer
 	listPlayers := d.listPlayers
+	teleportPlayer := d.teleportPlayer
 	maxPlayers := d.maxPlayers
 	d.mu.RUnlock()
 	ctx.NextEntityID = allocateEntityID
 	ctx.FindPlayer = findPlayer
 	ctx.ListPlayers = listPlayers
+	ctx.TeleportPlayer = teleportPlayer
 	ctx.MaxPlayers = maxPlayers
 
 	if !ok {

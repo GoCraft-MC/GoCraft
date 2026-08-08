@@ -3,8 +3,10 @@ package bedrock
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"image/color"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
@@ -926,23 +928,35 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 	mapping, mapped := javaToBedrockItemMappings[stack.ItemID]
 	var runtimeID int32
 	var metadata uint32
+	lightLevel := -1
+	if stack.ItemID == "minecraft:light" {
+		lightLevel = min(max(stack.Damage, 0), 15)
+		mapped = false
+	}
 	if mapped {
 		runtimeID, metadata = mapping.runtimeID, mapping.metadata
 	} else {
 		var meta int16
 		var ok bool
-		runtimeID, meta, ok = dfworld.ItemRuntimeID(namedItem{name: stack.ItemID})
+		itemName := stack.ItemID
+		if lightLevel >= 0 {
+			itemName = fmt.Sprintf("minecraft:light_block_%d", lightLevel)
+		}
+		runtimeID, meta, ok = dfworld.ItemRuntimeID(namedItem{name: itemName})
 		if !ok {
 			return protocol.ItemInstance{}
 		}
 		metadata = uint32(uint16(meta))
 	}
 	var nbtData map[string]any
-	if stack.Damage > 0 {
+	if stack.Damage > 0 && lightLevel < 0 {
 		nbtData = map[string]any{"Damage": int32(stack.Damage)}
 	}
 	blockRuntimeID := mapping.blockRuntimeID
 	block := splitBlockName(stack.ItemID)
+	if lightLevel >= 0 {
+		block.Properties = map[string]string{"level": strconv.Itoa(lightLevel)}
+	}
 	if networkID := l.encoder.BlockNetworkID(block); blockRuntimeID == 0 && networkID != l.encoder.BlockNetworkID(coreworld.Air) {
 		blockRuntimeID = int32(networkID)
 	}

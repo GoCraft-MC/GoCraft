@@ -78,7 +78,7 @@ type Listener struct {
 	// Creative inventory catalogue — built once in NewListener.
 	creativeGroups []protocol.CreativeGroup
 	creativeItems  []protocol.CreativeItem
-	craftingData   *packet.CraftingData
+	craftingData   []*packet.CraftingData
 	creativeNames  map[uint32]creativeKnownItem // creative network ID → item name/meta
 }
 
@@ -184,12 +184,18 @@ func NewListener(
 	}
 	l.initCreativeContent()
 	l.craftingData = bedrockCraftingData()
+	shapedRecipes, shapelessRecipes := 0, 0
+	for _, data := range l.craftingData {
+		shapedRecipes += len(data.ShapedRecipes)
+		shapelessRecipes += len(data.ShapelessRecipes)
+	}
 	slog.Info(
 		"bedrock: crafting catalogue ready",
 		"java_version", bedrockRecipeCompatibilityVersion,
-		"shaped", len(l.craftingData.ShapedRecipes),
-		"shapeless", len(l.craftingData.ShapelessRecipes),
-		"total", len(l.craftingData.ShapedRecipes)+len(l.craftingData.ShapelessRecipes),
+		"packets", len(l.craftingData),
+		"shaped", shapedRecipes,
+		"shapeless", shapelessRecipes,
+		"total", shapedRecipes+shapelessRecipes,
 	)
 	return l
 }
@@ -585,9 +591,11 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		slog.Debug("bedrock: creative content send failed", "displayName", identity.DisplayName, "err", err)
 		return
 	}
-	if err := conn.WritePacket(l.craftingData); err != nil {
-		slog.Debug("bedrock: crafting data send failed", "displayName", identity.DisplayName, "err", err)
-		return
+	for _, craftingData := range l.craftingData {
+		if err := conn.WritePacket(craftingData); err != nil {
+			slog.Debug("bedrock: crafting data send failed", "displayName", identity.DisplayName, "err", err)
+			return
+		}
 	}
 
 	// Send local player state (SetPlayerGameType, UpdateAbilities, UpdateAttributes
@@ -1774,7 +1782,9 @@ func (l *Listener) handlePlayerBlockAction(session *bedrockSession, playerUUID [
 	case protocol.PlayerActionStopSleeping:
 		l.bus.PostWake(intent.WakeIntent{PlayerUUID: playerUUID})
 	case protocol.PlayerActionStartSneak:
-		l.bus.PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: playerUUID})
+		l.postPlayerState(playerUUID, intent.PlayerStateSneaking, true)
+	case protocol.PlayerActionStopSneak:
+		l.postPlayerState(playerUUID, intent.PlayerStateSneaking, false)
 	case protocol.PlayerActionStartSprint:
 		l.postPlayerState(playerUUID, intent.PlayerStateSprinting, true)
 	case protocol.PlayerActionStopSprint:
@@ -1884,6 +1894,12 @@ func inputHasFlag(input protocol.InputFlags, flag int32) bool {
 }
 
 func (l *Listener) postInputState(playerUUID [16]byte, input protocol.InputFlags) {
+	if inputHasFlag(input, packet.InputFlagStartSneaking) {
+		l.postPlayerState(playerUUID, intent.PlayerStateSneaking, true)
+	}
+	if inputHasFlag(input, packet.InputFlagStopSneaking) {
+		l.postPlayerState(playerUUID, intent.PlayerStateSneaking, false)
+	}
 	if inputHasFlag(input, packet.InputFlagStartSprinting) {
 		l.postPlayerState(playerUUID, intent.PlayerStateSprinting, true)
 	}
@@ -1926,6 +1942,9 @@ func (l *Listener) handleUseItemTransaction(playerUUID [16]byte, data *protocol.
 		},
 		Face:       data.BlockFace,
 		HotbarSlot: data.HotBarSlot,
+		ClickX:     data.ClickedPosition[0],
+		ClickY:     data.ClickedPosition[1],
+		ClickZ:     data.ClickedPosition[2],
 	})
 }
 

@@ -4,6 +4,8 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
@@ -122,10 +124,8 @@ func (l *Listener) initCreativeContent() {
 			Item:                  stack,
 			GroupIndex:            uint32(entry.GroupIndex),
 		})
-		l.creativeNames[creativeNetworkID] = creativeKnownItem{
-			name: entry.Name,
-			meta: entry.Meta,
-		}
+		canonicalName, canonicalMeta := canonicalCreativeIdentity(entry.Name, entry.Meta)
+		l.creativeNames[creativeNetworkID] = creativeKnownItem{name: canonicalName, meta: canonicalMeta}
 	}
 
 	slog.Info(
@@ -134,6 +134,19 @@ func (l *Listener) initCreativeContent() {
 		"items", len(l.creativeItems),
 		"skipped", skipped,
 	)
+}
+
+func canonicalCreativeIdentity(name string, meta int16) (string, int16) {
+	const lightPrefix = "minecraft:light_block_"
+	if strings.HasPrefix(name, lightPrefix) {
+		if level, err := strconv.Atoi(strings.TrimPrefix(name, lightPrefix)); err == nil && level >= 0 && level <= 15 {
+			return "minecraft:light", int16(level)
+		}
+	}
+	if name == "minecraft:light_block" {
+		return "minecraft:light", meta
+	}
+	return name, meta
 }
 
 // creativeItemStack converts one NBT catalogue entry into a protocol stack.

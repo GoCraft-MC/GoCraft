@@ -10,18 +10,21 @@ import (
 type blockUpdateKind uint8
 
 const (
-	UpdateFall      blockUpdateKind = iota // gravity-affected block may need to fall
-	UpdateFluid                            // fluid block may need to spread
-	UpdateLeafDecay                        // leaf block may decay if too far from log
-	UpdateFire                             // fire block may spread or burn out
-	UpdateIce                              // ice block may melt to water
+	UpdateFall          blockUpdateKind = iota // gravity-affected block may need to fall
+	UpdateFluid                                // fluid block may need to spread
+	UpdateLeafDecay                            // leaf block may decay if too far from log
+	UpdateFire                                 // fire block may spread or burn out
+	UpdateIce                                  // ice block may melt to water
+	UpdateButton                               // pressed button may release
+	UpdateComposter                            // level-seven composter becomes ready
+	UpdatePressurePlate                        // pressure plate checks entities above it
 )
 
 // PendingBlockUpdate is one scheduled block-tick entry.
 type PendingBlockUpdate struct {
 	X, Y, Z int
-	Kind     blockUpdateKind
-	DueTick  int64 // world-age tick when this update fires
+	Kind    blockUpdateKind
+	DueTick int64 // world-age tick when this update fires
 }
 
 // BlockPhysics is the scheduled-block-tick engine.
@@ -69,6 +72,21 @@ func (bp *BlockPhysics) ScheduleFire(x, y, z int, worldAge, delayTicks int64) {
 // ScheduleIce queues an ice-melt check for (x, y, z).
 func (bp *BlockPhysics) ScheduleIce(x, y, z int, worldAge, delayTicks int64) {
 	bp.schedule(x, y, z, UpdateIce, worldAge, delayTicks)
+}
+
+// ScheduleButton queues the release of a pressed button.
+func (bp *BlockPhysics) ScheduleButton(x, y, z int, worldAge, delayTicks int64) {
+	bp.schedule(x, y, z, UpdateButton, worldAge, delayTicks)
+}
+
+// ScheduleComposter queues the final ready state of a full composter.
+func (bp *BlockPhysics) ScheduleComposter(x, y, z int, worldAge, delayTicks int64) {
+	bp.schedule(x, y, z, UpdateComposter, worldAge, delayTicks)
+}
+
+// SchedulePressurePlate queues an occupancy check for a pressure plate.
+func (bp *BlockPhysics) SchedulePressurePlate(x, y, z int, worldAge, delayTicks int64) {
+	bp.schedule(x, y, z, UpdatePressurePlate, worldAge, delayTicks)
 }
 
 // DrainDue removes and returns all updates whose DueTick <= worldAge.
@@ -293,16 +311,12 @@ func IsRedstoneConductor(name string) bool {
 
 // IsRedstoneSource reports whether this block can be a power source.
 func IsRedstoneSource(name string) bool {
+	if strings.HasSuffix(name, "_button") || strings.HasSuffix(name, "_pressure_plate") {
+		return true
+	}
 	switch name {
 	case "minecraft:lever", "minecraft:redstone_torch",
 		"minecraft:redstone_wall_torch", "minecraft:redstone_block",
-		"minecraft:stone_button", "minecraft:oak_button",
-		"minecraft:spruce_button", "minecraft:birch_button",
-		"minecraft:jungle_button", "minecraft:acacia_button",
-		"minecraft:dark_oak_button", "minecraft:mangrove_button",
-		"minecraft:cherry_button", "minecraft:bamboo_button",
-		"minecraft:crimson_button", "minecraft:warped_button",
-		"minecraft:stone_pressure_plate", "minecraft:oak_pressure_plate",
 		"minecraft:daylight_detector":
 		return true
 	}

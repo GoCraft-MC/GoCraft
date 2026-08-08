@@ -14,8 +14,9 @@ import (
 // Session ties a canonical player (from core/) to their live Java connection.
 // It is created when the player enters the Play state and removed on disconnect.
 type Session struct {
-	Player *player.Player
-	Conn   *network.ClientConn
+	Player     *player.Player
+	Conn       *network.ClientConn
+	TeleportTo func(x, y, z float64) error
 }
 
 // Manager is a concurrent-safe registry of active Java play sessions.

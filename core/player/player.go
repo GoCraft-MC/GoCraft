@@ -94,6 +94,7 @@ type Player struct {
 	// tracked from the client command packet and is used by legacy knockback.
 	FallDistance          float64
 	Sprinting             bool
+	Sneaking              bool
 	UsingItemID           string
 	UsingItemSince        time.Time
 	LastEnvironmentDamage time.Time
@@ -313,6 +314,7 @@ func (p *Player) Revive() {
 	p.OnGround = false
 	p.Sleeping = false
 	p.Sprinting = false
+	p.Sneaking = false
 	p.Flying = false
 	p.UsingItemID = ""
 	p.UsingItemSince = time.Time{}

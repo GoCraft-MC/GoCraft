@@ -72,6 +72,8 @@ func buildCommandsPacket() *protocol.Packet {
 	tpX := addArgument("x", parserDouble, false, noNumberBounds, tpY)
 	tpTarget := addArgument("target", parserGameProfile, true, nil)
 	rootChildren = append(rootChildren, addLiteral("tp", false, tpX, tpTarget))
+	tpHereTarget := addArgument("player", parserGameProfile, true, nil)
+	rootChildren = append(rootChildren, addLiteral("tphere", false, tpHereTarget))
 
 	giveCount := addArgument("count", parserInteger, true, integerBounds(1, 64))
 	giveItem := addArgument("item", parserItemStack, true, nil, giveCount)

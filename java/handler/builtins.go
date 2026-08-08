@@ -66,6 +66,7 @@ func RegisterBuiltins(d *Dispatcher) {
 	d.RegisterOperator(`gamemode`, cmdGameMode)
 	d.RegisterOperator(`gm`, cmdGameMode)
 	d.RegisterOperator(`tp`, cmdTp)
+	d.RegisterOperator(`tphere`, cmdTpHere)
 	d.RegisterOperator(`locate`, cmdLocate)
 	d.RegisterOperator(`summon`, cmdSummon)
 	d.RegisterOperator(`give`, cmdGive)
@@ -143,6 +144,7 @@ func registerBuiltinsWithoutPermissions(d *Dispatcher) {
 	d.Register("gamemode", cmdGameMode)
 	d.Register("gm", cmdGameMode) // short alias
 	d.Register("tp", cmdTp)
+	d.Register("tphere", cmdTpHere)
 	d.Register("xyz", cmdXYZ)
 	d.Register("locate", cmdLocate)
 	d.Register("summon", cmdSummon)
@@ -166,7 +168,7 @@ func registerBuiltinsWithoutPermissions(d *Dispatcher) {
 
 func cmdHelp(ctx CommandContext) error {
 	_ = sendSystemMessage(ctx.Conn,
-		"Commands: /gamemode /tp /xyz /locate /summon /give /get /kill /fly /potioneffect /walkspeed /flyspeed /kick /whitelist /list /version /seed /spawnboat /time /tps /timings /help")
+		"Commands: /gamemode /tp /tphere /xyz /locate /summon /give /get /kill /fly /potioneffect /walkspeed /flyspeed /kick /whitelist /list /version /seed /spawnboat /time /tps /timings /help")
 	return nil
 }
 
@@ -541,6 +543,30 @@ func cmdTp(ctx CommandContext) error {
 		}
 	}
 	return fmt.Errorf("player not found: %s", targetName)
+}
+
+// cmdTpHere teleports one online player to the issuing player. Player lookup
+// and movement are edition-neutral, so either endpoint may be Java or Bedrock.
+func cmdTpHere(ctx CommandContext) error {
+	if len(ctx.Args) != 1 {
+		return fmt.Errorf("usage: /tphere <player>")
+	}
+	if ctx.Player == nil {
+		return fmt.Errorf("this command must be used by a player")
+	}
+	target := findCanonicalPlayer(ctx, ctx.Args[0])
+	if target == nil {
+		return fmt.Errorf("player not found: %s", ctx.Args[0])
+	}
+	if ctx.TeleportPlayer == nil {
+		return fmt.Errorf("teleport service is unavailable")
+	}
+
+	position := ctx.Player.Position
+	if err := ctx.TeleportPlayer(target, position.X, position.Y, position.Z); err != nil {
+		return fmt.Errorf("teleporting %s: %w", target.Username, err)
+	}
+	return sendCommandMessage(ctx, fmt.Sprintf("Teleported %s to you", target.Username))
 }
 
 // ── /give ─────────────────────────────────────────────────────────────────────

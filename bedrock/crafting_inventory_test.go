@@ -99,26 +99,24 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 	if bedrockRecipeCompatibilityVersion != "1.21.4" {
 		t.Fatalf("Bedrock recipes target %s, want Java 1.21.4", bedrockRecipeCompatibilityVersion)
 	}
-	data := bedrockCraftingData()
+	data := bedrockCraftingCatalogue()
 	javaRecipes := handler.CraftingRecipeCatalog()
 	javaRecipeIDs := make(map[string]struct{}, len(javaRecipes))
 	javaCraftingRecipes := 0
-	craftingTableVariants := 1
+	expectedTotal := 0
 	for _, recipe := range javaRecipes {
 		javaRecipeIDs[recipe.Name] = struct{}{}
 		if recipe.Kind == "shaped" || recipe.Kind == "shapeless" {
 			javaCraftingRecipes++
-		}
-		if recipe.Name == "minecraft:crafting_table" && len(recipe.Ingredients) != 0 {
-			craftingTableVariants = len(recipe.Ingredients[0].Alternatives)
-			for _, plank := range recipe.Ingredients[0].Alternatives[1:] {
-				javaRecipeIDs["gocraft:java_1_21_4/crafting_table/"+strings.TrimPrefix(plank, "minecraft:")] = struct{}{}
+			variants := bedrockJavaIngredientVariants(recipe)
+			expectedTotal += len(variants)
+			for _, variant := range variants {
+				javaRecipeIDs[variant.recipeID] = struct{}{}
 			}
 		}
 	}
 	total := len(data.ShapedRecipes) + len(data.ShapelessRecipes) +
 		len(data.SmithingTransformRecipes) + len(data.SmithingTrimRecipes)
-	expectedTotal := javaCraftingRecipes + craftingTableVariants - 1
 	if total != expectedTotal {
 		advertised := make(map[string]struct{}, total)
 		for _, recipe := range data.ShapedRecipes {
@@ -136,7 +134,7 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 				missing = append(missing, recipe.Name)
 			}
 		}
-		t.Fatalf("published %d protocol variants, want %d Java 1.21.4 recipes plus %d crafting-table plank encodings; missing %s", total, javaCraftingRecipes, craftingTableVariants-1, strings.Join(missing, ", "))
+		t.Fatalf("published %d protocol variants, want %d concrete encodings of %d Java 1.21.4 recipes; missing %s", total, expectedTotal, javaCraftingRecipes, strings.Join(missing, ", "))
 	}
 	foundPlanks := false
 	seenRecipeIDs := make(map[string]struct{}, total)
@@ -179,15 +177,22 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 	if !foundPlanks {
 		t.Fatal("Bedrock catalogue does not contain minecraft:oak_planks")
 	}
-	var encoded bytes.Buffer
-	data.Marshal(protocol.NewWriter(&encoded, 0))
-	if encoded.Len() == 0 {
-		t.Fatal("Bedrock crafting data encoded to an empty packet")
+	decodedTotal := 0
+	for index, dataPacket := range bedrockCraftingData() {
+		if len(dataPacket.ShapedRecipes) > maxRecipesPerCraftingDataPacket ||
+			len(dataPacket.ShapelessRecipes) > maxRecipesPerCraftingDataPacket {
+			t.Fatalf("crafting-data packet %d exceeds the Bedrock recipe slice limit", index)
+		}
+		var encoded bytes.Buffer
+		dataPacket.Marshal(protocol.NewWriter(&encoded, 0))
+		if encoded.Len() == 0 {
+			t.Fatalf("Bedrock crafting-data packet %d encoded empty", index)
+		}
+		decoded := &packet.CraftingData{}
+		decoded.Marshal(protocol.NewReader(bytes.NewBuffer(encoded.Bytes()), 0, true))
+		decodedTotal += len(decoded.ShapedRecipes) + len(decoded.ShapelessRecipes) +
+			len(decoded.SmithingTransformRecipes) + len(decoded.SmithingTrimRecipes)
 	}
-	decoded := &packet.CraftingData{}
-	decoded.Marshal(protocol.NewReader(bytes.NewBuffer(encoded.Bytes()), 0, true))
-	decodedTotal := len(decoded.ShapedRecipes) + len(decoded.ShapelessRecipes) +
-		len(decoded.SmithingTransformRecipes) + len(decoded.SmithingTrimRecipes)
 	if decodedTotal != total {
 		t.Fatalf("crafting-data round trip decoded %d recipes, encoded %d", decodedTotal, total)
 	}
@@ -213,7 +218,7 @@ func TestCraftingTableRecipeAdvertisesEveryJava1214Plank(t *testing.T) {
 		expected[fmt.Sprintf("%s:%d", name, metadata)] = struct{}{}
 	}
 
-	data := bedrockCraftingData()
+	data := bedrockCraftingCatalogue()
 	seen := make(map[string]struct{}, len(expected))
 	for _, recipe := range data.ShapedRecipes {
 		if recipe.RecipeID != "minecraft:crafting_table" &&
@@ -246,8 +251,60 @@ func TestCraftingTableRecipeAdvertisesEveryJava1214Plank(t *testing.T) {
 	}
 }
 
+func TestStickRecipeAdvertisesEveryJava1214Plank(t *testing.T) {
+	var alternatives []string
+	for _, recipe := range handler.CraftingRecipeCatalog() {
+		if recipe.Name == "minecraft:stick" && len(recipe.Ingredients) != 0 {
+			alternatives = recipe.Ingredients[0].Alternatives
+			break
+		}
+	}
+	if len(alternatives) == 0 {
+		t.Fatal("Java 1.21.4 stick plank alternatives are missing")
+	}
+	expected := make(map[string]struct{}, len(alternatives))
+	for _, plank := range alternatives {
+		name, metadata, ok := bedrockItemIdentity(plank)
+		if !ok {
+			t.Fatalf("plank %s has no Bedrock identity", plank)
+		}
+		expected[fmt.Sprintf("%s:%d", name, metadata)] = struct{}{}
+	}
+
+	seen := make(map[string]struct{}, len(expected))
+	for _, recipe := range bedrockCraftingCatalogue().ShapedRecipes {
+		if recipe.RecipeID != "minecraft:stick" &&
+			!strings.HasPrefix(recipe.RecipeID, "gocraft:java_1_21_4/stick/") {
+			continue
+		}
+		if recipe.Width != 1 || recipe.Height != 2 || len(recipe.Input) != 2 {
+			t.Fatalf("stick recipe shape = %dx%d with %d inputs", recipe.Width, recipe.Height, len(recipe.Input))
+		}
+		var variant string
+		for index, input := range recipe.Input {
+			descriptor, ok := input.Descriptor.(*protocol.DefaultItemDescriptor)
+			if !ok {
+				t.Fatalf("stick input %d descriptor = %T, want concrete item", index, input.Descriptor)
+			}
+			key := fmt.Sprintf("%s:%d", descriptor.Name, descriptor.MetadataValue)
+			if index == 0 {
+				variant = key
+			} else if key != variant {
+				t.Fatalf("stick recipe %s mixes %s and %s", recipe.RecipeID, variant, key)
+			}
+		}
+		if _, ok := expected[variant]; !ok {
+			t.Fatalf("stick recipe %s advertises unexpected plank %s", recipe.RecipeID, variant)
+		}
+		seen[variant] = struct{}{}
+	}
+	if len(seen) != len(expected) {
+		t.Fatalf("advertised %d stick plank variants, want all %d", len(seen), len(expected))
+	}
+}
+
 func TestCraftingCatalogueContainsOnlyPumpkinConcreteDescriptors(t *testing.T) {
-	data := bedrockCraftingData()
+	data := bedrockCraftingCatalogue()
 	check := func(recipeID string, inputs []protocol.ItemDescriptorCount) {
 		t.Helper()
 		for index, input := range inputs {
