@@ -15,5 +15,5 @@ import "embed"
 
 // FS is a read-only view of all embedded game-data files.
 //
-//go:embed java/1.21.4/blocks.json java/1.21.4/items.json java/1.21.4/registries.json java/1.21.4/network_registries.json java/1.21.4/network_tags.json java/1.21.4/recipes.json
+//go:embed java/1.21.4/blocks.json java/1.21.4/items.json java/1.21.4/registries.json java/1.21.4/network_registries.json java/1.21.4/network_tags.json java/1.21.4/recipes.json java/1.21.4/block_loot.json java/1.21.4/fuels.json
 var FS embed.FS

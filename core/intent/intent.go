@@ -121,8 +121,9 @@ type BlockInteractIntent struct {
 	ClickZ     float32
 }
 
-// ConsumeFoodIntent requests consumption of the currently selected Bedrock
-// hotbar item after the client completes its use-item animation.
+// ConsumeFoodIntent requests consumption from the Bedrock hotbar slot captured
+// when the client completed its use-item animation. It does not change the
+// player's newer persistent selection.
 type ConsumeFoodIntent struct {
 	PlayerUUID [16]byte
 	HotbarSlot int32
@@ -134,10 +135,12 @@ const (
 )
 
 // EntityInteractIntent requests an attack or use against a canonical entity ID.
+// HotbarSlot is the action-time item context, not a persistent selection update.
 type EntityInteractIntent struct {
 	PlayerUUID [16]byte
 	TargetID   int32
 	Attack     bool
+	HotbarSlot int32
 }
 
 // RespawnIntent requests revival after the Bedrock death-screen button.
@@ -172,6 +175,9 @@ const (
 	InventoryCursorSlot          int16 = -1
 	InventoryCraftingTableStart  int16 = player.InventorySize
 	InventoryCraftingTableOutput int16 = InventoryCraftingTableStart + 9
+	InventoryFurnaceInput        int16 = InventoryCraftingTableOutput + 1
+	InventoryFurnaceFuel         int16 = InventoryFurnaceInput + 1
+	InventoryFurnaceOutput       int16 = InventoryFurnaceFuel + 1
 )
 
 const (
@@ -187,7 +193,8 @@ const (
 // InventoryAction describes one protocol-neutral operation in an atomic
 // Bedrock item-stack request. Slots are canonical Player.Inventory indices,
 // InventoryCursorSlot addresses Player.CarriedItem, and the crafting-table
-// constants address the separate 3x3 grid and its derived output.
+// constants address the separate 3x3 grid and its derived output. Furnace
+// constants address input, fuel, and result of the open furnace-family block.
 type InventoryAction struct {
 	Kind        uint8
 	Source      int16

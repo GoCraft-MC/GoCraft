@@ -106,7 +106,7 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 	expectedTotal := 0
 	for _, recipe := range javaRecipes {
 		javaRecipeIDs[recipe.Name] = struct{}{}
-		if recipe.Kind == "shaped" || recipe.Kind == "shapeless" {
+		if recipe.Kind == "shaped" || recipe.Kind == "shapeless" || recipe.Kind == "furnace" {
 			javaCraftingRecipes++
 			variants := bedrockJavaIngredientVariants(recipe)
 			expectedTotal += len(variants)
@@ -125,9 +125,9 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 		for _, recipe := range data.ShapelessRecipes {
 			advertised[recipe.RecipeID] = struct{}{}
 		}
-		missing := make([]string, 0, javaCraftingRecipes-total)
+		missing := make([]string, 0, max(javaCraftingRecipes-total, 0))
 		for _, recipe := range javaRecipes {
-			if recipe.Kind != "shaped" && recipe.Kind != "shapeless" {
+			if recipe.Kind != "shaped" && recipe.Kind != "shapeless" && recipe.Kind != "furnace" {
 				continue
 			}
 			if _, ok := advertised[recipe.Name]; !ok {
@@ -195,6 +195,52 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 	}
 	if decodedTotal != total {
 		t.Fatalf("crafting-data round trip decoded %d recipes, encoded %d", decodedTotal, total)
+	}
+}
+
+func TestBedrockCatalogueAdvertisesEveryJava1214CookingStation(t *testing.T) {
+	want := map[string]int{
+		"furnace": 0, "blast_furnace": 0, "smoker": 0, "campfire": 0,
+	}
+	for _, recipe := range handler.CraftingRecipeCatalog() {
+		if recipe.Kind == "furnace" {
+			want[strings.TrimPrefix(recipe.Station, "minecraft:")] += len(bedrockJavaIngredientVariants(recipe))
+		}
+	}
+	got := map[string]int{}
+	for _, recipe := range bedrockCraftingCatalogue().ShapelessRecipes {
+		if _, cooking := want[recipe.Block]; cooking {
+			got[recipe.Block]++
+			if len(recipe.Input) != 1 || len(recipe.Output) != 1 {
+				t.Fatalf("cooking recipe %s has %d inputs/%d outputs", recipe.RecipeID, len(recipe.Input), len(recipe.Output))
+			}
+		}
+	}
+	for station, expected := range want {
+		if expected == 0 || got[station] != expected {
+			t.Errorf("Bedrock %s recipes = %d, want %d Java 1.21.4 variants", station, got[station], expected)
+		}
+	}
+}
+
+func TestBedrockFurnaceSlotsMapToCanonicalContainer(t *testing.T) {
+	p := player.New([16]byte{44}, "smelter", player.ClientEditionBedrock)
+	p.OpenContainerKind = "minecraft:blast_furnace"
+	p.ContainerSlots = make([]player.ItemStack, 3)
+	for container, tc := range map[byte]struct {
+		slot byte
+		want int16
+	}{
+		protocol.ContainerBlastFurnaceIngredient: {slot: 0, want: intent.InventoryFurnaceInput},
+		protocol.ContainerFurnaceFuel:            {slot: 1, want: intent.InventoryFurnaceFuel},
+		protocol.ContainerFurnaceResult:          {slot: 2, want: intent.InventoryFurnaceOutput},
+	} {
+		got, ok := canonicalInventorySlotFor(p, protocol.StackRequestSlotInfo{
+			Container: protocol.FullContainerName{ContainerID: container}, Slot: tc.slot,
+		})
+		if !ok || got != tc.want {
+			t.Errorf("container %d maps to %d, ok=%v; want %d", container, got, ok, tc.want)
+		}
 	}
 }
 

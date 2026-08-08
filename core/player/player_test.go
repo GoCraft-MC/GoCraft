@@ -30,6 +30,37 @@ func TestGiveItemFailureIsAtomic(t *testing.T) {
 	}
 }
 
+func TestGiveItemNeverUsesOrMergesIntoOffhand(t *testing.T) {
+	p := &Player{}
+	for slot := HotbarStart; slot < HotbarStart+9; slot++ {
+		p.Inventory[slot] = ItemStack{ItemID: "minecraft:dirt", Count: 64}
+	}
+	p.Inventory[OffhandSlot] = ItemStack{ItemID: "minecraft:coal", Count: 1}
+
+	if !p.GiveItem(ItemStack{ItemID: "minecraft:coal", Count: 3}) {
+		t.Fatal("GiveItem rejected available main-inventory space")
+	}
+	if got := p.Inventory[OffhandSlot]; got.ItemID != "minecraft:coal" || got.Count != 1 {
+		t.Fatalf("offhand was changed to %+v, want the original one coal", got)
+	}
+	if got := p.Inventory[9]; got.ItemID != "minecraft:coal" || got.Count != 3 {
+		t.Fatalf("main-inventory drop = %+v, want three coal", got)
+	}
+}
+
+func TestGiveItemDoesNotUseEmptyOffhandWhenStorageIsFull(t *testing.T) {
+	p := &Player{}
+	for slot := 9; slot < OffhandSlot; slot++ {
+		p.Inventory[slot] = ItemStack{ItemID: "minecraft:dirt", Count: 64}
+	}
+	if p.GiveItem(ItemStack{ItemID: "minecraft:coal", Count: 1}) {
+		t.Fatal("GiveItem accepted an item using only empty offhand capacity")
+	}
+	if got := p.Inventory[OffhandSlot]; !got.IsEmpty() {
+		t.Fatalf("offhand received pickup %+v", got)
+	}
+}
+
 func TestHealFullRestoresLivingSurvivalState(t *testing.T) {
 	p := New([16]byte{}, `healer`, ClientEditionJava)
 	p.Health = 3

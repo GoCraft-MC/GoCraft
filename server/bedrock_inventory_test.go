@@ -93,6 +93,36 @@ func TestBedrockInventoryCursorRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBedrockInventoryCanRecoverInvalidItemFromOffhand(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{21}, "bedrock-offhand-recovery", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:coal", Count: 7}
+	_ = g.AddPlayer(p)
+	s := &Server{game: g, sessions: session.NewManager()}
+	done := make(chan intent.InventoryResult, 1)
+
+	s.applyBedrockInventory(intent.InventoryIntent{
+		PlayerUUID: p.UUID,
+		Actions: []intent.InventoryAction{{
+			Kind:        intent.InventoryActionMove,
+			Source:      player.OffhandSlot,
+			Destination: 9,
+			Count:       7,
+		}},
+		Done: done,
+	})
+	if result := <-done; !result.Accepted {
+		t.Fatal("moving a stranded stack out of offhand was rejected")
+	}
+	if !p.Inventory[player.OffhandSlot].IsEmpty() {
+		t.Fatalf("offhand remained %+v", p.Inventory[player.OffhandSlot])
+	}
+	if got := p.Inventory[9]; got.ItemID != "minecraft:coal" || got.Count != 7 {
+		t.Fatalf("recovered stack = %+v, want seven coal", got)
+	}
+}
+
 func TestBedrockCreativeGiveCanBePlacedFromCursor(t *testing.T) {
 	g := game.New()
 	p := player.New([16]byte{12}, "builder", player.ClientEditionBedrock)

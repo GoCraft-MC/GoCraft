@@ -12,6 +12,7 @@
     "minecraft:chunk_batch_start": 13,
     "minecraft:commands": 17,
     "minecraft:set_container_content": 19,
+    "minecraft:set_container_data": 20,
     "minecraft:forget_level_chunk": 34,
     "minecraft:game_event": 35,
     "minecraft:keep_alive": 39,

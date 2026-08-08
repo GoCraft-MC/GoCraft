@@ -16,6 +16,7 @@ import (
 	"math"
 	"strings"
 
+	"GoCraft/core/blockloot"
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
@@ -128,6 +129,15 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 
 	broken := w.GetBlock(int(bx), int(by), int(bz))
 	if !broken.IsAir() && digBreaksBlock(status, p.GameMode, broken.ResourceLocation()) {
+		heldSlot := player.HotbarStart + p.HeldSlot
+		held := p.Inventory[heldSlot]
+		drops := blockloot.Drops(blockloot.Context{
+			Block: broken,
+			Tool:  held,
+			BlockAt: func(dx, dy, dz int) coreworld.Block {
+				return w.GetBlock(int(bx)+dx, int(by)+dy, int(bz)+dz)
+			},
+		})
 		slog.Info("block break", "player", p.Username,
 			"x", bx, "y", by, "z", bz,
 			"block", broken.ResourceLocation(),
@@ -143,7 +153,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		inventoryChanged := false
 		if p.GameMode != player.GameModeCreative && p.GameMode != player.GameModeSpectator {
 			// Chest contents: give stored items to the player before clearing.
-			if isChestBlock(broken.ResourceLocation()) {
+			if isChestBlock(broken.ResourceLocation()) || IsFurnaceContainer(broken.ResourceLocation()) {
 				for _, item := range w.ContainerItems(int(bx), int(by), int(bz)) {
 					if item.ItemID != "" && item.Count > 0 {
 						if p.GiveItem(player.ItemStack{ItemID: item.ItemID, Count: item.Count}) {
@@ -153,9 +163,8 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 				}
 			}
 
-			dropName, dropCount := blockDropItem(broken.ResourceLocation())
-			if dropName != "" && dropCount > 0 {
-				if p.GiveItem(player.ItemStack{ItemID: dropName, Count: dropCount}) {
+			for _, drop := range drops {
+				if p.GiveItem(drop) {
 					inventoryChanged = true
 					// GoCraft does not yet spawn experience-orb entities, but
 					// experience-bearing ores still provide vanilla pickup feedback.
@@ -165,14 +174,13 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 					}
 				}
 			}
-			heldSlot := player.HotbarStart + p.HeldSlot
 			if wear := player.BlockUseDamage(p.Inventory[heldSlot].ItemID); wear > 0 {
 				p.Inventory[heldSlot].ApplyDamage(wear)
 				inventoryChanged = true
 			}
 		}
 		// Clear orphaned container data regardless of game mode.
-		if isChestBlock(broken.ResourceLocation()) {
+		if isChestBlock(broken.ResourceLocation()) || IsFurnaceContainer(broken.ResourceLocation()) {
 			w.SetContainerItems(int(bx), int(by), int(bz), broken.ResourceLocation(), nil)
 		}
 		// Sync inventory once if anything was added.
@@ -487,6 +495,9 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			targetBlock.ResourceLocation() == "minecraft:trapped_chest" {
 			return openChest(p, conn, w, spatial.BlockPos{X: bx, Y: by, Z: bz})
 		}
+		if IsFurnaceContainer(targetBlock.ResourceLocation()) {
+			return openFurnace(p, conn, w, spatial.BlockPos{X: bx, Y: by, Z: bz}, targetBlock.ResourceLocation())
+		}
 		return sendOpenScreen(conn, 1, menuType, title)
 	}
 
@@ -545,6 +556,10 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	switch {
 	case block.ResourceLocation() == "minecraft:chest" || block.ResourceLocation() == "minecraft:trapped_chest":
 		placeChestBlock(p, px, py, pz, block.ResourceLocation(), w, mgr)
+		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
+	case IsFurnaceContainer(block.ResourceLocation()):
+		block.Properties = map[string]string{"facing": chestFacingFromYaw(p.Rotation.Yaw), "lit": "false"}
+		applyBlockChange(px, py, pz, block, w, mgr)
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
 	case isBedBlock(block.ResourceLocation()):
 		if !placeBedBlock(p, px, py, pz, block.ResourceLocation(), w, mgr) {
@@ -700,7 +715,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 }
 
 func isChestBlock(blockName string) bool {
-	return blockName == "minecraft:chest" || blockName == "minecraft:trapped_chest"
+	return blockName == "minecraft:chest" || blockName == "minecraft:trapped_chest" || blockName == "minecraft:barrel"
 }
 
 // isBedBlock reports whether a resource location is one of the 16 bed colours.

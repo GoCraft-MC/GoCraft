@@ -38,6 +38,7 @@ import (
 
 	"GoCraft/bedrock"
 	"GoCraft/config"
+	"GoCraft/core/blockloot"
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
@@ -95,6 +96,7 @@ type Server struct {
 	// worldAge is advanced only by the entity tick goroutine.
 	worldAge int64
 	spawnRNG *rand.Rand
+	furnaces map[spatial.BlockPos]*furnaceState
 
 	// sleepAllTick is the worldAge tick at which ALL online players were first
 	// detected sleeping.  0 means nobody is sleeping or the check hasn't fired.
@@ -257,6 +259,7 @@ func New(cfg *config.Config) (*Server, error) {
 		mobAIs:         make(map[int32]*mobAI),
 		spawnRNG:       rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
 		worldAge:       initialWorldAge,
+		furnaces:       make(map[spatial.BlockPos]*furnaceState),
 		timings:        timings,
 		javaCrossKnown: make(map[[16]byte]map[[16]byte]crossPlayerView),
 	}
@@ -620,6 +623,7 @@ func (s *Server) safeTick() {
 		}
 	}()
 	s.tickIntents()
+	s.tickFurnaces()
 	s.tickEntities()
 	s.tickBedrockHunger()
 	if s.bedrockListener != nil {
@@ -695,6 +699,8 @@ func (s *Server) tickIntents() {
 			}
 		case intent.HotbarIntent:
 			if p := s.game.GetPlayer(i.PlayerUUID); p != nil && i.Slot >= 0 && i.Slot < 9 {
+				slog.Debug("bedrock hotbar selection applied",
+					"packet_type", "HotbarIntent", "incoming_slot", i.Slot, "current_server_slot", p.HeldSlot, "outgoing_slot", "none")
 				p.HeldSlot = int(i.Slot)
 			}
 		case intent.PlayerStateIntent:
@@ -720,6 +726,11 @@ func (s *Server) applyBedrockContainerClose(i intent.ContainerCloseIntent) {
 			p.CraftingGrid[slot] = player.ItemStack{}
 		}
 		p.CraftingResult = handler.FindCraftingTableResult(p.CraftingGrid)
+	}
+	if handler.IsFurnaceContainer(p.OpenContainerKind) {
+		persistFurnaceSlots(s.world, p.OpenContainerPos, p.OpenContainerKind, p.ContainerSlots)
+		p.ContainerSlots = nil
+		p.OpenContainerPos = spatial.BlockPos{}
 	}
 	p.OpenContainerID = 0
 	p.OpenContainerKind = ""
@@ -854,8 +865,7 @@ func (s *Server) applyBedrockConsumeFood(i intent.ConsumeFoodIntent) {
 	if i.HotbarSlot < 0 || i.HotbarSlot >= 9 {
 		return
 	}
-	p.HeldSlot = int(i.HotbarSlot)
-	slot := player.HotbarStart + p.HeldSlot
+	slot := player.HotbarStart + int(i.HotbarSlot)
 	stack := p.Inventory[slot]
 	nutrition, saturation, ok := player.FoodValue(stack.ItemID)
 	if !ok || stack.IsEmpty() || !p.ConsumeFood(nutrition, saturation) {
@@ -1017,8 +1027,10 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 	if p == nil || p.Edition != player.ClientEditionBedrock || p.GameMode == player.GameModeSpectator {
 		return
 	}
-	if i.HotbarSlot >= 0 && i.HotbarSlot < 9 {
+	previousHeldSlot := p.HeldSlot
+	if i.HotbarSlot >= 0 && i.HotbarSlot < 9 && int(i.HotbarSlot) != previousHeldSlot {
 		p.HeldSlot = int(i.HotbarSlot)
+		defer func() { p.HeldSlot = previousHeldSlot }()
 	}
 	center := spatial.Vec3{X: float64(i.Position.X) + 0.5, Y: float64(i.Position.Y) + 0.5, Z: float64(i.Position.Z) + 0.5}
 	if p.Position.Distance(center) > 6.5 {
@@ -1031,6 +1043,18 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		block := s.world.GetBlock(x, y, z)
 		if block.IsAir() || block.ResourceLocation() == "minecraft:bedrock" {
 			return
+		}
+		held := p.HeldItem()
+		drops := blockloot.Drops(blockloot.Context{
+			Block: block,
+			Tool:  held,
+			BlockAt: func(dx, dy, dz int) coreworld.Block {
+				return s.world.GetBlock(x+dx, y+dy, z+dz)
+			},
+		})
+		containerItems := []coreworld.ContainerItem(nil)
+		if bedrockSpillingContainer(block.ResourceLocation()) {
+			containerItems = s.world.ContainerItems(x, y, z)
 		}
 		partnerY, partnerHalf, hasPartner := coreworld.DoublePlantPartnerY(block, y)
 		partner := coreworld.Air
@@ -1054,11 +1078,23 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			s.refreshBedrockWireConnections(x, y, z)
 		}
 		if p.GameMode != player.GameModeCreative {
-			drop := player.ItemStack{ItemID: block.ResourceLocation(), Count: 1}
-			if !p.GiveItem(drop) {
-				s.newDroppedItem(drop, p.Position, 0)
+			for _, item := range containerItems {
+				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count}
+				if !p.GiveItem(stack) {
+					s.newDroppedItem(stack, p.Position, item.Slot+1)
+				}
 			}
-			s.damageBedrockHeldItem(p, 1)
+			for _, drop := range drops {
+				if !p.GiveItem(drop) {
+					s.newDroppedItem(drop, p.Position, 0)
+				}
+			}
+			if wear := player.BlockUseDamage(held.ItemID); wear > 0 {
+				s.damageBedrockHeldItem(p, wear)
+			}
+		}
+		if bedrockSpillingContainer(block.ResourceLocation()) {
+			s.world.SetContainerItems(x, y, z, block.ResourceLocation(), nil)
 		}
 
 	case intent.BlockActionUse:
@@ -1074,9 +1110,17 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		if !bypassActivation && s.bedrockListener != nil {
+			if handler.IsFurnaceContainer(clicked.ResourceLocation()) {
+				s.openBedrockFurnace(p, i.Position, clicked.ResourceLocation())
+			}
 			if s.bedrockListener.OpenContainerBlock(p.UUID, int32(x), int32(y), int32(z), clicked.ResourceLocation()) {
-				p.OpenContainerKind = clicked.ResourceLocation()
-				p.OpenContainerID = 1
+				if !handler.IsFurnaceContainer(clicked.ResourceLocation()) {
+					p.OpenContainerKind = clicked.ResourceLocation()
+					p.OpenContainerID = 1
+				} else {
+					state := s.furnaceStateFor(i.Position)
+					s.bedrockListener.SyncFurnaceContainer(p, state.CookTime, state.BurnTime, state.BurnDuration, state.CookDuration)
+				}
 				return
 			}
 		}
@@ -1116,10 +1160,20 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 	}
 }
 
+func bedrockSpillingContainer(blockID string) bool {
+	return blockID == "minecraft:chest" || blockID == "minecraft:trapped_chest" || blockID == "minecraft:barrel" ||
+		handler.IsFurnaceContainer(blockID)
+}
+
 func (s *Server) applyBedrockEntityInteract(i intent.EntityInteractIntent) {
 	attacker := s.game.GetPlayer(i.PlayerUUID)
 	if attacker == nil {
 		return
+	}
+	previousHeldSlot := attacker.HeldSlot
+	if i.HotbarSlot >= 0 && i.HotbarSlot < 9 && int(i.HotbarSlot) != previousHeldSlot {
+		attacker.HeldSlot = int(i.HotbarSlot)
+		defer func() { attacker.HeldSlot = previousHeldSlot }()
 	}
 	if !i.Attack {
 		if i.TargetID == 0 && attacker.VehicleEntityID != 0 {
@@ -1240,6 +1294,8 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	inventory := p.Inventory
 	craftingGrid := p.CraftingGrid
 	craftingResult := handler.FindCraftingTableResult(craftingGrid)
+	furnaceSlots := append([]player.ItemStack(nil), p.ContainerSlots...)
+	furnaceOpen := handler.IsFurnaceContainer(p.OpenContainerKind) && len(furnaceSlots) == furnaceSlotCount
 	carried := p.CarriedItem
 	updateBedrockPersonalCrafting(&inventory)
 	drops := make([]player.ItemStack, 0)
@@ -1252,6 +1308,12 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		}
 		if slot == intent.InventoryCraftingTableOutput {
 			return craftingResult, true
+		}
+		if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
+			if !furnaceOpen {
+				return player.ItemStack{}, false
+			}
+			return furnaceSlots[slot-intent.InventoryFurnaceInput], true
 		}
 		if slot < 0 || int(slot) >= len(inventory) {
 			return player.ItemStack{}, false
@@ -1274,6 +1336,13 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		if slot == intent.InventoryCraftingTableOutput {
 			return stack.IsEmpty()
 		}
+		if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
+			if !furnaceOpen {
+				return false
+			}
+			furnaceSlots[slot-intent.InventoryFurnaceInput] = stack
+			return true
+		}
 		if slot < 0 || int(slot) >= len(inventory) || !canPlaceCanonicalInventorySlot(int(slot), stack) {
 			return false
 		}
@@ -1292,7 +1361,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				return
 			}
 			given := player.ItemStack{ItemID: action.Item.ItemID, Count: action.Count, Damage: action.Item.Damage}
-			if !set(action.Destination, given) {
+			if !canPlaceBedrockFurnaceSlot(action.Destination, given) || !set(action.Destination, given) {
 				return
 			}
 			continue
@@ -1304,7 +1373,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		}
 		switch action.Kind {
 		case intent.InventoryActionMove:
-			if action.Count <= 0 || action.Count > source.Count || action.Source == action.Destination || action.Destination == 0 || action.Destination == intent.InventoryCraftingTableOutput {
+			if action.Count <= 0 || action.Count > source.Count || action.Source == action.Destination || action.Destination == 0 || action.Destination == intent.InventoryCraftingTableOutput || action.Destination == intent.InventoryFurnaceOutput {
 				return
 			}
 			if (action.Source == 0 || action.Source == intent.InventoryCraftingTableOutput) && action.Count != source.Count {
@@ -1325,7 +1394,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			if action.Destination >= 5 && action.Destination <= 8 {
 				limit = 1
 			}
-			if newDestination.Count > limit || !set(action.Destination, newDestination) {
+			if newDestination.Count > limit || !canPlaceBedrockFurnaceSlot(action.Destination, newDestination) || !set(action.Destination, newDestination) {
 				return
 			}
 			source.Count -= action.Count
@@ -1341,7 +1410,9 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 
 		case intent.InventoryActionSwap:
 			destination, ok := get(action.Destination)
-			if !ok || action.Source == action.Destination || !set(action.Source, destination) || !set(action.Destination, source) {
+			if !ok || action.Source == action.Destination ||
+				!canPlaceBedrockFurnaceSlot(action.Source, destination) || !canPlaceBedrockFurnaceSlot(action.Destination, source) ||
+				!set(action.Source, destination) || !set(action.Destination, source) {
 				return
 			}
 
@@ -1373,12 +1444,33 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	p.CraftingGrid = craftingGrid
 	p.CraftingResult = handler.FindCraftingTableResult(craftingGrid)
 	p.CarriedItem = carried
+	if furnaceOpen {
+		p.ContainerSlots = furnaceSlots
+		persistFurnaceSlots(s.world, p.OpenContainerPos, p.OpenContainerKind, furnaceSlots)
+		s.furnaceStateFor(p.OpenContainerPos)
+	}
 	for index, stack := range drops {
 		if dropped := s.newDroppedItem(stack, p.Position, index); dropped != nil {
 			handler.BroadcastSpawnMob(dropped, s.sessions)
 		}
 	}
 	accepted = true
+}
+
+func canPlaceBedrockFurnaceSlot(slot int16, stack player.ItemStack) bool {
+	if stack.IsEmpty() || slot < intent.InventoryFurnaceInput || slot > intent.InventoryFurnaceOutput {
+		return true
+	}
+	switch slot {
+	case intent.InventoryFurnaceInput:
+		return true
+	case intent.InventoryFurnaceFuel:
+		return handler.CanPlaceFurnaceFuelSlot(stack.ItemID)
+	case intent.InventoryFurnaceOutput:
+		return false
+	default:
+		return false
+	}
 }
 
 func consumeBedrockCraftingTable(grid *[9]player.ItemStack) {

@@ -89,6 +89,7 @@ var (
 	packetIDBlockUpdate            = protocoldata.MustCB("play", "minecraft:block_update")
 	packetIDAcknowledgeBlockChange = protocoldata.MustCB("play", "minecraft:acknowledge_block_change")
 	packetIDSetContainerContent    = protocoldata.MustCB("play", "minecraft:set_container_content")
+	packetIDSetContainerData       = protocoldata.MustCB("play", "minecraft:set_container_data")
 	packetIDSetHeldItemSC          = protocoldata.MustCB("play", "minecraft:set_held_slot")
 	packetIDCommands               = protocoldata.MustCB("play", "minecraft:commands")
 	packetIDDisconnectPlay         = protocoldata.MustCB("play", "minecraft:disconnect")

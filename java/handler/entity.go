@@ -219,7 +219,7 @@ func SendExternalPlayerEquipment(conn *network.ClientConn, p *player.Player) {
 		item player.ItemStack
 	}{
 		{0, p.HeldItem()},
-		{1, p.Inventory[45]},
+		{1, p.Inventory[player.OffhandSlot]},
 		{2, p.Inventory[8]},
 		{3, p.Inventory[7]},
 		{4, p.Inventory[6]},

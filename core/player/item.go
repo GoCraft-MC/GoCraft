@@ -17,6 +17,12 @@ const InventorySize = 46
 // HotbarStart is the slot index of the first hotbar slot.
 const HotbarStart = 36
 
+// OffhandSlot is separate from the 36-slot pickup/storage inventory. It must
+// never be considered an empty destination by GiveItem: Bedrock only permits a
+// limited set of items there, and server-forcing arbitrary drops into it makes
+// them appear stuck or desynchronised in the client UI.
+const OffhandSlot = 45
+
 // ItemStack is a quantity of one item type occupying a single inventory slot.
 // A zero-value ItemStack (or one with Count ≤ 0) represents an empty slot.
 //

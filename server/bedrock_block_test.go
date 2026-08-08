@@ -122,6 +122,111 @@ func TestBedrockBreakingLogAwardsLog(t *testing.T) {
 	t.Fatal("broken oak log was not awarded to Bedrock inventory")
 }
 
+func TestBedrockStoneUsesVanillaLootAndHarvestTool(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		tool     string
+		wantDrop bool
+	}{
+		{name: "hand", wantDrop: false},
+		{name: "pickaxe", tool: "minecraft:wooden_pickaxe", wantDrop: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer w.Close()
+			g := game.New()
+			p := player.New([16]byte{24}, "bedrock-miner", player.ClientEditionBedrock)
+			p.GameMode = player.GameModeSurvival
+			p.Position = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+			if test.tool != "" {
+				p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: test.tool, Count: 1}
+			}
+			if err := g.AddPlayer(p); err != nil {
+				t.Fatal(err)
+			}
+			w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+			s := &Server{game: g, world: w, sessions: session.NewManager()}
+			s.applyBedrockBlockInteract(intent.BlockInteractIntent{
+				PlayerUUID: p.UUID,
+				Action:     intent.BlockActionBreak,
+				Position:   spatial.BlockPos{X: 1, Y: 64, Z: 0},
+			})
+			got := false
+			for _, stack := range p.Inventory {
+				got = got || stack.ItemID == "minecraft:cobblestone" && stack.Count == 1
+			}
+			if got != test.wantDrop {
+				t.Fatalf("cobblestone present = %v, want %v", got, test.wantDrop)
+			}
+		})
+	}
+}
+
+func TestBedrockBreakPreservesSelectedToolAndDamagesIt(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	g := game.New()
+	p := player.New([16]byte{16}, "bedrock-digger", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Position = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+	p.HeldSlot = 4
+	p.Inventory[player.HotbarStart+4] = player.ItemStack{ItemID: "minecraft:wooden_shovel", Count: 1}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "dirt"})
+	s := &Server{game: g, world: w, sessions: session.NewManager()}
+
+	s.applyBedrockBlockInteract(intent.BlockInteractIntent{
+		PlayerUUID: p.UUID,
+		Action:     intent.BlockActionBreak,
+		Position:   spatial.BlockPos{X: 1, Y: 64, Z: 0},
+		HotbarSlot: -1,
+	})
+
+	if p.HeldSlot != 4 {
+		t.Fatalf("selected slot after break = %d, want 4", p.HeldSlot)
+	}
+	if got := p.Inventory[player.HotbarStart+4].Damage; got != 1 {
+		t.Fatalf("selected shovel damage = %d, want 1", got)
+	}
+	if got := p.Inventory[player.HotbarStart].Damage; got != 0 {
+		t.Fatalf("slot-zero item damage = %d, want 0", got)
+	}
+}
+
+func TestBedrockStaleActionSlotDoesNotOverrideCurrentSelection(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	g := game.New()
+	p := player.New([16]byte{17}, "bedrock-fast-scroller", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Position = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+	p.HeldSlot = 7
+	p.Inventory[player.HotbarStart+2] = player.ItemStack{ItemID: "minecraft:wooden_shovel", Count: 1}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "dirt"})
+	s := &Server{game: g, world: w, sessions: session.NewManager()}
+
+	// The action was performed with slot 2, but a subsequent MobEquipment has
+	// already selected slot 7 by the time the simulation applies the action.
+	s.applyBedrockBlockInteract(intent.BlockInteractIntent{
+		PlayerUUID: p.UUID,
+		Action:     intent.BlockActionBreak,
+		Position:   spatial.BlockPos{X: 1, Y: 64, Z: 0},
+		HotbarSlot: 2,
+	})
+
+	if p.HeldSlot != 7 {
+		t.Fatalf("selected slot after stale action = %d, want 7", p.HeldSlot)
+	}
+	if got := p.Inventory[player.HotbarStart+2].Damage; got != 1 {
+		t.Fatalf("action shovel damage = %d, want 1", got)
+	}
+}
+
 func TestBedrockCanConsumeFood(t *testing.T) {
 	g := game.New()
 	p := player.New([16]byte{15}, "bedrock-eater", player.ClientEditionBedrock)

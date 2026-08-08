@@ -334,7 +334,9 @@ func (p *Player) GiveItem(item ItemStack) bool {
 	}
 	remaining := item.Count
 	stackLimit := MaxStackSize(item.ItemID)
-	ranges := [][2]int{{HotbarStart, InventorySize}, {9, HotbarStart}}
+	// The normal storage inventory is exactly 36 slots: hotbar 36-44 and main
+	// inventory 9-35. Slot 45 is offhand, not a tenth hotbar slot.
+	ranges := [][2]int{{HotbarStart, HotbarStart + 9}, {9, HotbarStart}}
 
 	// Refuse atomically when the inventory cannot hold the whole request.
 	capacity := 0

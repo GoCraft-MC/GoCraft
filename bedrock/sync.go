@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/handler"
 
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl32"
@@ -572,14 +574,24 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 	inventoryChanged := !viewer.inventorySent ||
 		viewer.lastInventory != p.Inventory ||
 		viewer.lastCarriedItem != p.CarriedItem
-	heldChanged := !viewer.inventorySent ||
-		viewer.lastHeldSlot != p.HeldSlot ||
-		viewer.lastHeldItem != heldItem
-	if !inventoryChanged && !heldChanged {
+	selectionChanged := viewer.inventorySent && viewer.lastHeldSlot != p.HeldSlot
+	if !inventoryChanged && !selectionChanged {
+		return
+	}
+	// The selected hotbar slot is client-owned during normal play. MobEquipment
+	// received from the client is applied by the simulation before Sync runs.
+	// Echoing that state back to the same client here is unsafe: while the player
+	// scrolls quickly, this tick may contain the previous selection and visually
+	// roll a newer client selection back. A slot-only change has no inventory
+	// content to synchronise, so only advance the local snapshot.
+	if !inventoryChanged {
+		viewer.lastHeldSlot = p.HeldSlot
+		viewer.lastHeldItem = heldItem
 		return
 	}
 
 	viewer.stackMu.Lock()
+	sendInitialSelection := shouldBootstrapHotbarSelection(viewer.inventorySent, viewer.clientHeldSlotSeen)
 	for slot := 0; slot < player.InventorySize; slot++ {
 		stack := p.Inventory[slot]
 		if stack.IsEmpty() {
@@ -598,12 +610,6 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 		(!viewer.lastCarriedItem.IsEmpty() &&
 			(viewer.lastCarriedItem.ItemID != p.CarriedItem.ItemID || viewer.lastCarriedItem.Damage != p.CarriedItem.Damage)) {
 		viewer.cursorStackID = viewer.allocateStackNetworkID()
-	}
-
-	heldCanonicalSlot := player.HotbarStart + p.HeldSlot
-	var held protocol.ItemInstance
-	if heldChanged {
-		held = l.itemInstance(heldItem, viewer.stackNetworkIDs[heldCanonicalSlot])
 	}
 
 	var content []protocol.ItemInstance
@@ -627,7 +633,7 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 			l.itemInstance(p.Inventory[8], viewer.stackNetworkIDs[8]),
 		}
 		offhand = []protocol.ItemInstance{
-			l.itemInstance(p.Inventory[45], viewer.stackNetworkIDs[45]),
+			l.itemInstance(p.Inventory[player.OffhandSlot], viewer.stackNetworkIDs[player.OffhandSlot]),
 		}
 		// The Bedrock cursor is slot 0 of the 54-slot UI inventory. Sending an
 		// entirely empty UI inventory here clears the client's mouse cursor after
@@ -670,13 +676,17 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 			l.sendPersonalCraftingSlots(viewer.conn, viewer, p)
 		}
 	}
-	if heldChanged {
-		_ = viewer.conn.WritePacket(&packet.MobEquipment{
-			EntityRuntimeID: bedrockSelfRuntimeID,
-			NewItem:         held,
-			InventorySlot:   byte(p.HeldSlot),
-			HotBarSlot:      byte(p.HeldSlot),
-			WindowID:        protocol.WindowIDInventory,
+	if sendInitialSelection {
+		// Bootstrap the persisted server selection only when the client has not
+		// already supplied a newer one during login. Runtime corrections use this
+		// dedicated selection packet too; MobEquipment is for held-item visibility.
+		slog.Debug("bedrock hotbar selection bootstrap sent",
+			"packet_type", "InventorySync", "incoming_slot", "none", "current_server_slot", p.HeldSlot,
+			"outgoing_slot", p.HeldSlot, "outgoing_packet", "PlayerHotBar")
+		_ = viewer.conn.WritePacket(&packet.PlayerHotBar{
+			SelectedHotBarSlot: uint32(p.HeldSlot),
+			WindowID:           protocol.WindowIDInventory,
+			SelectHotBarSlot:   true,
 		})
 	}
 
@@ -685,6 +695,13 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 	viewer.lastHeldSlot = p.HeldSlot
 	viewer.lastHeldItem = heldItem
 	viewer.lastCarriedItem = p.CarriedItem
+}
+
+// shouldBootstrapHotbarSelection reports whether the server still owns the
+// initial selected-slot bootstrap. Once the client has sent any selection, or
+// the first inventory snapshot was sent, runtime selection remains client-owned.
+func shouldBootstrapHotbarSelection(inventorySent, clientHeldSlotSeen bool) bool {
+	return !inventorySent && !clientHeldSlotSeen
 }
 
 func bedrockInventoryCanonicalSlot(slot int) int {
@@ -750,6 +767,12 @@ func (l *Listener) OpenContainerBlock(playerUUID [16]byte, x, y, z int32, blockN
 	if viewer == nil {
 		return false
 	}
+	if handler.IsFurnaceContainer(blockName) {
+		viewer.stackMu.Lock()
+		viewer.furnaceSent = false
+		viewer.lastFurnaceKind = ""
+		viewer.stackMu.Unlock()
+	}
 	_ = viewer.conn.WritePacket(&packet.ContainerOpen{
 		WindowID:                1,
 		ContainerType:           containerType,
@@ -757,6 +780,75 @@ func (l *Listener) OpenContainerBlock(playerUUID [16]byte, x, y, z int32, blockN
 		ContainerEntityUniqueID: -1,
 	})
 	return true
+}
+
+// SyncFurnaceContainer publishes the authoritative three furnace slots and
+// progress properties to the player that currently has the block open.
+func (l *Listener) SyncFurnaceContainer(p *player.Player, cookTime, burnTime, burnDuration, cookDuration int) {
+	if p == nil || !handler.IsFurnaceContainer(p.OpenContainerKind) {
+		return
+	}
+	l.sessionsMu.RLock()
+	viewer := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if viewer == nil {
+		return
+	}
+
+	var slots [3]player.ItemStack
+	copy(slots[:], p.ContainerSlots)
+	properties := [4]int32{int32(cookTime), int32(burnTime), int32(burnDuration), int32(cookDuration)}
+
+	viewer.stackMu.Lock()
+	changed := !viewer.furnaceSent || viewer.lastFurnaceKind != p.OpenContainerKind ||
+		viewer.lastFurnaceSlots != slots || viewer.lastFurnaceData != properties
+	if !changed {
+		viewer.stackMu.Unlock()
+		return
+	}
+	for index, stack := range slots {
+		previous := viewer.lastFurnaceSlots[index]
+		if stack.IsEmpty() {
+			viewer.furnaceNetworkIDs[index] = 0
+		} else if !viewer.furnaceSent || viewer.furnaceNetworkIDs[index] == 0 ||
+			(!previous.IsEmpty() && (previous.ItemID != stack.ItemID || previous.Damage != stack.Damage)) {
+			viewer.furnaceNetworkIDs[index] = viewer.allocateStackNetworkID()
+		}
+	}
+	instances := [3]protocol.ItemInstance{
+		l.itemInstance(slots[0], viewer.furnaceNetworkIDs[0]),
+		l.itemInstance(slots[1], viewer.furnaceNetworkIDs[1]),
+		l.itemInstance(slots[2], viewer.furnaceNetworkIDs[2]),
+	}
+	viewer.lastFurnaceSlots = slots
+	viewer.lastFurnaceData = properties
+	viewer.lastFurnaceKind = p.OpenContainerKind
+	viewer.furnaceSent = true
+	viewer.stackMu.Unlock()
+
+	ingredientContainer := byte(protocol.ContainerFurnaceIngredient)
+	switch strings.TrimPrefix(p.OpenContainerKind, "minecraft:") {
+	case "blast_furnace", "lit_blast_furnace":
+		ingredientContainer = protocol.ContainerBlastFurnaceIngredient
+	case "smoker", "lit_smoker":
+		ingredientContainer = protocol.ContainerSmokerIngredient
+	}
+	containers := [3]byte{ingredientContainer, protocol.ContainerFurnaceFuel, protocol.ContainerFurnaceResult}
+	for index := range instances {
+		_ = viewer.conn.WritePacket(&packet.InventorySlot{
+			WindowID: 1,
+			Slot:     uint32(index),
+			Container: protocol.Option(protocol.FullContainerName{
+				ContainerID: containers[index],
+			}),
+			NewItem: instances[index],
+		})
+	}
+	// Bedrock exposes only cooking progress, remaining burn time, and total
+	// burn duration. Key 3 is reserved, unlike Java's four-property delegate.
+	for key, value := range properties[:3] {
+		_ = viewer.conn.WritePacket(&packet.ContainerSetData{WindowID: 1, Key: int32(key), Value: value})
+	}
 }
 
 // bedrockContainerType maps a block resource location to the Bedrock protocol

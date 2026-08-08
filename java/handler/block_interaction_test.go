@@ -266,8 +266,10 @@ func TestSurvivalGrassBreaksOnStartDigging(t *testing.T) {
 	if got := w.GetBlock(6, 64, 0); !got.IsAir() {
 		t.Fatalf("grass = %q, want air after START_DIGGING", got.ResourceLocation())
 	}
-	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:wheat_seeds" || got.Count != 1 {
-		t.Fatalf("grass drop = %+v, want one wheat seed", got)
+	// Vanilla 1.21.4 gives short grass a 12.5% seed chance. Either result is
+	// valid; this test is about instant breaking rather than forcing a drop.
+	if got := p.Inventory[player.HotbarStart]; !got.IsEmpty() && (got.ItemID != "minecraft:wheat_seeds" || got.Count != 1) {
+		t.Fatalf("grass drop = %+v, want empty or one wheat seed", got)
 	}
 }
 

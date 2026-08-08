@@ -64,6 +64,8 @@ type RecipeDescription struct {
 	Width, Height       int32
 	Ingredients         []RecipeIngredientDescription
 	Result              player.ItemStack
+	CookingTime         int32
+	Experience          float32
 }
 
 type RecipeIngredientDescription struct {
@@ -77,6 +79,7 @@ func CraftingRecipeCatalog() []RecipeDescription {
 		description := RecipeDescription{
 			Name: source.name, Station: source.station,
 			Width: source.width, Height: source.height, Result: source.result.stack,
+			CookingTime: source.duration, Experience: source.experience,
 		}
 		switch source.kind {
 		case recipeDisplayShaped:

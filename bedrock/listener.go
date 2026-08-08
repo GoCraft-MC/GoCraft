@@ -49,6 +49,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/handler"
 )
 
 const bedrockChunkRadius int32 = 4
@@ -114,10 +115,17 @@ type bedrockSession struct {
 	stackMu            sync.Mutex
 	stackNetworkIDs    [player.InventorySize]int32
 	craftingNetworkIDs [10]int32
+	furnaceNetworkIDs  [3]int32
+	lastFurnaceSlots   [3]player.ItemStack
+	lastFurnaceData    [4]int32
+	lastFurnaceKind    string
+	furnaceSent        bool
 	cursorStackID      int32
 	nextStackNetworkID int32
 	lastCarriedItem    player.ItemStack
 	lastHeldItem       player.ItemStack
+	clientHeldSlot     int
+	clientHeldSlotSeen bool
 	invOpened          bool // true while the player's own inventory/creative screen is open
 	breakingPos        protocol.BlockPos
 	breaking           bool
@@ -813,13 +821,19 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 				if !ok {
 					continue
 				}
-				l.bus.PostHotbar(intent.HotbarIntent{PlayerUUID: playerUUID, Slot: data.HotBarSlot})
+				if !validActionHotbarSlot(data.HotBarSlot, "InventoryTransaction/UseItemOnEntity") {
+					continue
+				}
 				l.bus.PostEntityInteract(intent.EntityInteractIntent{
 					PlayerUUID: playerUUID,
 					TargetID:   targetID,
 					Attack:     data.ActionType == protocol.UseItemOnEntityActionAttack,
+					HotbarSlot: data.HotBarSlot,
 				})
 			case *protocol.ReleaseItemTransactionData:
+				if !validActionHotbarSlot(data.HotBarSlot, "InventoryTransaction/ReleaseItem") {
+					continue
+				}
 				l.bus.PostConsumeFood(intent.ConsumeFoodIntent{PlayerUUID: playerUUID, HotbarSlot: data.HotBarSlot})
 			}
 
@@ -827,7 +841,7 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 			l.handleStackRequests(ctx, conn, playerUUID, p.Requests)
 
 		case *packet.MobEquipment:
-			l.bus.PostHotbar(intent.HotbarIntent{PlayerUUID: playerUUID, Slot: int32(p.HotBarSlot)})
+			l.acceptClientHotbarSlot(bedrockSess, playerUUID, int32(p.HotBarSlot), "MobEquipment")
 
 		case *packet.Text:
 			if strings.TrimSpace(p.Message) != "" {
@@ -1445,6 +1459,26 @@ func canonicalInventorySlotFor(p *player.Player, slot protocol.StackRequestSlotI
 			return intent.InventoryCraftingTableOutput, true
 		}
 		return 0, true
+	case protocol.ContainerFurnaceIngredient, protocol.ContainerBlastFurnaceIngredient, protocol.ContainerSmokerIngredient:
+		if p == nil || !handler.IsFurnaceContainer(p.OpenContainerKind) || slot.Slot != 0 {
+			return 0, false
+		}
+		return intent.InventoryFurnaceInput, true
+	case protocol.ContainerFurnaceFuel:
+		if p == nil || !handler.IsFurnaceContainer(p.OpenContainerKind) || (slot.Slot != 0 && slot.Slot != 1) {
+			return 0, false
+		}
+		return intent.InventoryFurnaceFuel, true
+	case protocol.ContainerFurnaceResult:
+		if p == nil || !handler.IsFurnaceContainer(p.OpenContainerKind) || (slot.Slot != 0 && slot.Slot != 2) {
+			return 0, false
+		}
+		return intent.InventoryFurnaceOutput, true
+	case protocol.ContainerLevelEntity:
+		if p == nil || !handler.IsFurnaceContainer(p.OpenContainerKind) || slot.Slot > 2 {
+			return 0, false
+		}
+		return intent.InventoryFurnaceInput + int16(slot.Slot), true
 	case protocol.ContainerHotBar, protocol.ContainerInventory, protocol.ContainerCombinedHotBarAndInventory:
 		if slot.Slot > 35 {
 			return 0, false
@@ -1462,7 +1496,7 @@ func canonicalInventorySlotFor(p *player.Player, slot protocol.StackRequestSlotI
 		if slot.Slot != 0 {
 			return 0, false
 		}
-		return 45, true
+		return player.OffhandSlot, true
 	case protocol.ContainerCursor:
 		return intent.InventoryCursorSlot, true
 	default:
@@ -1489,6 +1523,9 @@ func (s *bedrockSession) stackNetworkIDAt(slot int16) int32 {
 	if slot >= intent.InventoryCraftingTableStart && slot <= intent.InventoryCraftingTableOutput {
 		return s.craftingNetworkIDs[slot-intent.InventoryCraftingTableStart]
 	}
+	if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
+		return s.furnaceNetworkIDs[slot-intent.InventoryFurnaceInput]
+	}
 	if slot < 0 || int(slot) >= len(s.stackNetworkIDs) {
 		return 0
 	}
@@ -1502,6 +1539,10 @@ func (s *bedrockSession) setStackNetworkID(slot int16, id int32) {
 	}
 	if slot >= intent.InventoryCraftingTableStart && slot <= intent.InventoryCraftingTableOutput {
 		s.craftingNetworkIDs[slot-intent.InventoryCraftingTableStart] = id
+		return
+	}
+	if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
+		s.furnaceNetworkIDs[slot-intent.InventoryFurnaceInput] = id
 		return
 	}
 	if slot < 0 || int(slot) >= len(s.stackNetworkIDs) {
@@ -1735,6 +1776,13 @@ func canonicalStackAt(p *player.Player, slot int16) player.ItemStack {
 	if slot == intent.InventoryCraftingTableOutput {
 		return p.CraftingResult
 	}
+	if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
+		index := int(slot - intent.InventoryFurnaceInput)
+		if index >= 0 && index < len(p.ContainerSlots) {
+			return p.ContainerSlots[index]
+		}
+		return player.ItemStack{}
+	}
 	if slot < 0 || int(slot) >= len(p.Inventory) {
 		return player.ItemStack{}
 	}
@@ -1776,6 +1824,9 @@ func (l *Listener) handlePlayerBlockAction(session *bedrockSession, playerUUID [
 			Action:     intent.BlockActionBreak,
 			Position:   spatial.BlockPos{X: position.X(), Y: position.Y(), Z: position.Z()},
 			Face:       face,
+			// PlayerAction carries no selected-slot field. Zero is a real hotbar
+			// slot, so use -1 to preserve the latest MobEquipment selection.
+			HotbarSlot: -1,
 		})
 	case protocol.PlayerActionRespawn:
 		l.bus.PostRespawn(intent.RespawnIntent{PlayerUUID: playerUUID})
@@ -1922,7 +1973,9 @@ func (l *Listener) handleUseItemTransaction(playerUUID [16]byte, data *protocol.
 	if data == nil {
 		return
 	}
-	l.bus.PostHotbar(intent.HotbarIntent{PlayerUUID: playerUUID, Slot: data.HotBarSlot})
+	if !validActionHotbarSlot(data.HotBarSlot, "InventoryTransaction/UseItem") {
+		return
+	}
 	action := uint8(0)
 	switch data.ActionType {
 	case protocol.UseItemActionBreakBlock:
@@ -1945,6 +1998,71 @@ func (l *Listener) handleUseItemTransaction(playerUUID [16]byte, data *protocol.
 		ClickX:     data.ClickedPosition[0],
 		ClickY:     data.ClickedPosition[1],
 		ClickZ:     data.ClickedPosition[2],
+	})
+}
+
+// validActionHotbarSlot validates the slot snapshot carried by an item action.
+// It deliberately does not change the persistent selected slot: Bedrock uses
+// MobEquipment for that state, while transaction slots identify only the item
+// that participated in a particular use, release, or entity interaction.
+func validActionHotbarSlot(slot int32, packetType string) bool {
+	if slot >= 0 && slot < 9 {
+		return true
+	}
+	slog.Debug("bedrock action hotbar context rejected",
+		"packet_type", packetType, "action_slot", slot)
+	return false
+}
+
+// acceptClientHotbarSlot records a client-owned selected-slot change and
+// queues it for the simulation. A valid selection is never echoed back to the
+// originating client: doing so one tick later can overwrite a newer wheel
+// selection. Only invalid or dropped changes receive a correction.
+func (l *Listener) acceptClientHotbarSlot(session *bedrockSession, playerUUID [16]byte, slot int32, packetType string) bool {
+	p := l.game.GetPlayer(playerUUID)
+	current := -1
+	if p != nil {
+		current = p.HeldSlot
+	}
+	if slot < 0 || slot >= 9 || p == nil {
+		slog.Debug("bedrock hotbar selection rejected",
+			"packet_type", packetType, "incoming_slot", slot, "current_server_slot", current, "corrected_slot", current)
+		if p != nil {
+			l.sendHotbarCorrection(session, p, packetType)
+		}
+		return false
+	}
+	if session != nil {
+		session.stackMu.Lock()
+		session.clientHeldSlot = int(slot)
+		session.clientHeldSlotSeen = true
+		session.stackMu.Unlock()
+	}
+	slog.Debug("bedrock hotbar selection accepted",
+		"packet_type", packetType, "incoming_slot", slot, "current_server_slot", current, "outgoing_slot", "none")
+	if !l.bus.PostHotbar(intent.HotbarIntent{PlayerUUID: playerUUID, Slot: slot}) {
+		slog.Debug("bedrock hotbar selection queue full; correcting",
+			"packet_type", packetType, "incoming_slot", slot, "current_server_slot", current, "corrected_slot", current)
+		l.sendHotbarCorrection(session, p, packetType+"/QueueFull")
+		return false
+	}
+	return true
+}
+
+func (l *Listener) sendHotbarCorrection(session *bedrockSession, p *player.Player, packetType string) {
+	if session == nil || session.conn == nil || p == nil || p.HeldSlot < 0 || p.HeldSlot >= 9 {
+		return
+	}
+	session.stackMu.Lock()
+	session.clientHeldSlot = p.HeldSlot
+	session.clientHeldSlotSeen = true
+	session.stackMu.Unlock()
+	slog.Debug("bedrock hotbar correction sent",
+		"packet_type", packetType, "current_server_slot", p.HeldSlot, "outgoing_slot", p.HeldSlot, "outgoing_packet", "PlayerHotBar")
+	_ = session.conn.WritePacket(&packet.PlayerHotBar{
+		SelectedHotBarSlot: uint32(p.HeldSlot),
+		WindowID:           protocol.WindowIDInventory,
+		SelectHotBarSlot:   true,
 	})
 }
 

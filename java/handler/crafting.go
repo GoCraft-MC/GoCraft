@@ -152,9 +152,6 @@ func findMatchingInventorySlot(inventory *[player.InventorySize]player.ItemStack
 			return i
 		}
 	}
-	if !inventory[45].IsEmpty() && ingredient.matches(inventory[45].ItemID) {
-		return 45
-	}
 	return -1
 }
 
@@ -164,7 +161,7 @@ func addStackToInventory(inventory *[player.InventorySize]player.ItemStack, item
 	}
 	remaining := item.Count
 	stackLimit := player.MaxStackSize(item.ItemID)
-	for _, bounds := range [][2]int{{player.HotbarStart, player.HotbarStart + 9}, {9, player.HotbarStart}, {45, 46}} {
+	for _, bounds := range [][2]int{{player.HotbarStart, player.HotbarStart + 9}, {9, player.HotbarStart}} {
 		for i := bounds[0]; i < bounds[1] && remaining > 0; i++ {
 			if inventory[i].ItemID != item.ItemID || inventory[i].Damage != item.Damage || inventory[i].Count >= stackLimit {
 				continue
@@ -174,7 +171,7 @@ func addStackToInventory(inventory *[player.InventorySize]player.ItemStack, item
 			remaining -= add
 		}
 	}
-	for _, bounds := range [][2]int{{player.HotbarStart, player.HotbarStart + 9}, {9, player.HotbarStart}, {45, 46}} {
+	for _, bounds := range [][2]int{{player.HotbarStart, player.HotbarStart + 9}, {9, player.HotbarStart}} {
 		for i := bounds[0]; i < bounds[1] && remaining > 0; i++ {
 			if !inventory[i].IsEmpty() {
 				continue
@@ -271,6 +268,10 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 		handleChestClick(p, w, int(slot), button, mode)
 		return sendChestContainerContent(conn, p)
 	}
+	if windowID == furnaceContainerID && p.OpenContainerID == windowID && IsFurnaceContainer(p.OpenContainerKind) {
+		handleFurnaceClick(p, w, int(slot), button, mode)
+		return sendFurnaceContainerContent(conn, p)
+	}
 	if windowID != craftingTableContainerID || p.OpenContainerID != windowID || p.OpenContainerKind != "minecraft:crafting_table" {
 		return nil
 	}
@@ -315,6 +316,15 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 		returnCraftingGrid(p)
 		p.OpenContainerID = 0
 		p.OpenContainerKind = ""
+		p.ContainerStateID++
+		return sendSetContainerContent(conn, p, p.ContainerStateID)
+	}
+	if windowID == furnaceContainerID && p.OpenContainerID == windowID && IsFurnaceContainer(p.OpenContainerKind) {
+		persistFurnaceContents(p, w)
+		p.OpenContainerID = 0
+		p.OpenContainerKind = ""
+		p.OpenContainerPos = spatial.BlockPos{}
+		p.ContainerSlots = nil
 		p.ContainerStateID++
 		return sendSetContainerContent(conn, p, p.ContainerStateID)
 	}
