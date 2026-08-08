@@ -78,6 +78,7 @@ type Listener struct {
 	// Creative inventory catalogue — built once in NewListener.
 	creativeGroups []protocol.CreativeGroup
 	creativeItems  []protocol.CreativeItem
+	craftingData   *packet.CraftingData
 	creativeNames  map[uint32]creativeKnownItem // creative network ID → item name/meta
 }
 
@@ -112,6 +113,7 @@ type bedrockSession struct {
 	teleportPos        *spatial.Vec3
 	stackMu            sync.Mutex
 	stackNetworkIDs    [player.InventorySize]int32
+	craftingNetworkIDs [10]int32
 	cursorStackID      int32
 	nextStackNetworkID int32
 	lastCarriedItem    player.ItemStack
@@ -181,6 +183,14 @@ func NewListener(
 		spawnNotify: make(map[string]chan struct{}),
 	}
 	l.initCreativeContent()
+	l.craftingData = bedrockCraftingData()
+	slog.Info(
+		"bedrock: crafting catalogue ready",
+		"java_version", bedrockRecipeCompatibilityVersion,
+		"shaped", len(l.craftingData.ShapedRecipes),
+		"shapeless", len(l.craftingData.ShapelessRecipes),
+		"total", len(l.craftingData.ShapedRecipes)+len(l.craftingData.ShapelessRecipes),
+	)
 	return l
 }
 
@@ -575,6 +585,10 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		slog.Debug("bedrock: creative content send failed", "displayName", identity.DisplayName, "err", err)
 		return
 	}
+	if err := conn.WritePacket(l.craftingData); err != nil {
+		slog.Debug("bedrock: crafting data send failed", "displayName", identity.DisplayName, "err", err)
+		return
+	}
 
 	// Send local player state (SetPlayerGameType, UpdateAbilities, UpdateAttributes
 	// for movement speed, SetActorData) after chunks — matching Dragonfly ordering.
@@ -849,11 +863,17 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 					ContainerEntityUniqueID: -1,
 				})
 				bedrockSess.invOpened = true
+				bedrockSess.inventorySent = false
+				if player != nil {
+					l.sendPersonalCraftingSlots(conn, bedrockSess, player)
+				}
 			}
 
 		case *packet.ContainerClose:
 			// Echo the close back so the client confirms the screen is dismissed.
 			bedrockSess.invOpened = false
+			bedrockSess.inventorySent = false
+			l.bus.PostContainerClose(intent.ContainerCloseIntent{PlayerUUID: playerUUID, WindowID: p.WindowID})
 			_ = conn.WritePacket(&packet.ContainerClose{
 				WindowID:      p.WindowID,
 				ContainerType: p.ContainerType,
@@ -943,7 +963,8 @@ func (l *Listener) handleStackRequests(
 			RequestID: request.RequestID,
 		}
 
-		actions, valid := l.canonicalInventoryActions(request.Actions)
+		playerState := l.game.GetPlayer(playerUUID)
+		actions, valid := l.canonicalInventoryActions(playerState, request.Actions)
 		if !valid {
 			slog.Warn(
 				"bedrock: stack request translation failed",
@@ -958,6 +979,14 @@ func (l *Listener) handleStackRequests(
 			"request_id", request.RequestID,
 			"canonical_actions", len(actions),
 		)
+		if len(actions) == 0 {
+			// Crafting prediction packets may contain only CraftRecipe/Create
+			// style actions. A successful empty response is required to keep the
+			// Bedrock UI from rolling the local grid back.
+			response.Status = protocol.ItemStackResponseStatusOK
+			responses = append(responses, response)
+			continue
+		}
 
 		done := make(chan intent.InventoryResult, 1)
 
@@ -1060,6 +1089,7 @@ func (l *Listener) handleStackRequests(
 		)
 		for _, container := range containerInfo {
 			if container.Container.ContainerID == protocol.ContainerCraftingInput ||
+				container.Container.ContainerID == protocol.ContainerCraftingOutputPreview ||
 				container.Container.ContainerID == protocol.ContainerCreatedOutput {
 				craftingTouched = true
 				break
@@ -1112,53 +1142,93 @@ func (l *Listener) sendPersonalCraftingSlots(conn *minecraft.Conn, session *bedr
 	if conn == nil || session == nil || p == nil {
 		return
 	}
-	type slotUpdate struct {
-		uiSlot    uint32
-		canonical int
-	}
-	updates := []slotUpdate{
-		{uiSlot: 28, canonical: 1},
-		{uiSlot: 29, canonical: 2},
-		{uiSlot: 30, canonical: 3},
-		{uiSlot: 31, canonical: 4},
-		{uiSlot: 50, canonical: 0},
-	}
-
-	session.stackMu.Lock()
-	packets := make([]*packet.InventorySlot, 0, len(updates))
-	for _, update := range updates {
-		stack := p.Inventory[update.canonical]
-		stackID := session.stackNetworkIDs[update.canonical]
-		if stack.IsEmpty() {
-			stackID = 0
-			session.stackNetworkIDs[update.canonical] = 0
-		} else if stackID == 0 {
-			stackID = session.allocateStackNetworkID()
-			session.stackNetworkIDs[update.canonical] = stackID
-		}
-		packets = append(packets, &packet.InventorySlot{
-			WindowID: protocol.WindowIDUI,
-			Slot:     update.uiSlot,
-			NewItem:  l.itemInstance(stack, stackID),
-		})
-	}
-	session.stackMu.Unlock()
-
-	for _, pk := range packets {
+	for _, pk := range l.personalCraftingSlotPackets(session, p) {
 		_ = conn.WritePacket(pk)
 	}
 }
 
+// personalCraftingSlotPackets keeps both crafting screens in Bedrock's shared
+// UI inventory: personal input 28-31, workbench input 32-40, and result 50.
+// This is the same UI layout used by Dragonfly's crafting handler and prevents
+// crafting updates from overwriting normal inventory/hotbar slots.
+func (l *Listener) personalCraftingSlotPackets(session *bedrockSession, p *player.Player) []*packet.InventorySlot {
+	if session == nil || p == nil {
+		return nil
+	}
+	updates := craftingSlotUpdates(p)
+
+	session.stackMu.Lock()
+	packets := make([]*packet.InventorySlot, 0, len(updates))
+	for _, update := range updates {
+		stack := canonicalStackAt(p, update.canonical)
+		stackID := session.stackNetworkIDAt(update.canonical)
+		if stack.IsEmpty() {
+			stackID = 0
+			session.setStackNetworkID(update.canonical, 0)
+		} else if stackID == 0 {
+			stackID = session.allocateStackNetworkID()
+			session.setStackNetworkID(update.canonical, stackID)
+		}
+		packets = append(packets, &packet.InventorySlot{
+			WindowID: update.windowID,
+			Slot:     update.slot,
+			Container: protocol.Option(protocol.FullContainerName{
+				ContainerID: update.container,
+			}),
+			NewItem: l.itemInstance(stack, stackID),
+		})
+	}
+	session.stackMu.Unlock()
+	return packets
+}
+
+type craftingSlotUpdate struct {
+	windowID  uint32
+	slot      uint32
+	container byte
+	canonical int16
+}
+
+func craftingSlotUpdates(p *player.Player) []craftingSlotUpdate {
+	updates := make([]craftingSlotUpdate, 0, 10)
+	if p.OpenContainerKind == "minecraft:crafting_table" {
+		for slot := int16(0); slot < 9; slot++ {
+			updates = append(updates, craftingSlotUpdate{
+				windowID: protocol.WindowIDUI, slot: uint32(32 + slot), container: protocol.ContainerCraftingInput,
+				canonical: intent.InventoryCraftingTableStart + slot,
+			})
+		}
+		updates = append(updates, craftingSlotUpdate{
+			windowID: protocol.WindowIDUI, slot: 50, container: protocol.ContainerCreatedOutput,
+			canonical: intent.InventoryCraftingTableOutput,
+		})
+	} else {
+		for slot := int16(0); slot < 4; slot++ {
+			updates = append(updates, craftingSlotUpdate{
+				windowID: protocol.WindowIDUI, slot: uint32(28 + slot), container: protocol.ContainerCraftingInput,
+				canonical: 1 + slot,
+			})
+		}
+		updates = append(updates, craftingSlotUpdate{
+			windowID: protocol.WindowIDUI, slot: 50, container: protocol.ContainerCreatedOutput, canonical: 0,
+		})
+	}
+	return updates
+}
+
 func (l *Listener) canonicalInventoryActions(
+	p *player.Player,
 	actions []protocol.StackRequestAction,
 ) ([]intent.InventoryAction, bool) {
 	out := make([]intent.InventoryAction, 0, len(actions))
+	recognized := false
 	creativeSelected := false
 	creativeCount := creativeRequestCount(actions)
 
 	for _, raw := range actions {
 		switch action := raw.(type) {
 		case *protocol.CraftCreativeStackRequestAction:
+			recognized = true
 			ki, ok := l.creativePlayerStack(
 				action.CreativeItemNetworkID,
 				int(action.NumberOfCrafts),
@@ -1193,19 +1263,19 @@ func (l *Listener) canonicalInventoryActions(
 			creativeSelected = true
 
 		case *protocol.CraftResultsDeprecatedStackRequestAction:
+			recognized = true
 			// Client-side preview of the result. The authoritative item was
 			// already resolved using CraftCreativeStackRequestAction.
 			continue
 
 		case *protocol.CreateStackRequestAction:
-			// The creative item is already created in the canonical cursor.
-			if !creativeSelected {
-				slog.Warn("bedrock: create stack action without creative selection")
-				return nil, false
-			}
+			recognized = true
+			// CreatedOutput is virtual. Creative selection is handled above and
+			// survival crafting is handled when the result is taken.
 			continue
 
 		case *protocol.TakeStackRequestAction:
+			recognized = true
 			// Modern Bedrock creative selection sends the temporary created
 			// output (container 60, slot 50) to the cursor (container 59).
 			// CraftCreativeStackRequestAction already created that authoritative
@@ -1216,8 +1286,8 @@ func (l *Listener) canonicalInventoryActions(
 				continue
 			}
 
-			source, sourceOK := canonicalInventorySlot(action.Source)
-			destination, destinationOK := canonicalInventorySlot(action.Destination)
+			source, sourceOK := canonicalInventorySlotFor(p, action.Source)
+			destination, destinationOK := canonicalInventorySlotFor(p, action.Destination)
 			if !sourceOK || !destinationOK || action.Count == 0 {
 				slog.Warn(
 					"bedrock: invalid take stack slots",
@@ -1237,8 +1307,9 @@ func (l *Listener) canonicalInventoryActions(
 			})
 
 		case *protocol.PlaceStackRequestAction:
-			source, sourceOK := canonicalInventorySlot(action.Source)
-			destination, destinationOK := canonicalInventorySlot(action.Destination)
+			recognized = true
+			source, sourceOK := canonicalInventorySlotFor(p, action.Source)
+			destination, destinationOK := canonicalInventorySlotFor(p, action.Destination)
 			if !sourceOK || !destinationOK || action.Count == 0 {
 				return nil, false
 			}
@@ -1250,8 +1321,9 @@ func (l *Listener) canonicalInventoryActions(
 			})
 
 		case *protocol.SwapStackRequestAction:
-			source, sourceOK := canonicalInventorySlot(action.Source)
-			destination, destinationOK := canonicalInventorySlot(action.Destination)
+			recognized = true
+			source, sourceOK := canonicalInventorySlotFor(p, action.Source)
+			destination, destinationOK := canonicalInventorySlotFor(p, action.Destination)
 			if !sourceOK || !destinationOK || source == destination {
 				return nil, false
 			}
@@ -1262,7 +1334,8 @@ func (l *Listener) canonicalInventoryActions(
 			})
 
 		case *protocol.DropStackRequestAction:
-			source, sourceOK := canonicalInventorySlot(action.Source)
+			recognized = true
+			source, sourceOK := canonicalInventorySlotFor(p, action.Source)
 			if !sourceOK || action.Count == 0 {
 				return nil, false
 			}
@@ -1273,7 +1346,8 @@ func (l *Listener) canonicalInventoryActions(
 			})
 
 		case *protocol.DestroyStackRequestAction:
-			source, sourceOK := canonicalInventorySlot(action.Source)
+			recognized = true
+			source, sourceOK := canonicalInventorySlotFor(p, action.Source)
 			if !sourceOK || action.Count == 0 {
 				return nil, false
 			}
@@ -1283,7 +1357,17 @@ func (l *Listener) canonicalInventoryActions(
 				Count:  int(action.Count),
 			})
 
-		case *protocol.ConsumeStackRequestAction:
+		case *protocol.ConsumeStackRequestAction,
+			*protocol.CraftRecipeStackRequestAction,
+			*protocol.AutoCraftRecipeStackRequestAction,
+			*protocol.CraftRecipeOptionalStackRequestAction,
+			*protocol.CraftGrindstoneRecipeStackRequestAction,
+			*protocol.CraftLoomRecipeStackRequestAction,
+			*protocol.CraftNonImplementedStackRequestAction:
+			// These prediction actions are either accompanied by authoritative
+			// moves or are successful no-ops. Pumpkin accepts them so the client
+			// does not roll its crafting UI back.
+			recognized = true
 			continue
 
 		default:
@@ -1299,10 +1383,7 @@ func (l *Listener) canonicalInventoryActions(
 		}
 	}
 
-	if len(out) == 0 {
-		return nil, false
-	}
-	return out, true
+	return out, recognized
 }
 
 func creativeRequestCount(actions []protocol.StackRequestAction) int {
@@ -1324,17 +1405,36 @@ func creativeRequestCount(actions []protocol.StackRequestAction) int {
 }
 
 func canonicalInventorySlot(slot protocol.StackRequestSlotInfo) (int16, bool) {
+	return canonicalInventorySlotFor(nil, slot)
+}
+
+func canonicalInventorySlotFor(p *player.Player, slot protocol.StackRequestSlotInfo) (int16, bool) {
 	switch slot.Container.ContainerID {
 	case protocol.ContainerCraftingInput:
-		// Bedrock stores the personal 2x2 grid in UI slots 28-31. The
-		// canonical/Java inventory layout stores it in slots 1-4.
-		if slot.Slot < 28 || slot.Slot > 31 {
+		// Bedrock may address crafting slots either by local container index
+		// (0-3/0-8) or by the UI inventory slots (28-31/32-40).
+		if p != nil && p.OpenContainerKind == "minecraft:crafting_table" {
+			if slot.Slot < 9 {
+				return intent.InventoryCraftingTableStart + int16(slot.Slot), true
+			}
+			if slot.Slot >= 32 && slot.Slot <= 40 {
+				return intent.InventoryCraftingTableStart + int16(slot.Slot-32), true
+			}
 			return 0, false
 		}
-		return int16(1 + slot.Slot - 28), true
-	case protocol.ContainerCreatedOutput:
-		if slot.Slot != 50 {
+		if slot.Slot < 4 {
+			return int16(1 + slot.Slot), true
+		}
+		if slot.Slot >= 28 && slot.Slot <= 31 {
+			return int16(1 + slot.Slot - 28), true
+		}
+		return 0, false
+	case protocol.ContainerCreatedOutput, protocol.ContainerCraftingOutputPreview:
+		if slot.Slot != 0 && slot.Slot != 50 {
 			return 0, false
+		}
+		if p != nil && p.OpenContainerKind == "minecraft:crafting_table" {
+			return intent.InventoryCraftingTableOutput, true
 		}
 		return 0, true
 	case protocol.ContainerHotBar, protocol.ContainerInventory, protocol.ContainerCombinedHotBarAndInventory:
@@ -1378,6 +1478,9 @@ func (s *bedrockSession) stackNetworkIDAt(slot int16) int32 {
 	if slot == intent.InventoryCursorSlot {
 		return s.cursorStackID
 	}
+	if slot >= intent.InventoryCraftingTableStart && slot <= intent.InventoryCraftingTableOutput {
+		return s.craftingNetworkIDs[slot-intent.InventoryCraftingTableStart]
+	}
 	if slot < 0 || int(slot) >= len(s.stackNetworkIDs) {
 		return 0
 	}
@@ -1387,6 +1490,10 @@ func (s *bedrockSession) stackNetworkIDAt(slot int16) int32 {
 func (s *bedrockSession) setStackNetworkID(slot int16, id int32) {
 	if slot == intent.InventoryCursorSlot {
 		s.cursorStackID = id
+		return
+	}
+	if slot >= intent.InventoryCraftingTableStart && slot <= intent.InventoryCraftingTableOutput {
+		s.craftingNetworkIDs[slot-intent.InventoryCraftingTableStart] = id
 		return
 	}
 	if slot < 0 || int(slot) >= len(s.stackNetworkIDs) {
@@ -1425,8 +1532,8 @@ func (l *Listener) applyStackNetworkIDChanges(session *bedrockSession, p *player
 			l.transferStackNetworkID(session, p, action.Source, action.Destination)
 
 		case *protocol.SwapStackRequestAction:
-			source, sourceOK := canonicalInventorySlot(action.Source)
-			destination, destinationOK := canonicalInventorySlot(action.Destination)
+			source, sourceOK := canonicalInventorySlotFor(p, action.Source)
+			destination, destinationOK := canonicalInventorySlotFor(p, action.Destination)
 			if !sourceOK || !destinationOK {
 				continue
 			}
@@ -1442,13 +1549,13 @@ func (l *Listener) applyStackNetworkIDChanges(session *bedrockSession, p *player
 			session.setStackNetworkID(destination, sourceID)
 
 		case *protocol.DropStackRequestAction:
-			source, ok := canonicalInventorySlot(action.Source)
+			source, ok := canonicalInventorySlotFor(p, action.Source)
 			if ok && canonicalStackAt(p, source).IsEmpty() {
 				session.setStackNetworkID(source, 0)
 			}
 
 		case *protocol.DestroyStackRequestAction:
-			source, ok := canonicalInventorySlot(action.Source)
+			source, ok := canonicalInventorySlotFor(p, action.Source)
 			if ok && canonicalStackAt(p, source).IsEmpty() {
 				session.setStackNetworkID(source, 0)
 			}
@@ -1457,8 +1564,8 @@ func (l *Listener) applyStackNetworkIDChanges(session *bedrockSession, p *player
 }
 
 func (l *Listener) transferStackNetworkID(session *bedrockSession, p *player.Player, sourceInfo, destinationInfo protocol.StackRequestSlotInfo) {
-	source, sourceOK := canonicalInventorySlot(sourceInfo)
-	destination, destinationOK := canonicalInventorySlot(destinationInfo)
+	source, sourceOK := canonicalInventorySlotFor(p, sourceInfo)
+	destination, destinationOK := canonicalInventorySlotFor(p, destinationInfo)
 	if !sourceOK || !destinationOK {
 		return
 	}
@@ -1511,7 +1618,7 @@ func (l *Listener) stackResponseContainerInfo(session *bedrockSession, p *player
 	changed := make([]changedSlot, 0, len(actions)*2+1)
 	seen := make(map[string]struct{}, len(actions)*2+1)
 	add := func(slot protocol.StackRequestSlotInfo) {
-		if _, ok := canonicalInventorySlot(slot); !ok {
+		if _, ok := canonicalInventorySlotFor(p, slot); !ok {
 			return
 		}
 		key := fmt.Sprintf("%d:%v:%d", slot.Container.ContainerID, slot.Container.DynamicContainerID, slot.Slot)
@@ -1521,21 +1628,6 @@ func (l *Listener) stackResponseContainerInfo(session *bedrockSession, p *player
 		seen[key] = struct{}{}
 		changed = append(changed, changedSlot{container: slot.Container, slot: slot.Slot})
 	}
-	addCraftingOutput := func() {
-		add(protocol.StackRequestSlotInfo{
-			Container: protocol.FullContainerName{ContainerID: protocol.ContainerCreatedOutput},
-			Slot:      50,
-		})
-	}
-	touchesCraftingInput := func(slots ...protocol.StackRequestSlotInfo) bool {
-		for _, slot := range slots {
-			if slot.Container.ContainerID == protocol.ContainerCraftingInput {
-				return true
-			}
-		}
-		return false
-	}
-
 	creativeRequest := false
 	for _, raw := range actions {
 		if _, ok := raw.(*protocol.CraftCreativeStackRequestAction); ok {
@@ -1558,39 +1650,28 @@ func (l *Listener) stackResponseContainerInfo(session *bedrockSession, p *player
 			add(action.Source)
 			add(action.Destination)
 			if action.Source.Container.ContainerID == protocol.ContainerCreatedOutput {
-				// Taking a result consumes one item from each occupied input
-				// slot, so include all four updated grid slots in the response.
-				for slot := byte(28); slot <= 31; slot++ {
+				// Taking a result consumes one item from each occupied input slot.
+				start, end := byte(28), byte(31)
+				if p.OpenContainerKind == "minecraft:crafting_table" {
+					start, end = 32, 40
+				}
+				for slot := start; slot <= end; slot++ {
 					add(protocol.StackRequestSlotInfo{
 						Container: protocol.FullContainerName{ContainerID: protocol.ContainerCraftingInput},
 						Slot:      slot,
 					})
 				}
-			} else if touchesCraftingInput(action.Source, action.Destination) {
-				addCraftingOutput()
 			}
 		case *protocol.PlaceStackRequestAction:
 			add(action.Source)
 			add(action.Destination)
-			if touchesCraftingInput(action.Source, action.Destination) {
-				addCraftingOutput()
-			}
 		case *protocol.SwapStackRequestAction:
 			add(action.Source)
 			add(action.Destination)
-			if touchesCraftingInput(action.Source, action.Destination) {
-				addCraftingOutput()
-			}
 		case *protocol.DropStackRequestAction:
 			add(action.Source)
-			if touchesCraftingInput(action.Source) {
-				addCraftingOutput()
-			}
 		case *protocol.DestroyStackRequestAction:
 			add(action.Source)
-			if touchesCraftingInput(action.Source) {
-				addCraftingOutput()
-			}
 		}
 	}
 
@@ -1600,7 +1681,7 @@ func (l *Listener) stackResponseContainerInfo(session *bedrockSession, p *player
 	groups := make([]protocol.StackResponseContainerInfo, 0, len(changed))
 	indices := make(map[containerKey]int, len(changed))
 	for _, entry := range changed {
-		canonical, ok := canonicalInventorySlot(protocol.StackRequestSlotInfo{Container: entry.container, Slot: entry.slot})
+		canonical, ok := canonicalInventorySlotFor(p, protocol.StackRequestSlotInfo{Container: entry.container, Slot: entry.slot})
 		if !ok {
 			continue
 		}
@@ -1640,6 +1721,12 @@ func canonicalStackAt(p *player.Player, slot int16) player.ItemStack {
 	if slot == intent.InventoryCursorSlot {
 		return p.CarriedItem
 	}
+	if slot >= intent.InventoryCraftingTableStart && slot < intent.InventoryCraftingTableOutput {
+		return p.CraftingGrid[slot-intent.InventoryCraftingTableStart]
+	}
+	if slot == intent.InventoryCraftingTableOutput {
+		return p.CraftingResult
+	}
 	if slot < 0 || int(slot) >= len(p.Inventory) {
 		return player.ItemStack{}
 	}
@@ -1652,6 +1739,18 @@ func (l *Listener) handlePlayerBlockAction(session *bedrockSession, playerUUID [
 		session.breakingPos, session.breaking = position, true
 		l.broadcastBlockCrack(playerUUID, position, packet.LevelEventStartBlockCracking)
 	case protocol.PlayerActionCrackBreak, protocol.PlayerActionContinueDestroyBlock:
+		// Holding the button while moving to the next block may emit CONTINUE
+		// without a new START. An update event cannot start a fresh crack overlay,
+		// so explicitly stop the old target and start the new one.
+		if !session.breaking || session.breakingPos != position {
+			if session.breaking {
+				l.broadcastBlockCrack(playerUUID, session.breakingPos, packet.LevelEventStopBlockCracking)
+			}
+			session.breakingPos, session.breaking = position, true
+			l.broadcastBlockCrack(playerUUID, position, packet.LevelEventStartBlockCracking)
+			l.broadcastBlockHitSound(position)
+			break
+		}
 		session.breakingPos, session.breaking = position, true
 		l.broadcastBlockCrack(playerUUID, position, packet.LevelEventUpdateBlockCracking)
 		l.broadcastBlockHitSound(position)

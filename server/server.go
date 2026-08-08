@@ -671,8 +671,28 @@ func (s *Server) tickIntents() {
 			s.applyBedrockPlayerState(i)
 		case intent.InventoryIntent:
 			s.applyBedrockInventory(i)
+		case intent.ContainerCloseIntent:
+			s.applyBedrockContainerClose(i)
 		}
 	}
+}
+
+func (s *Server) applyBedrockContainerClose(i intent.ContainerCloseIntent) {
+	p := s.game.GetPlayer(i.PlayerUUID)
+	if p == nil || p.Edition != player.ClientEditionBedrock {
+		return
+	}
+	if p.OpenContainerKind == "minecraft:crafting_table" {
+		for slot := range p.CraftingGrid {
+			if p.CraftingGrid[slot].IsEmpty() || !p.GiveItem(p.CraftingGrid[slot]) {
+				continue
+			}
+			p.CraftingGrid[slot] = player.ItemStack{}
+		}
+		p.CraftingResult = handler.FindCraftingTableResult(p.CraftingGrid)
+	}
+	p.OpenContainerID = 0
+	p.OpenContainerKind = ""
 }
 
 func (s *Server) applyBedrockPlayerState(i intent.PlayerStateIntent) {
@@ -1010,6 +1030,8 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		clicked := s.world.GetBlock(x, y, z)
 		if s.bedrockListener != nil {
 			if s.bedrockListener.OpenContainerBlock(p.UUID, int32(x), int32(y), int32(z), clicked.ResourceLocation()) {
+				p.OpenContainerKind = clicked.ResourceLocation()
+				p.OpenContainerID = 1
 				return
 			}
 		}
@@ -1191,12 +1213,20 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		return
 	}
 	inventory := p.Inventory
+	craftingGrid := p.CraftingGrid
+	craftingResult := handler.FindCraftingTableResult(craftingGrid)
 	carried := p.CarriedItem
 	updateBedrockPersonalCrafting(&inventory)
 	drops := make([]player.ItemStack, 0)
 	get := func(slot int16) (player.ItemStack, bool) {
 		if slot == intent.InventoryCursorSlot {
 			return carried, true
+		}
+		if slot >= intent.InventoryCraftingTableStart && slot < intent.InventoryCraftingTableOutput {
+			return craftingGrid[slot-intent.InventoryCraftingTableStart], true
+		}
+		if slot == intent.InventoryCraftingTableOutput {
+			return craftingResult, true
 		}
 		if slot < 0 || int(slot) >= len(inventory) {
 			return player.ItemStack{}, false
@@ -1211,10 +1241,21 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			carried = stack
 			return true
 		}
+		if slot >= intent.InventoryCraftingTableStart && slot < intent.InventoryCraftingTableOutput {
+			craftingGrid[slot-intent.InventoryCraftingTableStart] = stack
+			craftingResult = handler.FindCraftingTableResult(craftingGrid)
+			return true
+		}
+		if slot == intent.InventoryCraftingTableOutput {
+			return stack.IsEmpty()
+		}
 		if slot < 0 || int(slot) >= len(inventory) || !canPlaceCanonicalInventorySlot(int(slot), stack) {
 			return false
 		}
 		inventory[slot] = stack
+		if slot >= 1 && slot <= 4 {
+			updateBedrockPersonalCrafting(&inventory)
+		}
 		return true
 	}
 
@@ -1238,10 +1279,10 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		}
 		switch action.Kind {
 		case intent.InventoryActionMove:
-			if action.Count <= 0 || action.Count > source.Count || action.Source == action.Destination || action.Destination == 0 {
+			if action.Count <= 0 || action.Count > source.Count || action.Source == action.Destination || action.Destination == 0 || action.Destination == intent.InventoryCraftingTableOutput {
 				return
 			}
-			if action.Source == 0 && action.Count != source.Count {
+			if (action.Source == 0 || action.Source == intent.InventoryCraftingTableOutput) && action.Count != source.Count {
 				// Crafting outputs are indivisible: One result stack consumes one
 				// item from every occupied ingredient slot.
 				return
@@ -1268,6 +1309,9 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			}
 			if action.Source == 0 {
 				consumeBedrockPersonalCrafting(&inventory)
+			} else if action.Source == intent.InventoryCraftingTableOutput {
+				consumeBedrockCraftingTable(&craftingGrid)
+				craftingResult = handler.FindCraftingTableResult(craftingGrid)
 			}
 
 		case intent.InventoryActionSwap:
@@ -1301,6 +1345,8 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	}
 	updateBedrockPersonalCrafting(&inventory)
 	p.Inventory = inventory
+	p.CraftingGrid = craftingGrid
+	p.CraftingResult = handler.FindCraftingTableResult(craftingGrid)
 	p.CarriedItem = carried
 	for index, stack := range drops {
 		if dropped := s.newDroppedItem(stack, p.Position, index); dropped != nil {
@@ -1308,6 +1354,18 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		}
 	}
 	accepted = true
+}
+
+func consumeBedrockCraftingTable(grid *[9]player.ItemStack) {
+	for slot := range grid {
+		if grid[slot].IsEmpty() {
+			continue
+		}
+		grid[slot].Count--
+		if grid[slot].Count <= 0 {
+			grid[slot] = player.ItemStack{}
+		}
+	}
 }
 
 func updateBedrockPersonalCrafting(inventory *[player.InventorySize]player.ItemStack) {

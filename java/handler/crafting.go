@@ -240,11 +240,23 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 
 	if windowID == 0 {
 		before := p.ArmorPoints()
-		if mode == 1 {
+		if mode == 1 && slot == 0 {
+			shiftPersonalCraftingResult(p)
+		} else if mode == 0 && slot == 0 {
+			takePersonalCraftingResult(p)
+		} else if mode == 1 {
 			shiftPlayerInventorySlot(p, int(slot))
 		} else if mode == 0 {
 			clickPlayerInventorySlot(p, int(slot), button)
+		} else if mode == 5 {
+			handleQuickCraft(p, int(slot), button, func(slot int) *player.ItemStack {
+				if slot < 1 || slot >= player.InventorySize || !canPlaceInPlayerSlot(slot, p.CarriedItem) {
+					return nil
+				}
+				return &p.Inventory[slot]
+			})
 		}
+		updatePersonalCraftingResult(p)
 		p.ContainerStateID++
 		if err := sendSetContainerContent(conn, p, p.ContainerStateID); err != nil {
 			return err
@@ -272,6 +284,10 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 		shiftCraftingSlot(p, int(slot))
 	} else if mode == 0 {
 		clickCraftingSlot(p, int(slot), button)
+	} else if mode == 5 {
+		handleQuickCraft(p, int(slot), button, func(slot int) *player.ItemStack {
+			return craftingContainerSlot(p, slot)
+		})
 	}
 	p.CraftingResult = findCraftingResult(p.CraftingGrid)
 	p.ContainerStateID++
@@ -512,7 +528,9 @@ func clickPlayerInventorySlot(p *player.Player, slot int, button byte) {
 		}
 		return
 	}
-	if slot < 5 || slot >= player.InventorySize {
+	// Slot zero is a derived crafting result and is handled separately. Slots
+	// 1-4 are the player's 2x2 crafting input grid.
+	if slot < 1 || slot >= player.InventorySize {
 		return
 	}
 	target := &p.Inventory[slot]
@@ -570,10 +588,18 @@ func clickPlayerInventorySlot(p *player.Player, slot int, button byte) {
 }
 
 func shiftPlayerInventorySlot(p *player.Player, slot int) {
-	if slot < 5 || slot >= player.InventorySize || p.Inventory[slot].IsEmpty() {
+	if slot < 1 || slot >= player.InventorySize || p.Inventory[slot].IsEmpty() {
 		return
 	}
 	item := p.Inventory[slot]
+	if slot <= 4 {
+		inventory := p.Inventory
+		inventory[slot] = player.ItemStack{}
+		if addStackToInventory(&inventory, item) {
+			p.Inventory = inventory
+		}
+		return
+	}
 	if slot >= 9 {
 		if armorSlot := armorInventorySlot(item.ItemID); armorSlot >= 5 && p.Inventory[armorSlot].IsEmpty() {
 			p.Inventory[armorSlot] = item
@@ -608,6 +634,115 @@ func canPlaceInPlayerSlot(slot int, item player.ItemStack) bool {
 		return true
 	}
 	return armorInventorySlot(item.ItemID) == slot
+}
+
+// handleQuickCraft implements the three-packet drag sequence used by modern
+// clients: start (0/4), add slot (1/5), and end (2/6). Left drag distributes
+// the cursor evenly; right drag places one item in each selected slot.
+func handleQuickCraft(p *player.Player, slot int, button byte, targetFor func(int) *player.ItemStack) {
+	stage, dragButton := button%4, button/4
+	switch stage {
+	case 0:
+		p.QuickCraftButton = dragButton
+		p.QuickCraftSlots = p.QuickCraftSlots[:0]
+	case 1:
+		if p.CarriedItem.IsEmpty() || dragButton != p.QuickCraftButton || targetFor(slot) == nil {
+			return
+		}
+		for _, existing := range p.QuickCraftSlots {
+			if existing == slot {
+				return
+			}
+		}
+		p.QuickCraftSlots = append(p.QuickCraftSlots, slot)
+	case 2:
+		if dragButton != p.QuickCraftButton || p.CarriedItem.IsEmpty() || len(p.QuickCraftSlots) == 0 {
+			p.QuickCraftSlots = p.QuickCraftSlots[:0]
+			return
+		}
+		remainingSlots := len(p.QuickCraftSlots)
+		for _, selected := range p.QuickCraftSlots {
+			target := targetFor(selected)
+			if target == nil || (!target.IsEmpty() && (target.ItemID != p.CarriedItem.ItemID || target.Damage != p.CarriedItem.Damage)) {
+				remainingSlots--
+				continue
+			}
+			amount := 1
+			if dragButton == 0 {
+				amount = p.CarriedItem.Count / remainingSlots
+				if amount < 1 {
+					amount = 1
+				}
+			}
+			limit := player.MaxStackSize(p.CarriedItem.ItemID)
+			space := limit
+			if !target.IsEmpty() {
+				space -= target.Count
+			}
+			amount = minInt(amount, minInt(space, p.CarriedItem.Count))
+			if amount > 0 {
+				if target.IsEmpty() {
+					*target = p.CarriedItem
+					target.Count = amount
+				} else {
+					target.Count += amount
+				}
+				p.CarriedItem.Count -= amount
+				normalizeStack(&p.CarriedItem)
+			}
+			remainingSlots--
+			if p.CarriedItem.IsEmpty() {
+				break
+			}
+		}
+		p.QuickCraftSlots = p.QuickCraftSlots[:0]
+	}
+}
+
+func updatePersonalCraftingResult(p *player.Player) {
+	grid := [4]player.ItemStack{
+		p.Inventory[1], p.Inventory[2], p.Inventory[3], p.Inventory[4],
+	}
+	p.Inventory[0] = FindPersonalCraftingResult(grid)
+}
+
+func takePersonalCraftingResult(p *player.Player) {
+	result := p.Inventory[0]
+	if result.IsEmpty() || (!p.CarriedItem.IsEmpty() && p.CarriedItem.ItemID != result.ItemID) {
+		return
+	}
+	if p.CarriedItem.Count+result.Count > player.MaxStackSize(result.ItemID) {
+		return
+	}
+	if p.CarriedItem.IsEmpty() {
+		p.CarriedItem = result
+	} else {
+		p.CarriedItem.Count += result.Count
+	}
+	consumePersonalCraftingIngredients(p)
+}
+
+func shiftPersonalCraftingResult(p *player.Player) {
+	result := p.Inventory[0]
+	if result.IsEmpty() {
+		return
+	}
+	inventory := p.Inventory
+	if !addStackToInventory(&inventory, result) {
+		return
+	}
+	p.Inventory = inventory
+	consumePersonalCraftingIngredients(p)
+}
+
+func consumePersonalCraftingIngredients(p *player.Player) {
+	for slot := 1; slot <= 4; slot++ {
+		if p.Inventory[slot].IsEmpty() {
+			continue
+		}
+		p.Inventory[slot].Count--
+		normalizeStack(&p.Inventory[slot])
+	}
 }
 
 func armorInventorySlot(itemID string) int {
@@ -762,6 +897,11 @@ func FindPersonalCraftingResult(grid [4]player.ItemStack) player.ItemStack {
 	tableGrid[3] = grid[2]
 	tableGrid[4] = grid[3]
 	return findCraftingResult(tableGrid)
+}
+
+// FindCraftingTableResult resolves a canonical 3x3 crafting-table grid.
+func FindCraftingTableResult(grid [9]player.ItemStack) player.ItemStack {
+	return findCraftingResult(grid)
 }
 
 func shapedGridMatches(recipe recipeDisplay, grid [9]player.ItemStack) bool {

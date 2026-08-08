@@ -164,3 +164,97 @@ func TestBedrockPersonalCraftingProducesAndConsumesRecipe(t *testing.T) {
 		t.Fatalf("next crafting output = %+v, want four oak planks", p.Inventory[0])
 	}
 }
+
+func TestBedrockPersonalCraftingAcceptsEveryJava1214Plank(t *testing.T) {
+	planks := []string{
+		"minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks",
+		"minecraft:jungle_planks", "minecraft:acacia_planks", "minecraft:cherry_planks",
+		"minecraft:dark_oak_planks", "minecraft:pale_oak_planks", "minecraft:mangrove_planks",
+		"minecraft:bamboo_planks", "minecraft:crimson_planks", "minecraft:warped_planks",
+	}
+	for _, plank := range planks {
+		t.Run(plank, func(t *testing.T) {
+			g := game.New()
+			p := player.New([16]byte{16}, "crafter", player.ClientEditionBedrock)
+			p.GameMode = player.GameModeSurvival
+			for slot := 1; slot <= 3; slot++ {
+				p.Inventory[slot] = player.ItemStack{ItemID: plank, Count: 1}
+			}
+			p.CarriedItem = player.ItemStack{ItemID: plank, Count: 1}
+			_ = g.AddPlayer(p)
+			s := &Server{game: g, sessions: session.NewManager()}
+			done := make(chan intent.InventoryResult, 1)
+			s.applyBedrockInventory(intent.InventoryIntent{
+				PlayerUUID: p.UUID,
+				Actions: []intent.InventoryAction{{
+					Kind: intent.InventoryActionMove, Source: intent.InventoryCursorSlot, Destination: 4, Count: 1,
+				}},
+				Done: done,
+			})
+			if result := <-done; !result.Accepted {
+				t.Fatal("placing the fourth plank was rejected")
+			}
+			if result := p.Inventory[0]; result.ItemID != "minecraft:crafting_table" || result.Count != 1 {
+				t.Fatalf("result = %+v, want one crafting table", result)
+			}
+		})
+	}
+}
+
+func TestBedrockCraftingTableProducesAndConsumesRecipe(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{14}, "table-crafter", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.OpenContainerKind = "minecraft:crafting_table"
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:oak_log", Count: 1}
+	_ = g.AddPlayer(p)
+	s := &Server{game: g, sessions: session.NewManager()}
+
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{PlayerUUID: p.UUID, Actions: []intent.InventoryAction{{
+		Kind: intent.InventoryActionMove, Source: player.HotbarStart,
+		Destination: intent.InventoryCraftingTableStart, Count: 1,
+	}}, Done: done})
+	if result := <-done; !result.Accepted {
+		t.Fatal("placing a log in the crafting table was rejected")
+	}
+	if p.CraftingResult.ItemID != "minecraft:oak_planks" || p.CraftingResult.Count != 4 {
+		t.Fatalf("crafting result = %+v, want four oak planks", p.CraftingResult)
+	}
+
+	done = make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{PlayerUUID: p.UUID, Actions: []intent.InventoryAction{{
+		Kind: intent.InventoryActionMove, Source: intent.InventoryCraftingTableOutput,
+		Destination: intent.InventoryCursorSlot, Count: 4,
+	}}, Done: done})
+	if result := <-done; !result.Accepted {
+		t.Fatal("taking the crafting-table result was rejected")
+	}
+	if p.CarriedItem.ItemID != "minecraft:oak_planks" || p.CarriedItem.Count != 4 || !p.CraftingGrid[0].IsEmpty() {
+		t.Fatalf("cursor=%+v input=%+v", p.CarriedItem, p.CraftingGrid[0])
+	}
+}
+
+func TestBedrockCraftingTableCloseClearsStateAndReturnsIngredients(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{15}, "closing-crafter", player.ClientEditionBedrock)
+	p.OpenContainerID = 1
+	p.OpenContainerKind = "minecraft:crafting_table"
+	p.CraftingGrid[4] = player.ItemStack{ItemID: "minecraft:oak_log", Count: 1}
+	_ = g.AddPlayer(p)
+	s := &Server{game: g}
+
+	// Bedrock may report a protocol-specific window ID while closing. Closing
+	// the active server-side container must not leave the player stuck in the
+	// 3x3 crafting context.
+	s.applyBedrockContainerClose(intent.ContainerCloseIntent{PlayerUUID: p.UUID, WindowID: 0xff})
+	if p.OpenContainerID != 0 || p.OpenContainerKind != "" {
+		t.Fatalf("container state remained open: id=%d kind=%q", p.OpenContainerID, p.OpenContainerKind)
+	}
+	if !p.CraftingGrid[4].IsEmpty() {
+		t.Fatalf("crafting input was not returned: %+v", p.CraftingGrid[4])
+	}
+	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:oak_log" || got.Count != 1 {
+		t.Fatalf("returned inventory item = %+v, want oak log", got)
+	}
+}

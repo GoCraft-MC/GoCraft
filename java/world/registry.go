@@ -169,7 +169,10 @@ func loadRegistries() {
 	itemIDs, itemNames = loadItemRegistry()
 	etMap, _ := loadRegistry(raw, "minecraft:entity_type", "registries.json")
 	entityTypeIDs = etMap
-	biomeMap, _ := loadRegistry(raw, "minecraft:worldgen/biome", "registries.json")
+	// Dynamic biome IDs are assigned by the ordered Registry Data snapshot sent
+	// during Configuration. The generic registry report may use a different
+	// internal order and, in older generated snapshots, omitted pale_garden.
+	biomeMap, _ := loadNetworkRegistry("minecraft:worldgen/biome")
 	biomeIDs = biomeMap
 	blockEntityMap, _ := loadRegistry(raw, "minecraft:block_entity_type", "registries.json")
 	blockEntityTypeIDs = blockEntityMap
@@ -186,6 +189,42 @@ func loadRegistries() {
 		"blockEntityTypes", len(blockEntityTypeIDs),
 		"soundEvents", len(soundEventIDs),
 		"mobEffects", len(mobEffectIDs))
+}
+
+func loadNetworkRegistry(name string) (map[string]int32, map[int32]string) {
+	data, err := gamedata.FS.ReadFile("java/1.21.4/network_registries.json")
+	if err != nil {
+		panic(fmt.Sprintf("gamedata: reading network_registries.json: %v", err))
+	}
+	var file struct {
+		Registries []struct {
+			Name    string   `json:"name"`
+			Entries []string `json:"entries"`
+		} `json:"registries"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		panic(fmt.Sprintf("gamedata: parsing network_registries.json: %v", err))
+	}
+	for _, registry := range file.Registries {
+		if registry.Name != name {
+			continue
+		}
+		nameToID := make(map[string]int32, len(registry.Entries))
+		idToName := make(map[int32]string, len(registry.Entries))
+		for id, entry := range registry.Entries {
+			protocolID := int32(id)
+			if entry == "" {
+				panic(fmt.Sprintf("gamedata: network registry %s entry %d is empty", name, id))
+			}
+			if _, duplicate := nameToID[entry]; duplicate {
+				panic(fmt.Sprintf("gamedata: network registry %s contains duplicate %s", name, entry))
+			}
+			nameToID[entry] = protocolID
+			idToName[protocolID] = entry
+		}
+		return nameToID, idToName
+	}
+	panic(fmt.Sprintf("gamedata: network registry %s is missing", name))
 }
 
 // loadRegistry extracts one named registry from the top-level registries map

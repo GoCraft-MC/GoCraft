@@ -53,6 +53,28 @@ func TestNearestBiomeFindsTheBiomeAtTheSearchOrigin(t *testing.T) {
 	}
 }
 
+func TestNearestBiomeFindsThreeDimensionalCaveBiomes(t *testing.T) {
+	generator := NewOverworldGenerator(20260808)
+	for _, target := range []string{"minecraft:lush_caves", "minecraft:dripstone_caves", "minecraft:deep_dark"} {
+		x, z, ok := generator.NearestBiome(0, 0, target, 2048)
+		if !ok {
+			t.Errorf("expected to locate %s", target)
+			continue
+		}
+		found := false
+		surface := generator.sampleTerrain(x, z)
+		for y := WorldMinY + 8; y <= minInt(56, surface.height-8); y += 12 {
+			if generator.biomeAt3D(x, y, z, surface) == target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("located %s at %d,%d but no sampled Y has that biome", target, x, z)
+		}
+	}
+}
+
 func TestGeneratedBiomeNamesAreUniqueAndUnnamespaced(t *testing.T) {
 	seen := make(map[string]struct{})
 	for _, name := range GeneratedBiomeNames() {

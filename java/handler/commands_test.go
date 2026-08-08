@@ -32,6 +32,26 @@ func TestBuiltinsRegisterNavigationVersionAndSummonCommands(t *testing.T) {
 	}
 }
 
+func TestVersionAliasesUseEditionNeutralReply(t *testing.T) {
+	dispatcher := NewDispatcher()
+	RegisterBuiltins(dispatcher)
+
+	for _, command := range []string{"/version", "/ver"} {
+		t.Run(command, func(t *testing.T) {
+			var reply string
+			dispatcher.Dispatch(command, CommandContext{
+				Reply: func(message string) error {
+					reply = message
+					return nil
+				},
+			})
+			if reply != goCraftVersion {
+				t.Fatalf("reply = %q, want %q", reply, goCraftVersion)
+			}
+		})
+	}
+}
+
 func TestEverySummonCompletionBuildsAJavaSpawnPacket(t *testing.T) {
 	for _, name := range summonableMobNames {
 		entity := corentity.New(1, [16]byte{}, corentity.EntityType("minecraft:"+name), 0, 64, 0)

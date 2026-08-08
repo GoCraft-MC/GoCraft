@@ -138,6 +138,8 @@ type Player struct {
 	CraftingGrid            [9]ItemStack
 	CraftingResult          ItemStack
 	CarriedItem             ItemStack
+	QuickCraftButton        byte
+	QuickCraftSlots         []int
 }
 
 // HeldItem returns the ItemStack in the currently selected hotbar slot.

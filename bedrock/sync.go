@@ -608,14 +608,15 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 	var armour []protocol.ItemInstance
 	var offhand []protocol.ItemInstance
 	var uiContent []protocol.ItemInstance
+	playerScreen := viewer.invOpened && p.OpenContainerKind == ""
 	if inventoryChanged {
+		// Bedrock's Inventory container is always 36 slots in hotbar-then-main
+		// order, including while the player screen is open. Player-screen slots
+		// are synchronised separately below, like Pumpkin's slot update path.
 		content = make([]protocol.ItemInstance, 36)
-		for slot := 0; slot < 9; slot++ {
-			canonical := player.HotbarStart + slot
+		for slot := range content {
+			canonical := bedrockInventoryCanonicalSlot(slot)
 			content[slot] = l.itemInstance(p.Inventory[canonical], viewer.stackNetworkIDs[canonical])
-		}
-		for slot := 9; slot < 36; slot++ {
-			content[slot] = l.itemInstance(p.Inventory[slot], viewer.stackNetworkIDs[slot])
 		}
 		armour = []protocol.ItemInstance{
 			l.itemInstance(p.Inventory[5], viewer.stackNetworkIDs[5]),
@@ -632,21 +633,40 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 		// left their original inventory slots looking stuck/ghosted.
 		uiContent = make([]protocol.ItemInstance, 54)
 		uiContent[0] = l.itemInstance(p.CarriedItem, viewer.cursorStackID)
-		for slot := 0; slot < 4; slot++ {
-			canonical := 1 + slot
-			uiContent[28+slot] = l.itemInstance(p.Inventory[canonical], viewer.stackNetworkIDs[canonical])
+		for _, update := range craftingSlotUpdates(p) {
+			if update.windowID != protocol.WindowIDUI || int(update.slot) >= len(uiContent) {
+				continue
+			}
+			stack := canonicalStackAt(p, update.canonical)
+			stackID := viewer.stackNetworkIDAt(update.canonical)
+			uiContent[update.slot] = l.itemInstance(stack, stackID)
 		}
-		uiContent[50] = l.itemInstance(p.Inventory[0], viewer.stackNetworkIDs[0])
 	}
 	viewer.stackMu.Unlock()
 
 	if inventoryChanged {
-		// Send in Dragonfly's exact order: Inventory → UI → OffHand → Armour
-		_ = viewer.conn.WritePacket(&packet.InventoryContent{WindowID: protocol.WindowIDInventory, Content: content})
-		// WindowIDUI: 54 empty slots — matches Dragonfly's s.ui (inventory.New(54, nil))
+		// Keep Bedrock's native inventory containers intact. Crafting screen slots
+		// are sent last so UI content cannot overwrite the authoritative result.
+		_ = viewer.conn.WritePacket(&packet.InventoryContent{
+			WindowID: protocol.WindowIDInventory,
+			Content:  content,
+			Container: protocol.FullContainerName{
+				ContainerID: protocol.ContainerInventory,
+			},
+		})
+		// WindowIDUI: 54 slots matching Dragonfly's UI inventory.
 		_ = viewer.conn.WritePacket(&packet.InventoryContent{WindowID: protocol.WindowIDUI, Content: uiContent})
-		_ = viewer.conn.WritePacket(&packet.InventoryContent{WindowID: protocol.WindowIDOffHand, Content: offhand})
-		_ = viewer.conn.WritePacket(&packet.InventoryContent{WindowID: protocol.WindowIDArmour, Content: armour})
+		_ = viewer.conn.WritePacket(&packet.InventoryContent{
+			WindowID: protocol.WindowIDOffHand, Content: offhand,
+			Container: protocol.FullContainerName{ContainerID: protocol.ContainerOffhand},
+		})
+		_ = viewer.conn.WritePacket(&packet.InventoryContent{
+			WindowID: protocol.WindowIDArmour, Content: armour,
+			Container: protocol.FullContainerName{ContainerID: protocol.ContainerArmor},
+		})
+		if playerScreen || p.OpenContainerKind == "minecraft:crafting_table" {
+			l.sendPersonalCraftingSlots(viewer.conn, viewer, p)
+		}
 	}
 	if heldChanged {
 		_ = viewer.conn.WritePacket(&packet.MobEquipment{
@@ -663,6 +683,16 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 	viewer.lastHeldSlot = p.HeldSlot
 	viewer.lastHeldItem = heldItem
 	viewer.lastCarriedItem = p.CarriedItem
+}
+
+func bedrockInventoryCanonicalSlot(slot int) int {
+	if slot < 0 || slot >= 36 {
+		return -1
+	}
+	if slot < 9 {
+		return player.HotbarStart + slot
+	}
+	return slot
 }
 
 func (l *Listener) sendPlayerEquipment(viewer *bedrockSession, p *player.Player) {
@@ -893,23 +923,33 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 	if stack.IsEmpty() {
 		return protocol.ItemInstance{}
 	}
-	runtimeID, meta, ok := dfworld.ItemRuntimeID(namedItem{name: stack.ItemID})
-	if !ok {
-		return protocol.ItemInstance{}
+	mapping, mapped := javaToBedrockItemMappings[stack.ItemID]
+	var runtimeID int32
+	var metadata uint32
+	if mapped {
+		runtimeID, metadata = mapping.runtimeID, mapping.metadata
+	} else {
+		var meta int16
+		var ok bool
+		runtimeID, meta, ok = dfworld.ItemRuntimeID(namedItem{name: stack.ItemID})
+		if !ok {
+			return protocol.ItemInstance{}
+		}
+		metadata = uint32(uint16(meta))
 	}
 	var nbtData map[string]any
 	if stack.Damage > 0 {
 		nbtData = map[string]any{"Damage": int32(stack.Damage)}
 	}
-	blockRuntimeID := int32(0)
+	blockRuntimeID := mapping.blockRuntimeID
 	block := splitBlockName(stack.ItemID)
-	if networkID := l.encoder.BlockNetworkID(block); networkID != l.encoder.BlockNetworkID(coreworld.Air) {
+	if networkID := l.encoder.BlockNetworkID(block); blockRuntimeID == 0 && networkID != l.encoder.BlockNetworkID(coreworld.Air) {
 		blockRuntimeID = int32(networkID)
 	}
 	return protocol.ItemInstance{
 		StackNetworkID: stackNetworkID,
 		Stack: protocol.ItemStack{
-			ItemType:       protocol.ItemType{NetworkID: runtimeID, MetadataValue: uint32(uint16(meta))},
+			ItemType:       protocol.ItemType{NetworkID: runtimeID, MetadataValue: metadata},
 			Count:          uint16(min(stack.Count, math.MaxUint16)),
 			BlockRuntimeID: blockRuntimeID,
 			NBTData:        nbtData,

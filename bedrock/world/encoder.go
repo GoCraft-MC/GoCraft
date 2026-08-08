@@ -468,13 +468,142 @@ func (e *Encoder) EncodeFullChunkPayload(chunk *coreworld.Chunk) ([]byte, error)
 		}
 		buf.Write(sectionBytes)
 	}
-	// Biome data: one single-value plains entry per sub-chunk.
-	plains := makeSingleValueBiomeStorage(biomePlains)
-	for range overworldSubChunkCount {
-		buf.Write(plains)
+	// Biome data: translate Java's quart-resolution cells to Bedrock's
+	// 16x16x16 network palette for every sub-chunk.
+	for i := 0; i < coreworld.SectionCount; i++ {
+		var section *coreworld.Section
+		if chunk != nil {
+			section = chunk.Sections[i]
+		}
+		buf.Write(e.encodeBiomeStorage(section))
 	}
 	buf.WriteByte(0x00) // border block count varint (0 = none)
 	return buf.Bytes(), nil
+}
+
+// encodeBiomeStorage converts a Java quart-resolution biome container to the
+// Bedrock 16x16x16 paletted storage used in LevelChunk. Every quart value is
+// expanded to its corresponding 4x4x4 block cube.
+func (e *Encoder) encodeBiomeStorage(section *coreworld.Section) []byte {
+	if section == nil {
+		return makeSingleValueBiomeStorage(biomePlains)
+	}
+	javaPalette := section.BiomePalette()
+	javaData := section.BiomeData()
+	bedrockPalette := make([]uint32, 0, len(javaPalette))
+	bedrockIndex := make(map[uint32]uint16, len(javaPalette))
+	translated := make([]uint16, len(javaPalette))
+	for i, biome := range javaPalette {
+		id := bedrockBiomeRuntimeID(biome)
+		index, ok := bedrockIndex[id]
+		if !ok {
+			index = uint16(len(bedrockPalette))
+			bedrockIndex[id] = index
+			bedrockPalette = append(bedrockPalette, id)
+		}
+		translated[i] = index
+	}
+	if len(bedrockPalette) <= 1 {
+		id := biomePlains
+		if len(bedrockPalette) == 1 {
+			id = bedrockPalette[0]
+		}
+		return makeSingleValueBiomeStorage(id)
+	}
+
+	bits := paletteBits(len(bedrockPalette))
+	valuesPerWord := 32 / int(bits)
+	wordCount := (4096 + valuesPerWord - 1) / valuesPerWord
+	var buf bytes.Buffer
+	buf.WriteByte(bits<<1 | 1)
+	for wordIndex := 0; wordIndex < wordCount; wordIndex++ {
+		var word uint32
+		for valueIndex := 0; valueIndex < valuesPerWord; valueIndex++ {
+			linear := wordIndex*valuesPerWord + valueIndex
+			if linear >= 4096 {
+				break
+			}
+			x := linear >> 8
+			z := (linear >> 4) & 15
+			y := linear & 15
+			quartIndex := (y>>2)*16 + (z>>2)*4 + (x >> 2)
+			javaIndex := int(javaData[quartIndex])
+			if javaIndex >= len(translated) {
+				javaIndex = 0
+			}
+			word |= uint32(translated[javaIndex]) << (valueIndex * int(bits))
+		}
+		writeUint32LE(&buf, word)
+	}
+	_ = protocol.WriteVarint32(&buf, int32(len(bedrockPalette)))
+	for _, id := range bedrockPalette {
+		_ = protocol.WriteVarint32(&buf, int32(id))
+	}
+	return buf.Bytes()
+}
+
+var javaToBedrockBiomeID = map[string]uint32{
+	"minecraft:badlands":                 37,
+	"minecraft:bamboo_jungle":            48,
+	"minecraft:beach":                    16,
+	"minecraft:birch_forest":             27,
+	"minecraft:cherry_grove":             192,
+	"minecraft:cold_ocean":               44,
+	"minecraft:dark_forest":              29,
+	"minecraft:deep_cold_ocean":          45,
+	"minecraft:deep_dark":                190,
+	"minecraft:deep_frozen_ocean":        47,
+	"minecraft:deep_lukewarm_ocean":      43,
+	"minecraft:deep_ocean":               24,
+	"minecraft:desert":                   2,
+	"minecraft:dripstone_caves":          188,
+	"minecraft:eroded_badlands":          165,
+	"minecraft:flower_forest":            132,
+	"minecraft:forest":                   4,
+	"minecraft:frozen_ocean":             46,
+	"minecraft:frozen_peaks":             183,
+	"minecraft:frozen_river":             11,
+	"minecraft:grove":                    185,
+	"minecraft:ice_spikes":               140,
+	"minecraft:jagged_peaks":             182,
+	"minecraft:jungle":                   21,
+	"minecraft:lukewarm_ocean":           42,
+	"minecraft:lush_caves":               187,
+	"minecraft:mangrove_swamp":           191,
+	"minecraft:meadow":                   186,
+	"minecraft:mushroom_fields":          14,
+	"minecraft:ocean":                    0,
+	"minecraft:old_growth_birch_forest":  155,
+	"minecraft:old_growth_pine_taiga":    32,
+	"minecraft:old_growth_spruce_taiga":  160,
+	"minecraft:pale_garden":              193,
+	"minecraft:plains":                   1,
+	"minecraft:river":                    7,
+	"minecraft:savanna":                  35,
+	"minecraft:savanna_plateau":          36,
+	"minecraft:snowy_beach":              26,
+	"minecraft:snowy_plains":             12,
+	"minecraft:snowy_slopes":             184,
+	"minecraft:snowy_taiga":              30,
+	"minecraft:sparse_jungle":            23,
+	"minecraft:stony_peaks":              189,
+	"minecraft:stony_shore":              25,
+	"minecraft:sunflower_plains":         129,
+	"minecraft:swamp":                    6,
+	"minecraft:taiga":                    5,
+	"minecraft:warm_ocean":               40,
+	"minecraft:windswept_forest":         34,
+	"minecraft:windswept_gravelly_hills": 131,
+	"minecraft:windswept_hills":          3,
+	"minecraft:windswept_savanna":        163,
+	"minecraft:wooded_badlands":          38,
+}
+
+func bedrockBiomeRuntimeID(name string) uint32 {
+	if id, ok := javaToBedrockBiomeID[name]; ok {
+		return id
+	}
+	return biomePlains
 }
 
 // encodeNetworkSubChunk encodes one section using V9 network format (network hashes

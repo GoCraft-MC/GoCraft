@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -15,6 +16,10 @@ import (
 )
 
 const (
+	// RecipeCatalogVersion is the Java gameplay version that defines the
+	// server's authoritative recipe set for every client edition.
+	RecipeCatalogVersion = "1.21.4"
+
 	recipeDisplayShapeless   int32 = 0
 	recipeDisplayShaped      int32 = 1
 	recipeDisplayFurnace     int32 = 2
@@ -50,6 +55,75 @@ type recipeDisplay struct {
 	duration    int32
 	experience  float32
 	fuel        recipeSlotDisplay
+}
+
+// RecipeDescription is the protocol-neutral portion of a vanilla recipe used
+// by edition adapters when publishing their native recipe catalogues.
+type RecipeDescription struct {
+	Name, Kind, Station string
+	Width, Height       int32
+	Ingredients         []RecipeIngredientDescription
+	Result              player.ItemStack
+}
+
+type RecipeIngredientDescription struct {
+	Alternatives []string
+}
+
+// CraftingRecipeCatalog returns a detached copy of every fixed vanilla recipe.
+func CraftingRecipeCatalog() []RecipeDescription {
+	result := make([]RecipeDescription, 0, len(javaRecipeDisplays))
+	for _, source := range javaRecipeDisplays {
+		description := RecipeDescription{
+			Name: source.name, Station: source.station,
+			Width: source.width, Height: source.height, Result: source.result.stack,
+		}
+		switch source.kind {
+		case recipeDisplayShaped:
+			description.Kind = "shaped"
+		case recipeDisplayShapeless:
+			description.Kind = "shapeless"
+		case recipeDisplayFurnace:
+			description.Kind = "furnace"
+		case recipeDisplayStonecutter:
+			description.Kind = "stonecutter"
+		case recipeDisplaySmithing:
+			description.Kind = "smithing"
+		}
+		for _, ingredient := range source.ingredients {
+			description.Ingredients = append(description.Ingredients, describeRecipeIngredient(ingredient))
+		}
+		result = append(result, description)
+	}
+	return result
+}
+
+func describeRecipeIngredient(slot recipeSlotDisplay) RecipeIngredientDescription {
+	var values []string
+	var visit func(recipeSlotDisplay)
+	visit = func(current recipeSlotDisplay) {
+		switch current.kind {
+		case slotDisplayItem:
+			values = append(values, current.item)
+		case slotDisplayStack:
+			values = append(values, current.stack.ItemID)
+		case slotDisplayTag:
+			if tagged := javaItemTags[current.item]; len(tagged) != 0 {
+				items := make([]string, 0, len(tagged))
+				for item := range tagged {
+					items = append(items, item)
+				}
+				sort.Strings(items)
+				values = append(values, items...)
+			}
+		case slotDisplayComposite, slotDisplayWithRemainder, slotDisplaySmithingTrim:
+			for _, child := range current.children {
+				visit(child)
+			}
+		}
+	}
+	visit(slot)
+	return RecipeIngredientDescription{Alternatives: values}
 }
 
 type vanillaRecipeCatalog struct {
@@ -151,8 +225,8 @@ func loadJavaRecipeDisplays() ([]recipeDisplay, []string, int, map[string]map[st
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return nil, nil, 0, nil, fmt.Errorf("decoding embedded recipes: %w", err)
 	}
-	if catalog.Version != "1.21.4" {
-		return nil, nil, len(catalog.Recipes), nil, fmt.Errorf("recipe catalog version %q, want 1.21.4", catalog.Version)
+	if catalog.Version != RecipeCatalogVersion {
+		return nil, nil, len(catalog.Recipes), nil, fmt.Errorf("recipe catalog version %q, want %s", catalog.Version, RecipeCatalogVersion)
 	}
 	tags, err := loadJavaItemTags()
 	if err != nil {

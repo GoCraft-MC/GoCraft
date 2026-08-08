@@ -89,3 +89,59 @@ func TestPersonalCraftingSupportsShapedTwoByTwoRecipes(t *testing.T) {
 		t.Fatalf("result = %+v, want crafting table", got)
 	}
 }
+
+func TestPlayerInventoryCraftingClickProducesAndConsumesPlanks(t *testing.T) {
+	p := player.New([16]byte{}, "crafter", player.ClientEditionJava)
+	p.CarriedItem = player.ItemStack{ItemID: "minecraft:oak_log", Count: 2}
+
+	clickPlayerInventorySlot(p, 3, 0)
+	updatePersonalCraftingResult(p)
+	if got := p.Inventory[0]; got.ItemID != "minecraft:oak_planks" || got.Count != 4 {
+		t.Fatalf("crafting output = %+v, want four oak planks", got)
+	}
+
+	takePersonalCraftingResult(p)
+	updatePersonalCraftingResult(p)
+	if p.CarriedItem.ItemID != "minecraft:oak_planks" || p.CarriedItem.Count != 4 {
+		t.Fatalf("cursor = %+v, want four oak planks", p.CarriedItem)
+	}
+	if p.Inventory[3].Count != 1 {
+		t.Fatalf("remaining logs = %d, want 1", p.Inventory[3].Count)
+	}
+	if got := p.Inventory[0]; got.ItemID != "minecraft:oak_planks" || got.Count != 4 {
+		t.Fatalf("next crafting output = %+v, want four oak planks", got)
+	}
+}
+
+func TestShiftClickPersonalCraftingInputReturnsItToInventory(t *testing.T) {
+	p := player.New([16]byte{}, "crafter", player.ClientEditionJava)
+	p.Inventory[2] = player.ItemStack{ItemID: "minecraft:birch_log", Count: 1}
+	updatePersonalCraftingResult(p)
+
+	shiftPlayerInventorySlot(p, 2)
+	updatePersonalCraftingResult(p)
+	if !p.Inventory[2].IsEmpty() || !p.Inventory[0].IsEmpty() {
+		t.Fatalf("crafting slots not cleared: input=%+v output=%+v", p.Inventory[2], p.Inventory[0])
+	}
+	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:birch_log" || got.Count != 1 {
+		t.Fatalf("hotbar = %+v, want birch log", got)
+	}
+}
+
+func TestQuickCraftDragPlacesItemsInCraftingTable(t *testing.T) {
+	p := player.New([16]byte{}, "crafter", player.ClientEditionJava)
+	p.CarriedItem = player.ItemStack{ItemID: "minecraft:oak_planks", Count: 2}
+	target := func(slot int) *player.ItemStack { return craftingContainerSlot(p, slot) }
+
+	handleQuickCraft(p, -999, 0, target)
+	handleQuickCraft(p, 1, 1, target)
+	handleQuickCraft(p, 4, 1, target)
+	handleQuickCraft(p, -999, 2, target)
+
+	if p.CraftingGrid[0].Count != 1 || p.CraftingGrid[3].Count != 1 || !p.CarriedItem.IsEmpty() {
+		t.Fatalf("drag result grid=%+v/%+v cursor=%+v", p.CraftingGrid[0], p.CraftingGrid[3], p.CarriedItem)
+	}
+	if result := findCraftingResult(p.CraftingGrid); result.ItemID != "minecraft:stick" || result.Count != 4 {
+		t.Fatalf("crafting result = %+v, want four sticks", result)
+	}
+}

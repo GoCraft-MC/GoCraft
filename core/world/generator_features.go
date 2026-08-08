@@ -78,7 +78,7 @@ func (g *OverworldGenerator) carveSphere(c *Chunk, heights [SectionSize * Sectio
 				}
 				existing := generatedBlock(c, localX, y, localZ).ResourceLocation()
 				if existing == "minecraft:stone" || existing == "minecraft:deepslate" {
-					setGeneratedBlock(c, localX, y, localZ, Air)
+					setGeneratedBlock(c, localX, y, localZ, g.aquiferMaterial(worldX, y, worldZ))
 				}
 			}
 		}
@@ -182,7 +182,7 @@ func (g *OverworldGenerator) addVegetation(c *Chunk) {
 			if groundY <= SeaLevel+1 || !g.treeSlopeSafe(worldX, worldZ, groundY) {
 				continue
 			}
-			if biome == "minecraft:desert" || biome == "minecraft:badlands" {
+			if biome == "minecraft:desert" || biome == "minecraft:badlands" || biome == "minecraft:eroded_badlands" {
 				g.placeCactus(c, worldX, groundY, worldZ, 2+int((state>>20)%3))
 				continue
 			}
@@ -200,26 +200,32 @@ func vegetationDenominator(biome string) int {
 	switch biome {
 	case "minecraft:jungle", "minecraft:bamboo_jungle":
 		return 1
-	case "minecraft:dark_forest":
+	case "minecraft:sparse_jungle":
+		return 3
+	case "minecraft:dark_forest", "minecraft:pale_garden":
 		return 1
-	case "minecraft:forest", "minecraft:flower_forest":
+	case "minecraft:forest", "minecraft:flower_forest", "minecraft:windswept_forest":
 		return 2
 	case "minecraft:birch_forest", "minecraft:old_growth_birch_forest":
 		return 2
 	case "minecraft:cherry_grove":
 		return 3
-	case "minecraft:taiga":
+	case "minecraft:taiga", "minecraft:snowy_taiga", "minecraft:grove":
 		return 3
+	case "minecraft:old_growth_pine_taiga", "minecraft:old_growth_spruce_taiga":
+		return 1
 	case "minecraft:swamp", "minecraft:mangrove_swamp":
 		return 4
-	case "minecraft:savanna":
+	case "minecraft:savanna", "minecraft:savanna_plateau", "minecraft:windswept_savanna":
 		return 4
-	case "minecraft:plains":
+	case "minecraft:plains", "minecraft:sunflower_plains":
 		return 8
 	case "minecraft:meadow":
 		return 5
-	case "minecraft:desert", "minecraft:badlands":
+	case "minecraft:desert", "minecraft:badlands", "minecraft:eroded_badlands":
 		return 4
+	case "minecraft:wooded_badlands":
+		return 5
 	case "minecraft:windswept_hills":
 		return 12
 	default:
@@ -233,14 +239,18 @@ func treeBlocksForBiome(biome string, state uint64) (Block, Block, string) {
 		return birchLogBlock, birchLeafBlock, "round"
 	case "minecraft:old_growth_birch_forest":
 		return birchLogBlock, birchLeafBlock, "tallbirch"
-	case "minecraft:taiga":
+	case "minecraft:taiga", "minecraft:snowy_taiga", "minecraft:grove":
 		if state%3 == 0 {
 			return spruceLogBlock, spruceLeafBlock, "largespruce"
 		}
 		return spruceLogBlock, spruceLeafBlock, "spruce"
-	case "minecraft:savanna":
+	case "minecraft:old_growth_pine_taiga":
+		return spruceLogBlock, spruceLeafBlock, "spruce"
+	case "minecraft:old_growth_spruce_taiga":
+		return spruceLogBlock, spruceLeafBlock, "largespruce"
+	case "minecraft:savanna", "minecraft:savanna_plateau", "minecraft:windswept_savanna":
 		return acaciaLogBlock, acaciaLeafBlock, "acacia"
-	case "minecraft:jungle":
+	case "minecraft:jungle", "minecraft:sparse_jungle":
 		if state%5 == 0 {
 			return jungleLogBlock, jungleLeafBlock, "largejungle"
 		}
@@ -252,6 +262,12 @@ func treeBlocksForBiome(biome string, state uint64) (Block, Block, string) {
 		return jungleLogBlock, jungleLeafBlock, "round"
 	case "minecraft:dark_forest":
 		return darkOakLogBlock, darkOakLeafBlock, "darkoak"
+	case "minecraft:pale_garden":
+		return paleOakLogBlock, paleOakLeafBlock, "darkoak"
+	case "minecraft:mangrove_swamp":
+		return mangroveLogBlock, mangroveLeafBlock, "round"
+	case "minecraft:windswept_forest", "minecraft:wooded_badlands":
+		return oakLogBlock, oakLeafBlock, "round"
 	case "minecraft:cherry_grove":
 		return cherryLogBlock, cherryLeafBlock, "cherry"
 	case "minecraft:flower_forest":
@@ -490,7 +506,8 @@ func setFeatureBlock(c *Chunk, worldX, y, worldZ int, material Block, trunk bool
 	isLeaf := name == "minecraft:oak_leaves" || name == "minecraft:birch_leaves" ||
 		name == "minecraft:spruce_leaves" || name == "minecraft:acacia_leaves" ||
 		name == "minecraft:jungle_leaves" || name == "minecraft:dark_oak_leaves" ||
-		name == "minecraft:cherry_leaves" || name == "minecraft:mangrove_leaves"
+		name == "minecraft:cherry_leaves" || name == "minecraft:mangrove_leaves" ||
+		name == "minecraft:pale_oak_leaves"
 	replaceable := existing.IsAir() || name == "minecraft:water" || isLeaf
 	if !replaceable {
 		return
@@ -541,7 +558,7 @@ func (g *OverworldGenerator) addGroundCover(c *Chunk, heights [SectionSize * Sec
 
 			case "minecraft:sand", "minecraft:red_sand":
 				// Dead bushes in desert/badlands
-				if biome == "minecraft:desert" || biome == "minecraft:badlands" {
+				if biome == "minecraft:desert" || biome == "minecraft:badlands" || biome == "minecraft:eroded_badlands" || biome == "minecraft:wooded_badlands" {
 					state := g.columnHash(worldX, worldZ, 0x6465616462757368)
 					if state%7 == 0 {
 						setGeneratedBlock(c, localX, aboveY, localZ, deadBushBlock)
@@ -563,7 +580,7 @@ func (g *OverworldGenerator) addGroundCover(c *Chunk, heights [SectionSize * Sec
 
 			case "minecraft:water":
 				// Lily pads on swamp water surface
-				if surfaceY == SeaLevel-1 && biome == "minecraft:swamp" {
+				if surfaceY == SeaLevel-1 && (biome == "minecraft:swamp" || biome == "minecraft:mangrove_swamp") {
 					state := g.columnHash(worldX, worldZ, 0x6c696c797061643)
 					if state%5 == 0 {
 						setGeneratedBlock(c, localX, SeaLevel, localZ, lilyPadBlock)
@@ -585,7 +602,7 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 	hasUpper := false
 
 	switch biome {
-	case "minecraft:taiga":
+	case "minecraft:taiga", "minecraft:snowy_taiga", "minecraft:old_growth_pine_taiga", "minecraft:old_growth_spruce_taiga", "minecraft:grove":
 		switch r % 10 {
 		case 0, 1, 2, 3:
 			lower = fernBlock
@@ -595,7 +612,7 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 			lower = shortGrassBlock
 		}
 
-	case "minecraft:jungle":
+	case "minecraft:jungle", "minecraft:sparse_jungle":
 		switch r % 10 {
 		case 0, 1, 2:
 			lower = shortGrassBlock
@@ -607,7 +624,7 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 			lower, upper, hasUpper = largeFernLowerBlock, largeFernUpperBlock, true
 		}
 
-	case "minecraft:swamp":
+	case "minecraft:swamp", "minecraft:mangrove_swamp":
 		switch r % 10 {
 		case 0, 1, 2:
 			lower = shortGrassBlock
@@ -617,7 +634,7 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 			lower = blueOrchidBlock
 		}
 
-	case "minecraft:dark_forest":
+	case "minecraft:dark_forest", "minecraft:pale_garden":
 		switch r % 12 {
 		case 0, 1, 2, 3:
 			lower = shortGrassBlock
@@ -625,7 +642,7 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 			lower, upper, hasUpper = tallGrassLowerBlock, tallGrassUpperBlock, true
 		}
 
-	case "minecraft:forest":
+	case "minecraft:forest", "minecraft:windswept_forest":
 		switch r % 20 {
 		case 0, 1, 2, 3, 4, 5, 6, 7:
 			lower = shortGrassBlock
@@ -659,17 +676,21 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 			lower = biomeFlower("minecraft:meadow", r)
 		}
 
-	case "minecraft:plains":
+	case "minecraft:plains", "minecraft:sunflower_plains":
 		switch r % 32 {
 		case 0, 1, 2, 3, 4, 5, 6, 7:
 			lower = shortGrassBlock
 		case 8, 9, 10:
 			lower, upper, hasUpper = tallGrassLowerBlock, tallGrassUpperBlock, true
 		case 11:
-			lower = biomeFlower("minecraft:plains", r)
+			if biome == "minecraft:sunflower_plains" {
+				lower, upper, hasUpper = sunflowerLowerBlock, sunflowerUpperBlock, true
+			} else {
+				lower = biomeFlower("minecraft:plains", r)
+			}
 		}
 
-	case "minecraft:savanna":
+	case "minecraft:savanna", "minecraft:savanna_plateau", "minecraft:windswept_savanna":
 		switch r % 8 {
 		case 0, 1, 2:
 			lower = shortGrassBlock
@@ -713,16 +734,6 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 			lower = dandelionBlock
 		}
 
-	case "minecraft:mangrove_swamp":
-		switch r % 10 {
-		case 0, 1, 2:
-			lower = shortGrassBlock
-		case 3, 4:
-			lower, upper, hasUpper = tallGrassLowerBlock, tallGrassUpperBlock, true
-		case 5:
-			lower = blueOrchidBlock
-		}
-
 	case "minecraft:bamboo_jungle":
 		switch r % 10 {
 		case 0, 1, 2:
@@ -735,12 +746,12 @@ func (g *OverworldGenerator) placeGrassColumnDecor(c *Chunk, localX, surfaceY, l
 			lower, upper, hasUpper = largeFernLowerBlock, largeFernUpperBlock, true
 		}
 
-	case "minecraft:windswept_hills":
+	case "minecraft:windswept_hills", "minecraft:windswept_gravelly_hills":
 		if r%6 == 0 {
 			lower = shortGrassBlock
 		}
 
-	case "minecraft:snowy_plains", "minecraft:snowy_slopes":
+	case "minecraft:snowy_plains", "minecraft:snowy_slopes", "minecraft:ice_spikes":
 		if r%20 == 0 {
 			lower = shortGrassBlock
 		}
@@ -800,7 +811,7 @@ func (g *OverworldGenerator) addBamboo(c *Chunk, heights [SectionSize * SectionS
 			worldX := cellX*cellSize + int(nextRandom(&state)*float64(cellSize))
 			worldZ := cellZ*cellSize + int(nextRandom(&state)*float64(cellSize))
 			biome := g.BiomeAt(worldX, worldZ)
-			if biome != "minecraft:jungle" && biome != "minecraft:bamboo_jungle" {
+			if biome != "minecraft:jungle" && biome != "minecraft:bamboo_jungle" && biome != "minecraft:sparse_jungle" {
 				continue
 			}
 			// Bamboo jungle has much denser bamboo
@@ -846,7 +857,7 @@ func (g *OverworldGenerator) addMushrooms(c *Chunk, heights [SectionSize * Secti
 			worldX := cellX*cellSize + int(nextRandom(&state)*float64(cellSize))
 			worldZ := cellZ*cellSize + int(nextRandom(&state)*float64(cellSize))
 			biome := g.BiomeAt(worldX, worldZ)
-			if biome != "minecraft:dark_forest" && biome != "minecraft:swamp" {
+			if biome != "minecraft:dark_forest" && biome != "minecraft:swamp" && biome != "minecraft:mushroom_fields" {
 				continue
 			}
 			localX := worldX - chunkMinX
@@ -886,7 +897,7 @@ func (g *OverworldGenerator) isNearWater(worldX, worldZ, surfaceY int) bool {
 
 func isMountainBiome(biome string) bool {
 	switch biome {
-	case "minecraft:windswept_hills", "minecraft:meadow", "minecraft:snowy_slopes", "minecraft:frozen_peaks", "minecraft:jagged_peaks", "minecraft:stony_peaks":
+	case "minecraft:windswept_hills", "minecraft:windswept_gravelly_hills", "minecraft:windswept_forest", "minecraft:meadow", "minecraft:grove", "minecraft:snowy_slopes", "minecraft:frozen_peaks", "minecraft:jagged_peaks", "minecraft:stony_peaks":
 		return true
 	default:
 		return false

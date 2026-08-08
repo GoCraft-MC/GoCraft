@@ -336,8 +336,7 @@ func cmdLocate(ctx CommandContext) error {
 }
 
 func cmdVersion(ctx CommandContext) error {
-	_ = sendSystemMessage(ctx.Conn, goCraftVersion)
-	return nil
+	return sendCommandMessage(ctx, goCraftVersion)
 }
 
 func cmdSummon(ctx CommandContext) error {

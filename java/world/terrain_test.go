@@ -151,3 +151,41 @@ func TestVillageBlockStatesExistInProtocol769Registry(t *testing.T) {
 		}
 	}
 }
+
+func TestModernWorldgenBlocksAndBiomesExistInProtocol769Registry(t *testing.T) {
+	blocks := []coreworld.Block{
+		{Namespace: "minecraft", Name: "orange_terracotta"},
+		{Namespace: "minecraft", Name: "yellow_terracotta"},
+		{Namespace: "minecraft", Name: "brown_terracotta"},
+		{Namespace: "minecraft", Name: "white_terracotta"},
+		{Namespace: "minecraft", Name: "light_gray_terracotta"},
+		{Namespace: "minecraft", Name: "coarse_dirt"},
+		{Namespace: "minecraft", Name: "lava"},
+		{Namespace: "minecraft", Name: "moss_block"},
+		{Namespace: "minecraft", Name: "clay"},
+		{Namespace: "minecraft", Name: "dripstone_block"},
+		{Namespace: "minecraft", Name: "pointed_dripstone", Properties: map[string]string{"vertical_direction": "up", "thickness": "tip", "waterlogged": "false"}},
+		{Namespace: "minecraft", Name: "sculk"},
+		{Namespace: "minecraft", Name: "mycelium"},
+		{Namespace: "minecraft", Name: "packed_ice"},
+		{Namespace: "minecraft", Name: "blue_ice"},
+		{Namespace: "minecraft", Name: "tube_coral_block"},
+		{Namespace: "minecraft", Name: "mangrove_log"},
+		{Namespace: "minecraft", Name: "pale_oak_log"},
+		{Namespace: "minecraft", Name: "pale_oak_leaves"},
+	}
+	for _, block := range blocks {
+		if StateID(block) == 0 {
+			t.Errorf("worldgen block %s resolves to Java air", block.Key())
+		}
+		if len(block.Properties) != 0 && !HasExactState(block) {
+			t.Errorf("missing exact protocol-769 worldgen state %s", block.Key())
+		}
+	}
+	for _, biome := range coreworld.GeneratedBiomeNames() {
+		name := "minecraft:" + biome
+		if _, ok := biomeIDs[name]; !ok {
+			t.Errorf("missing protocol-769 biome %s", name)
+		}
+	}
+}

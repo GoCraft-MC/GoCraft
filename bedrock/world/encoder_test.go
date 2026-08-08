@@ -48,6 +48,37 @@ func TestKnownBlocksResolveToDifferentNetworkHashes(t *testing.T) {
 	}
 }
 
+func TestModernWorldgenBlocksResolveForBedrock(t *testing.T) {
+	encoder := NewEncoder()
+	air := encoder.BlockNetworkID(coreworld.Air)
+	blocks := []coreworld.Block{
+		{Namespace: "minecraft", Name: "orange_terracotta"},
+		{Namespace: "minecraft", Name: "yellow_terracotta"},
+		{Namespace: "minecraft", Name: "brown_terracotta"},
+		{Namespace: "minecraft", Name: "white_terracotta"},
+		{Namespace: "minecraft", Name: "light_gray_terracotta"},
+		{Namespace: "minecraft", Name: "coarse_dirt"},
+		{Namespace: "minecraft", Name: "lava"},
+		{Namespace: "minecraft", Name: "moss_block"},
+		{Namespace: "minecraft", Name: "clay"},
+		{Namespace: "minecraft", Name: "dripstone_block"},
+		{Namespace: "minecraft", Name: "pointed_dripstone", Properties: map[string]string{"vertical_direction": "up", "thickness": "tip", "waterlogged": "false"}},
+		{Namespace: "minecraft", Name: "sculk"},
+		{Namespace: "minecraft", Name: "mycelium"},
+		{Namespace: "minecraft", Name: "packed_ice"},
+		{Namespace: "minecraft", Name: "blue_ice"},
+		{Namespace: "minecraft", Name: "tube_coral_block"},
+		{Namespace: "minecraft", Name: "mangrove_log"},
+		{Namespace: "minecraft", Name: "pale_oak_log"},
+		{Namespace: "minecraft", Name: "pale_oak_leaves"},
+	}
+	for _, block := range blocks {
+		if got := encoder.BlockNetworkID(block); got == air {
+			t.Errorf("%s resolved to Bedrock air", block.Key())
+		}
+	}
+}
+
 func TestFullChunkAirPaletteUsesNetworkHash(t *testing.T) {
 	encoder := NewEncoder()
 	payload, err := encoder.EncodeFullChunkPayload(nil)
@@ -63,6 +94,52 @@ func TestFullChunkAirPaletteUsesNetworkHash(t *testing.T) {
 	}
 	if got, want := uint32(networkID), encoder.BlockNetworkID(coreworld.Air); got != want {
 		t.Fatalf("air network ID = %d, want stable hash %d", got, want)
+	}
+}
+
+func TestBedrockBiomeMapCoversGeneratedOverworldBiomes(t *testing.T) {
+	for _, biome := range coreworld.GeneratedBiomeNames() {
+		name := "minecraft:" + biome
+		if _, ok := javaToBedrockBiomeID[name]; !ok {
+			t.Errorf("no Bedrock runtime biome mapping for %s", name)
+		}
+	}
+}
+
+func TestBiomeStorageExpandsQuartCellsForBedrock(t *testing.T) {
+	section := coreworld.NewSection()
+	section.SetUniformBiome("minecraft:plains")
+	section.SetBiomeCell(1, 2, 3, "minecraft:lush_caves")
+	payload := NewEncoder().encodeBiomeStorage(section)
+	if bits := payload[0] >> 1; bits != 1 {
+		t.Fatalf("biome bits per entry = %d, want 1", bits)
+	}
+
+	// Quart cell (1,2,3) expands to block coordinates x=4..7, y=8..11,
+	// z=12..15. Bedrock's linear order is X-Z-Y.
+	inside := 5*256 + 13*16 + 9
+	outside := 1*256 + 1*16 + 1
+	if got := packedPaletteIndex(payload[1:], inside, 1); got != 1 {
+		t.Fatalf("palette index inside cave quart = %d, want 1", got)
+	}
+	if got := packedPaletteIndex(payload[1:], outside, 1); got != 0 {
+		t.Fatalf("palette index outside cave quart = %d, want 0", got)
+	}
+
+	paletteOffset := 1 + 128*4
+	buf := bytes.NewBuffer(payload[paletteOffset:])
+	var count, plainsID, lushID int32
+	if err := protocol.Varint32(buf, &count); err != nil {
+		t.Fatalf("decode biome palette count: %v", err)
+	}
+	if err := protocol.Varint32(buf, &plainsID); err != nil {
+		t.Fatalf("decode plains biome ID: %v", err)
+	}
+	if err := protocol.Varint32(buf, &lushID); err != nil {
+		t.Fatalf("decode lush cave biome ID: %v", err)
+	}
+	if count != 2 || plainsID != 1 || lushID != 187 {
+		t.Fatalf("biome palette = count %d IDs [%d %d], want count 2 IDs [1 187]", count, plainsID, lushID)
 	}
 }
 

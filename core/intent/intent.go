@@ -164,7 +164,11 @@ type PlayerStateIntent struct {
 	Enabled    bool
 }
 
-const InventoryCursorSlot int16 = -1
+const (
+	InventoryCursorSlot          int16 = -1
+	InventoryCraftingTableStart  int16 = player.InventorySize
+	InventoryCraftingTableOutput int16 = InventoryCraftingTableStart + 9
+)
 
 const (
 	InventoryActionMove uint8 = iota + 1
@@ -177,8 +181,9 @@ const (
 )
 
 // InventoryAction describes one protocol-neutral operation in an atomic
-// Bedrock item-stack request. Slots are canonical Player.Inventory indices;
-// InventoryCursorSlot addresses Player.CarriedItem.
+// Bedrock item-stack request. Slots are canonical Player.Inventory indices,
+// InventoryCursorSlot addresses Player.CarriedItem, and the crafting-table
+// constants address the separate 3x3 grid and its derived output.
 type InventoryAction struct {
 	Kind        uint8
 	Source      int16
@@ -198,6 +203,11 @@ type InventoryIntent struct {
 	Done       chan<- InventoryResult
 }
 
+type ContainerCloseIntent struct {
+	PlayerUUID [16]byte
+	WindowID   byte
+}
+
 // Implement sealed interfaces.
 func (JoinIntent) isLifecycle()          {}
 func (DisconnectIntent) isLifecycle()    {}
@@ -211,6 +221,7 @@ func (WakeIntent) isGameplay()           {}
 func (HotbarIntent) isGameplay()         {}
 func (PlayerStateIntent) isGameplay()    {}
 func (InventoryIntent) isGameplay()      {}
+func (ContainerCloseIntent) isGameplay() {}
 
 // ── Bus ───────────────────────────────────────────────────────────────────────
 
@@ -301,6 +312,7 @@ func (b *Bus) PostWake(i WakeIntent) bool                     { return b.tryGame
 func (b *Bus) PostHotbar(i HotbarIntent) bool                 { return b.tryGameplay(i) }
 func (b *Bus) PostPlayerState(i PlayerStateIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostInventory(i InventoryIntent) bool           { return b.tryGameplay(i) }
+func (b *Bus) PostContainerClose(i ContainerCloseIntent) bool { return b.tryGameplay(i) }
 
 func (b *Bus) tryGameplay(i GameplayIntent) bool {
 	select {
