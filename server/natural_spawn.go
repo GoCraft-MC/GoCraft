@@ -23,6 +23,7 @@ const (
 	pumpkinCreaturePopulationChunksPerTick = 2
 	pumpkinMaxCreatureGroupsPerChunk       = 8
 	pumpkinCreaturePopulationRadius        = 96.0
+	pumpkinCreaturePopulationPerArea       = 16
 )
 
 type mobCategory uint8
@@ -235,6 +236,15 @@ func (s *Server) populatePumpkinGenerationCreatures(chunks [][2]int32, players [
 			delete(s.creaturePopulatedChunks, chunk)
 		}
 	}
+	populationCount, typeCounts := s.activeCreaturePopulation(players)
+	simulationAreas := (len(chunks) + pumpkinSpawnableChunkDenominator - 1) / pumpkinSpawnableChunkDenominator
+	if simulationAreas < 1 {
+		simulationAreas = 1
+	}
+	populationLimit := pumpkinCreaturePopulationPerArea * simulationAreas
+	if populationCount >= populationLimit {
+		return
+	}
 	processed := 0
 	for _, chunk := range chunks {
 		if processed >= pumpkinCreaturePopulationChunksPerTick {
@@ -249,8 +259,31 @@ func (s *Server) populatePumpkinGenerationCreatures(chunks [][2]int32, players [
 		}
 		s.creaturePopulatedChunks[key] = struct{}{}
 		processed++
-		s.spawnPumpkinGenerationCreaturesForChunk(chunk[0], chunk[1])
+		spawned := s.spawnPumpkinGenerationCreaturesForChunk(
+			chunk[0], chunk[1], populationLimit-populationCount, typeCounts,
+		)
+		populationCount += spawned
+		if populationCount >= populationLimit {
+			return
+		}
 	}
+}
+
+func (s *Server) activeCreaturePopulation(players []naturalSpawnPlayer) (int, map[string]int) {
+	counts := make(map[string]int)
+	total := 0
+	for _, entity := range s.world.Entities.Snapshot() {
+		if entity.Dead || !entityWithinSimulationRange(entity, players, pumpkinMobCategories[mobCategoryCreature].despawnDistance) {
+			continue
+		}
+		settings, ok := pumpkinEntitySpawnSettingsByType[string(entity.Type)]
+		if !ok || settings.category != mobCategoryCreature {
+			continue
+		}
+		total++
+		counts[string(entity.Type)]++
+	}
+	return total, counts
 }
 
 func pumpkinChunkWithinPlayerDistance(cx, cz int32, players []naturalSpawnPlayer, distance float64) bool {
@@ -265,7 +298,10 @@ func pumpkinChunkWithinPlayerDistance(cx, cz int32, players []naturalSpawnPlayer
 	return false
 }
 
-func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32) int {
+func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32, remaining int, typeCounts map[string]int) int {
+	if remaining <= 0 {
+		return 0
+	}
 	centerX, centerZ := int(cx)*16+8, int(cz)*16+8
 	surfaceY, loaded := s.world.SurfaceYIfLoaded(centerX, centerZ)
 	if !loaded {
@@ -291,7 +327,7 @@ func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32) int {
 		if rng.Float64() >= settings.creatureProbability {
 			break
 		}
-		entry, supported := pumpkinSpawnEntrySupportedByProtocolAt(entries, rng.Intn(len(entries)))
+		entry, supported := pumpkinLeastRepresentedCreatureEntry(entries, typeCounts)
 		if !supported {
 			continue
 		}
@@ -306,6 +342,9 @@ func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32) int {
 		x, z := int(cx)*16+rng.Intn(16), int(cz)*16+rng.Intn(16)
 		startX, startZ := x, z
 		for range count {
+			if spawned >= remaining {
+				return spawned
+			}
 			for attempt := 0; attempt < 4; attempt++ {
 				success := false
 				candidateSurface, candidateLoaded := s.world.SurfaceYIfLoaded(x, z)
@@ -325,6 +364,7 @@ func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32) int {
 							handler.BroadcastSpawnMob(e, s.sessions)
 						}
 						spawned++
+						typeCounts[entry.entityType]++
 						success = true
 					}
 				}
@@ -341,6 +381,22 @@ func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32) int {
 		}
 	}
 	return spawned
+}
+
+func pumpkinLeastRepresentedCreatureEntry(entries []pumpkinSpawnEntry, typeCounts map[string]int) (pumpkinSpawnEntry, bool) {
+	var selected pumpkinSpawnEntry
+	selectedCount := int(^uint(0) >> 1)
+	found := false
+	for _, entry := range entries {
+		if !pumpkinSpawnEntitySupportedByProtocol(entry.entityType) {
+			continue
+		}
+		count := typeCounts[entry.entityType]
+		if !found || count < selectedCount {
+			selected, selectedCount, found = entry, count, true
+		}
+	}
+	return selected, found
 }
 
 func (s *Server) validPumpkinGenerationCreaturePosition(entityType string, settings pumpkinEntitySpawnSettings, cx, cz int32, x, y, z int) bool {
@@ -516,16 +572,23 @@ func (s *Server) pumpkinSpawnEntrySupportedByProtocol(entries []pumpkinSpawnEntr
 func pumpkinSpawnEntrySupportedByProtocolAt(entries []pumpkinSpawnEntry, start int) (pumpkinSpawnEntry, bool) {
 	for offset := range len(entries) {
 		entry := entries[(start+offset)%len(entries)]
-		switch entry.entityType {
-		case "minecraft:nautilus", "minecraft:parched", "minecraft:sulfur_cube":
-			// These are present in the newer Pumpkin checkout but not in
-			// GoCraft's negotiated Java 1.21.4 entity registry.
+		if !pumpkinSpawnEntitySupportedByProtocol(entry.entityType) {
 			continue
-		default:
-			return entry, true
 		}
+		return entry, true
 	}
 	return pumpkinSpawnEntry{}, false
+}
+
+func pumpkinSpawnEntitySupportedByProtocol(entityType string) bool {
+	switch entityType {
+	case "minecraft:nautilus", "minecraft:parched", "minecraft:sulfur_cube":
+		// These are present in the newer Pumpkin checkout but not in
+		// GoCraft's negotiated Java 1.21.4 entity registry.
+		return false
+	default:
+		return true
+	}
 }
 
 func adjustPumpkinSpawnY(world *coreworld.World, x, y, z int, location spawnLocation) int {

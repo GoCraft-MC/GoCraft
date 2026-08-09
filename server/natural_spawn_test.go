@@ -166,30 +166,66 @@ func TestPumpkinChunkGenerationPopulationIncludesChickensForReportedSeed(t *test
 	for range (len(chunks) + pumpkinCreaturePopulationChunksPerTick - 1) / pumpkinCreaturePopulationChunksPerTick {
 		s.populatePumpkinGenerationCreatures(chunks, players)
 	}
-	if len(s.creaturePopulatedChunks) != eligibleChunks {
-		t.Fatalf("populated chunks = %d, want %d eligible chunks", len(s.creaturePopulatedChunks), eligibleChunks)
+	if len(s.creaturePopulatedChunks) == 0 || len(s.creaturePopulatedChunks) > eligibleChunks {
+		t.Fatalf("populated chunks = %d, eligible chunks = %d", len(s.creaturePopulatedChunks), eligibleChunks)
 	}
 
-	chickens, total := 0, 0
+	typeCounts, total := make(map[corentity.EntityType]int), 0
 	for _, spawned := range world.Entities.Snapshot() {
 		if settings, ok := pumpkinEntitySpawnSettingsByType[string(spawned.Type)]; ok && settings.category == mobCategoryCreature {
 			total++
-			if spawned.Type == corentity.TypeChicken {
-				chickens++
-			}
+			typeCounts[spawned.Type]++
 			if !spawned.NaturalSpawned {
 				t.Errorf("chunk-generation creature %s was not assigned the unload lifecycle", spawned.Type)
 			}
 		}
 	}
-	if chickens == 0 {
-		t.Fatalf("Pumpkin chunk-generation pass produced %d creatures but no chickens", total)
+	if total > pumpkinCreaturePopulationPerArea {
+		t.Fatalf("Pumpkin chunk-generation pass produced %d creatures, cap is %d", total, pumpkinCreaturePopulationPerArea)
 	}
-	t.Logf("reported seed chunk population: creatures=%d chickens=%d", total, chickens)
+	for _, entityType := range []corentity.EntityType{corentity.TypeSheep, corentity.TypePig, corentity.TypeChicken, corentity.TypeCow} {
+		if typeCounts[entityType] == 0 {
+			t.Errorf("bounded Pumpkin population omitted %s: total=%d types=%v", entityType, total, typeCounts)
+		}
+	}
+	t.Logf("reported seed bounded chunk population: creatures=%d types=%v", total, typeCounts)
 	before := len(world.Entities.Snapshot())
 	s.populatePumpkinGenerationCreatures(chunks, players)
 	if after := len(world.Entities.Snapshot()); after != before {
 		t.Fatalf("already-populated chunks spawned duplicates: before=%d after=%d", before, after)
+	}
+}
+
+func TestPumpkinChunkPopulationRespectsExistingCreatureBudget(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+	s := &Server{game: game.New(), world: world, creaturePopulatedChunks: make(map[[2]int32]struct{})}
+	for id := int32(1); id <= pumpkinCreaturePopulationPerArea; id++ {
+		cow := corentity.New(id, [16]byte{}, corentity.TypeCow, 8.5, 64, 8.5)
+		world.Entities.Add(cow)
+	}
+	players := []naturalSpawnPlayer{{id: 100, position: spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}}}
+	before := len(world.Entities.Snapshot())
+	s.populatePumpkinGenerationCreatures([][2]int32{{0, 0}}, players)
+	if after := len(world.Entities.Snapshot()); after != before {
+		t.Fatalf("existing passive cap was exceeded: before=%d after=%d", before, after)
+	}
+}
+
+func TestPumpkinChunkPopulationSelectsLeastRepresentedHerd(t *testing.T) {
+	entries := []pumpkinSpawnEntry{
+		{entityType: string(corentity.TypeSheep), minCount: 4, maxCount: 4},
+		{entityType: string(corentity.TypePig), minCount: 4, maxCount: 4},
+		{entityType: string(corentity.TypeChicken), minCount: 4, maxCount: 4},
+		{entityType: string(corentity.TypeCow), minCount: 4, maxCount: 4},
+	}
+	entry, ok := pumpkinLeastRepresentedCreatureEntry(entries, map[string]int{
+		string(corentity.TypeSheep): 4,
+		string(corentity.TypePig):   4,
+	})
+	if !ok || entry.entityType != string(corentity.TypeChicken) {
+		t.Fatalf("least-represented herd = %+v, present=%v; want chicken", entry, ok)
 	}
 }
 
