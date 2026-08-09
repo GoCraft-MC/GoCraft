@@ -21,7 +21,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 )
 
 // expectedVersion is the Minecraft version whose protocol data is embedded.
@@ -89,10 +88,12 @@ func init() {
 			packetTable[tableKey(state, "serverbound", name)] = id
 		}
 	}
+}
 
-	total := len(packetTable)
-	slog.Info("protocoldata: loaded protocol packet IDs",
-		"version", expectedVersion, "packets", total)
+// StartupSummary returns the version and packet count for the server startup
+// log. Loading occurs before main can open latest.log, so main emits the line.
+func StartupSummary() (version string, packets int) {
+	return expectedVersion, len(packetTable)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

@@ -38,6 +38,11 @@ const expectedVersion = "1.21.4"
 // per block/entity tick.
 var unknownIDs sync.Map
 
+var (
+	loadedBlockCount      int
+	loadedBlockStateCount int
+)
+
 // warnUnknown logs a warning for resourceLocation the first time it is seen.
 func warnUnknown(registry, resourceLocation string) {
 	key := registry + "\x00" + resourceLocation
@@ -118,8 +123,8 @@ func loadBlockRegistry() {
 	}
 
 	javaStateIDs = loaded
-	slog.Info("gamedata: loaded block registry",
-		"version", expectedVersion, "blocks", defaults, "states", states)
+	loadedBlockCount = defaults
+	loadedBlockStateCount = states
 }
 
 // loadItemRegistry parses the complete protocol-769 item table generated from
@@ -180,7 +185,13 @@ func loadRegistries() {
 	soundEventIDs = soundMap
 	effectMap, _ := loadRegistry(raw, "minecraft:mob_effect", "registries.json")
 	mobEffectIDs = effectMap
+}
 
+// LogStartupSummary emits registry counts after main has configured both the
+// console and latest.log handlers. Registry validation still happens at init.
+func LogStartupSummary() {
+	slog.Info("gamedata: loaded block registry",
+		"version", expectedVersion, "blocks", loadedBlockCount, "states", loadedBlockStateCount)
 	slog.Info("gamedata: loaded registries",
 		"version", expectedVersion,
 		"items", len(itemIDs),
