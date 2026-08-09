@@ -9,7 +9,10 @@ import (
 	"GoCraft/core/spatial"
 )
 
-const pumpkinNavigatorRepathTicks = 15
+const (
+	pumpkinNavigatorRepathTicks       = 15
+	pumpkinNavigatorRepathSpreadTicks = 15
+)
 
 // navigateMob owns the MOVE control for one tick. It mirrors Pumpkin's
 // NavigatorGoal lifecycle: recompute when the destination changes or the
@@ -27,14 +30,18 @@ func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial
 	if ai.repathTick > 0 {
 		ai.repathTick--
 	}
-	goalChanged := !ai.hasPathGoal || ai.pathGoal != goal
-	if goalChanged || ai.repathTick <= 0 {
+	// Keep following the current path until its refresh window expires. A
+	// moving target may change block every tick; immediately recalculating for
+	// every change made all nearby mobs run A* together. Offset refreshes by
+	// entity ID so herds and hostile groups do not create a 15-tick CPU spike.
+	if !ai.hasPathGoal || ai.repathTick <= 0 {
 		path, _ := navigation.FindPath(s.world, e.Position, destination, 4096)
 		ai.path = path
 		ai.pathIndex = 0
 		ai.pathGoal = goal
 		ai.hasPathGoal = true
-		ai.repathTick = pumpkinNavigatorRepathTicks
+		phase := int(uint32(e.EntityID) % pumpkinNavigatorRepathSpreadTicks)
+		ai.repathTick = pumpkinNavigatorRepathTicks + phase
 	}
 
 	for ai.pathIndex < len(ai.path) {

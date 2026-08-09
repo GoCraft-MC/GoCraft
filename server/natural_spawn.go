@@ -2,6 +2,7 @@ package server
 
 import (
 	"math"
+	"math/rand"
 
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
@@ -14,6 +15,15 @@ import (
 // model used by natural_spawner.rs. The 17x17 (289 chunk) denominator is the
 // cap-scaling constant used by Pumpkin and vanilla.
 const pumpkinSpawnableChunkDenominator = 17 * 17
+
+// Pumpkin performs a separate creature pass while chunks are generated. Work
+// through only a couple of newly active chunks per tick so loading a player's
+// complete view cannot cause a single large tick spike.
+const (
+	pumpkinCreaturePopulationChunksPerTick = 2
+	pumpkinMaxCreatureGroupsPerChunk       = 8
+	pumpkinCreaturePopulationRadius        = 96.0
+)
 
 type mobCategory uint8
 
@@ -179,6 +189,7 @@ func (s *Server) tickNaturalSpawning() {
 		return
 	}
 
+	s.populatePumpkinGenerationCreatures(chunks, players)
 	state := s.newNaturalSpawnState(players, chunks)
 	categories := filteredSpawningCategories(&state, s.cfg == nil || s.cfg.Difficulty != "peaceful", s.worldAge%400 == 0)
 	if len(categories) == 0 {
@@ -202,6 +213,151 @@ func (s *Server) tickNaturalSpawning() {
 			}
 		}
 	}
+}
+
+// populatePumpkinGenerationCreatures mirrors Pumpkin's
+// spawn_mobs_for_chunk_generation pass. Runtime natural spawning is capped at
+// ten CREATURE mobs for a full 17x17 simulation area, which is too small to
+// represent every four-animal herd. The generation pass is what supplies the
+// normal mix of sheep, pigs, chickens, cows, and biome-specific animals.
+func (s *Server) populatePumpkinGenerationCreatures(chunks [][2]int32, players []naturalSpawnPlayer) {
+	if s.world == nil || s.game == nil {
+		return
+	}
+	if s.creaturePopulatedChunks == nil {
+		s.creaturePopulatedChunks = make(map[[2]int32]struct{})
+	}
+	// GoCraft does not persist entities with chunks yet. Forget population
+	// markers only after their chunk has left despawn range; revisiting then
+	// deterministically recreates the same bounded simulation population.
+	for chunk := range s.creaturePopulatedChunks {
+		if !pumpkinChunkWithinPlayerDistance(chunk[0], chunk[1], players, pumpkinMobCategories[mobCategoryCreature].despawnDistance) {
+			delete(s.creaturePopulatedChunks, chunk)
+		}
+	}
+	processed := 0
+	for _, chunk := range chunks {
+		if processed >= pumpkinCreaturePopulationChunksPerTick {
+			return
+		}
+		key := [2]int32{chunk[0], chunk[1]}
+		if _, populated := s.creaturePopulatedChunks[key]; populated {
+			continue
+		}
+		if !pumpkinChunkWithinPlayerDistance(chunk[0], chunk[1], players, pumpkinCreaturePopulationRadius) {
+			continue
+		}
+		s.creaturePopulatedChunks[key] = struct{}{}
+		processed++
+		s.spawnPumpkinGenerationCreaturesForChunk(chunk[0], chunk[1])
+	}
+}
+
+func pumpkinChunkWithinPlayerDistance(cx, cz int32, players []naturalSpawnPlayer, distance float64) bool {
+	centerX, centerZ := float64(cx*16+8), float64(cz*16+8)
+	limitSquared := distance * distance
+	for _, candidate := range players {
+		dx, dz := centerX-candidate.position.X, centerZ-candidate.position.Z
+		if dx*dx+dz*dz <= limitSquared {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32) int {
+	centerX, centerZ := int(cx)*16+8, int(cz)*16+8
+	surfaceY, loaded := s.world.SurfaceYIfLoaded(centerX, centerZ)
+	if !loaded {
+		return 0
+	}
+	biome := s.world.BiomeAt(centerX, pumpkinSurfaceSpawnY(s.world, centerX, centerZ, surfaceY), centerZ)
+	settings, ok := pumpkinBiomeSpawns[biome]
+	if !ok || settings.creatureProbability <= 0 {
+		return 0
+	}
+	entries := settings.groups[mobCategoryCreature]
+	if len(entries) == 0 {
+		return 0
+	}
+
+	worldSeed := int64(0)
+	if s.cfg != nil {
+		worldSeed = s.cfg.WorldSeed
+	}
+	rng := rand.New(rand.NewSource(pumpkinCreaturePopulationSeed(worldSeed, cx, cz)))
+	spawned := 0
+	for group := 0; group < pumpkinMaxCreatureGroupsPerChunk; group++ {
+		if rng.Float64() >= settings.creatureProbability {
+			break
+		}
+		entry, supported := pumpkinSpawnEntrySupportedByProtocolAt(entries, rng.Intn(len(entries)))
+		if !supported {
+			continue
+		}
+		entitySettings, known := pumpkinEntitySpawnSettingsByType[entry.entityType]
+		if !known || !entitySettings.summonable || entitySettings.category != mobCategoryCreature {
+			continue
+		}
+		count := entry.minCount
+		if entry.maxCount > entry.minCount {
+			count += rng.Intn(entry.maxCount - entry.minCount + 1)
+		}
+		x, z := int(cx)*16+rng.Intn(16), int(cz)*16+rng.Intn(16)
+		startX, startZ := x, z
+		for range count {
+			for attempt := 0; attempt < 4; attempt++ {
+				success := false
+				candidateSurface, candidateLoaded := s.world.SurfaceYIfLoaded(x, z)
+				if candidateLoaded {
+					y := pumpkinSurfaceSpawnY(s.world, x, z, candidateSurface)
+					if s.validPumpkinGenerationCreaturePosition(entry.entityType, entitySettings, cx, cz, x, y, z) {
+						e := corentity.New(s.game.NextEntityID(), newRandomUUID(), corentity.EntityType(entry.entityType),
+							float64(x)+0.5, float64(y), float64(z)+0.5)
+						// The entity manager is global rather than chunk-persistent, so use
+						// the natural distance-based unload lifecycle. The deterministic
+						// chunk pass recreates them when that area becomes active again.
+						e.NaturalSpawned = true
+						e.OnGround = true
+						e.Yaw = rng.Float32() * 360
+						s.world.Entities.Add(e)
+						if s.sessions != nil {
+							handler.BroadcastSpawnMob(e, s.sessions)
+						}
+						spawned++
+						success = true
+					}
+				}
+				x += rng.Intn(5) - rng.Intn(5)
+				z += rng.Intn(5) - rng.Intn(5)
+				positionCX, positionCZ := coreworld.ChunkCoordsFor(x, z)
+				if positionCX != cx || positionCZ != cz {
+					x, z = startX, startZ
+				}
+				if success {
+					break
+				}
+			}
+		}
+	}
+	return spawned
+}
+
+func (s *Server) validPumpkinGenerationCreaturePosition(entityType string, settings pumpkinEntitySpawnSettings, cx, cz int32, x, y, z int) bool {
+	positionCX, positionCZ := coreworld.ChunkCoordsFor(x, z)
+	if positionCX != cx || positionCZ != cz || settings.location != spawnLocationOnGround {
+		return false
+	}
+	if !pumpkinSpawnLocationOK(s.world, x, y, z, settings.location) ||
+		!s.pumpkinEntitySpawnRuleOK(corentity.EntityType(entityType), x, y, z) {
+		return false
+	}
+	ok, loaded := s.world.CanEntityOccupyIfLoaded(float64(x)+0.5, float64(y), float64(z)+0.5)
+	return loaded && ok
+}
+
+func pumpkinCreaturePopulationSeed(worldSeed int64, cx, cz int32) int64 {
+	return worldSeed ^ int64(cx)*341873128712 ^ int64(cz)*132897987541 ^ 0x4352454154555245
 }
 
 func (s *Server) naturalSpawnPlayers() []naturalSpawnPlayer {
@@ -354,7 +510,10 @@ func (s *Server) spawnCategoryForChunk(state *naturalSpawnState, category mobCat
 }
 
 func (s *Server) pumpkinSpawnEntrySupportedByProtocol(entries []pumpkinSpawnEntry) (pumpkinSpawnEntry, bool) {
-	start := s.spawnRNG.Intn(len(entries))
+	return pumpkinSpawnEntrySupportedByProtocolAt(entries, s.spawnRNG.Intn(len(entries)))
+}
+
+func pumpkinSpawnEntrySupportedByProtocolAt(entries []pumpkinSpawnEntry, start int) (pumpkinSpawnEntry, bool) {
 	for offset := range len(entries) {
 		entry := entries[(start+offset)%len(entries)]
 		switch entry.entityType {

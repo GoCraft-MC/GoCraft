@@ -139,6 +139,60 @@ func TestNaturalSpawnerProducesFishInGeneratedOcean(t *testing.T) {
 	t.Fatal("natural spawner produced no aquatic mobs in an ocean")
 }
 
+func TestPumpkinChunkGenerationPopulationIncludesChickensForReportedSeed(t *testing.T) {
+	const reportedSeed int64 = 3869364577908799655
+	world := coreworld.New(coreworld.NewOverworldGenerator(reportedSeed), nil, false)
+	defer world.Close()
+	chunks := make([][2]int32, 0, pumpkinSpawnableChunkDenominator)
+	for cx := int32(-8); cx <= 8; cx++ {
+		for cz := int32(-8); cz <= 8; cz++ {
+			world.Chunk(cx, cz)
+			chunks = append(chunks, [2]int32{cx, cz})
+		}
+	}
+	s := &Server{
+		cfg:                     &config.Config{WorldSeed: reportedSeed},
+		game:                    game.New(),
+		world:                   world,
+		creaturePopulatedChunks: make(map[[2]int32]struct{}),
+	}
+	players := []naturalSpawnPlayer{{id: 1, position: spatial.Vec3{X: 0.5, Y: 80, Z: 0.5}}}
+	eligibleChunks := 0
+	for _, chunk := range chunks {
+		if pumpkinChunkWithinPlayerDistance(chunk[0], chunk[1], players, pumpkinCreaturePopulationRadius) {
+			eligibleChunks++
+		}
+	}
+	for range (len(chunks) + pumpkinCreaturePopulationChunksPerTick - 1) / pumpkinCreaturePopulationChunksPerTick {
+		s.populatePumpkinGenerationCreatures(chunks, players)
+	}
+	if len(s.creaturePopulatedChunks) != eligibleChunks {
+		t.Fatalf("populated chunks = %d, want %d eligible chunks", len(s.creaturePopulatedChunks), eligibleChunks)
+	}
+
+	chickens, total := 0, 0
+	for _, spawned := range world.Entities.Snapshot() {
+		if settings, ok := pumpkinEntitySpawnSettingsByType[string(spawned.Type)]; ok && settings.category == mobCategoryCreature {
+			total++
+			if spawned.Type == corentity.TypeChicken {
+				chickens++
+			}
+			if !spawned.NaturalSpawned {
+				t.Errorf("chunk-generation creature %s was not assigned the unload lifecycle", spawned.Type)
+			}
+		}
+	}
+	if chickens == 0 {
+		t.Fatalf("Pumpkin chunk-generation pass produced %d creatures but no chickens", total)
+	}
+	t.Logf("reported seed chunk population: creatures=%d chickens=%d", total, chickens)
+	before := len(world.Entities.Snapshot())
+	s.populatePumpkinGenerationCreatures(chunks, players)
+	if after := len(world.Entities.Snapshot()); after != before {
+		t.Fatalf("already-populated chunks spawned duplicates: before=%d after=%d", before, after)
+	}
+}
+
 func TestPumpkinCategoryCapsScaleAtSeventeenBySeventeenChunks(t *testing.T) {
 	state := naturalSpawnState{spawnableChunkCount: pumpkinSpawnableChunkDenominator}
 	want := []int{70, 10, 15, 5, 5, 5, 20, -1}

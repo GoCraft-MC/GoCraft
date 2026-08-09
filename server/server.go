@@ -94,9 +94,10 @@ type Server struct {
 	mobAIs map[int32]*mobAI
 
 	// worldAge is advanced only by the entity tick goroutine.
-	worldAge int64
-	spawnRNG *rand.Rand
-	furnaces map[spatial.BlockPos]*furnaceState
+	worldAge                int64
+	spawnRNG                *rand.Rand
+	creaturePopulatedChunks map[[2]int32]struct{}
+	furnaces                map[spatial.BlockPos]*furnaceState
 
 	// sleepAllTick is the worldAge tick at which ALL online players were first
 	// detected sleeping.  0 means nobody is sleeping or the check hasn't fired.
@@ -253,24 +254,25 @@ func New(cfg *config.Config) (*Server, error) {
 	})
 
 	s := &Server{
-		cfg:            cfg,
-		game:           gameCore,
-		privKey:        privKey,
-		pubKeyDER:      pubKeyDER,
-		world:          worldInstance,
-		spawnX:         spawnX,
-		spawnZ:         spawnZ,
-		regProvider:    &registry.VanillaProvider{},
-		chunkSender:    javaworld.DefaultSender,
-		sessions:       session.NewManager(),
-		cmds:           cmds,
-		intentBus:      bus,
-		mobAIs:         make(map[int32]*mobAI),
-		spawnRNG:       rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
-		worldAge:       initialWorldAge,
-		furnaces:       make(map[spatial.BlockPos]*furnaceState),
-		timings:        timings,
-		javaCrossKnown: make(map[[16]byte]map[[16]byte]crossPlayerView),
+		cfg:                     cfg,
+		game:                    gameCore,
+		privKey:                 privKey,
+		pubKeyDER:               pubKeyDER,
+		world:                   worldInstance,
+		spawnX:                  spawnX,
+		spawnZ:                  spawnZ,
+		regProvider:             &registry.VanillaProvider{},
+		chunkSender:             javaworld.DefaultSender,
+		sessions:                session.NewManager(),
+		cmds:                    cmds,
+		intentBus:               bus,
+		mobAIs:                  make(map[int32]*mobAI),
+		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
+		creaturePopulatedChunks: make(map[[2]int32]struct{}),
+		worldAge:                initialWorldAge,
+		furnaces:                make(map[spatial.BlockPos]*furnaceState),
+		timings:                 timings,
+		javaCrossKnown:          make(map[[16]byte]map[[16]byte]crossPlayerView),
 	}
 
 	// Register server-state commands as closures after s is initialised.
