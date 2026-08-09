@@ -166,11 +166,115 @@ func TestJavaAnimalMetadataSynchronizesBabyTameOwnerAndSaddle(t *testing.T) {
 	}
 	assertMetadataTerminator(t, r)
 
+	// Horse: tamed+saddled — index 16 (baby), 17 (flags), then 0xff only.
+	// NO index 18 Optional UUID; that field does not exist for AbstractHorse.
 	horse := corentity.New(91, [16]byte{10}, corentity.TypeHorse, 0, 64, 0)
 	horse.Tamed, horse.Saddled = true, true
-	if pkt := buildMobMetadata(horse); pkt == nil {
-		t.Fatal("horse metadata is nil")
+	horse.HasTameOwner = true // must be ignored — AbstractHorse has no owner UUID field
+	horse.TameOwnerUUID = [16]byte{0xde, 0xad}
+	horseR := buildMobMetadata(horse).Reader()
+	assertMetadataVarInt(t, horseR, "horse entity ID", horse.EntityID)
+	idx, _ := protocol.ReadByte(horseR)
+	if idx != 16 {
+		t.Fatalf("horse baby index = %d, want 16", idx)
 	}
+	assertMetadataVarInt(t, horseR, "horse baby serializer", 8)
+	protocol.ReadBool(horseR) // false — skip
+	idx, _ = protocol.ReadByte(horseR)
+	if idx != 17 {
+		t.Fatalf("horse flags index = %d, want 17", idx)
+	}
+	assertMetadataVarInt(t, horseR, "horse flags serializer", 0)
+	horseFlags, _ := protocol.ReadByte(horseR)
+	if horseFlags&0x06 != 0x06 {
+		t.Fatalf("tamed+saddled horse flags = %#x, want bits 0x02|0x04", horseFlags)
+	}
+	// Terminator must follow immediately — no index 18 Optional UUID.
+	assertMetadataTerminator(t, horseR)
+}
+
+// TestJavaAbstractHorseMetadataHasNoOwnerUUIDAtIndex18 is a protocol-level
+// regression test for the bug introduced in commit 7c3ec145: writing serializer
+// type 13 (Optional UUID) at metadata index 18 for every AbstractHorse entity.
+// ZombieHorse can spawn naturally, so every joining Java 1.21.4 client would
+// receive the malformed packet and disconnect with "Network Protocol Error".
+func TestJavaAbstractHorseMetadataHasNoOwnerUUIDAtIndex18(t *testing.T) {
+	horseTypes := []corentity.EntityType{
+		corentity.TypeHorse,
+		corentity.TypeDonkey,
+		corentity.TypeMule,
+		corentity.TypeSkeletonHorse,
+		corentity.TypeZombieHorse,
+		corentity.TypeCamel,
+		corentity.TypeLlama,
+		corentity.TypeTraderLlama,
+	}
+	for i, ht := range horseTypes {
+		t.Run(string(ht), func(t *testing.T) {
+			e := corentity.New(int32(300+i), [16]byte{byte(i + 1)}, ht, 0, 64, 0)
+			e.HasTameOwner = true // worst case: would emit UUID if bug were present
+			e.TameOwnerUUID = [16]byte{0xde, 0xad, 0xbe, 0xef}
+			pkt := buildMobMetadata(e)
+			if pkt == nil {
+				t.Fatal("AbstractHorse metadata is nil")
+			}
+			r := pkt.Reader()
+			assertMetadataVarInt(t, r, "entity ID", e.EntityID)
+			// index 16: baby (from AgeableMob — all AbstractHorse subtypes are ageable)
+			idx, err := protocol.ReadByte(r)
+			if err != nil || idx != 16 {
+				t.Fatalf("baby index = %d err = %v, want 16", idx, err)
+			}
+			assertMetadataVarInt(t, r, "baby serializer", 8)
+			protocol.ReadBool(r) // false — skip
+			// index 17: horse flags byte
+			idx, err = protocol.ReadByte(r)
+			if err != nil || idx != 17 {
+				t.Fatalf("flags index = %d err = %v, want 17", idx, err)
+			}
+			assertMetadataVarInt(t, r, "flags serializer", 0)
+			protocol.ReadByte(r) // flags value — skip
+			// Next byte MUST be the terminator 0xff.
+			// If it is 18, the index-18 Optional UUID bug is present.
+			b, err := protocol.ReadByte(r)
+			if err != nil {
+				t.Fatalf("read after flags: %v", err)
+			}
+			if b == 18 {
+				t.Fatalf("%s metadata contains index 18 — Optional UUID bug is present (causes Java client disconnect)", ht)
+			}
+			if b != 0xff {
+				t.Fatalf("%s metadata has unexpected byte 0x%02x after flags (want 0xff terminator)", ht, b)
+			}
+			if r.Len() != 0 {
+				t.Fatalf("%s metadata has %d trailing bytes", ht, r.Len())
+			}
+		})
+	}
+}
+
+// TestJavaUntamedHorseFlagsAreZero verifies default (untamed, unsaddled) horse
+// writes flags=0x00 at index 17 and terminates immediately.
+func TestJavaUntamedHorseFlagsAreZero(t *testing.T) {
+	horse := corentity.New(400, [16]byte{20}, corentity.TypeHorse, 0, 64, 0)
+	r := buildMobMetadata(horse).Reader()
+	assertMetadataVarInt(t, r, "entity ID", horse.EntityID)
+	idx, _ := protocol.ReadByte(r)
+	if idx != 16 {
+		t.Fatalf("baby index = %d", idx)
+	}
+	assertMetadataVarInt(t, r, "baby serializer", 8)
+	protocol.ReadBool(r)
+	idx, _ = protocol.ReadByte(r)
+	if idx != 17 {
+		t.Fatalf("flags index = %d", idx)
+	}
+	assertMetadataVarInt(t, r, "flags serializer", 0)
+	flags, _ := protocol.ReadByte(r)
+	if flags != 0 {
+		t.Fatalf("untamed horse flags = %#x, want 0x00", flags)
+	}
+	assertMetadataTerminator(t, r)
 }
 
 func TestPlayerSleepMetadataUsesProtocol769PoseAndBedPosition(t *testing.T) {

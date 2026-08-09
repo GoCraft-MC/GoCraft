@@ -101,7 +101,13 @@
       "Bash(awk -F: 'NR==1{n=1} {printf \"0x%02x=%d %s\\\\n\", n+1, n+1, $2; n++}')",
       "Bash(ls \"$\\(go env GOPATH\\)/pkg/mod/cache/download/github.com/sandertv/\")",
       "Bash(ls \"$\\(go env GOPATH\\)/pkg/mod\")",
-      "Bash(cat \"$\\(go env GOMODCACHE\\)/cache/download/sumdb/sum.golang.org/lookup/github.com/!hashim!the!arab/gophertunnel@v1.25.3-0.20260804190447-1f617284845c\")"
+      "Bash(cat \"$\\(go env GOMODCACHE\\)/cache/download/sumdb/sum.golang.org/lookup/github.com/!hashim!the!arab/gophertunnel@v1.25.3-0.20260804190447-1f617284845c\")",
+      "Bash(chmod +x /tmp/search_metadata.sh)",
+      "Bash(bash /tmp/search_metadata.sh)",
+      "Bash(bash /tmp/search_more.sh)",
+      "Bash(bash /tmp/check_cold.sh)",
+      "Bash(bash /tmp/get_all_indices.sh)",
+      "Bash(gofmt -w java/handler/mob.go java/handler/entity_teleport_test.go)"
     ]
   }
 }
