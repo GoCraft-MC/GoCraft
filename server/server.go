@@ -1731,42 +1731,14 @@ func (s *Server) tickEntities() {
 	allEntities := s.world.Entities.Snapshot()
 
 	// ── Parallel passive mob AI ───────────────────────────────────────────────
-	// Passive wander AI is pure per-entity computation (position/velocity writes
-	// on the entity pointer; read-only world access) so it is safe to run
-	// concurrently.  Hostile and golem AI mutate shared player state and stay
+	// Passive per-entity computation is dispatched through a bounded worker
+	// group. Hostile and golem AI can mutate shared players/world state and stay
 	// serial below.
-	//
-	// We pre-seed every passive mob's AI struct from the tick goroutine first so
-	// the map reads inside tickPassiveMobAI are guaranteed to be read-only
-	// (safe for concurrent goroutines).
-	for _, e := range allEntities {
-		if !e.Dead && isPassiveMob(e.Type) && entityWithinSimulationRange(e, simulationPlayers, 128) {
-			_ = s.mobAIFor(e) // ensure AI struct exists before parallel phase
-		}
-	}
 	endPassiveAI := s.timings.measure(sectionAI)
-	type villagerWakeEntry struct{ e *corentity.Entity }
-	var villagerWakesMu sync.Mutex
-	var villagerWakes []villagerWakeEntry
-	var passiveAIWG sync.WaitGroup
-	for _, e := range allEntities {
-		if e.Dead || !isPassiveMob(e.Type) || !entityWithinSimulationRange(e, simulationPlayers, 128) {
-			continue
-		}
-		passiveAIWG.Add(1)
-		go func(e *corentity.Entity) {
-			defer passiveAIWG.Done()
-			if s.tickPassiveMobAI(e) && e.Type == corentity.TypeVillager {
-				villagerWakesMu.Lock()
-				villagerWakes = append(villagerWakes, villagerWakeEntry{e})
-				villagerWakesMu.Unlock()
-			}
-		}(e)
-	}
-	passiveAIWG.Wait()
+	villagerWakes := s.tickPassiveAIParallel(allEntities, simulationPlayers)
 	endPassiveAI()
-	for _, vw := range villagerWakes {
-		handler.BroadcastVillagerSleepState(vw.e, s.sessions)
+	for _, villager := range villagerWakes {
+		handler.BroadcastVillagerSleepState(villager, s.sessions)
 	}
 
 	for _, e := range allEntities {
