@@ -62,13 +62,41 @@ func TestBedrockBabyVillagerMetadataCanReturnToAdultScale(t *testing.T) {
 	villager := corentity.New(8, [16]byte{}, corentity.TypeVillager, 1, 64, 1)
 	villager.IsBaby = true
 	listener := &Listener{}
-	baby := listener.bedrockEntityMetadata(villager)
+	baby := listener.bedrockEntityMetadata(nil, villager)
 	if !baby.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagBaby) || baby[protocol.EntityDataKeyScale] != float32(0.5) {
 		t.Fatalf("baby metadata = %#v", baby)
 	}
 	villager.IsBaby = false
-	adult := listener.bedrockEntityMetadata(villager)
+	adult := listener.bedrockEntityMetadata(nil, villager)
 	if adult.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagBaby) || adult[protocol.EntityDataKeyScale] != float32(1) {
 		t.Fatalf("adult metadata = %#v", adult)
+	}
+}
+
+func TestBedrockAnimalMetadataCarriesCanonicalInteractionState(t *testing.T) {
+	wolf := corentity.New(20, [16]byte{}, corentity.TypeWolf, 0, 64, 0)
+	wolf.IsBaby = true
+	wolf.LoveTicks = 100
+	wolf.Tamed = true
+	wolf.Sitting = true
+	wolf.HasTameOwner = true
+	wolf.TameOwnerEntityID = 4
+	metadata := (&Listener{}).bedrockEntityMetadata(&bedrockSession{entityID: 4}, wolf)
+	for _, flag := range []uint8{
+		protocol.EntityDataFlagBaby, protocol.EntityDataFlagInLove,
+		protocol.EntityDataFlagTamed, protocol.EntityDataFlagSitting,
+	} {
+		if !metadata.Flag(protocol.EntityDataKeyFlags, flag) {
+			t.Fatalf("animal metadata missing flag %d: %#v", flag, metadata)
+		}
+	}
+	if got := metadata[protocol.EntityDataKeyOwner]; got != int64(bedrockSelfRuntimeID) {
+		t.Fatalf("owner runtime ID = %#v, want self %d", got, bedrockSelfRuntimeID)
+	}
+
+	horse := corentity.New(21, [16]byte{}, corentity.TypeHorse, 0, 64, 0)
+	horse.Saddled = true
+	if metadata := (&Listener{}).bedrockEntityMetadata(nil, horse); !metadata.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSaddled) {
+		t.Fatal("saddled flag missing from horse metadata")
 	}
 }

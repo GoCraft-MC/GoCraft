@@ -95,19 +95,62 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		encodeSlot(b, player.ItemStack{ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage})
 		return b.Byte(0xff).Build()
 	}
-	if e.Type != corentity.TypeVillager {
+	if e.Type != corentity.TypeVillager && !corentity.IsAgeableAnimal(e.Type) && !corentity.IsTameableAnimal(e.Type) && !corentity.IsAnimalVehicle(e.Type) {
 		return nil
+	}
+	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)
+	if e.Type == corentity.TypeVillager {
+		b = appendLivingEntitySleepMetadata(b, e.Sleeping, e.VillageBed)
+	}
+	if e.Type == corentity.TypeVillager || corentity.IsAgeableAnimal(e.Type) {
+		b = b.Byte(16).VarInt(8).Bool(e.IsBaby) // AgeableMob DATA_BABY_ID.
+	}
+
+	if isJavaTamableAnimal(e.Type) {
+		flags := byte(0)
+		if e.Sitting {
+			flags |= 0x01
+		}
+		if e.Tamed {
+			flags |= 0x04
+		}
+		b = b.Byte(17).VarInt(0).Byte(flags)
+		b = b.Byte(18).VarInt(13).Bool(e.HasTameOwner)
+		if e.HasTameOwner {
+			b = b.UUID(protocol.UUID(e.TameOwnerUUID))
+		}
+	}
+	if isJavaAbstractHorse(e.Type) {
+		flags := byte(0)
+		if e.Tamed {
+			flags |= 0x02
+		}
+		if e.Saddled {
+			flags |= 0x04
+		}
+		b = b.Byte(17).VarInt(0).Byte(flags)
+		b = b.Byte(18).VarInt(13).Bool(e.HasTameOwner)
+		if e.HasTameOwner {
+			b = b.UUID(protocol.UUID(e.TameOwnerUUID))
+		}
+	}
+	if e.Type == corentity.TypePig {
+		b = b.Byte(17).VarInt(8).Bool(e.Saddled)
+	}
+	if e.Type == corentity.TypeOcelot {
+		b = b.Byte(17).VarInt(8).Bool(e.Trusting)
+	}
+	if e.Type == corentity.TypeStrider {
+		b = b.Byte(19).VarInt(8).Bool(e.Saddled)
+	}
+	if e.Type != corentity.TypeVillager {
+		return b.Byte(0xff).Build()
 	}
 	level := e.VillagerLevel
 	if level < 1 {
 		level = 1
 	} else if level > 5 {
 		level = 5
-	}
-	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)
-	b = appendLivingEntitySleepMetadata(b, e.Sleeping, e.VillageBed)
-	if e.IsBaby {
-		b = b.Byte(16).VarInt(8).Bool(true) // AgeableMob DATA_BABY_ID (index 16, Boolean type 8)
 	}
 	return b.
 		Byte(18).   // DATA_VILLAGER_DATA metadata index
@@ -119,9 +162,37 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		Build()
 }
 
+func isJavaTamableAnimal(t corentity.EntityType) bool {
+	switch t {
+	case corentity.TypeCat, corentity.TypeParrot, corentity.TypeWolf:
+		return true
+	default:
+		return false
+	}
+}
+
+func isJavaAbstractHorse(t corentity.EntityType) bool {
+	switch t {
+	case corentity.TypeCamel, corentity.TypeDonkey, corentity.TypeHorse, corentity.TypeMule,
+		corentity.TypeSkeletonHorse, corentity.TypeZombieHorse, corentity.TypeLlama,
+		corentity.TypeTraderLlama:
+		return true
+	default:
+		return false
+	}
+}
+
 // BroadcastVillagerMetadata sends a Set Entity Data packet for a villager to
 // all connected sessions — used when a baby villager grows into an adult.
 func BroadcastVillagerMetadata(e *corentity.Entity, mgr *session.Manager) {
+	BroadcastMobMetadata(e, mgr)
+}
+
+// BroadcastMobMetadata publishes canonical baby/tame/owner/saddle state.
+func BroadcastMobMetadata(e *corentity.Entity, mgr *session.Manager) {
+	if mgr == nil {
+		return
+	}
 	pkt := buildMobMetadata(e)
 	if pkt == nil {
 		return
@@ -131,6 +202,18 @@ func BroadcastVillagerMetadata(e *corentity.Entity, mgr *session.Manager) {
 			_ = s.Conn.WritePacket(pkt)
 		}
 	}()
+}
+
+// BroadcastEntityStatus triggers vanilla entity feedback such as love hearts
+// (18) and taming failure/success (6/7).
+func BroadcastEntityStatus(entityID int32, status byte, mgr *session.Manager) {
+	if mgr == nil {
+		return
+	}
+	pkt := buildEntityEvent(entityID, status)
+	for _, s := range mgr.SnapshotAll() {
+		_ = s.Conn.WritePacket(pkt)
+	}
 }
 
 // BroadcastVillagerSleepState sends position before pose metadata so the
@@ -294,6 +377,9 @@ func sendExistingMobsTo(conn *network.ClientConn, mobs []*corentity.Entity) {
 		if metadata := buildMobMetadata(e); metadata != nil {
 			_ = conn.WritePacket(metadata)
 		}
+		if passengers := e.PassengerIDs(); len(passengers) > 0 {
+			_ = conn.WritePacket(buildSetPassengers(e.EntityID, passengers))
+		}
 	}
 }
 
@@ -314,6 +400,9 @@ func sendExistingMobsInViewTo(conn *network.ClientConn, mobs []*corentity.Entity
 		_ = conn.WritePacket(pkt)
 		if metadata := buildMobMetadata(e); metadata != nil {
 			_ = conn.WritePacket(metadata)
+		}
+		if passengers := e.PassengerIDs(); len(passengers) > 0 {
+			_ = conn.WritePacket(buildSetPassengers(e.EntityID, passengers))
 		}
 	}
 }

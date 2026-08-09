@@ -85,6 +85,18 @@ func TestVillagerMetadataUsesProtocol769RegistryValues(t *testing.T) {
 		r := assertLivingEntitySleepMetadata(t, pkt, villager.EntityID, wantBed)
 		index, err := protocol.ReadByte(r)
 		if err != nil {
+			t.Fatalf("read villager baby index: %v", err)
+		}
+		if index != 16 {
+			t.Fatalf("villager baby index = %d, want 16", index)
+		}
+		assertMetadataVarInt(t, r, "villager baby serializer ID", 8)
+		baby, err := protocol.ReadBool(r)
+		if err != nil || baby {
+			t.Fatalf("adult villager baby metadata = %v/%v", baby, err)
+		}
+		index, err = protocol.ReadByte(r)
+		if err != nil {
 			t.Fatalf("read villager data index: %v", err)
 		}
 		if index != 18 {
@@ -109,8 +121,55 @@ func TestVillagerMetadataUsesProtocol769RegistryValues(t *testing.T) {
 	assertVillagerMetadata(&villager.VillageBed)
 
 	cow := corentity.New(78, [16]byte{4}, corentity.TypeCow, 0, 64, 0)
-	if got := buildMobMetadata(cow); got != nil {
-		t.Fatalf("buildMobMetadata(cow) = %v, want nil", got)
+	if got := buildMobMetadata(cow); got == nil {
+		t.Fatal("buildMobMetadata(cow) = nil, want ageable animal metadata")
+	}
+}
+
+func TestJavaAnimalMetadataSynchronizesBabyTameOwnerAndSaddle(t *testing.T) {
+	owner := [16]byte{1, 2, 3, 4}
+	wolf := corentity.New(90, [16]byte{9}, corentity.TypeWolf, 0, 64, 0)
+	wolf.IsBaby = true
+	wolf.Tamed = true
+	wolf.Sitting = true
+	wolf.HasTameOwner = true
+	wolf.TameOwnerUUID = owner
+	r := buildMobMetadata(wolf).Reader()
+	assertMetadataVarInt(t, r, "wolf entity ID", wolf.EntityID)
+	index, _ := protocol.ReadByte(r)
+	if index != 16 {
+		t.Fatalf("wolf baby index = %d", index)
+	}
+	assertMetadataVarInt(t, r, "wolf baby serializer", 8)
+	baby, _ := protocol.ReadBool(r)
+	if !baby {
+		t.Fatal("wolf baby metadata is false")
+	}
+	index, _ = protocol.ReadByte(r)
+	if index != 17 {
+		t.Fatalf("wolf tame flags index = %d", index)
+	}
+	assertMetadataVarInt(t, r, "wolf flags serializer", 0)
+	flags, _ := protocol.ReadByte(r)
+	if flags&0x05 != 0x05 {
+		t.Fatalf("wolf flags = %#x, want sitting+tamed", flags)
+	}
+	index, _ = protocol.ReadByte(r)
+	if index != 18 {
+		t.Fatalf("wolf owner index = %d", index)
+	}
+	assertMetadataVarInt(t, r, "wolf owner serializer", 13)
+	present, _ := protocol.ReadBool(r)
+	gotOwner, err := protocol.ReadUUID(r)
+	if !present || err != nil || [16]byte(gotOwner) != owner {
+		t.Fatalf("wolf owner = %v/%v/%v", present, gotOwner, err)
+	}
+	assertMetadataTerminator(t, r)
+
+	horse := corentity.New(91, [16]byte{10}, corentity.TypeHorse, 0, 64, 0)
+	horse.Tamed, horse.Saddled = true, true
+	if pkt := buildMobMetadata(horse); pkt == nil {
+		t.Fatal("horse metadata is nil")
 	}
 }
 

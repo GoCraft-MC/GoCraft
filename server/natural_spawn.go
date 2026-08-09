@@ -120,7 +120,7 @@ func entityWithinSimulationRange(entity *corentity.Entity, players []naturalSpaw
 // boats, and player-created entities are deliberately excluded.
 func (s *Server) despawnDistantNaturalMobs(players []naturalSpawnPlayer, removedIDs *[]int32) {
 	for _, entity := range s.world.Entities.Snapshot() {
-		if entity.Dead || !entity.NaturalSpawned {
+		if entity.Dead || !entity.NaturalSpawned || entity.Tamed || entity.HasTameOwner {
 			continue
 		}
 		settings, ok := pumpkinEntitySpawnSettingsByType[string(entity.Type)]

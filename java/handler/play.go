@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"GoCraft/core/intent"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -54,7 +55,7 @@ const keepAliveTimeout = 30 * time.Second
 //	C→S  Confirm Teleport (ID 1)   (0x00)
 //	S→C  Level Chunk With Light    (0x28) × (2·viewRadius+1)² — initial burst
 //	     … keep-alive / movement / play loop …
-func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, reg registry.Provider, worldSeed int64, worldAge func() int64, viewDistance, preGenerateRadius int32, nextEntityID func() int32) error {
+func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, reg registry.Provider, worldSeed int64, worldAge func() int64, viewDistance, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
 	if viewDistance < 2 {
 		viewDistance = 2
@@ -133,7 +134,7 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		"uuid", p.UUID,
 	)
 
-	return playLoop(conn, p, teleportID, w, sender, mgr, cmds, dimensionTypeID, hashedSeed, viewDistance, preGenerateRadius, nextEntityID)
+	return playLoop(conn, p, teleportID, w, sender, mgr, cmds, dimensionTypeID, hashedSeed, viewDistance, preGenerateRadius, nextEntityID, intentBus)
 }
 
 // ── Clientbound packet helpers ────────────────────────────────────────────────
@@ -461,7 +462,7 @@ func sendForgetChunk(conn *network.ClientConn, cx, cz int32) error {
 //     chunk boundary.
 //
 // On exit the session is removed from mgr and all other players are notified.
-func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, dimensionTypeID int32, hashedSeed int64, viewRadius, preGenerateRadius int32, nextEntityID func() int32) error {
+func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, dimensionTypeID int32, hashedSeed int64, viewRadius, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
@@ -697,11 +698,11 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 				// resetting the player so the client cannot immediately snap back to
 				// the death location after it accepts the respawn teleport.
 				if vehicleID := p.VehicleEntityID; vehicleID != 0 {
-					if vehicle, ok := w.Entities.Get(vehicleID); ok && vehicle.RiderEntityID == p.EntityID {
-						vehicle.RiderEntityID = 0
+					if vehicle, ok := w.Entities.Get(vehicleID); ok && vehicle.HasPassenger(p.EntityID) {
+						vehicle.RemovePassenger(p.EntityID)
+						BroadcastSetPassengers(vehicleID, vehicle.PassengerIDs(), mgr)
 					}
 					p.VehicleEntityID = 0
-					BroadcastSetPassengers(vehicleID, nil, mgr)
 				}
 				p.Revive()
 				if bedSpawn, ok := resolveBedRespawn(p, w); ok {
@@ -745,24 +746,24 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Entity interaction (right-click mob) — villager trading + boat mount.
 		if pkt.ID == packetIDInteract {
-			if err := handleInteractPacket(pkt, p, w, conn, mgr); err != nil {
+			if err := handleInteractPacket(pkt, p, w, conn, mgr, intentBus); err != nil {
 				slog.Warn("interact error", "player", p.Username, "err", err)
 			}
 		}
 
 		// Boat / vehicle packets.
 		if pkt.ID == packetIDMoveVehicle {
-			if err := HandleMoveVehiclePacket(pkt, p, w, conn, mgr); err != nil {
+			if err := HandleMoveVehiclePacket(pkt, p, w, conn, mgr, intentBus); err != nil {
 				slog.Warn("move_vehicle error", "player", p.Username, "err", err)
 			}
 		}
 		if pkt.ID == packetIDPlayerInput {
-			if err := HandlePlayerInputPacket(pkt, p, w, conn, mgr); err != nil {
+			if err := HandlePlayerInputPacket(pkt, p, w, conn, mgr, intentBus); err != nil {
 				slog.Warn("player_input error", "player", p.Username, "err", err)
 			}
 		}
 		if pkt.ID == packetIDPlayerCommand {
-			if err := HandlePlayerCommandPacket(pkt, p, w, conn, mgr); err != nil {
+			if err := HandlePlayerCommandPacket(pkt, p, w, conn, mgr, intentBus); err != nil {
 				slog.Warn("player_command error", "player", p.Username, "err", err)
 			}
 		}

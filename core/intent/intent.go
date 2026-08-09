@@ -136,11 +136,23 @@ const (
 
 // EntityInteractIntent requests an attack or use against a canonical entity ID.
 // HotbarSlot is the action-time item context, not a persistent selection update.
+// Both Java and Bedrock post this intent so animal state has one simulation
+// writer. TargetID zero with Attack false requests a dismount.
 type EntityInteractIntent struct {
 	PlayerUUID [16]byte
 	TargetID   int32
 	Attack     bool
 	HotbarSlot int32
+}
+
+// VehicleMoveIntent carries the controlling passenger's authoritative vehicle
+// update. Java's move_vehicle and Bedrock's mounted movement converge on the
+// same canonical vehicle state.
+type VehicleMoveIntent struct {
+	PlayerUUID [16]byte
+	Position   spatial.Vec3
+	Yaw        float32
+	OnGround   bool
 }
 
 // RespawnIntent requests revival after the Bedrock death-screen button.
@@ -227,6 +239,7 @@ func (TeleportIntent) isGameplay()       {}
 func (BlockInteractIntent) isGameplay()  {}
 func (ConsumeFoodIntent) isGameplay()    {}
 func (EntityInteractIntent) isGameplay() {}
+func (VehicleMoveIntent) isGameplay()    {}
 func (RespawnIntent) isGameplay()        {}
 func (WakeIntent) isGameplay()           {}
 func (HotbarIntent) isGameplay()         {}
@@ -318,6 +331,7 @@ func (b *Bus) PostTeleport(i TeleportIntent) bool {
 func (b *Bus) PostBlockInteract(i BlockInteractIntent) bool   { return b.tryGameplay(i) }
 func (b *Bus) PostConsumeFood(i ConsumeFoodIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostEntityInteract(i EntityInteractIntent) bool { return b.tryGameplay(i) }
+func (b *Bus) PostVehicleMove(i VehicleMoveIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostRespawn(i RespawnIntent) bool               { return b.tryGameplay(i) }
 func (b *Bus) PostWake(i WakeIntent) bool                     { return b.tryGameplay(i) }
 func (b *Bus) PostHotbar(i HotbarIntent) bool                 { return b.tryGameplay(i) }

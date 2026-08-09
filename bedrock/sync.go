@@ -43,19 +43,32 @@ type bedrockEntityView struct {
 	health             float32
 	dead               bool
 	riderID            int32
+	secondRiderID      int32
 	villagerVariant    corentity.VillagerVariant
 	villagerProfession corentity.VillagerProfession
 	villagerLevel      int32
 	baby               bool
 	sleeping           bool
+	inLove             bool
+	tamed              bool
+	sitting            bool
+	saddled            bool
+	trusting           bool
+	ownerUUID          [16]byte
+	hasOwner           bool
+	ownerEntityID      int32
 }
 
 func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
 	return bedrockEntityView{
 		position: entity.Position, yaw: entity.Yaw, health: entity.Health, dead: entity.Dead,
-		riderID: entity.RiderEntityID, villagerVariant: entity.VillagerVariant,
+		riderID: entity.RiderEntityID, secondRiderID: entity.SecondRiderEntityID,
+		villagerVariant:    entity.VillagerVariant,
 		villagerProfession: entity.VillagerProfession, villagerLevel: entity.VillagerLevel,
-		baby: entity.IsBaby, sleeping: entity.Sleeping,
+		baby: entity.IsBaby, sleeping: entity.Sleeping, inLove: entity.LoveTicks > 0,
+		tamed: entity.Tamed, sitting: entity.Sitting, saddled: entity.Saddled,
+		trusting: entity.Trusting, ownerUUID: entity.TameOwnerUUID,
+		hasOwner: entity.HasTameOwner, ownerEntityID: entity.TameOwnerEntityID,
 	}
 }
 
@@ -450,27 +463,41 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 				Rotation:        mgl32.Vec3{entity.Pitch, entity.Yaw, entity.Yaw},
 			})
 		}
-		if previous.riderID != entity.RiderEntityID {
-			linkType := byte(protocol.EntityLinkRider)
-			riderID := entity.RiderEntityID
-			if riderID == 0 {
-				linkType = protocol.EntityLinkRemove
-				riderID = previous.riderID
+		if previous.riderID != entity.RiderEntityID || previous.secondRiderID != entity.SecondRiderEntityID {
+			previousPassengers := []int32{previous.riderID, previous.secondRiderID}
+			currentPassengers := entity.PassengerIDs()
+			for _, riderID := range previousPassengers {
+				if riderID == 0 || containsEntityID(currentPassengers, riderID) {
+					continue
+				}
+				_ = viewer.conn.WritePacket(&packet.SetActorLink{EntityLink: protocol.EntityLink{
+					RiddenEntityUniqueID: int64(bedrockRemoteRuntimeID(entity.EntityID)),
+					RiderEntityUniqueID:  int64(canonicalRuntimeIDForViewer(viewer, riderID)),
+					Type:                 protocol.EntityLinkRemove, Immediate: true, RiderInitiated: true,
+				}})
 			}
-			_ = viewer.conn.WritePacket(&packet.SetActorLink{EntityLink: protocol.EntityLink{
-				RiddenEntityUniqueID: int64(bedrockRemoteRuntimeID(entity.EntityID)),
-				RiderEntityUniqueID:  int64(canonicalRuntimeIDForViewer(viewer, riderID)),
-				Type:                 linkType,
-				Immediate:            linkType == protocol.EntityLinkRemove,
-				RiderInitiated:       true,
-			}})
+			for _, riderID := range currentPassengers {
+				if riderID == previous.riderID || riderID == previous.secondRiderID {
+					continue
+				}
+				_ = viewer.conn.WritePacket(&packet.SetActorLink{EntityLink: protocol.EntityLink{
+					RiddenEntityUniqueID: int64(bedrockRemoteRuntimeID(entity.EntityID)),
+					RiderEntityUniqueID:  int64(canonicalRuntimeIDForViewer(viewer, riderID)),
+					Type:                 protocol.EntityLinkRider, RiderInitiated: true,
+				}})
+			}
 		}
-		if previous.sleeping != entity.Sleeping || entity.Type == corentity.TypeVillager &&
-			(previous.villagerVariant != entity.VillagerVariant || previous.villagerProfession != entity.VillagerProfession ||
-				previous.villagerLevel != entity.VillagerLevel || previous.baby != entity.IsBaby) {
+		if previous.sleeping != entity.Sleeping || previous.baby != entity.IsBaby ||
+			previous.inLove != (entity.LoveTicks > 0) || previous.tamed != entity.Tamed ||
+			previous.sitting != entity.Sitting || previous.saddled != entity.Saddled ||
+			previous.trusting != entity.Trusting || previous.ownerEntityID != entity.TameOwnerEntityID ||
+			previous.ownerUUID != entity.TameOwnerUUID || previous.hasOwner != entity.HasTameOwner ||
+			entity.Type == corentity.TypeVillager &&
+				(previous.villagerVariant != entity.VillagerVariant || previous.villagerProfession != entity.VillagerProfession ||
+					previous.villagerLevel != entity.VillagerLevel) {
 			_ = viewer.conn.WritePacket(&packet.SetActorData{
 				EntityRuntimeID: bedrockRemoteRuntimeID(entity.EntityID),
-				EntityMetadata:  l.bedrockEntityMetadata(entity),
+				EntityMetadata:  l.bedrockEntityMetadata(viewer, entity),
 				Tick:            tick,
 			})
 		}
@@ -487,14 +514,23 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 }
 
 func canonicalRuntimeIDForViewer(viewer *bedrockSession, entityID int32) uint64 {
-	if entityID == viewer.entityID {
+	if viewer != nil && entityID == viewer.entityID {
 		return bedrockSelfRuntimeID
 	}
 	return bedrockRemoteRuntimeID(entityID)
 }
 
+func containsEntityID(ids []int32, wanted int32) bool {
+	for _, id := range ids {
+		if id == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Entity) packet.Packet {
-	metadata := l.bedrockEntityMetadata(entity)
+	metadata := l.bedrockEntityMetadata(viewer, entity)
 
 	if entity.Type == corentity.TypeItem {
 		item := l.itemInstance(player.ItemStack{ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage}, 1)
@@ -515,14 +551,14 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 	if entityType == "" {
 		return nil
 	}
-	links := []protocol.EntityLink(nil)
-	if entity.RiderEntityID != 0 {
-		links = []protocol.EntityLink{{
+	links := make([]protocol.EntityLink, 0, 2)
+	for _, riderID := range entity.PassengerIDs() {
+		links = append(links, protocol.EntityLink{
 			RiddenEntityUniqueID: int64(bedrockRemoteRuntimeID(entity.EntityID)),
-			RiderEntityUniqueID:  int64(canonicalRuntimeIDForViewer(viewer, entity.RiderEntityID)),
+			RiderEntityUniqueID:  int64(canonicalRuntimeIDForViewer(viewer, riderID)),
 			Type:                 protocol.EntityLinkRider,
 			RiderInitiated:       true,
-		}}
+		})
 	}
 	return &packet.AddActor{
 		EntityUniqueID:  int64(bedrockRemoteRuntimeID(entity.EntityID)),
@@ -539,7 +575,7 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 	}
 }
 
-func (l *Listener) bedrockEntityMetadata(entity *corentity.Entity) protocol.EntityMetadata {
+func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corentity.Entity) protocol.EntityMetadata {
 	metadata := protocol.NewEntityMetadata()
 	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
 	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
@@ -549,6 +585,27 @@ func (l *Listener) bedrockEntityMetadata(entity *corentity.Entity) protocol.Enti
 	if entity.Sleeping {
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLayingDown)
 		metadata[protocol.EntityDataKeyBedPosition] = protocol.BlockPos{entity.VillageBed.X, entity.VillageBed.Y, entity.VillageBed.Z}
+	}
+	if entity.IsBaby {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagBaby)
+	}
+	if entity.LoveTicks > 0 {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagInLove)
+	}
+	if entity.Saddled {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSaddled)
+	}
+	if entity.Sitting {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSitting)
+	}
+	if entity.Tamed {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagTamed)
+	}
+	if entity.Trusting {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagTrusting)
+	}
+	if entity.HasTameOwner && entity.TameOwnerEntityID != 0 {
+		metadata[protocol.EntityDataKeyOwner] = int64(canonicalRuntimeIDForViewer(viewer, entity.TameOwnerEntityID))
 	}
 	if entity.Type == corentity.TypeVillager {
 		metadata[protocol.EntityDataKeyVariant] = bedrockVillagerProfessionID(entity.VillagerProfession)
@@ -562,7 +619,6 @@ func (l *Listener) bedrockEntityMetadata(entity *corentity.Entity) protocol.Enti
 		metadata[protocol.EntityDataKeyTradeExperience] = int32(0)
 		metadata[protocol.EntityDataKeyScale] = float32(1)
 		if entity.IsBaby {
-			metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagBaby)
 			metadata[protocol.EntityDataKeyScale] = float32(0.5)
 		}
 	}
@@ -800,6 +856,26 @@ func (l *Listener) BroadcastVillagerUnhappy(entity *corentity.Entity) {
 	l.sessionsMu.RUnlock()
 	for _, session := range sessions {
 		_ = session.conn.WritePacket(event)
+	}
+}
+
+// BroadcastActorEvent mirrors canonical animal feedback (feeding, hearts and
+// taming result) to every Bedrock viewer.
+func (l *Listener) BroadcastActorEvent(entityID int32, eventType byte) {
+	if l == nil || entityID == 0 {
+		return
+	}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(&packet.ActorEvent{
+			EntityRuntimeID: bedrockRemoteRuntimeID(entityID),
+			EventType:       eventType,
+		})
 	}
 }
 

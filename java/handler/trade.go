@@ -17,6 +17,7 @@ import (
 	"time"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/intent"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
@@ -101,7 +102,7 @@ var defaultVillagerTrades = []tradeOffer{
 //
 // If the targeted entity is a villager and the interaction is INTERACT with the
 // main hand, the trading UI is opened.
-func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager) error {
+func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 
 	entityID, err := protocol.ReadVarInt(r)
@@ -193,6 +194,14 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 
 	entity, ok := w.Entities.Get(entityID)
 	if !ok {
+		return nil
+	}
+	if (corentity.IsAgeableAnimal(entity.Type) || corentity.IsTameableAnimal(entity.Type) || corentity.IsAnimalVehicle(entity.Type)) && len(buses) > 0 && buses[0] != nil {
+		buses[0].PostEntityInteract(intent.EntityInteractIntent{
+			PlayerUUID: p.UUID,
+			TargetID:   entityID,
+			HotbarSlot: int32(p.HeldSlot),
+		})
 		return nil
 	}
 

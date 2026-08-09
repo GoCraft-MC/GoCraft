@@ -4,12 +4,40 @@ import (
 	"testing"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/intent"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 )
+
+func TestJavaAnimalInteractionPostsCanonicalIntent(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	cow := corentity.New(44, [16]byte{}, corentity.TypeCow, 1, 64, 0)
+	world.Entities.Add(cow)
+	p := player.New([16]byte{9}, "java-breeder", player.ClientEditionJava)
+	p.Position.X, p.Position.Y = 0, 64
+	p.HeldSlot = 2
+	bus := intent.NewBus(1, 4)
+	packet := protocol.NewBuilder(packetIDInteract).
+		VarInt(cow.EntityID).VarInt(0).VarInt(0).Bool(false).Build()
+	if err := handleInteractPacket(packet, p, world, nil, nil, bus); err != nil {
+		t.Fatal(err)
+	}
+	if cow.LoveTicks != 0 {
+		t.Fatal("Java adapter mutated canonical animal directly")
+	}
+	drained := bus.Drain()
+	if len(drained.Gameplay) != 1 {
+		t.Fatalf("gameplay intent count = %d, want 1", len(drained.Gameplay))
+	}
+	interaction, ok := drained.Gameplay[0].(intent.EntityInteractIntent)
+	if !ok || interaction.PlayerUUID != p.UUID || interaction.TargetID != cow.EntityID || interaction.HotbarSlot != 2 {
+		t.Fatalf("interaction = %#v", drained.Gameplay[0])
+	}
+}
 
 func TestInteractAttackQueuesDamageForTickThread(t *testing.T) {
 	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)

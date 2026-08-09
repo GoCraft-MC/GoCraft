@@ -698,7 +698,9 @@ func (s *Server) tickIntents() {
 		case intent.ConsumeFoodIntent:
 			s.applyBedrockConsumeFood(i)
 		case intent.EntityInteractIntent:
-			s.applyBedrockEntityInteract(i)
+			s.applyEntityInteract(i)
+		case intent.VehicleMoveIntent:
+			s.applyVehicleMove(i)
 		case intent.RespawnIntent:
 			s.applyBedrockRespawn(i)
 		case intent.WakeIntent:
@@ -758,6 +760,9 @@ func (s *Server) applyBedrockPlayerState(i intent.PlayerStateIntent) {
 		p.Flying = allowed && i.Enabled
 	case intent.PlayerStateSneaking:
 		p.Sneaking = i.Enabled
+		if i.Enabled && p.VehicleEntityID != 0 {
+			s.dismountPlayer(p)
+		}
 	}
 }
 
@@ -825,6 +830,9 @@ func (s *Server) safeSpawnY(x, z int) int {
 
 // applyDisconnect removes a player from the game core and logs the event.
 func (s *Server) applyDisconnect(i intent.DisconnectIntent) {
+	if p := s.game.GetPlayer(i.PlayerUUID); p != nil && p.VehicleEntityID != 0 {
+		s.dismountPlayer(p)
+	}
 	s.game.RemovePlayer(i.PlayerUUID)
 	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 	slog.Info("player disconnected via intent",
@@ -848,10 +856,11 @@ func (s *Server) applyMove(m intent.MoveIntent) {
 	p.Rotation = m.Rotation
 	p.OnGround = m.OnGround
 	if p.VehicleEntityID != 0 {
-		if vehicle, ok := s.world.Entities.Get(p.VehicleEntityID); ok && corentity.IsBoat(vehicle.Type) && vehicle.RiderEntityID == p.EntityID {
+		if vehicle, ok := s.world.Entities.Get(p.VehicleEntityID); ok && corentity.IsRideableVehicle(vehicle.Type) && vehicle.RiderEntityID == p.EntityID {
 			vehicle.Position.X = m.Position.X
 			vehicle.Position.Z = m.Position.Z
 			vehicle.Yaw = m.Rotation.Yaw
+			handler.BroadcastEntityPosition(vehicle, s.sessions)
 		}
 	}
 	if p.Edition == player.ClientEditionBedrock {
@@ -1174,7 +1183,7 @@ func bedrockSpillingContainer(blockID string) bool {
 		handler.IsFurnaceContainer(blockID)
 }
 
-func (s *Server) applyBedrockEntityInteract(i intent.EntityInteractIntent) {
+func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 	attacker := s.game.GetPlayer(i.PlayerUUID)
 	if attacker == nil {
 		return
@@ -1186,12 +1195,7 @@ func (s *Server) applyBedrockEntityInteract(i intent.EntityInteractIntent) {
 	}
 	if !i.Attack {
 		if i.TargetID == 0 && attacker.VehicleEntityID != 0 {
-			vehicleID := attacker.VehicleEntityID
-			if vehicle, ok := s.world.Entities.Get(vehicleID); ok && vehicle.RiderEntityID == attacker.EntityID {
-				vehicle.RiderEntityID = 0
-			}
-			attacker.VehicleEntityID = 0
-			handler.BroadcastSetPassengers(vehicleID, nil, s.sessions)
+			s.dismountPlayer(attacker)
 			return
 		}
 		if entity, ok := s.world.Entities.Get(i.TargetID); ok && attacker.Position.Distance(entity.Position) <= 4 {
@@ -1202,11 +1206,14 @@ func (s *Server) applyBedrockEntityInteract(i intent.EntityInteractIntent) {
 				}
 				return
 			}
-			if corentity.IsBoat(entity.Type) && entity.RiderEntityID == 0 {
-				entity.RiderEntityID = attacker.EntityID
-				attacker.VehicleEntityID = entity.EntityID
-				attacker.Position = entity.Position
-				handler.BroadcastSetPassengers(entity.EntityID, []int32{attacker.EntityID}, s.sessions)
+			if corentity.IsAgeableAnimal(entity.Type) || corentity.IsTameableAnimal(entity.Type) || corentity.IsAnimalVehicle(entity.Type) {
+				if s.interactAnimal(attacker, entity) {
+					s.syncPlayerInventory(attacker)
+				}
+				return
+			}
+			if corentity.IsBoat(entity.Type) {
+				s.mountPlayer(attacker, entity)
 			}
 		}
 		return
@@ -1274,6 +1281,12 @@ func (s *Server) applyBedrockEntityInteract(i intent.EntityInteractIntent) {
 	}
 }
 
+// Kept for existing tests and callers while all editions now share the same
+// canonical implementation.
+func (s *Server) applyBedrockEntityInteract(i intent.EntityInteractIntent) {
+	s.applyEntityInteract(i)
+}
+
 func (s *Server) applyBedrockRespawn(i intent.RespawnIntent) {
 	p := s.game.GetPlayer(i.PlayerUUID)
 	if p == nil || p.Edition != player.ClientEditionBedrock {
@@ -1283,12 +1296,8 @@ func (s *Server) applyBedrockRespawn(i intent.RespawnIntent) {
 	if !dead {
 		return
 	}
-	if vehicleID := p.VehicleEntityID; vehicleID != 0 {
-		if vehicle, ok := s.world.Entities.Get(vehicleID); ok && vehicle.RiderEntityID == p.EntityID {
-			vehicle.RiderEntityID = 0
-		}
-		p.VehicleEntityID = 0
-		handler.BroadcastSetPassengers(vehicleID, nil, s.sessions)
+	if p.VehicleEntityID != 0 {
+		s.dismountPlayer(p)
 	}
 	p.Revive()
 	if bedSpawn, ok := handler.ResolveBedRespawn(p, s.world); ok {
@@ -1730,6 +1739,7 @@ func (s *Server) tickEntities() {
 	simulationPlayers := s.naturalSpawnPlayers()
 	s.despawnDistantNaturalMobs(simulationPlayers, &deadIDs)
 	allEntities := s.world.Entities.Snapshot()
+	s.tickAnimalLifecycle(allEntities)
 
 	// ── Parallel passive mob AI ───────────────────────────────────────────────
 	// Passive per-entity computation is dispatched through a bounded worker
@@ -1747,6 +1757,7 @@ func (s *Server) tickEntities() {
 		// ── Dead entity cleanup ───────────────────────────────────────────────
 		if e.Dead {
 			if e.DeathTicks == 0 {
+				s.dismountEntityPassengers(e)
 				deathIDs = append(deathIDs, e.EntityID)
 				spawned = append(spawned, s.spawnMobDrops(e)...)
 				debuglog.Info(debuglog.EntityEvents, "entity died", "type", e.Type, "id", e.EntityID)
@@ -2390,6 +2401,24 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 		ai.sleepingWas = e.Sleeping
 		return wasAsleep != e.Sleeping
 	}
+	if e.Sitting || len(e.PassengerIDs()) > 0 {
+		clearMobNavigation(e, ai)
+		ai.sleepingWas = e.Sleeping
+		return wasAsleep != e.Sleeping
+	}
+	if e.BreedingMateEntityID != 0 && e.LoveTicks > 0 {
+		if mate, ok := s.world.Entities.Get(e.BreedingMateEntityID); ok && !mate.Dead && mate.LoveTicks > 0 {
+			dx, dz := mate.Position.X-e.Position.X, mate.Position.Z-e.Position.Z
+			e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+			if dx*dx+dz*dz > 2.5*2.5 {
+				s.navigateMob(e, ai, mate.Position, pumpkinMovementSpeed(e.Type, 1.0))
+			} else {
+				clearMobNavigation(e, ai)
+			}
+			ai.sleepingWas = e.Sleeping
+			return wasAsleep != e.Sleeping
+		}
+	}
 	if isAquaticMob(e.Type) {
 		s.tickAquaticMobAI(e, ai)
 		ai.sleepingWas = e.Sleeping
@@ -2926,9 +2955,14 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 
 		// ── Play state ───────────────────────────────────────────────────────
 		p := s.registerPlayer(result)
-		defer s.game.RemovePlayer(p.UUID)
+		defer func() {
+			if p.VehicleEntityID != 0 {
+				s.dismountPlayer(p)
+			}
+			s.game.RemovePlayer(p.UUID)
+		}()
 
-		if err := handler.HandlePlay(conn, p, s.world, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID); err != nil {
+		if err := handler.HandlePlay(conn, p, s.world, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus); err != nil {
 			slog.Debug("play error", "remote", remote, "err", err)
 		}
 

@@ -213,11 +213,11 @@ type Entity struct {
 	// FuseTicks counts down from 80 to 0; at 0 the entity explodes.
 	FuseTicks int32
 
-	// Boat / vehicle fields.
-	// RiderEntityID is the entity ID of the passenger currently riding this
-	// entity, or 0 if unoccupied. Only one rider is tracked (vanilla boats
-	// allow two but we implement one for simplicity).
-	RiderEntityID int32
+	// Vehicle fields. RiderEntityID is the controlling/front passenger and
+	// SecondRiderEntityID is the rear passenger used by boats and camels.
+	// Passenger mutations are owned by the simulation tick.
+	RiderEntityID       int32
+	SecondRiderEntityID int32
 
 	// Projectile fields.
 	OwnerEntityID    int32
@@ -229,11 +229,28 @@ type Entity struct {
 	ItemCount  int
 	ItemDamage int
 
-	// IsBaby marks an ageable entity (villager) as a child.
-	// BabyAgeTicks counts upward from 0; the tick goroutine grows the villager
-	// up once BabyAgeTicks reaches BabyGrowUpTicks.
-	IsBaby       bool
-	BabyAgeTicks int32
+	// Age and animal interaction state. BabyAgeTicks counts upward from zero
+	// until BabyGrowUpTicks. Love/cooldown values count down once per tick.
+	IsBaby                bool
+	BabyAgeTicks          int32
+	LoveTicks             int32
+	BreedingCooldownTicks int32
+	BreedingMateEntityID  int32
+	BreedingProgressTicks int32
+	LoveCauseUUID         [16]byte
+	HasLoveCause          bool
+
+	// Tameable/rideable animal state. Ownership is UUID-authoritative so it
+	// survives reconnects; TameOwnerEntityID is a runtime synchronization hint.
+	Tamed             bool
+	TameOwnerUUID     [16]byte
+	HasTameOwner      bool
+	TameOwnerEntityID int32
+	Sitting           bool
+	Trusting          bool
+	Saddled           bool
+	Temper            int32
+	PoisonTicks       int32
 	// Spatial state — written only by the entity tick goroutine.
 	Position   spatial.Vec3
 	VX, VY, VZ float64 // velocity in blocks/tick
@@ -273,7 +290,7 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 		roll := uint32(id)*1664525 + 1013904223
 		maxHP = 15 + float32(roll%16)
 	}
-	return &Entity{
+	e := &Entity{
 		EntityID:  id,
 		UUID:      uuid,
 		Type:      t,
@@ -281,6 +298,10 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 		Health:    maxHP,
 		MaxHealth: maxHP,
 	}
+	if t == TypeSkeletonHorse || t == TypeZombieHorse {
+		e.Tamed = true
+	}
+	return e
 }
 
 // defaultMaxHealth returns the base max health for all entity types.

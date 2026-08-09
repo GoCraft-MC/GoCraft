@@ -227,6 +227,17 @@ func sendSetContainerContent(conn *network.ClientConn, p *player.Player, stateID
 	return conn.WritePacket(b.Build())
 }
 
+// SendPlayerInventory refreshes the Java client after a simulation-thread
+// interaction consumes an item. Bedrock inventory is diffed by its normal Sync.
+func SendPlayerInventory(p *player.Player, mgr *session.Manager) {
+	if p == nil || mgr == nil {
+		return
+	}
+	if current, ok := mgr.Get(p.UUID); ok && current != nil && current.Conn != nil {
+		_ = sendSetContainerContent(current.Conn, p, p.ContainerStateID)
+	}
+}
+
 // sendSetHeldItem sends Set Held Item (S→C) to confirm the active hotbar slot.
 //
 // Wire layout (1.21.4, estimate):

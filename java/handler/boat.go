@@ -17,7 +17,9 @@ import (
 	"math"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/intent"
 	coreplayer "GoCraft/core/player"
+	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
@@ -59,7 +61,7 @@ func BroadcastSetPassengers(vehicleEntityID int32, passengerIDs []int32, mgr *se
 //	Double  x, y, z
 //	Float   yaw, pitch
 //	Bool    on_ground
-func HandleMoveVehiclePacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager) error {
+func HandleMoveVehiclePacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 
 	x, err := protocol.ReadDouble(r)
@@ -85,32 +87,41 @@ func HandleMoveVehiclePacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 	if err != nil {
 		return fmt.Errorf("move_vehicle: on_ground: %w", err)
 	}
-
-	boatID := p.VehicleEntityID
-	if boatID == 0 {
+	if len(buses) > 0 && buses[0] != nil {
+		buses[0].PostVehicleMove(intent.VehicleMoveIntent{
+			PlayerUUID: p.UUID,
+			Position:   spatial.Vec3{X: x, Y: y, Z: z},
+			Yaw:        yaw,
+			OnGround:   onGround,
+		})
 		return nil
 	}
-	boat, ok := w.Entities.Get(boatID)
-	if !ok {
+
+	vehicleID := p.VehicleEntityID
+	if vehicleID == 0 {
+		return nil
+	}
+	vehicle, ok := w.Entities.Get(vehicleID)
+	if !ok || !corentity.IsRideableVehicle(vehicle.Type) || vehicle.RiderEntityID != p.EntityID {
 		p.VehicleEntityID = 0
 		return nil
 	}
 
 	// Reject suspiciously large jumps (> 3 blocks) as lag-spike protection.
-	dx := x - boat.Position.X
-	dy := y - boat.Position.Y
-	dz := z - boat.Position.Z
+	dx := x - vehicle.Position.X
+	dy := y - vehicle.Position.Y
+	dz := z - vehicle.Position.Z
 	if math.Abs(dx) > 3 || math.Abs(dy) > 3 || math.Abs(dz) > 3 {
 		_ = sendSyncPosition(conn, p, 0)
 		return nil
 	}
 
 	// Update boat position.
-	boat.Position.X = x
-	boat.Position.Y = y
-	boat.Position.Z = z
-	boat.Yaw = yaw
-	boat.OnGround = onGround
+	vehicle.Position.X = x
+	vehicle.Position.Y = y
+	vehicle.Position.Z = z
+	vehicle.Yaw = yaw
+	vehicle.OnGround = onGround
 
 	// Keep player's logical position in sync (chunk loading, /tp, etc.).
 	p.Position.X = x
@@ -118,7 +129,7 @@ func HandleMoveVehiclePacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 	p.Position.Z = z
 
 	// Broadcast to all other clients.
-	broadcastBoatPositionExcept(boat, p.EntityID, mgr)
+	broadcastBoatPositionExcept(vehicle, p.EntityID, mgr)
 	return nil
 }
 
@@ -128,13 +139,17 @@ func HandleMoveVehiclePacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 // Wire layout (1.21.4):
 //
 //	Unsigned Byte inputs (forward, backward, left, right, jump, shift, sprint)
-func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager) error {
+func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 	flags, err := protocol.ReadByte(r)
 	if err != nil {
 		return fmt.Errorf("player_input: flags: %w", err)
 	}
 	if flags&0x20 != 0 && p.VehicleEntityID != 0 {
+		if len(buses) > 0 && buses[0] != nil {
+			buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: 0, HotbarSlot: int32(p.HeldSlot)})
+			return nil
+		}
 		DismountPlayer(p, w, conn, mgr)
 	}
 	return nil
@@ -148,7 +163,7 @@ func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 //	VarInt  entity_id
 //	VarInt  action  (8 = leave vehicle)
 //	VarInt  jump_boost
-func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager) error {
+func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 	if _, err := protocol.ReadVarInt(r); err != nil {
 		return fmt.Errorf("player_command: entity_id: %w", err)
@@ -170,6 +185,10 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 		p.Sprinting = false
 	case 8: // LEAVE_VEHICLE
 		if p.VehicleEntityID != 0 {
+			if len(buses) > 0 && buses[0] != nil {
+				buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: 0, HotbarSlot: int32(p.HeldSlot)})
+				break
+			}
 			DismountPlayer(p, w, conn, mgr)
 		}
 	}
@@ -185,12 +204,11 @@ func MountPlayer(p *coreplayer.Player, boatEntityID int32, w *coreworld.World, m
 	if !ok || !corentity.IsBoat(boat.Type) {
 		return false
 	}
-	if boat.RiderEntityID != 0 {
-		return false // occupied
+	if !boat.AddPassenger(p.EntityID) {
+		return false
 	}
-	boat.RiderEntityID = p.EntityID
 	p.VehicleEntityID = boatEntityID
-	BroadcastSetPassengers(boatEntityID, []int32{p.EntityID}, mgr)
+	BroadcastSetPassengers(boatEntityID, boat.PassengerIDs(), mgr)
 	return true
 }
 
@@ -204,13 +222,17 @@ func DismountPlayer(p *coreplayer.Player, w *coreworld.World, conn *network.Clie
 	p.VehicleEntityID = 0
 
 	if boat, ok := w.Entities.Get(boatID); ok {
-		boat.RiderEntityID = 0
+		boat.RemovePassenger(p.EntityID)
 		p.Position.X = boat.Position.X + 1.5
 		p.Position.Y = boat.Position.Y
 		p.Position.Z = boat.Position.Z
 	}
 
-	BroadcastSetPassengers(boatID, nil, mgr)
+	if boat, ok := w.Entities.Get(boatID); ok {
+		BroadcastSetPassengers(boatID, boat.PassengerIDs(), mgr)
+	} else {
+		BroadcastSetPassengers(boatID, nil, mgr)
+	}
 	_ = sendSyncPosition(conn, p, 0)
 }
 
