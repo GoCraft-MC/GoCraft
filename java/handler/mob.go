@@ -129,10 +129,13 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			flags |= 0x04
 		}
 		b = b.Byte(17).VarInt(0).Byte(flags)
-		b = b.Byte(18).VarInt(13).Bool(e.HasTameOwner)
-		if e.HasTameOwner {
-			b = b.UUID(protocol.UUID(e.TameOwnerUUID))
-		}
+		// AbstractHorse does NOT expose an owner-UUID tracked datum in protocol 769.
+		// Ownership is server-side state only; the client learns "is tamed" from the
+		// 0x02 flag above. Subtype-specific index-18 fields (Horse variant VarInt,
+		// Donkey/Mule has_chest Boolean, Camel is_dashing Boolean) all default to
+		// 0/false and need not be sent. SkeletonHorse and ZombieHorse have no index-18
+		// field at all. Sending serializer-type 13 (Optional UUID) here was producing
+		// a "Network Protocol Error" disconnect on every Java 1.21.4 client.
 	}
 	if e.Type == corentity.TypePig {
 		b = b.Byte(17).VarInt(8).Bool(e.Saddled)
