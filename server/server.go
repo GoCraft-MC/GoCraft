@@ -45,6 +45,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/internal/debuglog"
 	"GoCraft/java/auth"
 	"GoCraft/java/handler"
 	"GoCraft/java/network"
@@ -183,7 +184,7 @@ func New(cfg *config.Config) (*Server, error) {
 			} else if metadata.Time > 0 {
 				initialWorldAge = metadata.Time
 			}
-			slog.Info("server: loaded Java level.dat",
+			debuglog.Info(debuglog.WorldLoading, "server: loaded Java level.dat",
 				"world", metadata.LevelName,
 				"dataVersion", metadata.DataVersion,
 				"version", metadata.VersionName,
@@ -208,11 +209,11 @@ func New(cfg *config.Config) (*Server, error) {
 			return nil, fmt.Errorf("server: opening Anvil storage %s: %w", cfg.WorldDir, err)
 		}
 		storage = st
-		slog.Info("server: opened Anvil world", "worldDir", cfg.WorldDir, "storage", "disk")
+		debuglog.Info(debuglog.WorldLoading, "server: opened Anvil world", "worldDir", cfg.WorldDir, "storage", "disk")
 	} else {
 		// In-memory world: resolve seed without persisting.
 		cfg.WorldSeed = resolveWorldSeed(cfg.WorldSeed, "")
-		slog.Info("server: using memory-only world storage", "storage", "memory")
+		debuglog.Info(debuglog.WorldLoading, "server: using memory-only world storage", "storage", "memory")
 	}
 
 	gameCore := game.New()
@@ -245,7 +246,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	bus := intent.NewBus(64, 512)
 
-	slog.Info("server: world seed resolved", "seed", cfg.WorldSeed)
+	debuglog.Info(debuglog.WorldLoading, "server: world seed resolved", "seed", cfg.WorldSeed)
 	worldInstance := coreworld.New(coreworld.NewOverworldGenerator(cfg.WorldSeed), storage, cfg.Villagers)
 	worldInstance.SetMaxCachedChunks(cfg.MaxCachedChunks)
 
@@ -426,7 +427,7 @@ func (s *Server) Run(ctx context.Context) error {
 	//      go tool pprof http://localhost:6060/debug/pprof/heap
 	go func() {
 		pprofAddr := "localhost:6060"
-		slog.Info("pprof profiling server listening", "addr", pprofAddr)
+		debuglog.Info(debuglog.Profiling, "pprof profiling server listening", "addr", pprofAddr)
 		if err := http.ListenAndServe(pprofAddr, nil); err != nil {
 			slog.Warn("pprof server stopped", "err", err)
 		}
@@ -1721,7 +1722,7 @@ func (s *Server) tickEntities() {
 			ai.attackCooldown = 0
 		}
 		hurtEntities = append(hurtEntities, entity)
-		slog.Info("entity damaged", "type", entity.Type, "id", entityID,
+		debuglog.Info(debuglog.EntityEvents, "entity damaged", "type", entity.Type, "id", entityID,
 			"damage", event.Amount, "health", entity.Health)
 	}
 	endDamage()
@@ -1748,7 +1749,7 @@ func (s *Server) tickEntities() {
 			if e.DeathTicks == 0 {
 				deathIDs = append(deathIDs, e.EntityID)
 				spawned = append(spawned, s.spawnMobDrops(e)...)
-				slog.Info("entity died", "type", e.Type, "id", e.EntityID)
+				debuglog.Info(debuglog.EntityEvents, "entity died", "type", e.Type, "id", e.EntityID)
 			}
 			e.DeathTicks++
 			if e.DeathTicks >= 20 {
@@ -2010,7 +2011,7 @@ func (s *Server) tickEntities() {
 
 	// Warn when the CPU work in a tick exceeds the tick budget.
 	// Network I/O is off-goroutine and does not count toward this budget.
-	if elapsed > 50*time.Millisecond {
+	if elapsed > 50*time.Millisecond && debuglog.Enabled(debuglog.EntityTickOverruns) {
 		tps, avgMs := s.timings.TPS()
 		slog.Warn("entity tick overrun",
 			"elapsed", elapsed.Round(time.Millisecond),
@@ -3721,7 +3722,7 @@ func (s *Server) tickVillagerAging() {
 			e.IsBaby = false
 			e.BabyAgeTicks = 0
 			handler.BroadcastVillagerMetadata(e, s.sessions)
-			slog.Info("baby villager grew up", "id", e.EntityID,
+			debuglog.Info(debuglog.MobSpawning, "baby villager grew up", "id", e.EntityID,
 				"x", e.Position.X, "z", e.Position.Z)
 		}
 	}
@@ -3802,7 +3803,7 @@ func (s *Server) tickVillagerBreeding() {
 		baby.OnGround = true
 		s.world.Entities.Add(baby)
 		handler.BroadcastSpawnMob(baby, s.sessions)
-		slog.Info("villager baby born", "id", id,
+		debuglog.Info(debuglog.MobSpawning, "villager baby born", "id", id,
 			"x", bx, "z", bz,
 			"centerX", parent.VillageCenter.X, "centerZ", parent.VillageCenter.Z,
 			"adults", len(info.adults), "babies", info.babies)

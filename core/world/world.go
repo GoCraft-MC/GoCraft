@@ -12,6 +12,7 @@ import (
 
 	"GoCraft/core/entity"
 	"GoCraft/core/spatial"
+	"GoCraft/internal/debuglog"
 )
 
 // World holds all chunks that have been loaded or generated, and delegates
@@ -290,7 +291,7 @@ func (w *World) Chunk(x, z int32) *Chunk {
 				w.spawnedMu.Lock()
 				w.spawnedEntities = append(w.spawnedEntities, guard)
 				w.spawnedMu.Unlock()
-				slog.Info("generated village population spawned", "centerX", vc.WorldX, "centerZ", vc.WorldZ, "villagers", len(residents), "ironGolems", 1)
+				debuglog.Info(debuglog.MobSpawning, "generated village population spawned", "centerX", vc.WorldX, "centerZ", vc.WorldZ, "villagers", len(residents), "ironGolems", 1)
 			}
 		}
 	}
@@ -1164,7 +1165,7 @@ func (w *World) Flush() error {
 	loaded := len(w.chunks)
 	w.mu.Unlock()
 	if len(dirty) > 0 {
-		slog.Info("world autosave complete", "chunks", len(dirty), "cachedChunks", loaded)
+		debuglog.Info(debuglog.Autosaves, "world autosave complete", "chunks", len(dirty), "cachedChunks", loaded)
 	}
 	return nil
 }

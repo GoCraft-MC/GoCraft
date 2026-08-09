@@ -49,6 +49,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/internal/debuglog"
 	"GoCraft/java/handler"
 )
 
@@ -154,7 +155,7 @@ func (l *Listener) addSession(s *bedrockSession) {
 	l.sessionsMu.Lock()
 	l.sessions[s.uuid] = s
 	l.sessionsMu.Unlock()
-	slog.Info("bedrock: session added", "displayName", s.displayName)
+	debuglog.Info(debuglog.BedrockLogin, "bedrock: session added", "displayName", s.displayName)
 }
 
 func (l *Listener) removeSession(uuid [16]byte) {
@@ -197,7 +198,7 @@ func NewListener(
 		shapedRecipes += len(data.ShapedRecipes)
 		shapelessRecipes += len(data.ShapelessRecipes)
 	}
-	slog.Info(
+	debuglog.Info(debuglog.BedrockCatalogues,
 		"bedrock: crafting catalogue ready",
 		"java_version", bedrockRecipeCompatibilityVersion,
 		"packets", len(l.craftingData),
@@ -393,7 +394,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 	}
 	defer func() {
 		l.removeSession(playerUUID)
-		slog.Info("bedrock: session removed", "displayName", identity.DisplayName)
+		debuglog.Info(debuglog.BedrockLogin, "bedrock: session removed", "displayName", identity.DisplayName)
 	}()
 
 	// ── Step 4: stream chunks concurrently with StartGame ─────────────────────
@@ -436,7 +437,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		// that packet hits the wire, so this has zero unnecessary delay.
 		select {
 		case <-spawnReady:
-			slog.Info("bedrock: spawn goroutine: PlayStatus(PlayerSpawn) confirmed, sending chunks",
+			debuglog.Info(debuglog.BedrockLogin, "bedrock: spawn goroutine: PlayStatus(PlayerSpawn) confirmed, sending chunks",
 				"displayName", identity.DisplayName)
 		case <-time.After(10 * time.Second):
 			chunkStreamErr <- fmt.Errorf("timed out waiting for PlayStatus(PlayerSpawn)")
@@ -468,7 +469,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 					DefaultMax: math.MaxFloat32,
 				}},
 			}
-			slog.Info("bedrock: spawn goroutine: UpdateAttributes health", "health", initialHealth)
+			debuglog.Info(debuglog.BedrockLogin, "bedrock: spawn goroutine: UpdateAttributes health", "health", initialHealth)
 			if err := conn.WritePacket(healthPk); err != nil {
 				chunkStreamErr <- err
 				return
@@ -526,14 +527,14 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		}
 
 		// NCPU — client ignores LevelChunks received before this.
-		slog.Info("bedrock: spawn goroutine: sending NCPU")
+		debuglog.Info(debuglog.BedrockLogin, "bedrock: spawn goroutine: sending NCPU")
 		if err := conn.WritePacket(initialChunkPublisher(result.Position, chunkRadius)); err != nil {
 			chunkStreamErr <- err
 			return
 		}
 
 		// AvailableActorIdentifiers (Dragonfly sends this right after NCPU).
-		slog.Info("bedrock: spawn goroutine: sending AvailableActorIdentifiers")
+		debuglog.Info(debuglog.BedrockLogin, "bedrock: spawn goroutine: sending AvailableActorIdentifiers")
 		if err := conn.WritePacket(&packet.AvailableActorIdentifiers{
 			SerialisedEntityIdentifiers: availableActorIdentifiersPayload,
 		}); err != nil {
@@ -542,12 +543,12 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		}
 
 		// 81 LevelChunks (biome stubs; block data arrives via SubChunkRequest).
-		slog.Info("bedrock: spawn goroutine: sending LevelChunks", "displayName", identity.DisplayName)
+		debuglog.Info(debuglog.BedrockChunks, "bedrock: spawn goroutine: sending LevelChunks", "displayName", identity.DisplayName)
 		if err := l.sendInitialChunks(conn, spawnCX, spawnCZ, chunkRadius); err != nil {
 			chunkStreamErr <- err
 			return
 		}
-		slog.Info("bedrock: spawn goroutine: LevelChunks done", "displayName", identity.DisplayName)
+		debuglog.Info(debuglog.BedrockChunks, "bedrock: spawn goroutine: LevelChunks done", "displayName", identity.DisplayName)
 
 		chunkStreamErr <- nil
 	}()
@@ -591,7 +592,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 			"displayName", identity.DisplayName, "err", err)
 		return
 	}
-	slog.Info("bedrock: StartGame complete, chunk stream done", "displayName", identity.DisplayName)
+	debuglog.Info(debuglog.BedrockLogin, "bedrock: StartGame complete, chunk stream done", "displayName", identity.DisplayName)
 
 	// The generic connection login sends an empty CreativeContent packet.
 	// Replace it with the actual catalogue before the player can open the menu.
@@ -640,7 +641,7 @@ func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius int32)
 			}
 			if first {
 				first = false
-				slog.Info("bedrock: LevelChunk sample (full)",
+				debuglog.Info(debuglog.BedrockChunks, "bedrock: LevelChunk sample (full)",
 					"chunkX", pk.Position[0],
 					"chunkZ", pk.Position[1],
 					"subChunkCount", pk.SubChunkCount,
@@ -707,7 +708,7 @@ func (l *Listener) updateChunkStream(conn *minecraft.Conn, position spatial.Vec3
 func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSess *bedrockSession, streamCX, streamCZ, streamRadius int32) {
 	playerUUID, displayName := bedrockSess.uuid, bedrockSess.displayName
 	readyForWorldSync := false
-	slog.Info("bedrock: playLoop entered", "displayName", displayName)
+	debuglog.Info(debuglog.BedrockLogin, "bedrock: playLoop entered", "displayName", displayName)
 
 	// Close the connection when the server context is cancelled.
 	go func() {
@@ -729,9 +730,9 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 
 		switch p := pk.(type) {
 		case *packet.SubChunkRequest:
-			slog.Info("bedrock: SubChunkRequest received", "display", displayName, "dim", p.Dimension, "pos", p.Position, "offsets", len(p.Offsets))
+			debuglog.Info(debuglog.BedrockChunks, "bedrock: SubChunkRequest received", "display", displayName, "dim", p.Dimension, "pos", p.Position, "offsets", len(p.Offsets))
 			l.handleSubChunkRequest(conn, p)
-			slog.Info("bedrock: SubChunkRequest handled", "display", displayName)
+			debuglog.Info(debuglog.BedrockChunks, "bedrock: SubChunkRequest handled", "display", displayName)
 			if !readyForWorldSync {
 				readyForWorldSync = true
 			}
@@ -917,11 +918,11 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 				screenType = "End"
 				if !readyForWorldSync {
 					readyForWorldSync = true
-					slog.Info("bedrock: readyForWorldSync set true via LoadingScreenEnd", "display", displayName)
+					debuglog.Info(debuglog.BedrockLogin, "bedrock: readyForWorldSync set true via LoadingScreenEnd", "display", displayName)
 				}
 			}
 			id, hasID := p.LoadingScreenID.Value()
-			slog.Info("bedrock: ServerBoundLoadingScreen",
+			debuglog.Info(debuglog.BedrockLogin, "bedrock: ServerBoundLoadingScreen",
 				"display", displayName,
 				"type", screenType,
 				"typeRaw", p.Type,
@@ -958,20 +959,20 @@ func (l *Listener) handleStackRequests(
 	responses := make([]protocol.ItemStackResponse, 0, len(requests))
 	craftingTouched := false
 
-	slog.Info(
+	debuglog.Info(debuglog.BedrockInventory,
 		"bedrock: received stack request packet",
 		"requests", len(requests),
 	)
 
 	for _, request := range requests {
-		slog.Info(
+		debuglog.Info(debuglog.BedrockInventory,
 			"bedrock: processing stack request",
 			"request_id", request.RequestID,
 			"actions", len(request.Actions),
 		)
 
 		for index, action := range request.Actions {
-			slog.Info(
+			debuglog.Info(debuglog.BedrockInventory,
 				"bedrock: stack request action",
 				"request_id", request.RequestID,
 				"index", index,
@@ -996,7 +997,7 @@ func (l *Listener) handleStackRequests(
 			continue
 		}
 
-		slog.Info(
+		debuglog.Info(debuglog.BedrockInventory,
 			"bedrock: stack request translated",
 			"request_id", request.RequestID,
 			"canonical_actions", len(actions),
@@ -1033,7 +1034,7 @@ func (l *Listener) handleStackRequests(
 		case result := <-done:
 			accepted = result.Accepted
 
-			slog.Info(
+			debuglog.Info(debuglog.BedrockInventory,
 				"bedrock: simulation inventory result",
 				"request_id", request.RequestID,
 				"accepted", accepted,
@@ -1121,7 +1122,7 @@ func (l *Listener) handleStackRequests(
 		response.Status = protocol.ItemStackResponseStatusOK
 		response.ContainerInfo = containerInfo
 
-		slog.Info(
+		debuglog.Info(debuglog.BedrockInventory,
 			"bedrock: inventory request accepted",
 			"request_id", request.RequestID,
 			"player", p.Username,
@@ -1138,7 +1139,7 @@ func (l *Listener) handleStackRequests(
 		return
 	}
 
-	slog.Info(
+	debuglog.Info(debuglog.BedrockInventory,
 		"bedrock: sending stack responses",
 		"responses", len(responses),
 	)

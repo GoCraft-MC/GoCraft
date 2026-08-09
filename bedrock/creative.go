@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"GoCraft/core/player"
+	"GoCraft/internal/debuglog"
 	javaworld "GoCraft/java/world"
 
 	dfworld "github.com/df-mc/dragonfly/server/world"
@@ -204,7 +205,7 @@ func (l *Listener) initCreativeContent() {
 		l.creativeNames[creativeNetworkID] = creativeKnownItem{name: canonicalName, meta: canonicalMeta}
 	}
 
-	slog.Info(
+	debuglog.Info(debuglog.BedrockCatalogues,
 		"bedrock: creative catalogue ready",
 		"groups", len(l.creativeGroups),
 		"items", len(l.creativeItems),

@@ -1,13 +1,14 @@
 package server
 
 import (
-	"log/slog"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"GoCraft/internal/debuglog"
 )
 
 const seedFileName = "seed.txt"
@@ -38,7 +39,7 @@ func resolveWorldSeed(configuredSeed int64, worldDir string) int64 {
 		if data, err := os.ReadFile(seedFile); err == nil {
 			s := strings.TrimSpace(string(data))
 			if parsed, err := strconv.ParseInt(s, 10, 64); err == nil && parsed != 0 {
-				slog.Info("server: loaded world seed from seed.txt", "seed", parsed)
+				debuglog.Info(debuglog.WorldLoading, "server: loaded world seed from seed.txt", "seed", parsed)
 				return parsed
 			}
 		}
@@ -46,13 +47,13 @@ func resolveWorldSeed(configuredSeed int64, worldDir string) int64 {
 
 	// Generate a new random seed.
 	seed := rand.New(rand.NewSource(time.Now().UnixNano())).Int63()
-	slog.Info("server: generated random world seed", "seed", seed)
+	debuglog.Info(debuglog.WorldLoading, "server: generated random world seed", "seed", seed)
 
 	// Persist it so the world stays consistent across restarts.
 	if seedFile != "" {
 		if err := os.MkdirAll(worldDir, 0o755); err == nil {
 			_ = os.WriteFile(seedFile, []byte(strconv.FormatInt(seed, 10)+"\n"), 0o644)
-			slog.Info("server: saved world seed to seed.txt", "path", seedFile)
+			debuglog.Info(debuglog.WorldLoading, "server: saved world seed to seed.txt", "path", seedFile)
 		}
 	}
 

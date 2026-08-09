@@ -2,12 +2,12 @@ package world
 
 import (
 	"encoding/binary"
-	"log/slog"
 	"math"
 	"strings"
 
 	"GoCraft/core/entity"
 	"GoCraft/core/spatial"
+	"GoCraft/internal/debuglog"
 )
 
 type discoveredVillageResident struct {
@@ -161,7 +161,7 @@ func (w *World) discoverLoadedVillagePopulation(chunk *Chunk) {
 			villager.IsBaby = true
 		}
 		w.addGeneratedVillageEntity(villager)
-		slog.Info("village resident discovered and spawned",
+		debuglog.Info(debuglog.MobSpawning, "village resident discovered and spawned",
 			"id", id, "x", resident.spawn.X, "y", resident.spawn.Y, "z", resident.spawn.Z,
 			"profession", resident.profession, "centerX", resident.center.X, "centerZ", resident.center.Z,
 			"baby", villager.IsBaby)
@@ -179,7 +179,7 @@ func (w *World) discoverLoadedVillagePopulation(chunk *Chunk) {
 		golem.VillageCenter = center
 		golem.OnGround = true
 		w.addGeneratedVillageEntity(golem)
-		slog.Info("village guard discovered and spawned", "id", id, "x", spawn.X, "y", spawn.Y, "z", spawn.Z)
+		debuglog.Info(debuglog.MobSpawning, "village guard discovered and spawned", "id", id, "x", spawn.X, "y", spawn.Y, "z", spawn.Z)
 	}
 }
 

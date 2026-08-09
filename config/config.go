@@ -79,6 +79,23 @@ type WhitelistConfig struct {
 	Players []string `yaml:"players"`
 }
 
+// DebugConfig controls verbose diagnostic log categories. All switches default
+// to false so routine console and latest.log output remain concise.
+type DebugConfig struct {
+	StartupRegistry      bool `yaml:"startup_registry"`
+	EnvironmentOverrides bool `yaml:"environment_overrides"`
+	WorldLoading         bool `yaml:"world_loading"`
+	MobSpawning          bool `yaml:"mob_spawning"`
+	Autosaves            bool `yaml:"autosaves"`
+	EntityEvents         bool `yaml:"entity_events"`
+	EntityTickOverruns   bool `yaml:"entity_tick_overruns"`
+	BedrockCatalogues    bool `yaml:"bedrock_catalogues"`
+	BedrockLogin         bool `yaml:"bedrock_login"`
+	BedrockChunks        bool `yaml:"bedrock_chunks"`
+	BedrockInventory     bool `yaml:"bedrock_inventory"`
+	Profiling            bool `yaml:"profiling"`
+}
+
 // Config holds all server configuration values.
 type Config struct {
 	// JavaEnabled controls whether the Java Edition TCP listener is started.
@@ -133,6 +150,7 @@ type Config struct {
 	// separately in ops.json, matching the vanilla server convention.
 	Operators []string
 	Whitelist WhitelistConfig `yaml:"whitelist"`
+	Debug     DebugConfig     `yaml:"debug"`
 
 	// Combat timing and knockback settings.
 	Combat CombatConfig `yaml:"combat"`
@@ -439,15 +457,16 @@ func (c *Config) ApplyEnvOverrides() error {
 		c.Bedrock.OnlineMode = b
 	}
 
-	// Log any active overrides so operators can see what the container injected.
-	logEnvOverrides(c)
+	if c.Debug.EnvironmentOverrides {
+		logEnvOverrides()
+	}
 
 	// Re-validate after overrides — env vars can produce invalid combinations.
 	return c.validate()
 }
 
 // logEnvOverrides logs which values were overridden by environment variables.
-func logEnvOverrides(c *Config) {
+func logEnvOverrides() {
 	vars := []struct{ key, val string }{
 		{"GOCRAFT_JAVA_HOST", os.Getenv("GOCRAFT_JAVA_HOST")},
 		{"GOCRAFT_JAVA_PORT", os.Getenv("GOCRAFT_JAVA_PORT")},

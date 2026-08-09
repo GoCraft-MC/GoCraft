@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"GoCraft/config"
+	"GoCraft/internal/debuglog"
 	"GoCraft/internal/protocoldata"
 	"GoCraft/internal/serverlog"
 	javaworld "GoCraft/java/world"
@@ -58,9 +59,6 @@ func run() int {
 	}
 
 	slog.Info("GoCraft starting", "version", version)
-	protocolVersion, packetCount := protocoldata.StartupSummary()
-	slog.Info("protocoldata: loaded protocol packet IDs", "version", protocolVersion, "packets", packetCount)
-	javaworld.LogStartupSummary()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -74,6 +72,24 @@ func run() int {
 	if err := cfg.ApplyEnvOverrides(); err != nil {
 		slog.Error("invalid environment override", "err", err)
 		return 1
+	}
+	debuglog.Configure(debuglog.Settings{
+		StartupRegistry:    cfg.Debug.StartupRegistry,
+		WorldLoading:       cfg.Debug.WorldLoading,
+		MobSpawning:        cfg.Debug.MobSpawning,
+		Autosaves:          cfg.Debug.Autosaves,
+		EntityEvents:       cfg.Debug.EntityEvents,
+		EntityTickOverruns: cfg.Debug.EntityTickOverruns,
+		BedrockCatalogues:  cfg.Debug.BedrockCatalogues,
+		BedrockLogin:       cfg.Debug.BedrockLogin,
+		BedrockChunks:      cfg.Debug.BedrockChunks,
+		BedrockInventory:   cfg.Debug.BedrockInventory,
+		Profiling:          cfg.Debug.Profiling,
+	})
+	if debuglog.Enabled(debuglog.StartupRegistry) {
+		protocolVersion, packetCount := protocoldata.StartupSummary()
+		slog.Info("protocoldata: loaded protocol packet IDs", "version", protocolVersion, "packets", packetCount)
+		javaworld.LogStartupSummary()
 	}
 
 	srv, err := server.New(cfg)

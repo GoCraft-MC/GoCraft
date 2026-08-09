@@ -13,6 +13,20 @@ operators: []
 whitelist:
     enabled: false
     players: []
+# Verbose diagnostics. Enable only the category you are investigating.
+debug:
+    startup_registry: false
+    environment_overrides: false
+    world_loading: false
+    mob_spawning: false
+    autosaves: false
+    entity_events: false
+    entity_tick_overruns: false
+    bedrock_catalogues: false
+    bedrock_login: false
+    bedrock_chunks: false
+    bedrock_inventory: false
+    profiling: false
 combat:
     attack_cooldown: false
     knockback_horizontal: 0.4
