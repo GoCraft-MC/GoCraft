@@ -46,3 +46,32 @@ func TestGodModeBlocksNormalDamageButKillOverridesIt(t *testing.T) {
 		t.Fatal(`/kill did not override god mode`)
 	}
 }
+
+func TestBedrockGameModeCommandRefreshesEditionState(t *testing.T) {
+	p := player.New([16]byte{2}, `bedrock-builder`, player.ClientEditionBedrock)
+	p.GameMode = player.GameModeCreative
+	var (
+		refreshed *player.Player
+		reply     string
+	)
+	err := cmdGameMode(CommandContext{
+		Player: p,
+		Args:   []string{"survival"},
+		SyncAbilities: func(changed *player.Player) {
+			refreshed = changed
+		},
+		Reply: func(message string) error {
+			reply = message
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.GameMode != player.GameModeSurvival || refreshed != p {
+		t.Fatalf("game mode = %v, refreshed = %p, want survival/%p", p.GameMode, refreshed, p)
+	}
+	if reply != "Game mode changed to survival" {
+		t.Fatalf("reply = %q", reply)
+	}
+}

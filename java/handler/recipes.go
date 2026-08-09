@@ -72,10 +72,46 @@ type RecipeIngredientDescription struct {
 	Alternatives []string
 }
 
+var pumpkinBedrockRecipeDisplays = []recipeDisplay{
+	pumpkinCopperArmorRecipe("minecraft:copper_helmet", []string{"XXX", "X X"}),
+	pumpkinCopperArmorRecipe("minecraft:copper_chestplate", []string{"X X", "XXX", "XXX"}),
+	pumpkinCopperArmorRecipe("minecraft:copper_leggings", []string{"XXX", "X X", "X X"}),
+	pumpkinCopperArmorRecipe("minecraft:copper_boots", []string{"X X", "X X"}),
+}
+
+func pumpkinCopperArmorRecipe(name string, pattern []string) recipeDisplay {
+	display := recipeDisplay{
+		name: name, kind: recipeDisplayShaped, station: "minecraft:crafting_table",
+		width: int32(utf8.RuneCountInString(pattern[0])), height: int32(len(pattern)), category: 2,
+		result: recipeSlotDisplay{kind: slotDisplayStack, stack: player.ItemStack{ItemID: name, Count: 1}},
+	}
+	for _, row := range pattern {
+		for _, symbol := range row {
+			if symbol == ' ' {
+				display.ingredients = append(display.ingredients, recipeSlotDisplay{kind: slotDisplayEmpty})
+			} else {
+				display.ingredients = append(display.ingredients, recipeSlotDisplay{kind: slotDisplayItem, item: "minecraft:copper_ingot"})
+			}
+		}
+	}
+	return display
+}
+
 // CraftingRecipeCatalog returns a detached copy of every fixed vanilla recipe.
 func CraftingRecipeCatalog() []RecipeDescription {
-	result := make([]RecipeDescription, 0, len(javaRecipeDisplays))
-	for _, source := range javaRecipeDisplays {
+	return describeRecipeDisplays(javaRecipeDisplays)
+}
+
+// PumpkinBedrockCraftingRecipeCatalog returns recipes present in Pumpkin's
+// current Bedrock catalogue but absent from GoCraft's Java 1.21.4 data. Keeping
+// these separate prevents unknown future item IDs from entering Java packets.
+func PumpkinBedrockCraftingRecipeCatalog() []RecipeDescription {
+	return describeRecipeDisplays(pumpkinBedrockRecipeDisplays)
+}
+
+func describeRecipeDisplays(displays []recipeDisplay) []RecipeDescription {
+	result := make([]RecipeDescription, 0, len(displays))
+	for _, source := range displays {
 		description := RecipeDescription{
 			Name: source.name, Station: source.station,
 			Width: source.width, Height: source.height, Result: source.result.stack,

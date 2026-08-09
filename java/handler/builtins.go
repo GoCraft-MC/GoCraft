@@ -457,16 +457,20 @@ func cmdGameMode(ctx CommandContext) error {
 	if err := sendPlayerAbilities(ctx.Conn, ctx.Player); err != nil {
 		return fmt.Errorf("sending abilities: %w", err)
 	}
+	if ctx.SyncAbilities != nil {
+		ctx.SyncAbilities(ctx.Player)
+	}
 
 	// Update the tab-list game mode for all connected players.
-	updatePkt := buildGameModeUpdate(ctx.Player)
-	for _, s := range ctx.Manager.SnapshotAll() {
-		_ = s.Conn.WritePacket(updatePkt)
+	if ctx.Manager != nil {
+		updatePkt := buildGameModeUpdate(ctx.Player)
+		for _, s := range ctx.Manager.SnapshotAll() {
+			_ = s.Conn.WritePacket(updatePkt)
+		}
 	}
 
 	modeName := [4]string{"survival", "creative", "adventure", "spectator"}[mode]
-	_ = sendSystemMessage(ctx.Conn, "Game mode changed to "+modeName)
-	return nil
+	return sendCommandMessage(ctx, "Game mode changed to "+modeName)
 }
 
 // buildGameModeUpdate builds a Player Info Update (action 0x04 = UPDATE_GAME_MODE)

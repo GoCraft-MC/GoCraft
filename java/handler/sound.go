@@ -68,7 +68,36 @@ func BroadcastSoundAt(mgr *session.Manager, name string, category int32, x, y, z
 	broadcastSoundAt(mgr, name, category, x, y, z, volume, pitch)
 }
 
+// BroadcastVillagerUnhappy mirrors Pumpkin's set_unhappy interaction: the
+// villager shows angry particles and emits its "no" sound when a baby,
+// unemployed villager, or nitwit is used.
+func BroadcastVillagerUnhappy(mgr *session.Manager, e *corentity.Entity) {
+	if mgr == nil || e == nil {
+		return
+	}
+	packets := villagerUnhappyPackets(e)
+	for _, s := range mgr.SnapshotAll() {
+		for _, pkt := range packets {
+			_ = s.Conn.WritePacket(pkt)
+		}
+	}
+}
+
+func villagerUnhappyPackets(e *corentity.Entity) []*protocol.Packet {
+	if e == nil {
+		return nil
+	}
+	packets := []*protocol.Packet{buildEntityEvent(e.EntityID, 13)} // angry villager particles
+	if sound := buildEntitySound("minecraft:entity.villager.no", soundCategoryNeutral, e.EntityID, 1, 1); sound != nil {
+		packets = append(packets, sound)
+	}
+	return packets
+}
+
 func broadcastSoundAt(mgr *session.Manager, name string, category int32, x, y, z float64, volume, pitch float32) {
+	if mgr == nil {
+		return
+	}
 	pkt := buildSoundAt(name, category, x, y, z, volume, pitch)
 	if pkt == nil {
 		return

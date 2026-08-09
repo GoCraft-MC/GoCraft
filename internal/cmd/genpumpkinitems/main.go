@@ -16,7 +16,7 @@ import (
 
 type itemDefinition struct {
 	registryKey string
-	runtimeID  int64
+	runtimeID   int64
 }
 
 type itemMapping struct {
@@ -26,7 +26,7 @@ type itemMapping struct {
 }
 
 var (
-	constantPattern = regexp.MustCompile(`(?s)pub const ([A-Z0-9_]+): Self = Self \{\s*id:\s*(-?[0-9]+),\s*registry_key:\s*"([^"]+)",`)
+	constantPattern = regexp.MustCompile(`(?s)pub const ([A-Z0-9_]+)\s*: Self = Self \{\s*id\s*:\s*(-?[0-9]+)\s*,\s*registry_key\s*:\s*"([^"]+)"\s*,`)
 	mappingPattern  = regexp.MustCompile(`(?s)pub const [A-Z0-9_]+: Self = Self \{\s*java_item:\s*&Item::([A-Z0-9_]+),\s*bedrock_item:\s*&BedrockItem::([A-Z0-9_]+),\s*bedrock_data:\s*([0-9]+),\s*bedrock_block_state:\s*([0-9]+),\s*\};`)
 )
 
@@ -55,8 +55,11 @@ func main() {
 	for _, match := range mappingPattern.FindAllStringSubmatch(text[mappingStart:], -1) {
 		javaItem, javaOK := javaItems[match[1]]
 		bedrockItem, bedrockOK := bedrockItems[match[2]]
-		if !javaOK || !bedrockOK {
-			continue
+		if !javaOK {
+			fatalf("mapping %s references a missing Java item constant", match[1])
+		}
+		if !bedrockOK {
+			fatalf("mapping %s references missing Bedrock item constant %s", match[1], match[2])
 		}
 		metadata, metadataErr := strconv.ParseUint(match[3], 10, 32)
 		blockState, blockStateErr := strconv.ParseUint(match[4], 10, 32)
@@ -64,11 +67,11 @@ func main() {
 			fatalf("invalid mapping values for %s", match[1])
 		}
 		mappings = append(mappings, itemMapping{
-			javaName:     "minecraft:" + javaItem.registryKey,
-			bedrockName:  bedrockItem.registryKey,
-			runtimeID:    bedrockItem.runtimeID,
-			metadata:     metadata,
-			blockState:   blockState,
+			javaName:    "minecraft:" + javaItem.registryKey,
+			bedrockName: bedrockItem.registryKey,
+			runtimeID:   bedrockItem.runtimeID,
+			metadata:    metadata,
+			blockState:  blockState,
 		})
 	}
 	// Bedrock renamed the Java 1.21.4 chain item to iron_chain. Pumpkin's

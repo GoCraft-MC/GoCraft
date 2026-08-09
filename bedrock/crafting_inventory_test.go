@@ -95,23 +95,23 @@ func TestCraftPredictionActionsAreSuccessfulNoOps(t *testing.T) {
 	}
 }
 
-func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
+func TestBedrockCraftingDataContainsJavaAndPumpkinRecipes(t *testing.T) {
 	if bedrockRecipeCompatibilityVersion != "1.21.4" {
 		t.Fatalf("Bedrock recipes target %s, want Java 1.21.4", bedrockRecipeCompatibilityVersion)
 	}
 	data := bedrockCraftingCatalogue()
-	javaRecipes := handler.CraftingRecipeCatalog()
-	javaRecipeIDs := make(map[string]struct{}, len(javaRecipes))
-	javaCraftingRecipes := 0
+	sourceRecipes := append(handler.CraftingRecipeCatalog(), handler.PumpkinBedrockCraftingRecipeCatalog()...)
+	sourceRecipeIDs := make(map[string]struct{}, len(sourceRecipes))
+	sourceCraftingRecipes := 0
 	expectedTotal := 0
-	for _, recipe := range javaRecipes {
-		javaRecipeIDs[recipe.Name] = struct{}{}
+	for _, recipe := range sourceRecipes {
+		sourceRecipeIDs[recipe.Name] = struct{}{}
 		if recipe.Kind == "shaped" || recipe.Kind == "shapeless" || recipe.Kind == "furnace" {
-			javaCraftingRecipes++
+			sourceCraftingRecipes++
 			variants := bedrockJavaIngredientVariants(recipe)
 			expectedTotal += len(variants)
 			for _, variant := range variants {
-				javaRecipeIDs[variant.recipeID] = struct{}{}
+				sourceRecipeIDs[variant.recipeID] = struct{}{}
 			}
 		}
 	}
@@ -125,8 +125,8 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 		for _, recipe := range data.ShapelessRecipes {
 			advertised[recipe.RecipeID] = struct{}{}
 		}
-		missing := make([]string, 0, max(javaCraftingRecipes-total, 0))
-		for _, recipe := range javaRecipes {
+		missing := make([]string, 0, max(sourceCraftingRecipes-total, 0))
+		for _, recipe := range sourceRecipes {
 			if recipe.Kind != "shaped" && recipe.Kind != "shapeless" && recipe.Kind != "furnace" {
 				continue
 			}
@@ -134,15 +134,15 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 				missing = append(missing, recipe.Name)
 			}
 		}
-		t.Fatalf("published %d protocol variants, want %d concrete encodings of %d Java 1.21.4 recipes; missing %s", total, expectedTotal, javaCraftingRecipes, strings.Join(missing, ", "))
+		t.Fatalf("published %d protocol variants, want %d concrete encodings of %d Java/Pumpkin recipes; missing %s", total, expectedTotal, sourceCraftingRecipes, strings.Join(missing, ", "))
 	}
 	foundPlanks := false
 	seenRecipeIDs := make(map[string]struct{}, total)
 	seenNetworkIDs := make(map[uint32]struct{}, total)
 	checkIdentity := func(recipeID string, networkID uint32) {
 		t.Helper()
-		if _, exists := javaRecipeIDs[recipeID]; !exists {
-			t.Fatalf("Bedrock advertised non-Java-1.21.4 recipe %s", recipeID)
+		if _, exists := sourceRecipeIDs[recipeID]; !exists {
+			t.Fatalf("Bedrock advertised recipe outside the Java/Pumpkin catalogues: %s", recipeID)
 		}
 		if _, exists := seenRecipeIDs[recipeID]; exists {
 			t.Fatalf("Bedrock advertised duplicate recipe ID %s", recipeID)
@@ -195,6 +195,38 @@ func TestBedrockCraftingDataContainsVanillaRecipes(t *testing.T) {
 	}
 	if decodedTotal != total {
 		t.Fatalf("crafting-data round trip decoded %d recipes, encoded %d", decodedTotal, total)
+	}
+}
+
+func TestBedrockCraftingDataContainsPumpkinCopperArmorRecipes(t *testing.T) {
+	want := map[string]string{
+		"minecraft:copper_helmet":     "minecraft:copper_helmet",
+		"minecraft:copper_chestplate": "minecraft:copper_chestplate",
+		"minecraft:copper_leggings":   "minecraft:copper_leggings",
+		"minecraft:copper_boots":      "minecraft:copper_boots",
+	}
+	found := make(map[string]struct{}, len(want))
+	for _, recipe := range bedrockCraftingCatalogue().ShapedRecipes {
+		itemID, ok := want[recipe.RecipeID]
+		if !ok {
+			continue
+		}
+		if len(recipe.Output) != 1 {
+			t.Fatalf("%s has %d outputs, want one", recipe.RecipeID, len(recipe.Output))
+		}
+		mapping := javaToBedrockItemMappings[itemID]
+		output := recipe.Output[0]
+		if output.NetworkID != mapping.runtimeID || output.MetadataValue != mapping.metadata || output.Count != 1 {
+			t.Errorf("%s output = %d/%d x%d, want %d/%d x1",
+				recipe.RecipeID, output.NetworkID, output.MetadataValue, output.Count,
+				mapping.runtimeID, mapping.metadata)
+		}
+		found[recipe.RecipeID] = struct{}{}
+	}
+	for recipeID := range want {
+		if _, ok := found[recipeID]; !ok {
+			t.Errorf("Bedrock crafting data is missing Pumpkin recipe %s", recipeID)
+		}
 	}
 }
 

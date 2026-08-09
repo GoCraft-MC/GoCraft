@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -500,6 +501,22 @@ func (w *World) NearestBiome(x, z int, target string, maxDistance int) (int, int
 		return 0, 0, false
 	}
 	return generator.NearestBiome(x, z, target, maxDistance)
+}
+
+// BiomeAt returns the canonical biome resource location at a block position.
+// GoCraft's overworld generator can answer this without loading a chunk, which
+// lets the natural spawner use Pumpkin's biome-specific spawn tables without
+// adding disk I/O to the tick goroutine. Other generators use plains.
+func (w *World) BiomeAt(x, y, z int) string {
+	generator, ok := w.generator.(*OverworldGenerator)
+	if !ok {
+		return "minecraft:plains"
+	}
+	biome := generator.BiomeAt3D(x, y, z)
+	if strings.Contains(biome, ":") {
+		return biome
+	}
+	return "minecraft:" + biome
 }
 
 // IsChunkLoaded reports whether the chunk at chunk coordinates (cx, cz) is

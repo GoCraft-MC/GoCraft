@@ -38,11 +38,25 @@ type bedrockPlayerView struct {
 }
 
 type bedrockEntityView struct {
-	position spatial.Vec3
-	yaw      float32
-	health   float32
-	dead     bool
-	riderID  int32
+	position           spatial.Vec3
+	yaw                float32
+	health             float32
+	dead               bool
+	riderID            int32
+	villagerVariant    corentity.VillagerVariant
+	villagerProfession corentity.VillagerProfession
+	villagerLevel      int32
+	baby               bool
+	sleeping           bool
+}
+
+func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
+	return bedrockEntityView{
+		position: entity.Position, yaw: entity.Yaw, health: entity.Health, dead: entity.Dead,
+		riderID: entity.RiderEntityID, villagerVariant: entity.VillagerVariant,
+		villagerProfession: entity.VillagerProfession, villagerLevel: entity.VillagerLevel,
+		baby: entity.IsBaby, sleeping: entity.Sleeping,
+	}
 }
 
 // Sync publishes the current canonical simulation snapshot to all Bedrock
@@ -404,7 +418,7 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 		if !known {
 			if spawn := l.buildAddEntity(viewer, entity); spawn != nil {
 				_ = viewer.conn.WritePacket(spawn)
-				viewer.knownEntities[entity.EntityID] = bedrockEntityView{position: entity.Position, yaw: entity.Yaw, health: entity.Health, dead: entity.Dead, riderID: entity.RiderEntityID}
+				viewer.knownEntities[entity.EntityID] = newBedrockEntityView(entity)
 			}
 			continue
 		}
@@ -451,7 +465,16 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 				RiderInitiated:       true,
 			}})
 		}
-		viewer.knownEntities[entity.EntityID] = bedrockEntityView{position: entity.Position, yaw: entity.Yaw, health: entity.Health, dead: entity.Dead, riderID: entity.RiderEntityID}
+		if previous.sleeping != entity.Sleeping || entity.Type == corentity.TypeVillager &&
+			(previous.villagerVariant != entity.VillagerVariant || previous.villagerProfession != entity.VillagerProfession ||
+				previous.villagerLevel != entity.VillagerLevel || previous.baby != entity.IsBaby) {
+			_ = viewer.conn.WritePacket(&packet.SetActorData{
+				EntityRuntimeID: bedrockRemoteRuntimeID(entity.EntityID),
+				EntityMetadata:  l.bedrockEntityMetadata(entity),
+				Tick:            tick,
+			})
+		}
+		viewer.knownEntities[entity.EntityID] = newBedrockEntityView(entity)
 	}
 
 	for id := range viewer.knownEntities {
@@ -471,13 +494,7 @@ func canonicalRuntimeIDForViewer(viewer *bedrockSession, entityID int32) uint64 
 }
 
 func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Entity) packet.Packet {
-	metadata := protocol.NewEntityMetadata()
-	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
-	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
-	if entity.Sleeping {
-		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLayingDown)
-		metadata[protocol.EntityDataKeyBedPosition] = protocol.BlockPos{entity.VillageBed.X, entity.VillageBed.Y, entity.VillageBed.Z}
-	}
+	metadata := l.bedrockEntityMetadata(entity)
 
 	if entity.Type == corentity.TypeItem {
 		item := l.itemInstance(player.ItemStack{ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage}, 1)
@@ -497,10 +514,6 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 	entityType := bedrockEntityType(entity.Type)
 	if entityType == "" {
 		return nil
-	}
-	if entity.Type == corentity.TypeFallingBlock && entity.FallingBlockName != "" {
-		block := splitBlockName(entity.FallingBlockName)
-		metadata[protocol.EntityDataKeyVariant] = int32(l.encoder.BlockNetworkID(block))
 	}
 	links := []protocol.EntityLink(nil)
 	if entity.RiderEntityID != 0 {
@@ -524,6 +537,40 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 		EntityMetadata:  metadata,
 		EntityLinks:     links,
 	}
+}
+
+func (l *Listener) bedrockEntityMetadata(entity *corentity.Entity) protocol.EntityMetadata {
+	metadata := protocol.NewEntityMetadata()
+	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
+	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
+	if entity == nil {
+		return metadata
+	}
+	if entity.Sleeping {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLayingDown)
+		metadata[protocol.EntityDataKeyBedPosition] = protocol.BlockPos{entity.VillageBed.X, entity.VillageBed.Y, entity.VillageBed.Z}
+	}
+	if entity.Type == corentity.TypeVillager {
+		metadata[protocol.EntityDataKeyVariant] = bedrockVillagerProfessionID(entity.VillagerProfession)
+		metadata[protocol.EntityDataKeyMarkVariant] = bedrockVillagerVariantID(entity.VillagerVariant)
+		level := entity.VillagerLevel
+		if level < 1 {
+			level = 1
+		}
+		metadata[protocol.EntityDataKeyTradeTier] = level - 1
+		metadata[protocol.EntityDataKeyMaxTradeTier] = int32(4)
+		metadata[protocol.EntityDataKeyTradeExperience] = int32(0)
+		metadata[protocol.EntityDataKeyScale] = float32(1)
+		if entity.IsBaby {
+			metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagBaby)
+			metadata[protocol.EntityDataKeyScale] = float32(0.5)
+		}
+	}
+	if entity.Type == corentity.TypeFallingBlock && entity.FallingBlockName != "" && l != nil && l.encoder != nil {
+		block := splitBlockName(entity.FallingBlockName)
+		metadata[protocol.EntityDataKeyVariant] = int32(l.encoder.BlockNetworkID(block))
+	}
+	return metadata
 }
 
 func (l *Listener) syncLocalHealth(viewer *bedrockSession, tick uint64) {
@@ -729,6 +776,31 @@ func (l *Listener) sendPlayerEquipment(viewer *bedrockSession, p *player.Player)
 		Leggings:        l.itemInstance(p.Inventory[7], 103),
 		Boots:           l.itemInstance(p.Inventory[8], 104),
 	})
+}
+
+// BroadcastVillagerUnhappy plays Bedrock's villager rejection sound for the
+// same baby/unemployed/nitwit interaction handled by the canonical server.
+func (l *Listener) BroadcastVillagerUnhappy(entity *corentity.Entity) {
+	if l == nil || entity == nil {
+		return
+	}
+	event := &packet.LevelSoundEvent{
+		SoundType:      packet.SoundEventHaggleNo,
+		Position:       vec32(entity.Position),
+		ExtraData:      -1,
+		EntityType:     "minecraft:villager_v2",
+		BabyMob:        entity.IsBaby,
+		EntityUniqueID: int64(bedrockRemoteRuntimeID(entity.EntityID)),
+	}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, session := range l.sessions {
+		sessions = append(sessions, session)
+	}
+	l.sessionsMu.RUnlock()
+	for _, session := range sessions {
+		_ = session.conn.WritePacket(event)
+	}
 }
 
 // BroadcastMessage sends a server/system chat line to every Bedrock session.
@@ -939,6 +1011,8 @@ func (l *Listener) BroadcastBlockBreakEffect(position spatial.BlockPos, block co
 
 func bedrockEntityType(entityType corentity.EntityType) string {
 	switch entityType {
+	case corentity.TypeVillager:
+		return "minecraft:villager_v2"
 	case corentity.TypeOakBoat, corentity.TypeSpruceBoat, corentity.TypeBirchBoat, corentity.TypeJungleBoat,
 		corentity.TypeAcaciaBoat, corentity.TypeDarkOakBoat, corentity.TypeMangroveBoat, corentity.TypeCherryBoat:
 		return "minecraft:boat"
@@ -959,6 +1033,60 @@ func bedrockEntityType(entityType corentity.EntityType) string {
 		return "minecraft:bamboo_chest_raft"
 	default:
 		return string(entityType)
+	}
+}
+
+func bedrockVillagerProfessionID(profession corentity.VillagerProfession) int32 {
+	switch profession {
+	case corentity.VillagerProfessionFarmer:
+		return 1
+	case corentity.VillagerProfessionFisherman:
+		return 2
+	case corentity.VillagerProfessionShepherd:
+		return 3
+	case corentity.VillagerProfessionFletcher:
+		return 4
+	case corentity.VillagerProfessionLibrarian:
+		return 5
+	case corentity.VillagerProfessionCartographer:
+		return 6
+	case corentity.VillagerProfessionCleric:
+		return 7
+	case corentity.VillagerProfessionArmorer:
+		return 8
+	case corentity.VillagerProfessionWeaponsmith:
+		return 9
+	case corentity.VillagerProfessionToolsmith:
+		return 10
+	case corentity.VillagerProfessionButcher:
+		return 11
+	case corentity.VillagerProfessionLeatherworker:
+		return 12
+	case corentity.VillagerProfessionMason:
+		return 13
+	case corentity.VillagerProfessionNitwit:
+		return 14
+	default:
+		return 0
+	}
+}
+
+func bedrockVillagerVariantID(variant corentity.VillagerVariant) int32 {
+	switch variant {
+	case corentity.VillagerVariantDesert:
+		return 1
+	case corentity.VillagerVariantJungle:
+		return 2
+	case corentity.VillagerVariantSavanna:
+		return 3
+	case corentity.VillagerVariantSnow:
+		return 4
+	case corentity.VillagerVariantSwamp:
+		return 5
+	case corentity.VillagerVariantTaiga:
+		return 6
+	default:
+		return 0
 	}
 }
 

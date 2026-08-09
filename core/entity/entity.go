@@ -188,6 +188,10 @@ type Entity struct {
 	VillagerVariant    VillagerVariant
 	VillagerProfession VillagerProfession
 	VillagerLevel      int32
+	// NaturalSpawned distinguishes mobs created by the runtime mob spawner from
+	// generated village residents, commands, and player-created entities. It is
+	// used for distance despawning in the absence of chunk-scoped entity storage.
+	NaturalSpawned bool
 
 	// Generated village ownership. HasVillageHome distinguishes assigned
 	// positions from zero-value coordinates used by summoned villagers.
@@ -244,6 +248,21 @@ type Entity struct {
 	// DeathTicks keeps a dead living entity present long enough for the
 	// vanilla 20-tick death animation before it is removed from clients.
 	DeathTicks int
+}
+
+// CanTradeAsVillager reports whether a villager is old enough and has a
+// profession that may expose merchant offers. Unemployed villagers and
+// nitwits use the vanilla/Pumpkin unhappy interaction instead.
+func (e *Entity) CanTradeAsVillager() bool {
+	if e == nil || e.Type != TypeVillager || e.IsBaby {
+		return false
+	}
+	switch e.VillagerProfession {
+	case "", VillagerProfessionNone, VillagerProfessionNitwit:
+		return false
+	default:
+		return true
+	}
 }
 
 // New creates an entity of the given type at the given position with full health.

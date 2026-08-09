@@ -162,6 +162,63 @@ func TestBedrockStoneUsesVanillaLootAndHarvestTool(t *testing.T) {
 	}
 }
 
+func TestBedrockCreativeToolWorksAfterSwitchingToSurvival(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	g := game.New()
+	p := player.New([16]byte{25}, "bedrock-creative-miner", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeCreative
+	p.Position = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g, world: w, sessions: session.NewManager()}
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{
+		PlayerUUID: p.UUID,
+		Actions: []intent.InventoryAction{
+			{
+				Kind:        intent.InventoryActionCreativeGive,
+				Destination: intent.InventoryCursorSlot,
+				Count:       1,
+				Item:        player.ItemStack{ItemID: "minecraft:iron_pickaxe", Count: 1},
+			},
+			{
+				Kind:        intent.InventoryActionMove,
+				Source:      intent.InventoryCursorSlot,
+				Destination: player.HotbarStart,
+				Count:       1,
+			},
+		},
+		Done: done,
+	})
+	if result := <-done; !result.Accepted {
+		t.Fatal("creative iron pickaxe was rejected")
+	}
+
+	// A creative pick becomes an ordinary pristine tool in Survival. Creative
+	// mode itself intentionally has neither block drops nor durability wear.
+	p.GameMode = player.GameModeSurvival
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "iron_ore"})
+	s.applyBedrockBlockInteract(intent.BlockInteractIntent{
+		PlayerUUID: p.UUID,
+		Action:     intent.BlockActionBreak,
+		Position:   spatial.BlockPos{X: 1, Y: 64, Z: 0},
+		HotbarSlot: 0,
+	})
+
+	tool := p.Inventory[player.HotbarStart]
+	if tool.ItemID != "minecraft:iron_pickaxe" || tool.Damage != 1 {
+		t.Fatalf("creative pickaxe after mining = %+v, want iron pickaxe with one damage", tool)
+	}
+	for _, stack := range p.Inventory {
+		if stack.ItemID == "minecraft:raw_iron" && stack.Count == 1 {
+			return
+		}
+	}
+	t.Fatal("creative iron pickaxe did not harvest raw iron after switching to Survival")
+}
+
 func TestBedrockBreakPreservesSelectedToolAndDamagesIt(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer w.Close()

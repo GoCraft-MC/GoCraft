@@ -208,6 +208,10 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 	if entity.Type != corentity.TypeVillager {
 		return nil
 	}
+	if !entity.CanTradeAsVillager() {
+		BroadcastVillagerUnhappy(mgr, entity)
+		return nil
+	}
 
 	if err := sendOpenScreen(conn, villagerWindowID, merchantContainerType, "Villager"); err != nil {
 		return fmt.Errorf("interact: opening screen: %w", err)

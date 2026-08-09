@@ -18,14 +18,13 @@ const (
 	sectionPhysics                         // gravity, position integration, ground detection
 	sectionBroadcast                       // DispatchTickBroadcast (packet build, not net I/O)
 	sectionTime                            // time-of-day, crop ticks, time-skip drain
-	sectionSpawnPassive                    // passive mob natural spawn loop
-	sectionSpawnHostile                    // hostile mob natural spawn loop
+	sectionSpawnNatural                    // Pumpkin-style category natural spawn loop
 	sectionBlockPhysics                    // falling blocks + fluid spreading
 	sectionCount
 )
 
 var sectionNames = [sectionCount]string{
-	"damage", "mob-ai", "physics", "broadcast", "time/crops", "spawn-passive", "spawn-hostile", "block-physics",
+	"damage", "mob-ai", "physics", "broadcast", "time/crops", "spawn-natural", "block-physics",
 }
 
 // windowSize is the number of ticks kept in the rolling timing window.

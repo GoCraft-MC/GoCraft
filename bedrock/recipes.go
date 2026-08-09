@@ -31,7 +31,8 @@ func bedrockCraftingCatalogue() *packet.CraftingData {
 		Context: protocol.RecipeUnlockContextAlwaysUnlocked,
 	})
 	var networkID uint32 = 1
-	for _, recipe := range handler.CraftingRecipeCatalog() {
+	recipes := append(handler.CraftingRecipeCatalog(), handler.PumpkinBedrockCraftingRecipeCatalog()...)
+	for _, recipe := range recipes {
 		if recipe.Kind != "shaped" && recipe.Kind != "shapeless" && recipe.Kind != "furnace" {
 			continue
 		}

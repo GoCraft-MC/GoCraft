@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 
+	"GoCraft/core/player"
+	javaworld "GoCraft/java/world"
+
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -38,15 +41,88 @@ type creativeKnownItem struct {
 	meta int16
 }
 
-// initCreativeContent loads Dragonfly's bundled vanilla creative catalogue.
+type creativeBedrockIdentity struct {
+	name string
+	meta uint32
+}
+
+type creativeBedrockMapping struct {
+	javaName string
+	mapping  bedrockItemMapping
+}
+
+// creativeBedrockMappings reverses Pumpkin's generated Java-to-Bedrock table.
+// The embedded creative catalogue supplies its ordering, grouping, aux values,
+// and NBT variants, but its sequential item runtime IDs belong to a different
+// Bedrock palette. Inventory stacks must use the IDs advertised by the current
+// protocol's Pumpkin table.
+var creativeBedrockMappings = func() map[creativeBedrockIdentity]creativeBedrockMapping {
+	out := make(map[creativeBedrockIdentity]creativeBedrockMapping, len(javaToBedrockItemMappings))
+	for javaName, mapping := range javaToBedrockItemMappings {
+		key := creativeBedrockIdentity{name: mapping.name, meta: mapping.metadata}
+		candidate := creativeBedrockMapping{javaName: javaName, mapping: mapping}
+		current, exists := out[key]
+		if !exists || preferCreativeJavaName(candidate.javaName, current.javaName, mapping.name) {
+			out[key] = candidate
+		}
+	}
+	return out
+}()
+
+// creativeBedrockMappingsByName mirrors Pumpkin's runtime-ID-only fallback in
+// JavaToBedrockItemMapping::from_bedrock. Creative aux values are not always
+// identical to the aux value used when the same Java item is placed in an
+// inventory (planks are one example), but both stacks must still use the same
+// current Bedrock runtime ID.
+var creativeBedrockMappingsByName = func() map[string]creativeBedrockMapping {
+	out := make(map[string]creativeBedrockMapping, len(javaToBedrockItemMappings))
+	for javaName, mapping := range javaToBedrockItemMappings {
+		candidate := creativeBedrockMapping{javaName: javaName, mapping: mapping}
+		current, exists := out[mapping.name]
+		if !exists || preferCreativeJavaName(candidate.javaName, current.javaName, mapping.name) {
+			out[mapping.name] = candidate
+		}
+	}
+	return out
+}()
+
+func preferCreativeJavaName(candidate, current, bedrockName string) bool {
+	candidateKnown := javaworld.ItemID(candidate) >= 0
+	currentKnown := javaworld.ItemID(current) >= 0
+	if candidateKnown != currentKnown {
+		return candidateKnown
+	}
+	candidateExact := candidate == bedrockName
+	currentExact := current == bedrockName
+	if candidateExact != currentExact {
+		return candidateExact
+	}
+	return candidate < current
+}
+
+func creativeCurrentMapping(name string, meta int16) (creativeBedrockMapping, bool) {
+	mapping, ok := creativeBedrockMappings[creativeBedrockIdentity{
+		name: name,
+		meta: uint32(uint16(meta)),
+	}]
+	return mapping, ok
+}
+
+func creativeCurrentMappingByName(name string) (creativeBedrockMapping, bool) {
+	mapping, ok := creativeBedrockMappingsByName[name]
+	return mapping, ok
+}
+
+// initCreativeContent loads the embedded vanilla creative catalogue and
+// re-encodes it with Pumpkin's current Bedrock item palette.
 //
-// This intentionally mirrors Dragonfly's behaviour:
+// This intentionally mirrors Pumpkin's behaviour:
 //   - anonymous groups receive stable internal names such as "anon0";
-//   - block entries resolve through BlockByName;
-//   - regular items resolve through ItemByName;
-//   - metadata must match exactly to prevent fallback duplicates;
-//   - raw NBT group indices are preserved without adding one;
-//   - invalid or unavailable entries are skipped.
+//   - catalogue ordering, group indices, aux values, and NBT are preserved;
+//   - exact Bedrock name/aux mappings are preferred;
+//   - Bedrock-name fallback mirrors Pumpkin's runtime-ID fallback;
+//   - entries absent from Pumpkin's mappings fall back to Dragonfly resolution;
+//   - genuinely unavailable entries are skipped.
 func (l *Listener) initCreativeContent() {
 	// Item stacks that represent blocks need the registry's stable network
 	// hashes. Finalize is idempotent and makes this initializer safe on its own.
@@ -146,6 +222,21 @@ func canonicalCreativeIdentity(name string, meta int16) (string, int16) {
 	if name == "minecraft:light_block" {
 		return "minecraft:light", meta
 	}
+	if mapping, ok := creativeCurrentMapping(name, meta); ok {
+		// Pumpkin resolves the Bedrock ID/aux pair back to its Java item and then
+		// constructs a fresh ItemStack. The auxiliary value selects the mapping;
+		// it is not durability already consumed by the new stack.
+		return mapping.javaName, 0
+	}
+	if mapping, ok := creativeCurrentMappingByName(name); ok {
+		// Pumpkin falls back from the exact ID/aux pair to the Bedrock runtime
+		// ID alone. It then creates a fresh Java stack, so the creative aux
+		// value is a variant selector rather than consumed durability.
+		return mapping.javaName, 0
+	}
+	if player.MaxDurability(name) > 0 {
+		return name, 0
+	}
 	return name, meta
 }
 
@@ -153,6 +244,12 @@ func canonicalCreativeIdentity(name string, meta int16) (string, int16) {
 func creativeItemStack(data creativeNBTItem) (protocol.ItemStack, bool) {
 	if data.Name == "" {
 		return protocol.ItemStack{}, false
+	}
+	if current, found := creativeCurrentMapping(data.Name, data.Meta); found {
+		return currentCreativeItemStack(data, current), true
+	}
+	if current, found := creativeCurrentMappingByName(data.Name); found {
+		return currentCreativeItemStack(data, current), true
 	}
 
 	var (
@@ -197,7 +294,6 @@ func creativeItemStack(data creativeNBTItem) (protocol.ItemStack, bool) {
 	if !ok {
 		return protocol.ItemStack{}, false
 	}
-
 	if blockRID == 0 {
 		if block, ok := resolvedItem.(dfworld.Block); ok {
 			blockRID = creativeBlockNetworkID(block)
@@ -213,6 +309,21 @@ func creativeItemStack(data creativeNBTItem) (protocol.ItemStack, bool) {
 		NBTData:        cloneCreativeNBT(data.NBTData),
 		BlockRuntimeID: blockRID,
 	}, true
+}
+
+func currentCreativeItemStack(data creativeNBTItem, current creativeBedrockMapping) protocol.ItemStack {
+	// This follows Pumpkin's CCreativeContent construction: the runtime ID
+	// comes from Pumpkin's current palette, while the catalogue's aux value is
+	// preserved. In particular, creative block variants commonly advertise aux
+	// zero even though their normal Java-to-Bedrock inventory mapping does not.
+	return protocol.ItemStack{
+		ItemType: protocol.ItemType{
+			NetworkID:     current.mapping.runtimeID,
+			MetadataValue: uint32(uint16(data.Meta)),
+		},
+		Count:   1,
+		NBTData: cloneCreativeNBT(data.NBTData),
+	}
 }
 
 func creativeBlockNetworkID(block dfworld.Block) int32 {

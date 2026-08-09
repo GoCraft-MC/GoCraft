@@ -56,6 +56,26 @@ func TestJavaAttackDamagesExternalBedrockPlayer(t *testing.T) {
 	}
 }
 
+func TestBasicVillagerInteractionUsesUnhappyPathWithoutMerchantScreen(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	villager := corentity.New(43, [16]byte{}, corentity.TypeVillager, 0, 64, 0)
+	villager.VillagerProfession = corentity.VillagerProfessionNone
+	world.Entities.Add(villager)
+	p := player.New([16]byte{3}, "visitor", player.ClientEditionJava)
+	packet := protocol.NewBuilder(packetIDInteract).
+		VarInt(villager.EntityID).
+		VarInt(0).
+		VarInt(0).
+		Bool(false).
+		Build()
+	// A nil connection is intentional: the unhappy path must return before the
+	// merchant-screen writer is reached.
+	if err := handleInteractPacket(packet, p, world, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMerchantOfferUsesProtocol769ItemCostLayout(t *testing.T) {
 	trade := tradeOffer{
 		input1:  tradeItem{"minecraft:wheat", 20},
@@ -85,5 +105,19 @@ func TestMerchantOfferUsesProtocol769ItemCostLayout(t *testing.T) {
 	}
 	if outputCount != 1 || outputID != javaworld.ItemID("minecraft:emerald") || addedComponents != 0 || removedComponents != 0 {
 		t.Fatalf("output Slot = (%d,%d,%d,%d), want one emerald without components", outputCount, outputID, addedComponents, removedComponents)
+	}
+}
+
+func TestVillagerUnhappyFeedbackContainsParticlesAndNoSound(t *testing.T) {
+	villager := corentity.New(91, [16]byte{}, corentity.TypeVillager, 0, 64, 0)
+	packets := villagerUnhappyPackets(villager)
+	if len(packets) != 2 {
+		t.Fatalf("unhappy feedback packet count = %d, want 2", len(packets))
+	}
+	if packets[0].ID != packetIDEntityEvent {
+		t.Fatalf("first unhappy packet ID = %#x, want entity event %#x", packets[0].ID, packetIDEntityEvent)
+	}
+	if packets[1].ID != packetIDSoundEntity {
+		t.Fatalf("second unhappy packet ID = %#x, want entity sound %#x", packets[1].ID, packetIDSoundEntity)
 	}
 }

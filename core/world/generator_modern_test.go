@@ -5,6 +5,16 @@ import (
 	"testing"
 )
 
+func TestWorldBiomeAtKeepsCanonicalNamespace(t *testing.T) {
+	generator := NewOverworldGenerator(0)
+	world := New(generator, nil, false)
+	defer world.Close()
+	want := generator.BiomeAt3D(32, 64, 0)
+	if got := world.BiomeAt(32, 64, 0); got != want {
+		t.Fatalf("world biome = %q, want canonical generator biome %q", got, want)
+	}
+}
+
 func TestBiomeClassifierCoversJava1214OverworldPalette(t *testing.T) {
 	type climate struct {
 		height                        int

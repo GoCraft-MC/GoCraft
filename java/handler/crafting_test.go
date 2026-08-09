@@ -90,6 +90,49 @@ func TestPersonalCraftingSupportsShapedTwoByTwoRecipes(t *testing.T) {
 	}
 }
 
+func TestPumpkinBedrockCopperArmorRecipesProducePristineStacks(t *testing.T) {
+	tests := []struct {
+		item       string
+		durability int
+		armor      int
+		pattern    [3]string
+	}{
+		{"minecraft:copper_helmet", 121, 2, [3]string{"XXX", "X X"}},
+		{"minecraft:copper_chestplate", 176, 4, [3]string{"X X", "XXX", "XXX"}},
+		{"minecraft:copper_leggings", 165, 3, [3]string{"XXX", "X X", "X X"}},
+		{"minecraft:copper_boots", 143, 1, [3]string{"X X", "X X"}},
+	}
+
+	if got := len(PumpkinBedrockCraftingRecipeCatalog()); got != len(tests) {
+		t.Fatalf("Pumpkin Bedrock recipe supplement has %d recipes, want %d", got, len(tests))
+	}
+	for _, test := range tests {
+		t.Run(test.item, func(t *testing.T) {
+			var grid [9]player.ItemStack
+			for y, row := range test.pattern {
+				for x, symbol := range row {
+					if symbol == 'X' {
+						grid[y*3+x] = player.ItemStack{ItemID: "minecraft:copper_ingot", Count: 1}
+					}
+				}
+			}
+			if javaResult := FindCraftingTableResult(grid); !javaResult.IsEmpty() {
+				t.Fatalf("Java 1.21.4 resolver exposed future recipe result %+v", javaResult)
+			}
+			result := FindBedrockCraftingTableResult(grid)
+			if result.ItemID != test.item || result.Count != 1 || result.Damage != 0 {
+				t.Fatalf("Pumpkin recipe result = %+v, want one pristine %s", result, test.item)
+			}
+			if got := player.MaxDurability(result.ItemID); got != test.durability {
+				t.Errorf("crafted durability = %d, want %d", got, test.durability)
+			}
+			if got := player.ArmorPoints(result.ItemID); got != test.armor {
+				t.Errorf("crafted armor = %d, want %d", got, test.armor)
+			}
+		})
+	}
+}
+
 func TestPlayerInventoryCraftingClickProducesAndConsumesPlanks(t *testing.T) {
 	p := player.New([16]byte{}, "crafter", player.ClientEditionJava)
 	p.CarriedItem = player.ItemStack{ItemID: "minecraft:oak_log", Count: 2}

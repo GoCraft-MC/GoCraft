@@ -113,7 +113,6 @@ type mobAI struct {
 	homeX, homeZ   float64    // world-space spawn/home position (homed mobs only)
 	dirX, dirZ     float64    // current normalised walk direction
 	wanderTick     int        // ticks until next direction pick (0 = pick now)
-	pauseTick      int        // remaining ticks of stillness (overrides wanderTick)
 	panicTick      int        // remaining ticks fleeing from a recent attacker
 	knockbackTick  int        // ticks retaining the configured initial hit velocity
 	roaming        bool       // true = no fixed home (animals); false = homed (villagers)
@@ -122,8 +121,18 @@ type mobAI struct {
 	hasTarget      bool       // hostile AI: currently chasing a target
 	targetX        float64    // hostile AI: current target world X
 	targetZ        float64    // hostile AI: current target world Z
-	attackCooldown int        // ticks until next melee swing
-	fuseTick       int        // creeper fuse progress (30 ticks to detonation)
+	targetEntityID int32
+	attackCooldown int // ticks until next melee swing
+	fuseTick       int // creeper fuse progress (30 ticks to detonation)
+	path           []spatial.Vec3
+	pathIndex      int
+	pathGoal       spatial.BlockPos
+	hasPathGoal    bool
+	repathTick     int
+	wanderTarget   spatial.Vec3
+	hasWanderGoal  bool
+	lookTick       int
+	lookX, lookZ   float64
 }
 
 type crossPlayerView struct {
@@ -409,9 +418,6 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	slog.Info("starting GoCraft server", "motd", s.cfg.MOTD, "worldSeed", s.cfg.WorldSeed,
 		"worldStorage", s.cfg.WorldStorage, "maxCachedChunks", s.cfg.MaxCachedChunks)
-
-	// Spawn a small set of passive mobs near the world spawn for testing.
-	s.spawnTestMobs()
 
 	// pprof profiling endpoint — http://localhost:6060/debug/pprof/
 	// Use: go tool pprof http://localhost:6060/debug/pprof/goroutine
@@ -725,7 +731,7 @@ func (s *Server) applyBedrockContainerClose(i intent.ContainerCloseIntent) {
 			}
 			p.CraftingGrid[slot] = player.ItemStack{}
 		}
-		p.CraftingResult = handler.FindCraftingTableResult(p.CraftingGrid)
+		p.CraftingResult = handler.FindBedrockCraftingTableResult(p.CraftingGrid)
 	}
 	if handler.IsFurnaceContainer(p.OpenContainerKind) {
 		persistFurnaceSlots(s.world, p.OpenContainerPos, p.OpenContainerKind, p.ContainerSlots)
@@ -1185,11 +1191,20 @@ func (s *Server) applyBedrockEntityInteract(i intent.EntityInteractIntent) {
 			handler.BroadcastSetPassengers(vehicleID, nil, s.sessions)
 			return
 		}
-		if entity, ok := s.world.Entities.Get(i.TargetID); ok && corentity.IsBoat(entity.Type) && entity.RiderEntityID == 0 && attacker.Position.Distance(entity.Position) <= 4 {
-			entity.RiderEntityID = attacker.EntityID
-			attacker.VehicleEntityID = entity.EntityID
-			attacker.Position = entity.Position
-			handler.BroadcastSetPassengers(entity.EntityID, []int32{attacker.EntityID}, s.sessions)
+		if entity, ok := s.world.Entities.Get(i.TargetID); ok && attacker.Position.Distance(entity.Position) <= 4 {
+			if entity.Type == corentity.TypeVillager && !entity.CanTradeAsVillager() {
+				handler.BroadcastVillagerUnhappy(s.sessions, entity)
+				if s.bedrockListener != nil {
+					s.bedrockListener.BroadcastVillagerUnhappy(entity)
+				}
+				return
+			}
+			if corentity.IsBoat(entity.Type) && entity.RiderEntityID == 0 {
+				entity.RiderEntityID = attacker.EntityID
+				attacker.VehicleEntityID = entity.EntityID
+				attacker.Position = entity.Position
+				handler.BroadcastSetPassengers(entity.EntityID, []int32{attacker.EntityID}, s.sessions)
+			}
 		}
 		return
 	}
@@ -1293,7 +1308,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	}
 	inventory := p.Inventory
 	craftingGrid := p.CraftingGrid
-	craftingResult := handler.FindCraftingTableResult(craftingGrid)
+	craftingResult := handler.FindBedrockCraftingTableResult(craftingGrid)
 	furnaceSlots := append([]player.ItemStack(nil), p.ContainerSlots...)
 	furnaceOpen := handler.IsFurnaceContainer(p.OpenContainerKind) && len(furnaceSlots) == furnaceSlotCount
 	carried := p.CarriedItem
@@ -1330,7 +1345,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		}
 		if slot >= intent.InventoryCraftingTableStart && slot < intent.InventoryCraftingTableOutput {
 			craftingGrid[slot-intent.InventoryCraftingTableStart] = stack
-			craftingResult = handler.FindCraftingTableResult(craftingGrid)
+			craftingResult = handler.FindBedrockCraftingTableResult(craftingGrid)
 			return true
 		}
 		if slot == intent.InventoryCraftingTableOutput {
@@ -1405,7 +1420,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				consumeBedrockPersonalCrafting(&inventory)
 			} else if action.Source == intent.InventoryCraftingTableOutput {
 				consumeBedrockCraftingTable(&craftingGrid)
-				craftingResult = handler.FindCraftingTableResult(craftingGrid)
+				craftingResult = handler.FindBedrockCraftingTableResult(craftingGrid)
 			}
 
 		case intent.InventoryActionSwap:
@@ -1442,7 +1457,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	updateBedrockPersonalCrafting(&inventory)
 	p.Inventory = inventory
 	p.CraftingGrid = craftingGrid
-	p.CraftingResult = handler.FindCraftingTableResult(craftingGrid)
+	p.CraftingResult = handler.FindBedrockCraftingTableResult(craftingGrid)
 	p.CarriedItem = carried
 	if furnaceOpen {
 		p.ContainerSlots = furnaceSlots
@@ -1698,6 +1713,7 @@ func (s *Server) tickEntities() {
 			!entity.Dead && event.HasSource {
 			ai := s.mobAIFor(entity)
 			ai.hasTarget = true
+			ai.targetEntityID = 0
 			ai.targetX = event.SourceX
 			ai.targetZ = event.SourceZ
 			ai.attackCooldown = 0
@@ -1708,6 +1724,8 @@ func (s *Server) tickEntities() {
 	}
 	endDamage()
 
+	simulationPlayers := s.naturalSpawnPlayers()
+	s.despawnDistantNaturalMobs(simulationPlayers, &deadIDs)
 	allEntities := s.world.Entities.Snapshot()
 
 	// ── Parallel passive mob AI ───────────────────────────────────────────────
@@ -1720,7 +1738,7 @@ func (s *Server) tickEntities() {
 	// the map reads inside tickPassiveMobAI are guaranteed to be read-only
 	// (safe for concurrent goroutines).
 	for _, e := range allEntities {
-		if !e.Dead && isPassiveMob(e.Type) {
+		if !e.Dead && isPassiveMob(e.Type) && entityWithinSimulationRange(e, simulationPlayers, 128) {
 			_ = s.mobAIFor(e) // ensure AI struct exists before parallel phase
 		}
 	}
@@ -1730,7 +1748,7 @@ func (s *Server) tickEntities() {
 	var villagerWakes []villagerWakeEntry
 	var passiveAIWG sync.WaitGroup
 	for _, e := range allEntities {
-		if e.Dead || !isPassiveMob(e.Type) {
+		if e.Dead || !isPassiveMob(e.Type) || !entityWithinSimulationRange(e, simulationPlayers, 128) {
 			continue
 		}
 		passiveAIWG.Add(1)
@@ -1843,6 +1861,10 @@ func (s *Server) tickEntities() {
 		}
 
 		// ── Mob AI (golem / hostile) ──────────────────────────────────────────
+		if _, isMob := pumpkinEntitySpawnSettingsByType[string(e.Type)]; isMob && !entityWithinSimulationRange(e, simulationPlayers, 128) {
+			e.VX, e.VY, e.VZ = 0, 0, 0
+			continue
+		}
 		// Passive mob AI already ran in the parallel pre-pass above.
 		prevX, prevY, prevZ := e.Position.X, e.Position.Y, e.Position.Z
 		if !isPassiveMob(e.Type) {
@@ -1870,7 +1892,8 @@ func (s *Server) tickEntities() {
 		// ── Gravity + physics ─────────────────────────────────────────────────
 		endPhys := s.timings.measure(sectionPhysics)
 		// ── Gravity ───────────────────────────────────────────────────────────
-		if !e.OnGround {
+		inWater := s.entityInWater(e)
+		if !e.OnGround && !inWater {
 			e.VY += gravity
 		}
 
@@ -1929,8 +1952,13 @@ func (s *Server) tickEntities() {
 		}
 
 		// ── Horizontal drag ───────────────────────────────────────────────────
-		e.VX *= drag
-		e.VZ *= drag
+		horizontalDrag := drag
+		if inWater {
+			horizontalDrag = 0.8
+			e.VY *= 0.8
+		}
+		e.VX *= horizontalDrag
+		e.VZ *= horizontalDrag
 		if math.Abs(e.VX) < minVel {
 			e.VX = 0
 		}
@@ -1978,16 +2006,9 @@ func (s *Server) tickEntities() {
 	}
 	endTime()
 
-	if s.worldAge%80 == 0 {
-		endSpawnP := s.timings.measure(sectionSpawnPassive)
-		s.spawnPassiveMobsNearPlayers()
-		endSpawnP()
-	}
-	if s.worldAge%100 == 0 && s.cfg.Difficulty != "peaceful" {
-		endSpawnH := s.timings.measure(sectionSpawnHostile)
-		s.spawnHostileMobsNearPlayers()
-		endSpawnH()
-	}
+	endSpawn := s.timings.measure(sectionSpawnNatural)
+	s.tickNaturalSpawning()
+	endSpawn()
 	// Sleeping: if all online players are sleeping, skip night.
 	s.tickSleep()
 	// Villager baby grow-up: every tick, age all babies; grow up after ~5 min.
@@ -2264,180 +2285,6 @@ func clearLagRemoves(t corentity.EntityType, targets config.ClearLagTargets) boo
 	return false
 }
 
-// spawnTestMobs populates the world near the spawn point with a handful of
-// passive mobs so the entity system can be verified with a vanilla client.
-// This is removed or made config-driven in a later milestone.
-func (s *Server) spawnTestMobs() {
-	type spawn struct {
-		t    corentity.EntityType
-		x, z float64
-	}
-	mobs := []spawn{
-		{corentity.TypeCow, float64(s.spawnX + 6), float64(s.spawnZ)},
-		{corentity.TypeCow, float64(s.spawnX - 6), float64(s.spawnZ + 4)},
-		{corentity.TypePig, float64(s.spawnX), float64(s.spawnZ + 7)},
-		{corentity.TypeSheep, float64(s.spawnX + 4), float64(s.spawnZ - 5)},
-		{corentity.TypeChicken, float64(s.spawnX - 4), float64(s.spawnZ - 6)},
-	}
-	for _, m := range mobs {
-		id := s.game.NextEntityID()
-		uuid := newRandomUUID()
-		y := float64(s.world.SurfaceY(int(math.Floor(m.x)), int(math.Floor(m.z))) + 1)
-		e := corentity.New(id, uuid, m.t, m.x, y, m.z)
-		e.OnGround = true // spawned on the surface; skip first-tick gravity drop
-		s.world.Entities.Add(e)
-		slog.Info("spawned entity", "type", m.t, "id", id,
-			"x", m.x, "y", y, "z", m.z)
-	}
-}
-
-// spawnPassiveMobsNearPlayers provides a natural-spawn loop for passive mobs.
-// Cap scales with player count (10 per player, min 15) like vanilla.
-func (s *Server) spawnPassiveMobsNearPlayers() {
-	playerCount := 0
-	s.game.OnlinePlayers(func(_ *player.Player) { playerCount++ })
-	if playerCount == 0 {
-		return
-	}
-	cap := 10 * playerCount
-	if cap < 15 {
-		cap = 15
-	}
-
-	animals := 0
-	for _, e := range s.world.Entities.Snapshot() {
-		if e.Type != corentity.TypeVillager && isPassiveMob(e.Type) {
-			animals++
-		}
-	}
-	if animals >= cap {
-		return
-	}
-
-	passiveTypes := []corentity.EntityType{
-		corentity.TypeCow, corentity.TypeCow,
-		corentity.TypePig, corentity.TypeSheep, corentity.TypeSheep,
-		corentity.TypeChicken, corentity.TypeChicken,
-		corentity.TypeRabbit, corentity.TypeFox,
-	}
-
-	s.game.OnlinePlayers(func(p *player.Player) {
-		if animals >= cap {
-			return
-		}
-		// Spawn a group of 2-4 animals near the player.
-		groupSize := 2 + s.spawnRNG.Intn(3)
-		mobType := passiveTypes[s.spawnRNG.Intn(len(passiveTypes))]
-		angle := s.spawnRNG.Float64() * 2 * math.Pi
-		distance := 24 + s.spawnRNG.Float64()*40
-		cx := p.Position.X + math.Cos(angle)*distance
-		cz := p.Position.Z + math.Sin(angle)*distance
-		for i := 0; i < groupSize && animals < cap; i++ {
-			ox := cx + (s.spawnRNG.Float64()-0.5)*6
-			oz := cz + (s.spawnRNG.Float64()-0.5)*6
-			sy, syLoaded := s.world.SurfaceYIfLoaded(int(math.Floor(ox)), int(math.Floor(oz)))
-			if !syLoaded {
-				continue // don't trigger disk I/O on the tick goroutine
-			}
-			y := float64(sy + 1)
-			if canOccupy, occLoaded := s.world.CanEntityOccupyIfLoaded(ox, y, oz); !occLoaded || !canOccupy {
-				continue
-			}
-			e := corentity.New(s.game.NextEntityID(), newRandomUUID(), mobType, ox, y, oz)
-			e.OnGround = true
-			s.world.Entities.Add(e)
-			handler.BroadcastSpawnMob(e, s.sessions)
-			animals++
-			slog.Debug("passive mob spawned", "type", e.Type, "id", e.EntityID, "x", ox, "y", y, "z", oz)
-		}
-	})
-}
-
-// spawnHostileMobsNearPlayers spawns hostile mobs at night or underground.
-// Skipped entirely on peaceful difficulty.
-func (s *Server) spawnHostileMobsNearPlayers() {
-	playerCount := 0
-	s.game.OnlinePlayers(func(_ *player.Player) { playerCount++ })
-	if playerCount == 0 {
-		return
-	}
-
-	// Hostile cap: 70 per player in vanilla; we use 15 per player (scaled).
-	cap := 15 * playerCount
-	if cap < 20 {
-		cap = 20
-	}
-	hostiles := 0
-	for _, e := range s.world.Entities.Snapshot() {
-		if isHostileMob(e.Type) {
-			hostiles++
-		}
-	}
-	if hostiles >= cap {
-		return
-	}
-
-	// Vanilla spawns surface hostiles only at night (time 13000-23000).
-	// We allow underground spawning regardless of time.
-	timeOfDay := s.worldAge % 24000
-	isNight := timeOfDay >= 13000 && timeOfDay <= 23000
-
-	// Difficulty-based extra spawn weight.
-	extraChance := 0.0
-	switch s.cfg.Difficulty {
-	case "easy":
-		extraChance = 0.5
-	case "normal":
-		extraChance = 1.0
-	case "hard":
-		extraChance = 1.5
-	}
-
-	surfaceHostiles := []corentity.EntityType{
-		corentity.TypeZombie, corentity.TypeZombie,
-		corentity.TypeSkeleton, corentity.TypeSkeleton,
-		corentity.TypeCreeper,
-		corentity.TypeSpider,
-		corentity.TypeEnderman,
-		corentity.TypeWitch,
-	}
-
-	s.game.OnlinePlayers(func(p *player.Player) {
-		if hostiles >= cap {
-			return
-		}
-		if !isNight && s.spawnRNG.Float64() > extraChance*0.3 {
-			// During the day only a small fraction spawn (caves/shade).
-			return
-		}
-		// Spawn 1-3 hostiles per player per call.
-		groupSize := 1 + s.spawnRNG.Intn(3)
-		mobType := surfaceHostiles[s.spawnRNG.Intn(len(surfaceHostiles))]
-		angle := s.spawnRNG.Float64() * 2 * math.Pi
-		distance := 24 + s.spawnRNG.Float64()*56
-		cx := p.Position.X + math.Cos(angle)*distance
-		cz := p.Position.Z + math.Sin(angle)*distance
-		for i := 0; i < groupSize && hostiles < cap; i++ {
-			ox := cx + (s.spawnRNG.Float64()-0.5)*8
-			oz := cz + (s.spawnRNG.Float64()-0.5)*8
-			sy, syLoaded := s.world.SurfaceYIfLoaded(int(math.Floor(ox)), int(math.Floor(oz)))
-			if !syLoaded {
-				continue // don't trigger disk I/O on the tick goroutine
-			}
-			y := float64(sy + 1)
-			if canOccupy, occLoaded := s.world.CanEntityOccupyIfLoaded(ox, y, oz); !occLoaded || !canOccupy {
-				continue
-			}
-			e := corentity.New(s.game.NextEntityID(), newRandomUUID(), mobType, ox, y, oz)
-			e.OnGround = true
-			s.world.Entities.Add(e)
-			handler.BroadcastSpawnMob(e, s.sessions)
-			hostiles++
-			slog.Debug("hostile mob spawned", "type", e.Type, "id", e.EntityID, "x", ox, "y", y, "z", oz)
-		}
-	})
-}
-
 // isPassiveMob reports whether the given entity type uses passive-mob wander AI.
 func isPassiveMob(t corentity.EntityType) bool {
 	switch t {
@@ -2520,9 +2367,11 @@ func (s *Server) startPassiveMobPanic(e *corentity.Entity, hit coreworld.EntityD
 		dx, dz, distance = math.Cos(angle), math.Sin(angle), 1
 	}
 	ai.dirX, ai.dirZ = dx/distance, dz/distance
+	ai.targetX = e.Position.X + ai.dirX*10
+	ai.targetZ = e.Position.Z + ai.dirZ*10
+	ai.hasPathGoal = false
 	ai.panicTick = 60
 	ai.knockbackTick = 8
-	ai.pauseTick = 0
 	ai.wanderTick = 60
 	horizontal, vertical := 0.4, 0.4
 	if s.cfg != nil {
@@ -2559,10 +2408,21 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 
 	if ai.panicTick > 0 {
 		ai.panicTick--
-		e.VX, e.VZ = ai.dirX*0.28, ai.dirZ*0.28
-		e.Yaw = float32(math.Atan2(-ai.dirX, ai.dirZ) * 180 / math.Pi)
+		if s.world == nil || !s.navigateMob(e, ai, spatial.Vec3{X: ai.targetX, Y: e.Position.Y, Z: ai.targetZ}, pumpkinMovementSpeed(e.Type, 2.0)) {
+			e.VX, e.VZ = ai.dirX*0.28, ai.dirZ*0.28
+			e.Yaw = float32(math.Atan2(-ai.dirX, ai.dirZ) * 180 / math.Pi)
+		}
 		ai.sleepingWas = e.Sleeping
 		return wasAsleep != e.Sleeping
+	}
+	if isAquaticMob(e.Type) {
+		s.tickAquaticMobAI(e, ai)
+		ai.sleepingWas = e.Sleeping
+		return wasAsleep != e.Sleeping
+	}
+	// Pumpkin's priority-0 SwimGoal runs alongside MOVE goals.
+	if s.entityInWater(e) && ai.rng.Float64() < 0.8 {
+		e.VY = 0.12
 	}
 
 	// Assigned villagers return to their own bed at night and stay there until
@@ -2586,8 +2446,10 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 				return changed
 			}
 			e.Sleeping = false
-			e.VX, e.VZ = dx/distance*0.1, dz/distance*0.1
-			e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+			if !s.navigateMob(e, ai, spatial.Vec3{X: targetX, Y: float64(e.VillageBed.Y), Z: targetZ}, pumpkinMovementSpeed(e.Type, 1.0)) {
+				e.VX, e.VZ = dx/distance*0.1, dz/distance*0.1
+				e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+			}
 			changed := wasAsleep
 			ai.sleepingWas = false
 			return changed
@@ -2599,66 +2461,19 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 			return true
 		}
 	}
-
-	// While paused, hold still.
-	if ai.pauseTick > 0 {
-		ai.pauseTick--
-		e.VX, e.VZ = 0, 0
-		ai.sleepingWas = e.Sleeping
-		return wasAsleep != e.Sleeping
-	}
-
-	ai.wanderTick--
-
-	if ai.wanderTick <= 0 {
-		if ai.roaming {
-			// Roaming mobs: 25 % chance to pause instead of moving.
-			if ai.rng.Intn(4) == 0 {
-				ai.pauseTick = 40 + ai.rng.Intn(60) // 2–5 s pause
-				e.VX, e.VZ = 0, 0
-				ai.sleepingWas = e.Sleeping
-				return wasAsleep != e.Sleeping
-			}
-			angle := ai.rng.Float64() * 2 * math.Pi
-			ai.dirX = math.Cos(angle)
-			ai.dirZ = math.Sin(angle)
-		} else {
-			// Homed (villager): walk back toward home if too far, else random.
-			dx := e.Position.X - ai.homeX
-			dz := e.Position.Z - ai.homeZ
-			if dx*dx+dz*dz > 676 { // beyond 26 blocks: return toward village center
-				d := math.Sqrt(dx*dx + dz*dz)
-				ai.dirX = -dx / d
-				ai.dirZ = -dz / d
-			} else {
-				angle := ai.rng.Float64() * 2 * math.Pi
-				ai.dirX = math.Cos(angle)
-				ai.dirZ = math.Sin(angle)
-			}
+	if !ai.roaming {
+		dx, dz := e.Position.X-ai.homeX, e.Position.Z-ai.homeZ
+		if dx*dx+dz*dz > 26*26 {
+			ai.hasWanderGoal = false
+			s.navigateMob(e, ai, spatial.Vec3{X: ai.homeX, Y: e.Position.Y, Z: ai.homeZ}, pumpkinMovementSpeed(e.Type, 1.0))
+			ai.sleepingWas = e.Sleeping
+			return wasAsleep != e.Sleeping
 		}
-		ai.wanderTick = 60 + ai.rng.Intn(60) // 3–6 s before next direction change
 	}
-
-	// Walk speed: chickens are a bit slower; horses a bit faster.
-	speed := 0.1
-	switch e.Type {
-	case corentity.TypeChicken, corentity.TypeRabbit:
-		speed = 0.07
-	case corentity.TypeHorse, corentity.TypeDonkey, corentity.TypeMule:
-		speed = 0.18
-	case corentity.TypeSniffer:
-		speed = 0.06
-	}
-
-	e.VX = ai.dirX * speed
-	e.VZ = ai.dirZ * speed
-
-	if ai.dirX != 0 || ai.dirZ != 0 {
-		yawRad := math.Atan2(-ai.dirX, ai.dirZ)
-		e.Yaw = float32(yawRad * 180 / math.Pi)
-	}
+	s.tickPassiveIdleGoals(e, ai)
 	ai.sleepingWas = e.Sleeping
 	return wasAsleep != e.Sleeping
+
 }
 
 func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {
@@ -2713,32 +2528,59 @@ func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {
 func (s *Server) tickGolemAI(e *corentity.Entity) {
 	ai := s.mobAIFor(e)
 
+	if !ai.hasTarget && e.Type == corentity.TypeIronGolem {
+		nearest := 24.0
+		for _, candidate := range s.world.Entities.Snapshot() {
+			if candidate.Dead || candidate.Type != corentity.TypeZombie {
+				continue
+			}
+			distance := math.Hypot(candidate.Position.X-e.Position.X, candidate.Position.Z-e.Position.Z)
+			if distance < nearest {
+				nearest = distance
+				ai.hasTarget = true
+				ai.targetEntityID = candidate.EntityID
+				ai.targetX, ai.targetZ = candidate.Position.X, candidate.Position.Z
+			}
+		}
+	}
 	if !ai.hasTarget {
 		// No target: wander like a homed passive mob near the village centre.
 		_ = s.tickPassiveMobAI(e)
 		return
 	}
+	ai.hasWanderGoal = false
 
-	// Refresh target from the nearest player within 24 blocks.
 	nearestDist := 24.0
-	for _, sess := range s.allPlayerSessions() {
-		if sess.Player == nil || sess.Player.Dead ||
-			sess.Player.GameMode == player.GameModeCreative ||
-			sess.Player.GameMode == player.GameModeSpectator {
-			continue
+	if ai.targetEntityID != 0 {
+		if target, ok := s.world.Entities.Get(ai.targetEntityID); ok && !target.Dead && target.Type == corentity.TypeZombie {
+			ai.targetX, ai.targetZ = target.Position.X, target.Position.Z
+			nearestDist = math.Hypot(target.Position.X-e.Position.X, target.Position.Z-e.Position.Z)
+		} else {
+			ai.hasTarget = false
+			ai.targetEntityID = 0
 		}
-		dx := sess.Player.Position.X - e.Position.X
-		dz := sess.Player.Position.Z - e.Position.Z
-		d := math.Hypot(dx, dz)
-		if d < nearestDist {
-			ai.targetX = sess.Player.Position.X
-			ai.targetZ = sess.Player.Position.Z
-			nearestDist = d
+	} else {
+		// A player that struck the golem remains its revenge target.
+		for _, sess := range s.allPlayerSessions() {
+			if sess.Player == nil || sess.Player.Dead ||
+				sess.Player.GameMode == player.GameModeCreative ||
+				sess.Player.GameMode == player.GameModeSpectator {
+				continue
+			}
+			dx := sess.Player.Position.X - e.Position.X
+			dz := sess.Player.Position.Z - e.Position.Z
+			d := math.Hypot(dx, dz)
+			if d < nearestDist {
+				ai.targetX = sess.Player.Position.X
+				ai.targetZ = sess.Player.Position.Z
+				nearestDist = d
+			}
 		}
 	}
 	if nearestDist >= 24.0 {
 		// No player nearby — give up chase.
 		ai.hasTarget = false
+		ai.targetEntityID = 0
 		e.VX, e.VZ = 0, 0
 		return
 	}
@@ -2755,6 +2597,13 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 		e.VX, e.VZ = 0, 0
 		if ai.attackCooldown == 0 {
 			ai.attackCooldown = 20 // 1-second cooldown between hits
+			if ai.targetEntityID != 0 {
+				if target, ok := s.world.Entities.Get(ai.targetEntityID); ok && !target.Dead {
+					damage := float32(7 + ai.rng.Intn(15))
+					s.world.QueueEntityDamageFrom(target.EntityID, damage, e.Position.X, e.Position.Z)
+				}
+				return
+			}
 			// Find the nearest player, deal the iron golem's vanilla random
 			// 7-21 damage, and launch the target upward.
 			for _, sess := range s.allPlayerSessions() {
@@ -2790,11 +2639,11 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 		return
 	}
 
-	// Charge at the target at golem speed.
-	speed := 0.14
-	e.VX = dx / dist * speed
-	e.VZ = dz / dist * speed
-	e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	// Charge at the target through Pumpkin's navigator.
+	if !s.navigateMob(e, ai, spatial.Vec3{X: ai.targetX, Y: e.Position.Y, Z: ai.targetZ}, pumpkinMovementSpeed(e.Type, 1.0)) {
+		e.VX, e.VZ = dx/dist*0.14, dz/dist*0.14
+		e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	}
 }
 
 // tickHostileMobAI gives ground hostiles a common pursuit/melee controller.
@@ -2802,7 +2651,10 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	ai := s.mobAIFor(e)
 	var target *session.Session
-	nearest := 32.0
+	nearest := 16.0
+	if settings, ok := pumpkinEntitySpawnSettingsByType[string(e.Type)]; ok && settings.followRange > 0 {
+		nearest = settings.followRange
+	}
 	for _, candidate := range s.allPlayerSessions() {
 		if candidate.Player == nil || candidate.Player.Dead ||
 			candidate.Player.GameMode == player.GameModeCreative ||
@@ -2812,13 +2664,17 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 		dx := candidate.Player.Position.X - e.Position.X
 		dz := candidate.Player.Position.Z - e.Position.Z
 		distance := math.Hypot(dx, dz)
-		if distance < nearest && math.Abs(candidate.Player.Position.Y-e.Position.Y) <= 4 {
+		if distance < nearest && math.Abs(candidate.Player.Position.Y-e.Position.Y) <= 16 {
 			nearest = distance
 			target = candidate
 		}
 	}
 	if target == nil {
-		e.VX, e.VZ = 0, 0
+		if entityTarget := s.closestPumpkinEntityTarget(e, nearest); entityTarget != nil {
+			s.tickHostileAgainstEntity(e, ai, entityTarget)
+			return
+		}
+		ai.targetEntityID = 0
 		if e.Type == corentity.TypeCreeper && ai.fuseTick > 0 {
 			ai.fuseTick -= 2
 			if ai.fuseTick <= 0 {
@@ -2826,8 +2682,14 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 				handler.BroadcastCreeperSwell(e.EntityID, false, s.sessions)
 			}
 		}
+		if isAquaticMob(e.Type) {
+			s.tickAquaticMobAI(e, ai)
+		} else {
+			s.tickHostileIdleGoals(e, ai)
+		}
 		return
 	}
+	ai.hasWanderGoal = false
 
 	dx := target.Player.Position.X - e.Position.X
 	dz := target.Player.Position.Z - e.Position.Z
@@ -2868,6 +2730,9 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 		if ai.attackCooldown == 0 {
 			ai.attackCooldown = 20
 			damage := hostileAttackDamage(e.Type)
+			if settings, ok := pumpkinEntitySpawnSettingsByType[string(e.Type)]; ok && settings.attackDamage > 0 {
+				damage = float32(settings.attackDamage)
+			}
 			healthBefore, _, _, _ := target.Player.HealthSnapshot()
 			switch s.cfg.Difficulty {
 			case "easy":
@@ -2886,9 +2751,26 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	}
 
 	if distance > 0.001 {
-		speed := 0.1
-		e.VX = dx / distance * speed
-		e.VZ = dz / distance * speed
+		if isAquaticMob(e.Type) && s.entityInWater(e) {
+			speed := pumpkinMovementSpeed(e.Type, 1.0)
+			dy := target.Player.Position.Y - e.Position.Y
+			fullDistance := math.Sqrt(dx*dx + dy*dy + dz*dz)
+			if fullDistance > 0.001 {
+				e.VX, e.VY, e.VZ = dx/fullDistance*speed, dy/fullDistance*speed, dz/fullDistance*speed
+			}
+			return
+		}
+		if s.entityInWater(e) && ai.rng.Float64() < 0.8 {
+			e.VY = 0.12
+		}
+		modifier := 1.0
+		switch e.Type {
+		case corentity.TypeSkeleton, corentity.TypeBogged, corentity.TypeStray:
+			modifier = 1.2
+		}
+		if !s.navigateMob(e, ai, target.Player.Position, pumpkinMovementSpeed(e.Type, modifier)) {
+			e.VX, e.VZ = dx/distance*0.1, dz/distance*0.1
+		}
 	}
 }
 

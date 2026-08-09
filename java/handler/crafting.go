@@ -882,7 +882,11 @@ func craftingContainerSlot(p *player.Player, containerSlot int) *player.ItemStac
 }
 
 func findCraftingResult(grid [9]player.ItemStack) player.ItemStack {
-	for _, recipe := range javaRecipeDisplays {
+	return findCraftingResultIn(javaRecipeDisplays, grid)
+}
+
+func findCraftingResultIn(displays []recipeDisplay, grid [9]player.ItemStack) player.ItemStack {
+	for _, recipe := range displays {
 		if recipe.station != "minecraft:crafting_table" {
 			continue
 		}
@@ -912,6 +916,15 @@ func FindPersonalCraftingResult(grid [4]player.ItemStack) player.ItemStack {
 // FindCraftingTableResult resolves a canonical 3x3 crafting-table grid.
 func FindCraftingTableResult(grid [9]player.ItemStack) player.ItemStack {
 	return findCraftingResult(grid)
+}
+
+// FindBedrockCraftingTableResult includes current Pumpkin Bedrock recipes that
+// cannot be sent to GoCraft's Java 1.21.4 clients.
+func FindBedrockCraftingTableResult(grid [9]player.ItemStack) player.ItemStack {
+	if result := findCraftingResult(grid); !result.IsEmpty() {
+		return result
+	}
+	return findCraftingResultIn(pumpkinBedrockRecipeDisplays, grid)
 }
 
 func shapedGridMatches(recipe recipeDisplay, grid [9]player.ItemStack) bool {
