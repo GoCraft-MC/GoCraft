@@ -15,7 +15,7 @@ import (
 // normal block activation and placement. Returning true means the click was
 // consumed, including clicks that intentionally make no generic placement.
 func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteractIntent, target coreworld.Block) bool {
-	if p == nil || s.world == nil {
+	if p == nil || s.bedrockWorld() == nil {
 		return false
 	}
 	held := p.HeldItem()
@@ -25,12 +25,21 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	x, y, z := int(i.Position.X), int(i.Position.Y), int(i.Position.Z)
 	name, item := target.ResourceLocation(), held.ItemID
 
+	if item == "minecraft:ender_eye" && name == "minecraft:end_portal_frame" && target.Properties["eye"] != "true" {
+		replacement := bedrockCopyBlock(target)
+		replacement.Properties["eye"] = "true"
+		s.setBedrockActionBlock(x, y, z, replacement)
+		s.consumeBedrockHeldItem(p, 1)
+		s.tryActivateEndPortal(x, y, z)
+		return true
+	}
+
 	if bedrockIsHoe(item) {
 		var replacement coreworld.Block
 		changed := false
 		switch name {
 		case "minecraft:grass_block", "minecraft:dirt", "minecraft:dirt_path":
-			if i.Face != 0 && s.world.GetBlock(x, y+1, z).IsAir() {
+			if i.Face != 0 && s.bedrockWorld().GetBlock(x, y+1, z).IsAir() {
 				replacement = bedrockBlock("farmland", map[string]string{"moisture": "0"})
 				changed = true
 			}
@@ -69,7 +78,7 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 				return true
 			}
 		}
-		if i.Face != 0 && s.world.GetBlock(x, y+1, z).IsAir() {
+		if i.Face != 0 && s.bedrockWorld().GetBlock(x, y+1, z).IsAir() {
 			switch name {
 			case "minecraft:grass_block", "minecraft:dirt", "minecraft:coarse_dirt",
 				"minecraft:rooted_dirt", "minecraft:podzol", "minecraft:mycelium":
@@ -148,7 +157,7 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 				replacement.Properties["level"] = strconv.Itoa(level + 1)
 				s.setBedrockActionBlock(x, y, z, replacement)
 				if level+1 == 7 {
-					s.world.BlockPhysics.ScheduleComposter(x, y, z, s.worldAge, 20)
+					s.bedrockWorld().BlockPhysics.ScheduleComposter(x, y, z, s.worldAge, 20)
 				}
 			}
 			return true
@@ -223,7 +232,7 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 		}
 		dx, dy, dz := bedrockFaceOffset(i.Face)
 		px, py, pz := x+dx, y+dy, z+dz
-		if py < coreworld.WorldMinY || py > coreworld.WorldMaxY || !bedrockPlacementReplaceable(s.world.GetBlock(px, py, pz).ResourceLocation()) {
+		if py < coreworld.WorldMinY || py > coreworld.WorldMaxY || !bedrockPlacementReplaceable(s.bedrockWorld().GetBlock(px, py, pz).ResourceLocation()) {
 			return true
 		}
 		var placed coreworld.Block
@@ -262,17 +271,21 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 				return true
 			}
 		}
+		if name == "minecraft:obsidian" && s.igniteNetherPortal(x, y, z) {
+			s.finishBedrockIgniterUse(p, item)
+			return true
+		}
 		dx, dy, dz := bedrockFaceOffset(i.Face)
 		fx, fy, fz := x+dx, y+dy, z+dz
 		if fy >= coreworld.WorldMinY && fy <= coreworld.WorldMaxY &&
-			bedrockPlacementReplaceable(s.world.GetBlock(fx, fy, fz).ResourceLocation()) {
+			bedrockPlacementReplaceable(s.bedrockWorld().GetBlock(fx, fy, fz).ResourceLocation()) {
 			s.setBedrockActionBlock(fx, fy, fz, bedrockBlock("fire", nil))
 			s.finishBedrockIgniterUse(p, item)
 			return true
 		}
 	}
 
-	if crop, ok := bedrockCropForItem(item, name); ok && i.Face == 1 && s.world.GetBlock(x, y+1, z).IsAir() {
+	if crop, ok := bedrockCropForItem(item, name); ok && i.Face == 1 && s.bedrockWorld().GetBlock(x, y+1, z).IsAir() {
 		s.setBedrockActionBlock(x, y+1, z, crop)
 		s.consumeBedrockHeldItem(p, 1)
 		return true
@@ -301,7 +314,7 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 			if name == "minecraft:stone_button" || name == "minecraft:polished_blackstone_button" {
 				delay = 20
 			}
-			s.world.BlockPhysics.ScheduleButton(x, y, z, s.worldAge, delay)
+			s.bedrockWorld().BlockPhysics.ScheduleButton(x, y, z, s.worldAge, delay)
 		}
 		return true
 	}
@@ -330,7 +343,7 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		if block.Properties["half"] == "upper" {
 			otherY = y - 1
 		}
-		other := s.world.GetBlock(x, otherY, z)
+		other := s.bedrockWorld().GetBlock(x, otherY, z)
 		if other.ResourceLocation() == name {
 			other = bedrockCopyBlock(other)
 			other.Properties["open"] = nextOpen
@@ -451,7 +464,7 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		px, py, pz = x+dx, y+dy, z+dz
 	}
 	if py < coreworld.WorldMinY || py > coreworld.WorldMaxY ||
-		!bedrockPlacementReplaceable(s.world.GetBlock(px, py, pz).ResourceLocation()) {
+		!bedrockPlacementReplaceable(s.bedrockWorld().GetBlock(px, py, pz).ResourceLocation()) {
 		return true
 	}
 
@@ -460,7 +473,7 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		facing := bedrockPlayerFacing(p.Rotation.Yaw)
 		dx, dz := bedrockHorizontalOffset(facing)
 		hx, hz := px+dx, pz+dz
-		if !bedrockPlacementReplaceable(s.world.GetBlock(hx, py, hz).ResourceLocation()) {
+		if !bedrockPlacementReplaceable(s.bedrockWorld().GetBlock(hx, py, hz).ResourceLocation()) {
 			return true
 		}
 		foot := bedrockBlock(block.Name, map[string]string{"facing": facing, "occupied": "false", "part": "foot"})
@@ -471,8 +484,8 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		return true
 	}
 	if bedrockIsDoor(name) {
-		if py >= coreworld.WorldMaxY || !bedrockPlacementReplaceable(s.world.GetBlock(px, py+1, pz).ResourceLocation()) ||
-			!bedrockSolidSupport(s.world.GetBlock(px, py-1, pz)) {
+		if py >= coreworld.WorldMaxY || !bedrockPlacementReplaceable(s.bedrockWorld().GetBlock(px, py+1, pz).ResourceLocation()) ||
+			!bedrockSolidSupport(s.bedrockWorld().GetBlock(px, py-1, pz)) {
 			return true
 		}
 		facing := bedrockPlayerFacing(p.Rotation.Yaw)
@@ -496,10 +509,10 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		s.refreshBedrockWireConnections(px, py, pz)
 	}
 	if strings.HasSuffix(placed.ResourceLocation(), "_pressure_plate") {
-		s.world.BlockPhysics.SchedulePressurePlate(px, py, pz, s.worldAge, 1)
+		s.bedrockWorld().BlockPhysics.SchedulePressurePlate(px, py, pz, s.worldAge, 1)
 	}
 	if strings.HasSuffix(name, "_chest") || name == "minecraft:chest" || name == "minecraft:barrel" {
-		s.world.SetContainerItems(px, py, pz, name, nil)
+		s.bedrockWorld().SetContainerItems(px, py, pz, name, nil)
 	}
 	s.consumeBedrockHeldItem(p, 1)
 	return true
@@ -512,7 +525,7 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 	frontFacing := bedrockOppositeFacing(playerFacing)
 
 	if name == "minecraft:torch" || name == "minecraft:soul_torch" || name == "minecraft:redstone_torch" {
-		if i.Face == 1 && bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		if i.Face == 1 && bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			block.Properties = map[string]string{"facing": "up"}
 			return block, true
 		}
@@ -520,7 +533,7 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 			supportX, supportY, supportZ := x, y, z
 			dx, dy, dz := bedrockFaceOffset(i.Face)
 			supportX, supportY, supportZ = x-dx, y-dy, z-dz
-			if bedrockSolidSupport(s.world.GetBlock(supportX, supportY, supportZ)) {
+			if bedrockSolidSupport(s.bedrockWorld().GetBlock(supportX, supportY, supportZ)) {
 				block.Name = strings.Replace(block.Name, "_torch", "_wall_torch", 1)
 				if block.Name == "torch" {
 					block.Name = "wall_torch"
@@ -544,7 +557,7 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 	case strings.HasSuffix(name, "_fence_gate"):
 		props = map[string]string{"facing": playerFacing, "in_wall": "false", "open": "false", "powered": "false"}
 	case name == "minecraft:lever" || strings.HasSuffix(name, "_button"):
-		if !bedrockPlacementHasFaceSupport(s.world, x, y, z, i.Face) {
+		if !bedrockPlacementHasFaceSupport(s.bedrockWorld(), x, y, z, i.Face) {
 			return coreworld.Block{}, false
 		}
 		face := "wall"
@@ -556,22 +569,22 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		}
 		props = map[string]string{"face": face, "facing": facing, "powered": "false"}
 	case name == "minecraft:repeater":
-		if !bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		props = map[string]string{"delay": "1", "facing": playerFacing, "locked": "false", "powered": "false"}
 	case name == "minecraft:comparator":
-		if !bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		props = map[string]string{"facing": playerFacing, "mode": "compare", "powered": "false"}
 	case name == "minecraft:redstone_wire":
-		if !bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		props = s.bedrockRedstoneWireProperties(x, y, z)
 	case strings.HasSuffix(name, "_pressure_plate"):
-		if !bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		if name == "minecraft:light_weighted_pressure_plate" || name == "minecraft:heavy_weighted_pressure_plate" {
@@ -582,15 +595,15 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 	case name == "minecraft:lantern" || name == "minecraft:soul_lantern":
 		hanging := i.Face == 0
 		if hanging {
-			if !bedrockSolidSupport(s.world.GetBlock(x, y+1, z)) {
+			if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y+1, z)) {
 				return coreworld.Block{}, false
 			}
-		} else if !bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		} else if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		props = map[string]string{"hanging": strconv.FormatBool(hanging), "waterlogged": "false"}
 	case name == "minecraft:ladder":
-		if i.Face < 2 || i.Face > 5 || !bedrockPlacementHasFaceSupport(s.world, x, y, z, i.Face) {
+		if i.Face < 2 || i.Face > 5 || !bedrockPlacementHasFaceSupport(s.bedrockWorld(), x, y, z, i.Face) {
 			return coreworld.Block{}, false
 		}
 		props = map[string]string{"facing": bedrockFacingForFace(i.Face), "waterlogged": "false"}
@@ -608,12 +621,12 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 	case name == "minecraft:powered_rail" || name == "minecraft:detector_rail" || name == "minecraft:activator_rail":
 		props = map[string]string{"shape": "north_south", "powered": "false", "waterlogged": "false"}
 	case name == "minecraft:campfire" || name == "minecraft:soul_campfire":
-		if !bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		props = map[string]string{"facing": playerFacing, "lit": "true", "signal_fire": "false", "waterlogged": "false"}
 	case name == "minecraft:candle" || strings.HasSuffix(name, "_candle"):
-		if !bedrockSolidSupport(s.world.GetBlock(x, y-1, z)) {
+		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		props = map[string]string{"candles": "1", "lit": "false", "waterlogged": "false"}
@@ -631,6 +644,11 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		props = map[string]string{"charges": "0"}
 	case name == "minecraft:target":
 		props = map[string]string{"power": "0"}
+	case name == "minecraft:end_portal_frame":
+		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
+			return coreworld.Block{}, false
+		}
+		props = map[string]string{"facing": frontFacing, "eye": "false"}
 	case name == "minecraft:note_block":
 		props = map[string]string{"instrument": "harp", "note": "0", "powered": "false"}
 	case name == "minecraft:chest" || name == "minecraft:trapped_chest":
@@ -665,10 +683,153 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 }
 
 func (s *Server) setBedrockActionBlock(x, y, z int, block coreworld.Block) {
-	s.world.SetBlock(x, y, z, block)
+	s.bedrockWorld().SetBlock(x, y, z, block)
 	if s.sessions != nil {
 		handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block}, s.sessions)
 	}
+	s.refreshBedrockConnectedBlocks(x, y, z)
+}
+
+// refreshBedrockConnectedBlocks mirrors the neighbour-state pass used by
+// Pumpkin/vanilla after a block mutation. Walls carry explicit connection
+// states in the Bedrock palette, fence gates carry in_wall, and fences need a
+// neighbour UpdateBlock to make the client rebuild their dynamic model.
+func (s *Server) refreshBedrockConnectedBlocks(x, y, z int) {
+	if s.bedrockWorld() == nil {
+		return
+	}
+	positions := [][3]int{
+		{x, y, z},
+		{x - 1, y, z}, {x + 1, y, z}, {x, y, z - 1}, {x, y, z + 1},
+		{x, y - 1, z},
+	}
+	for _, pos := range positions {
+		px, py, pz := pos[0], pos[1], pos[2]
+		if py < coreworld.WorldMinY || py > coreworld.WorldMaxY {
+			continue
+		}
+		block := s.bedrockWorld().GetBlock(px, py, pz)
+		name := block.ResourceLocation()
+		switch {
+		case bedrockIsWall(name):
+			updated := s.bedrockWallState(px, py, pz, block)
+			if updated.Key() != block.Key() {
+				s.bedrockWorld().SetBlock(px, py, pz, updated)
+				if s.sessions != nil {
+					handler.BroadcastBlockChange(coreworld.BlockChange{X: px, Y: py, Z: pz, Block: updated}, s.sessions)
+				}
+			}
+		case strings.HasSuffix(name, "_fence_gate"):
+			updated := bedrockCopyBlock(block)
+			updated.Properties["in_wall"] = strconv.FormatBool(s.bedrockGateInWall(px, py, pz, block))
+			if updated.Key() != block.Key() {
+				s.bedrockWorld().SetBlock(px, py, pz, updated)
+				if s.sessions != nil {
+					handler.BroadcastBlockChange(coreworld.BlockChange{X: px, Y: py, Z: pz, Block: updated}, s.sessions)
+				}
+			}
+		case bedrockIsFence(name):
+			if s.bedrockListener != nil {
+				s.bedrockListener.BroadcastBlockChange(coreworld.BlockChange{X: px, Y: py, Z: pz, Block: block})
+			}
+		}
+	}
+}
+
+func (s *Server) bedrockWallState(x, y, z int, block coreworld.Block) coreworld.Block {
+	updated := bedrockCopyBlock(block)
+	connections := 0
+	above := s.bedrockWorld().GetBlock(x, y+1, z)
+	tall := bedrockWallTallAbove(above)
+	for _, direction := range []struct {
+		name   string
+		dx, dz int
+	}{
+		{name: "north", dz: -1},
+		{name: "east", dx: 1},
+		{name: "south", dz: 1},
+		{name: "west", dx: -1},
+	} {
+		connection := "none"
+		if bedrockWallConnectsTo(s.bedrockWorld().GetBlock(x+direction.dx, y, z+direction.dz), direction.name) {
+			connection = "low"
+			if tall {
+				connection = "tall"
+			}
+			connections++
+		}
+		updated.Properties[direction.name] = connection
+	}
+	north := updated.Properties["north"] != "none"
+	east := updated.Properties["east"] != "none"
+	south := updated.Properties["south"] != "none"
+	west := updated.Properties["west"] != "none"
+	post := connections < 2
+	if connections >= 2 {
+		switch {
+		case north && south:
+			post = east || west
+		case east && west:
+			post = north || south
+		default:
+			post = true
+		}
+	}
+	updated.Properties["up"] = strconv.FormatBool(post)
+	if _, ok := updated.Properties["waterlogged"]; !ok {
+		updated.Properties["waterlogged"] = "false"
+	}
+	return updated
+}
+
+func bedrockWallConnectsTo(block coreworld.Block, direction string) bool {
+	name := block.ResourceLocation()
+	if bedrockIsWall(name) || strings.HasSuffix(name, "_glass_pane") || name == "minecraft:glass_pane" || name == "minecraft:iron_bars" {
+		return true
+	}
+	if strings.HasSuffix(name, "_fence_gate") {
+		facing := block.Properties["facing"]
+		if direction == "north" || direction == "south" {
+			return facing == "east" || facing == "west"
+		}
+		return facing == "north" || facing == "south"
+	}
+	return bedrockWallFullFace(block)
+}
+
+func bedrockWallFullFace(block coreworld.Block) bool {
+	name := block.ResourceLocation()
+	if bedrockPlacementReplaceable(name) || coreworld.IsFluidBlock(name) || bedrockIsFence(name) ||
+		strings.HasSuffix(name, "_fence_gate") || strings.HasSuffix(name, "_door") ||
+		strings.HasSuffix(name, "_trapdoor") || strings.HasSuffix(name, "_button") ||
+		strings.HasSuffix(name, "_pressure_plate") || strings.Contains(name, "torch") ||
+		strings.HasSuffix(name, "_sign") || strings.HasSuffix(name, "_wall_sign") ||
+		name == "minecraft:lever" || name == "minecraft:ladder" || name == "minecraft:chain" || name == "minecraft:lantern" {
+		return false
+	}
+	return name != ""
+}
+
+func bedrockWallTallAbove(block coreworld.Block) bool {
+	return bedrockWallFullFace(block) || bedrockIsWall(block.ResourceLocation())
+}
+
+func (s *Server) bedrockGateInWall(x, y, z int, gate coreworld.Block) bool {
+	facing := gate.Properties["facing"]
+	if facing == "north" || facing == "south" {
+		return bedrockIsWall(s.bedrockWorld().GetBlock(x-1, y, z).ResourceLocation()) ||
+			bedrockIsWall(s.bedrockWorld().GetBlock(x+1, y, z).ResourceLocation())
+	}
+	return bedrockIsWall(s.bedrockWorld().GetBlock(x, y, z-1).ResourceLocation()) ||
+		bedrockIsWall(s.bedrockWorld().GetBlock(x, y, z+1).ResourceLocation())
+}
+
+func bedrockIsWall(name string) bool {
+	return strings.HasSuffix(name, "_wall")
+}
+
+func bedrockIsFence(name string) bool {
+	return strings.HasSuffix(name, "_fence") && !strings.HasSuffix(name, "_fence_gate")
 }
 
 func (s *Server) breakBedrockLinkedBlock(x, y, z int, block coreworld.Block) {
@@ -691,8 +852,33 @@ func (s *Server) breakBedrockLinkedBlock(x, y, z int, block coreworld.Block) {
 	default:
 		return
 	}
-	if partner := s.world.GetBlock(px, py, pz); partner.ResourceLocation() == name {
+	if partner := s.bedrockWorld().GetBlock(px, py, pz); partner.ResourceLocation() == name {
 		s.setBedrockActionBlock(px, py, pz, coreworld.Air)
+	}
+}
+
+// breakBedrockUnsupportedAbove applies vanilla's neighbour update immediately
+// after a player removes a supporting block. Doing this in the interaction
+// path also guarantees that the Bedrock UpdateBlock packets are ordered with
+// the original break instead of leaving vegetation floating client-side.
+func (s *Server) breakBedrockUnsupportedAbove(x, y, z int) {
+	world := s.bedrockWorld()
+	if world == nil {
+		return
+	}
+	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {
+		plant := world.GetBlock(x, plantY, z)
+		if !coreworld.RequiresGroundSupport(plant) || !world.GetBlock(x, plantY-1, z).IsAir() {
+			return
+		}
+		partnerY, partnerHalf, hasPartner := coreworld.DoublePlantPartnerY(plant, plantY)
+		s.setBedrockActionBlock(x, plantY, z, coreworld.Air)
+		if hasPartner {
+			partner := world.GetBlock(x, partnerY, z)
+			if partner.ResourceLocation() == plant.ResourceLocation() && partner.Properties["half"] == partnerHalf {
+				s.setBedrockActionBlock(x, partnerY, z, coreworld.Air)
+			}
+		}
 	}
 }
 
@@ -726,7 +912,7 @@ func (s *Server) replaceBedrockHeldItem(p *player.Player, replacement string) {
 
 func (s *Server) giveBedrockActionItem(p *player.Player, stack player.ItemStack) {
 	if !p.GiveItem(stack) {
-		s.newDroppedItem(stack, p.Position, 0)
+		s.newDroppedItemForPlayer(p, stack, p.Position, 0)
 	}
 }
 
@@ -960,14 +1146,14 @@ func (s *Server) bedrockRedstoneWireProperties(x, y, z int) map[string]string {
 		"north": {0, -1}, "south": {0, 1}, "west": {-1, 0}, "east": {1, 0},
 	} {
 		nx, nz := x+offset[0], z+offset[1]
-		neighbor := s.world.GetBlock(nx, y, nz)
+		neighbor := s.bedrockWorld().GetBlock(nx, y, nz)
 		if bedrockRedstoneConnectable(neighbor.ResourceLocation()) {
 			props[direction] = "side"
 			continue
 		}
-		if !bedrockSolidSupport(neighbor) && bedrockRedstoneConnectable(s.world.GetBlock(nx, y-1, nz).ResourceLocation()) {
+		if !bedrockSolidSupport(neighbor) && bedrockRedstoneConnectable(s.bedrockWorld().GetBlock(nx, y-1, nz).ResourceLocation()) {
 			props[direction] = "side"
-		} else if bedrockSolidSupport(neighbor) && bedrockRedstoneConnectable(s.world.GetBlock(nx, y+1, nz).ResourceLocation()) {
+		} else if bedrockSolidSupport(neighbor) && bedrockRedstoneConnectable(s.bedrockWorld().GetBlock(nx, y+1, nz).ResourceLocation()) {
 			props[direction] = "up"
 		}
 	}
@@ -982,7 +1168,7 @@ func bedrockRedstoneConnectable(name string) bool {
 func (s *Server) refreshBedrockWireConnections(x, y, z int) {
 	positions := [][3]int{{x, y, z}, {x - 1, y, z}, {x + 1, y, z}, {x, y, z - 1}, {x, y, z + 1}}
 	for _, pos := range positions {
-		wire := s.world.GetBlock(pos[0], pos[1], pos[2])
+		wire := s.bedrockWorld().GetBlock(pos[0], pos[1], pos[2])
 		if wire.ResourceLocation() != "minecraft:redstone_wire" {
 			continue
 		}

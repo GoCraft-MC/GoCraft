@@ -30,7 +30,9 @@ func TestNaturalSpawnerProducesLandMobsInLoadedSimulationChunks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{
-		cfg:      &config.Config{ViewDistance: 8, Difficulty: "normal"},
+		cfg: &config.Config{
+			ViewDistance: 8, Difficulty: "normal", MobSpawning: testMobSpawningConfig(),
+		},
 		game:     gameCore,
 		world:    world,
 		sessions: session.NewManager(),
@@ -70,7 +72,9 @@ func TestNaturalSpawnerProducesMobsInGeneratedOverworld(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{
-		cfg:      &config.Config{ViewDistance: 4, Difficulty: "normal"},
+		cfg: &config.Config{
+			ViewDistance: 4, Difficulty: "normal", MobSpawning: testMobSpawningConfig(),
+		},
 		game:     gameCore,
 		world:    world,
 		sessions: session.NewManager(),
@@ -121,7 +125,9 @@ func TestNaturalSpawnerProducesFishInGeneratedOcean(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{
-		cfg:      &config.Config{ViewDistance: 4, Difficulty: "normal"},
+		cfg: &config.Config{
+			ViewDistance: 4, Difficulty: "normal", MobSpawning: testMobSpawningConfig(),
+		},
 		game:     gameCore,
 		world:    world,
 		sessions: session.NewManager(),
@@ -151,7 +157,9 @@ func TestPumpkinChunkGenerationPopulationIncludesChickensForReportedSeed(t *test
 		}
 	}
 	s := &Server{
-		cfg:                     &config.Config{WorldSeed: reportedSeed},
+		cfg: &config.Config{
+			WorldSeed: reportedSeed, MobSpawning: testMobSpawningConfig(),
+		},
 		game:                    game.New(),
 		world:                   world,
 		creaturePopulatedChunks: make(map[[2]int32]struct{}),
@@ -230,7 +238,10 @@ func TestPumpkinChunkPopulationSelectsLeastRepresentedHerd(t *testing.T) {
 }
 
 func TestPumpkinCategoryCapsScaleAtSeventeenBySeventeenChunks(t *testing.T) {
-	state := naturalSpawnState{spawnableChunkCount: pumpkinSpawnableChunkDenominator}
+	state := naturalSpawnState{
+		spawnableChunkCount: pumpkinSpawnableChunkDenominator,
+		categoryCaps:        (&Server{}).naturalSpawnCategoryCaps(),
+	}
 	want := []int{70, 10, 15, 5, 5, 5, 20, -1}
 	for category, expected := range want {
 		if got := state.globalCap(mobCategory(category)); got != expected {
@@ -239,8 +250,28 @@ func TestPumpkinCategoryCapsScaleAtSeventeenBySeventeenChunks(t *testing.T) {
 	}
 }
 
+func TestConfiguredNaturalSpawnCapsReplacePumpkinLimits(t *testing.T) {
+	s := &Server{cfg: &config.Config{MobSpawning: config.MobSpawningConfig{
+		Hostile: 12, Passive: 8, Ambient: 4, Axolotls: 3,
+		UndergroundWaterCreatures: 2, WaterCreatures: 1, WaterAmbient: 0,
+	}}}
+	state := naturalSpawnState{
+		spawnableChunkCount: pumpkinSpawnableChunkDenominator,
+		categoryCaps:        s.naturalSpawnCategoryCaps(),
+	}
+	want := []int{12, 8, 4, 3, 2, 1, 0, -1}
+	for category, expected := range want {
+		if got := state.globalCap(mobCategory(category)); got != expected {
+			t.Fatalf("category %d configured cap = %d, want %d", category, got, expected)
+		}
+	}
+}
+
 func TestPumpkinPersistentSpawnCategoriesUseFourHundredTickGate(t *testing.T) {
-	state := naturalSpawnState{spawnableChunkCount: pumpkinSpawnableChunkDenominator}
+	state := naturalSpawnState{
+		spawnableChunkCount: pumpkinSpawnableChunkDenominator,
+		categoryCaps:        (&Server{}).naturalSpawnCategoryCaps(),
+	}
 	withoutPassives := filteredSpawningCategories(&state, true, false)
 	if containsMobCategory(withoutPassives, mobCategoryCreature) || containsMobCategory(withoutPassives, mobCategoryWaterCreature) {
 		t.Fatalf("persistent categories enabled outside passive cycle: %v", withoutPassives)
@@ -370,4 +401,11 @@ func containsMobCategory(categories []mobCategory, target mobCategory) bool {
 		}
 	}
 	return false
+}
+
+func testMobSpawningConfig() config.MobSpawningConfig {
+	return config.MobSpawningConfig{
+		Hostile: 70, Passive: 16, Ambient: 15, Axolotls: 5,
+		UndergroundWaterCreatures: 5, WaterCreatures: 5, WaterAmbient: 20,
+	}
 }

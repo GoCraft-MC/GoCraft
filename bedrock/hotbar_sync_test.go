@@ -67,7 +67,7 @@ func TestInventoryMutationDoesNotRebootstrapHotbarSelection(t *testing.T) {
 func TestUseItemActionSlotDoesNotBecomeASelectionUpdate(t *testing.T) {
 	bus := intent.NewBus(1, 4)
 	l := &Listener{bus: bus}
-	l.handleUseItemTransaction([16]byte{93}, &protocol.UseItemTransactionData{
+	l.handleUseItemTransaction(nil, [16]byte{93}, &protocol.UseItemTransactionData{
 		ActionType: protocol.UseItemActionClickBlock,
 		HotBarSlot: 6,
 	})
@@ -86,6 +86,55 @@ func TestUseItemActionSlotDoesNotBecomeASelectionUpdate(t *testing.T) {
 	}
 	if !interactionFound {
 		t.Fatal("valid use-item action was not queued")
+	}
+}
+
+func TestClickAirStartsFoodUseWithoutChangingSelection(t *testing.T) {
+	bus := intent.NewBus(1, 4)
+	l := &Listener{bus: bus}
+	l.handleUseItemTransaction(nil, [16]byte{94}, &protocol.UseItemTransactionData{
+		ActionType: protocol.UseItemActionClickAir,
+		HotBarSlot: 3,
+	})
+
+	var startFound bool
+	for _, gameplay := range bus.Drain().Gameplay {
+		switch value := gameplay.(type) {
+		case intent.HotbarIntent:
+			t.Fatalf("click-air action changed persistent selection to %d", value.Slot)
+		case intent.StartUseItemIntent:
+			startFound = true
+			if value.HotbarSlot != 3 {
+				t.Fatalf("use-item slot = %d, want 3", value.HotbarSlot)
+			}
+		}
+	}
+	if !startFound {
+		t.Fatal("clicking air with food did not queue a start-use intent")
+	}
+}
+
+func TestRepeatedBedrockBlockUseTransactionIsCollapsed(t *testing.T) {
+	bus := intent.NewBus(1, 8)
+	l := &Listener{bus: bus}
+	session := &bedrockSession{}
+	data := &protocol.UseItemTransactionData{
+		ActionType:    protocol.UseItemActionClickBlock,
+		TriggerType:   protocol.TriggerTypePlayerInput,
+		BlockPosition: protocol.BlockPos{4, 64, 7},
+		BlockFace:     1,
+		HotBarSlot:    0,
+	}
+	l.handleUseItemTransaction(session, [16]byte{95}, data)
+	l.handleUseItemTransaction(session, [16]byte{95}, data)
+	if got := len(bus.Drain().Gameplay); got != 1 {
+		t.Fatalf("duplicate initial block uses queued = %d, want 1", got)
+	}
+
+	data.TriggerType = protocol.TriggerTypeSimulationTick
+	l.handleUseItemTransaction(session, [16]byte{95}, data)
+	if got := len(bus.Drain().Gameplay); got != 0 {
+		t.Fatalf("held-use simulation ticks queued = %d, want 0", got)
 	}
 }
 

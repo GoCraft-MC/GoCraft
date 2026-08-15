@@ -164,7 +164,7 @@ func (s *Server) closestTemptingPlayer(e *corentity.Entity, maximumDistance floa
 		}
 		dx, dy, dz := candidate.Position.X-e.Position.X, candidate.Position.Y-e.Position.Y, candidate.Position.Z-e.Position.Z
 		distance := dx*dx + dy*dy + dz*dz
-		if distance < closestDistance {
+		if distance < closestDistance && s.mobHasLineOfSight(e, candidate.Position, 1.62) {
 			closest, closestDistance = candidate, distance
 		}
 	})
@@ -183,7 +183,7 @@ func (s *Server) closestVisiblePlayer(e *corentity.Entity, maximumDistance float
 		}
 		dx, dy, dz := candidate.Position.X-e.Position.X, candidate.Position.Y-e.Position.Y, candidate.Position.Z-e.Position.Z
 		distance := dx*dx + dy*dy + dz*dz
-		if distance < closestDistance {
+		if distance < closestDistance && s.mobHasLineOfSight(e, candidate.Position, 1.62) {
 			closest, closestDistance = candidate, distance
 		}
 	})

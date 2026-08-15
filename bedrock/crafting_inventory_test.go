@@ -426,6 +426,42 @@ func TestCraftingInputResponseUsesPumpkinChangedSlotsOnly(t *testing.T) {
 	}
 }
 
+func TestAutoCraftRequestCarriesRepetitionCount(t *testing.T) {
+	p := player.New([16]byte{33}, "auto-crafter", player.ClientEditionBedrock)
+	take := &protocol.TakeStackRequestAction{}
+	take.Count = 32
+	take.Source = protocol.StackRequestSlotInfo{
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerCreatedOutput}, Slot: 50,
+	}
+	take.Destination = protocol.StackRequestSlotInfo{
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerCursor}, Slot: 0,
+	}
+	actions, ok := (&Listener{}).canonicalInventoryActions(p, []protocol.StackRequestAction{
+		&protocol.AutoCraftRecipeStackRequestAction{NumberOfCrafts: 8},
+		take,
+	})
+	if !ok || len(actions) != 1 {
+		t.Fatalf("auto-craft translation = %t/%+v", ok, actions)
+	}
+	if actions[0].CraftCount != 8 || actions[0].Count != 32 || actions[0].Source != 0 {
+		t.Fatalf("translated auto-craft = %+v", actions[0])
+	}
+}
+
+func TestStandaloneConsumeRequestMapsToAuthoritativeFoodUse(t *testing.T) {
+	p := player.New([16]byte{34}, "eater", player.ClientEditionBedrock)
+	consume := &protocol.ConsumeStackRequestAction{}
+	consume.Count = 1
+	consume.Source = protocol.StackRequestSlotInfo{
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerHotBar}, Slot: 2,
+	}
+	actions, ok := (&Listener{}).canonicalInventoryActions(p, []protocol.StackRequestAction{consume})
+	if !ok || len(actions) != 1 || actions[0].Kind != intent.InventoryActionConsume ||
+		actions[0].Source != player.HotbarStart+2 || actions[0].Count != 1 {
+		t.Fatalf("consume translation = %t/%+v", ok, actions)
+	}
+}
+
 func TestPersonalCraftingSlotPacketsDoNotOverlapHotbar(t *testing.T) {
 	p := player.New([16]byte{32}, "crafter", player.ClientEditionBedrock)
 	session := &bedrockSession{nextStackNetworkID: 1}

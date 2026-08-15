@@ -6,6 +6,8 @@ import (
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
+	"GoCraft/core/spatial"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
 )
 
@@ -31,6 +33,89 @@ func TestBedrockInventoryCanEquipArmorAuthoritatively(t *testing.T) {
 	}
 	if p.Inventory[5].ItemID != "minecraft:iron_helmet" || !p.Inventory[player.HotbarStart].IsEmpty() {
 		t.Fatalf("unexpected inventory after equip: helmet=%+v source=%+v", p.Inventory[5], p.Inventory[player.HotbarStart])
+	}
+}
+
+func TestBedrockChestAcceptsAndPersistsItems(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	pos := spatial.BlockPos{X: 2, Y: 64, Z: 3}
+	w.SetBlock(2, 64, 3, coreworld.Block{Namespace: "minecraft", Name: "chest", Properties: map[string]string{
+		"facing": "north", "type": "single", "waterlogged": "false",
+	}})
+	w.SetContainerItems(2, 64, 3, "minecraft:chest", []coreworld.ContainerItem{{
+		Slot: 4, ItemID: "minecraft:apple", Count: 3,
+	}})
+
+	g := game.New()
+	p := player.New([16]byte{41}, "bedrock-chest", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:oak_log", Count: 12}
+	_ = g.AddPlayer(p)
+	s := &Server{game: g, world: w, sessions: session.NewManager()}
+	s.openBedrockGenericContainer(p, pos, "minecraft:chest")
+	if len(p.ContainerSlots) != 27 || p.ContainerSlots[4].ItemID != "minecraft:apple" {
+		t.Fatalf("loaded chest = %#v", p.ContainerSlots)
+	}
+
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{PlayerUUID: p.UUID, Actions: []intent.InventoryAction{{
+		Kind: intent.InventoryActionMove, Source: player.HotbarStart,
+		Destination: intent.InventoryContainerStart + 7, Count: 12,
+	}}, Done: done})
+	if result := <-done; !result.Accepted {
+		t.Fatal("placing an item in the open chest was rejected")
+	}
+	if !p.Inventory[player.HotbarStart].IsEmpty() || p.ContainerSlots[7].Count != 12 {
+		t.Fatalf("chest move did not apply: source=%+v destination=%+v", p.Inventory[player.HotbarStart], p.ContainerSlots[7])
+	}
+
+	items := w.ContainerItems(2, 64, 3)
+	foundLog := false
+	for _, item := range items {
+		if item.Slot == 7 && item.ItemID == "minecraft:oak_log" && item.Count == 12 {
+			foundLog = true
+		}
+	}
+	if !foundLog {
+		t.Fatalf("chest contents were not persisted: %+v", items)
+	}
+}
+
+func TestBedrockCartographyTableAcceptsInputsAndReturnsThemOnClose(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	g := game.New()
+	p := player.New([16]byte{44}, "bedrock-cartographer", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:filled_map", Count: 1}
+	p.Inventory[player.HotbarStart+1] = player.ItemStack{ItemID: "minecraft:paper", Count: 1}
+	_ = g.AddPlayer(p)
+	s := &Server{game: g, world: w, sessions: session.NewManager()}
+	s.openBedrockWorkstation(p, spatial.BlockPos{X: 1, Y: 64, Z: 1}, "minecraft:cartography_table")
+
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{PlayerUUID: p.UUID, Actions: []intent.InventoryAction{
+		{Kind: intent.InventoryActionMove, Source: player.HotbarStart, Destination: intent.InventoryContainerStart, Count: 1},
+		{Kind: intent.InventoryActionMove, Source: player.HotbarStart + 1, Destination: intent.InventoryContainerStart + 1, Count: 1},
+	}, Done: done})
+	if result := <-done; !result.Accepted {
+		t.Fatal("cartography inputs were rejected")
+	}
+	if p.ContainerSlots[0].ItemID != "minecraft:filled_map" || p.ContainerSlots[1].ItemID != "minecraft:paper" {
+		t.Fatalf("cartography slots = %+v", p.ContainerSlots)
+	}
+
+	s.applyBedrockContainerClose(intent.ContainerCloseIntent{PlayerUUID: p.UUID, WindowID: 1})
+	if p.OpenContainerKind != "" || len(p.ContainerSlots) != 0 {
+		t.Fatalf("cartography screen remained open: %q/%+v", p.OpenContainerKind, p.ContainerSlots)
+	}
+	foundMap, foundPaper := false, false
+	for _, stack := range p.Inventory {
+		foundMap = foundMap || stack.ItemID == "minecraft:filled_map" && stack.Count == 1
+		foundPaper = foundPaper || stack.ItemID == "minecraft:paper" && stack.Count == 1
+	}
+	if !foundMap || !foundPaper {
+		t.Fatalf("cartography inputs were not returned: map=%v paper=%v inventory=%+v", foundMap, foundPaper, p.Inventory)
 	}
 }
 
@@ -195,6 +280,29 @@ func TestBedrockPersonalCraftingProducesAndConsumesRecipe(t *testing.T) {
 	}
 }
 
+func TestBedrockAutoCraftConsumesAllRequestedIngredients(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{43}, "auto-crafter", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[1] = player.ItemStack{ItemID: "minecraft:oak_log", Count: 8}
+	_ = g.AddPlayer(p)
+	s := &Server{game: g, sessions: session.NewManager()}
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{PlayerUUID: p.UUID, Actions: []intent.InventoryAction{{
+		Kind: intent.InventoryActionMove, Source: 0, Destination: intent.InventoryCursorSlot,
+		Count: 32, CraftCount: 8,
+	}}, Done: done})
+	if result := <-done; !result.Accepted {
+		t.Fatal("valid eight-batch Bedrock craft was rejected")
+	}
+	if !p.Inventory[1].IsEmpty() || !p.Inventory[0].IsEmpty() {
+		t.Fatalf("crafting inputs were not exhausted: input=%+v output=%+v", p.Inventory[1], p.Inventory[0])
+	}
+	if p.CarriedItem.ItemID != "minecraft:oak_planks" || p.CarriedItem.Count != 32 {
+		t.Fatalf("crafted cursor stack = %+v, want 32 oak planks", p.CarriedItem)
+	}
+}
+
 func TestBedrockPersonalCraftingAcceptsEveryJava1214Plank(t *testing.T) {
 	planks := []string{
 		"minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks",
@@ -286,5 +394,37 @@ func TestBedrockCraftingTableCloseClearsStateAndReturnsIngredients(t *testing.T)
 	}
 	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:oak_log" || got.Count != 1 {
 		t.Fatalf("returned inventory item = %+v, want oak log", got)
+	}
+}
+
+func TestBedrockInventoryDropRemovesItemsAndSpawnsEntity(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	g := game.New()
+	p := player.New([16]byte{75}, "bedrock-dropper", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Position = spatial.Vec3{X: 3, Y: 65, Z: 4}
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:diamond", Count: 5}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g, world: w, sessions: session.NewManager()}
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{
+		PlayerUUID: p.UUID,
+		Actions: []intent.InventoryAction{{
+			Kind: intent.InventoryActionDrop, Source: player.HotbarStart, Count: 2,
+		}},
+		Done: done,
+	})
+	if result := <-done; !result.Accepted {
+		t.Fatal("valid Bedrock drop was rejected")
+	}
+	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:diamond" || got.Count != 3 {
+		t.Fatalf("source after drop = %+v, want three diamonds", got)
+	}
+	entities := w.Entities.Snapshot()
+	if len(entities) != 1 || entities[0].ItemID != "minecraft:diamond" || entities[0].ItemCount != 2 {
+		t.Fatalf("dropped entities = %+v", entities)
 	}
 }

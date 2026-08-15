@@ -18,6 +18,11 @@ type furnaceState struct {
 	CookDuration int
 }
 
+type furnaceKey struct {
+	Dimension int32
+	Position  spatial.BlockPos
+}
+
 func loadFurnaceSlots(w *coreworld.World, pos spatial.BlockPos) []player.ItemStack {
 	slots := make([]player.ItemStack, furnaceSlotCount)
 	for _, item := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
@@ -45,17 +50,23 @@ func (s *Server) openBedrockFurnace(p *player.Player, pos spatial.BlockPos, bloc
 	p.OpenContainerPos = pos
 	p.OpenContainerPartnerPos = spatial.BlockPos{}
 	p.OpenContainerHasPartner = false
-	p.ContainerSlots = loadFurnaceSlots(s.world, pos)
-	if s.furnaces[pos] == nil {
-		s.furnaces[pos] = &furnaceState{}
-	}
+	p.ContainerSlots = loadFurnaceSlots(s.worldForPlayer(p), pos)
+	s.furnaceStateForDimension(p.Dimension, pos)
 }
 
 func (s *Server) furnaceStateFor(pos spatial.BlockPos) *furnaceState {
-	state := s.furnaces[pos]
+	return s.furnaceStateForDimension(dimensionOverworld, pos)
+}
+
+func (s *Server) furnaceStateForDimension(dimension int32, pos spatial.BlockPos) *furnaceState {
+	if s.furnaces == nil {
+		s.furnaces = make(map[furnaceKey]*furnaceState)
+	}
+	key := furnaceKey{Dimension: dimension, Position: pos}
+	state := s.furnaces[key]
 	if state == nil {
 		state = &furnaceState{}
-		s.furnaces[pos] = state
+		s.furnaces[key] = state
 	}
 	return state
 }
@@ -91,18 +102,20 @@ func (s *Server) tickFurnaces() {
 	// and attach a simulation state on the next canonical tick.
 	s.game.OnlinePlayers(func(p *player.Player) {
 		if handler.IsFurnaceContainer(p.OpenContainerKind) {
-			s.furnaceStateFor(p.OpenContainerPos)
+			s.furnaceStateForDimension(p.Dimension, p.OpenContainerPos)
 		}
 	})
 
-	for pos, state := range s.furnaces {
-		block := s.world.GetBlock(int(pos.X), int(pos.Y), int(pos.Z))
+	for key, state := range s.furnaces {
+		pos := key.Position
+		dimensionWorld := s.worldForDimension(key.Dimension)
+		block := dimensionWorld.GetBlock(int(pos.X), int(pos.Y), int(pos.Z))
 		if !handler.IsFurnaceContainer(block.ResourceLocation()) {
-			delete(s.furnaces, pos)
+			delete(s.furnaces, key)
 			continue
 		}
 		station := block.ResourceLocation()
-		slots := loadFurnaceSlots(s.world, pos)
+		slots := loadFurnaceSlots(dimensionWorld, pos)
 		before := [furnaceSlotCount]player.ItemStack{}
 		copy(before[:], slots)
 
@@ -154,7 +167,7 @@ func (s *Server) tickFurnaces() {
 		copy(after[:], slots)
 		slotsChanged := before != after
 		if slotsChanged {
-			persistFurnaceSlots(s.world, pos, station, slots)
+			persistFurnaceSlots(dimensionWorld, pos, station, slots)
 		}
 
 		lit := state.BurnTime > 0
@@ -169,12 +182,14 @@ func (s *Server) tickFurnaces() {
 			} else {
 				updated.Properties["lit"] = "false"
 			}
-			s.world.SetBlock(int(pos.X), int(pos.Y), int(pos.Z), updated)
-			handler.BroadcastBlockChange(coreworld.BlockChange{X: int(pos.X), Y: int(pos.Y), Z: int(pos.Z), Block: updated}, s.sessions)
+			dimensionWorld.SetBlock(int(pos.X), int(pos.Y), int(pos.Z), updated)
+			if key.Dimension == dimensionOverworld {
+				handler.BroadcastBlockChange(coreworld.BlockChange{X: int(pos.X), Y: int(pos.Y), Z: int(pos.Z), Block: updated}, s.sessions)
+			}
 		}
 
 		s.game.OnlinePlayers(func(p *player.Player) {
-			if !handler.IsFurnaceContainer(p.OpenContainerKind) || p.OpenContainerPos != pos {
+			if p.Dimension != key.Dimension || !handler.IsFurnaceContainer(p.OpenContainerKind) || p.OpenContainerPos != pos {
 				return
 			}
 			if slotsChanged {

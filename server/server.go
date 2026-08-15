@@ -27,6 +27,7 @@ import (
 	"net/http"
 	_ "net/http/pprof" // registers /debug/pprof handlers on the default mux
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -71,16 +72,24 @@ type Server struct {
 
 	// World and Java encoding resources.
 	world       *coreworld.World
-	spawnX      int
-	spawnZ      int
-	regProvider registry.Provider
-	chunkSender *javaworld.Sender
-	sessions    *session.Manager
-	cmds        *handler.Dispatcher
+	netherWorld *coreworld.World
+	endWorld    *coreworld.World
+	// bedrockActionWorld is set only while the sole simulation goroutine is
+	// applying one Bedrock block intent, allowing shared action helpers to work
+	// in all dimensions without changing their public shape.
+	bedrockActionWorld *coreworld.World
+	spawnX             int
+	spawnZ             int
+	regProvider        registry.Provider
+	chunkSender        *javaworld.Sender
+	sessions           *session.Manager
+	cmds               *handler.Dispatcher
 
 	// Bedrock adapter (nil when bedrock.enabled = false).
 	bedrockListener *bedrock.Listener
 	javaCrossKnown  map[[16]byte]map[[16]byte]crossPlayerView
+	playerStore     *playerDataStore
+	bedrockBlockUse map[[16]byte]bedrockRecentBlockUse
 
 	// intentBus is the cross-adapter simulation command bus.
 	// Both Java (M14.1+) and Bedrock handlers post intents here; the tick
@@ -98,7 +107,7 @@ type Server struct {
 	worldAge                int64
 	spawnRNG                *rand.Rand
 	creaturePopulatedChunks map[[2]int32]struct{}
-	furnaces                map[spatial.BlockPos]*furnaceState
+	furnaces                map[furnaceKey]*furnaceState
 
 	// sleepAllTick is the worldAge tick at which ALL online players were first
 	// detected sleeping.  0 means nobody is sleeping or the check hasn't fired.
@@ -125,6 +134,7 @@ type mobAI struct {
 	targetZ        float64    // hostile AI: current target world Z
 	targetEntityID int32
 	attackCooldown int // ticks until next melee swing
+	bowDrawTicks   int // ticks remaining before a skeleton releases its arrow
 	fuseTick       int // creeper fuse progress (30 ticks to detonation)
 	path           []spatial.Vec3
 	pathIndex      int
@@ -144,6 +154,14 @@ type crossPlayerView struct {
 	inventory [player.InventorySize]player.ItemStack
 	heldSlot  int
 	dead      bool
+}
+
+type bedrockRecentBlockUse struct {
+	dimension int32
+	position  spatial.BlockPos
+	face      int32
+	slot      int32
+	at        time.Time
 }
 
 // New creates a Server with the given configuration.
@@ -167,10 +185,12 @@ func New(cfg *config.Config) (*Server, error) {
 	// Open Anvil persistence when WorldDir is configured; fall back to a
 	// seeded generation-only world otherwise. A real level.dat is authoritative
 	// for the seed and spawn so generated fallback chunks do not form seams.
-	var storage coreworld.Storage
+	var storage, netherStorage, endStorage coreworld.Storage
+	var playerStore *playerDataStore
 	spawnX, spawnZ := 0, 0
 	var initialWorldAge int64
 	if cfg.WorldStorage == config.WorldStorageDisk {
+		playerStore = newPlayerDataStore(filepath.Join(cfg.WorldDir, "playerdata"))
 		if metadata, metadataErr := anvil.LoadLevelMetadata(cfg.WorldDir); metadataErr == nil {
 			cfg.WorldSeed = metadata.Seed
 			spawnX, spawnZ = int(metadata.SpawnX), int(metadata.SpawnZ)
@@ -209,6 +229,15 @@ func New(cfg *config.Config) (*Server, error) {
 			return nil, fmt.Errorf("server: opening Anvil storage %s: %w", cfg.WorldDir, err)
 		}
 		storage = st
+		netherStorageInstance, storageErr := anvil.NewStorage(filepath.Join(cfg.WorldDir, "DIM-1"))
+		if storageErr != nil {
+			return nil, fmt.Errorf("server: opening Nether storage: %w", storageErr)
+		}
+		endStorageInstance, storageErr := anvil.NewStorage(filepath.Join(cfg.WorldDir, "DIM1"))
+		if storageErr != nil {
+			return nil, fmt.Errorf("server: opening End storage: %w", storageErr)
+		}
+		netherStorage, endStorage = netherStorageInstance, endStorageInstance
 		debuglog.Info(debuglog.WorldLoading, "server: opened Anvil world", "worldDir", cfg.WorldDir, "storage", "disk")
 	} else {
 		// In-memory world: resolve seed without persisting.
@@ -248,7 +277,11 @@ func New(cfg *config.Config) (*Server, error) {
 
 	debuglog.Info(debuglog.WorldLoading, "server: world seed resolved", "seed", cfg.WorldSeed)
 	worldInstance := coreworld.New(coreworld.NewOverworldGenerator(cfg.WorldSeed), storage, cfg.Villagers)
+	netherWorld := coreworld.New(coreworld.NewNetherGenerator(cfg.WorldSeed^0x4e6574686572), netherStorage, false)
+	endWorld := coreworld.New(coreworld.NewEndGenerator(cfg.WorldSeed^0x456e64), endStorage, false)
 	worldInstance.SetMaxCachedChunks(cfg.MaxCachedChunks)
+	netherWorld.SetMaxCachedChunks(cfg.MaxCachedChunks)
+	endWorld.SetMaxCachedChunks(cfg.MaxCachedChunks)
 
 	timings := newTickTimings(func() (int, int) {
 		return gameCore.OnlineCount(), cfg.MaxPlayers
@@ -260,6 +293,8 @@ func New(cfg *config.Config) (*Server, error) {
 		privKey:                 privKey,
 		pubKeyDER:               pubKeyDER,
 		world:                   worldInstance,
+		netherWorld:             netherWorld,
+		endWorld:                endWorld,
 		spawnX:                  spawnX,
 		spawnZ:                  spawnZ,
 		regProvider:             &registry.VanillaProvider{},
@@ -271,9 +306,11 @@ func New(cfg *config.Config) (*Server, error) {
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
 		creaturePopulatedChunks: make(map[[2]int32]struct{}),
 		worldAge:                initialWorldAge,
-		furnaces:                make(map[spatial.BlockPos]*furnaceState),
+		furnaces:                make(map[furnaceKey]*furnaceState),
 		timings:                 timings,
 		javaCrossKnown:          make(map[[16]byte]map[[16]byte]crossPlayerView),
+		playerStore:             playerStore,
+		bedrockBlockUse:         make(map[[16]byte]bedrockRecentBlockUse),
 	}
 
 	// Register server-state commands as closures after s is initialised.
@@ -354,6 +391,8 @@ func New(cfg *config.Config) (*Server, error) {
 			cfg.Bedrock,
 			bus,
 			worldInstance,
+			netherWorld,
+			endWorld,
 			gameCore,
 			cfg.WorldSeed,
 			spawnX,
@@ -366,6 +405,8 @@ func New(cfg *config.Config) (*Server, error) {
 			s.sendLegacyPlayerKnockback(&session.Session{Player: p}, sourceX, sourceZ, horizontal, vertical)
 		})
 		worldInstance.SetBlockObserver(s.bedrockListener.BroadcastBlockChange)
+		netherWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(1))
+		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
 	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
 	return s, nil
@@ -465,8 +506,11 @@ func (s *Server) Run(ctx context.Context) error {
 	wg.Wait()
 
 	// Flush world to disk regardless of shutdown cause.
-	if closeErr := s.world.Close(); closeErr != nil {
-		slog.Warn("server: error flushing world on shutdown", "err", closeErr)
+	s.saveAllPlayerData()
+	for dimension, dimensionWorld := range map[string]*coreworld.World{"overworld": s.world, "nether": s.netherWorld, "end": s.endWorld} {
+		if closeErr := dimensionWorld.Close(); closeErr != nil {
+			slog.Warn("server: error flushing world on shutdown", "dimension", dimension, "err", closeErr)
+		}
 	}
 	s.saveWorldAge()
 	return listenErr
@@ -632,18 +676,23 @@ func (s *Server) safeTick() {
 		}
 	}()
 	s.tickIntents()
+	s.tickBedrockItemUse()
 	s.tickFurnaces()
 	s.tickEntities()
+	s.tickAuxiliaryDimensionItems()
 	s.tickBedrockHunger()
 	if s.bedrockListener != nil {
 		s.bedrockListener.Sync(uint64(s.worldAge))
 		s.syncBedrockPlayersToJava()
 	}
 	if s.worldAge%600 == 0 {
-		if err := s.world.Flush(); err != nil {
-			slog.Warn("world autosave failed", "err", err)
+		for dimension, dimensionWorld := range map[string]*coreworld.World{"overworld": s.world, "nether": s.netherWorld, "end": s.endWorld} {
+			if err := dimensionWorld.Flush(); err != nil {
+				slog.Warn("world autosave failed", "dimension", dimension, "err", err)
+			}
 		}
 		s.saveWorldAge()
+		s.saveAllPlayerData()
 	}
 }
 
@@ -697,6 +746,8 @@ func (s *Server) tickIntents() {
 			s.applyBedrockBlockInteract(i)
 		case intent.ConsumeFoodIntent:
 			s.applyBedrockConsumeFood(i)
+		case intent.StartUseItemIntent:
+			s.applyBedrockStartUseItem(i)
 		case intent.EntityInteractIntent:
 			s.applyEntityInteract(i)
 		case intent.VehicleMoveIntent:
@@ -739,10 +790,16 @@ func (s *Server) applyBedrockContainerClose(i intent.ContainerCloseIntent) {
 		p.CraftingResult = handler.FindBedrockCraftingTableResult(p.CraftingGrid)
 	}
 	if handler.IsFurnaceContainer(p.OpenContainerKind) {
-		persistFurnaceSlots(s.world, p.OpenContainerPos, p.OpenContainerKind, p.ContainerSlots)
-		p.ContainerSlots = nil
-		p.OpenContainerPos = spatial.BlockPos{}
+		persistFurnaceSlots(s.worldForPlayer(p), p.OpenContainerPos, p.OpenContainerKind, p.ContainerSlots)
+	} else if isBedrockGenericContainer(p.OpenContainerKind) {
+		s.persistBedrockGenericContainer(p)
+	} else if isBedrockWorkstation(p.OpenContainerKind) {
+		s.returnBedrockWorkstationItems(p)
 	}
+	p.ContainerSlots = nil
+	p.OpenContainerPos = spatial.BlockPos{}
+	p.OpenContainerPartnerPos = spatial.BlockPos{}
+	p.OpenContainerHasPartner = false
 	p.OpenContainerID = 0
 	p.OpenContainerKind = ""
 }
@@ -794,6 +851,11 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 		Z: float64(s.spawnZ) + 0.5,
 	}
 	p.WorldSpawn = p.Position
+	s.loadPlayerData(p)
+	if p.Edition == player.ClientEditionJava && p.Dimension != dimensionOverworld {
+		p.Dimension = dimensionOverworld
+		p.Position = p.WorldSpawn
+	}
 	if err := s.game.AddPlayer(p); err != nil {
 		slog.Warn("applyJoin: duplicate player UUID",
 			"name", i.Username, "uuid", i.PlayerUUID, "err", err)
@@ -808,8 +870,9 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 		"entityID", p.EntityID)
 
 	i.Done <- intent.JoinResult{
-		EntityID: p.EntityID,
-		Position: p.Position,
+		EntityID:  p.EntityID,
+		Position:  p.Position,
+		Dimension: p.Dimension,
 	}
 }
 
@@ -828,12 +891,47 @@ func (s *Server) safeSpawnY(x, z int) int {
 	return y
 }
 
+func (s *Server) worldForDimension(dimension int32) *coreworld.World {
+	switch dimension {
+	case 1:
+		if s.netherWorld != nil {
+			return s.netherWorld
+		}
+	case 2:
+		if s.endWorld != nil {
+			return s.endWorld
+		}
+	}
+	return s.world
+}
+
+func (s *Server) worldForPlayer(p *player.Player) *coreworld.World {
+	if p == nil {
+		return s.world
+	}
+	return s.worldForDimension(p.Dimension)
+}
+
+func (s *Server) bedrockWorld() *coreworld.World {
+	if s.bedrockActionWorld != nil {
+		return s.bedrockActionWorld
+	}
+	return s.world
+}
+
 // applyDisconnect removes a player from the game core and logs the event.
 func (s *Server) applyDisconnect(i intent.DisconnectIntent) {
-	if p := s.game.GetPlayer(i.PlayerUUID); p != nil && p.VehicleEntityID != 0 {
-		s.dismountPlayer(p)
+	if p := s.game.GetPlayer(i.PlayerUUID); p != nil {
+		if p.VehicleEntityID != 0 {
+			s.dismountPlayer(p)
+		}
+		if p.Edition == player.ClientEditionBedrock && p.OpenContainerKind != "" {
+			s.applyBedrockContainerClose(intent.ContainerCloseIntent{PlayerUUID: p.UUID, WindowID: byte(p.OpenContainerID)})
+		}
+		s.savePlayerData(p)
 	}
 	s.game.RemovePlayer(i.PlayerUUID)
+	delete(s.bedrockBlockUse, i.PlayerUUID)
 	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 	slog.Info("player disconnected via intent",
 		"uuid", i.PlayerUUID, "reason", i.Reason)
@@ -856,7 +954,7 @@ func (s *Server) applyMove(m intent.MoveIntent) {
 	p.Rotation = m.Rotation
 	p.OnGround = m.OnGround
 	if p.VehicleEntityID != 0 {
-		if vehicle, ok := s.world.Entities.Get(p.VehicleEntityID); ok && corentity.IsRideableVehicle(vehicle.Type) && vehicle.RiderEntityID == p.EntityID {
+		if vehicle, ok := s.worldForPlayer(p).Entities.Get(p.VehicleEntityID); ok && corentity.IsRideableVehicle(vehicle.Type) && vehicle.RiderEntityID == p.EntityID {
 			vehicle.Position.X = m.Position.X
 			vehicle.Position.Z = m.Position.Z
 			vehicle.Yaw = m.Rotation.Yaw
@@ -872,26 +970,136 @@ func (s *Server) applyMove(m intent.MoveIntent) {
 			}
 		}
 		s.applyBedrockMovementDamage(p, previousY, previousOnGround)
+		s.tryBedrockPortalTravel(p)
 	}
 }
 
 func (s *Server) applyBedrockConsumeFood(i intent.ConsumeFoodIntent) {
 	p := s.game.GetPlayer(i.PlayerUUID)
-	if p == nil || p.Edition != player.ClientEditionBedrock || p.GameMode != player.GameModeSurvival {
+	if p == nil || p.Edition != player.ClientEditionBedrock || p.GameMode == player.GameModeSpectator {
 		return
 	}
 	if i.HotbarSlot < 0 || i.HotbarSlot >= 9 {
 		return
 	}
-	slot := player.HotbarStart + int(i.HotbarSlot)
-	stack := p.Inventory[slot]
-	nutrition, saturation, ok := player.FoodValue(stack.ItemID)
-	if !ok || stack.IsEmpty() || !p.ConsumeFood(nutrition, saturation) {
+	stack := p.Inventory[player.HotbarStart+int(i.HotbarSlot)]
+	started := p.UsingItemSlot == int(i.HotbarSlot) && p.UsingItemID == stack.ItemID && !p.UsingItemSince.IsZero()
+	if !started || time.Since(p.UsingItemSince) < player.FoodUseDuration(stack.ItemID) {
+		s.clearBedrockItemUse(p, false)
 		return
 	}
-	p.Inventory[slot].Count--
-	if p.Inventory[slot].Count <= 0 {
-		p.Inventory[slot] = player.ItemStack{}
+	s.finishBedrockFoodUse(p)
+}
+
+func (s *Server) applyBedrockStartUseItem(i intent.StartUseItemIntent) {
+	p := s.game.GetPlayer(i.PlayerUUID)
+	if p == nil || p.Edition != player.ClientEditionBedrock || p.GameMode == player.GameModeSpectator || p.Dead {
+		return
+	}
+	hotbar := int(i.HotbarSlot)
+	if hotbar < 0 {
+		hotbar = p.HeldSlot
+	}
+	if hotbar < 0 || hotbar >= 9 {
+		return
+	}
+	stack := p.Inventory[player.HotbarStart+hotbar]
+	if _, _, ok := player.FoodValue(stack.ItemID); !ok || stack.IsEmpty() {
+		return
+	}
+	_, food, _, _ := p.HealthSnapshot()
+	if p.GameMode != player.GameModeCreative && food >= 20 && !player.CanAlwaysEat(stack.ItemID) {
+		return
+	}
+	if p.UsingItemID != stack.ItemID || p.UsingItemSlot != hotbar || p.UsingItemSince.IsZero() {
+		p.UsingItemID = stack.ItemID
+		p.UsingItemSlot = hotbar
+		p.UsingItemSince = time.Now()
+	}
+	if s.bedrockListener != nil {
+		s.bedrockListener.BroadcastPlayerUsingItemState(p, false)
+	}
+}
+
+// tickBedrockItemUse completes consumables server-side when their vanilla use
+// duration expires. Pumpkin follows this model too: ReleaseItem cancels an
+// early use, but a client is not required to send a second transaction for a
+// successfully completed eating animation.
+func (s *Server) tickBedrockItemUse() {
+	if s.game == nil {
+		return
+	}
+	s.game.OnlinePlayers(func(p *player.Player) {
+		if p.Edition != player.ClientEditionBedrock || p.UsingItemID == "" || p.UsingItemSince.IsZero() {
+			return
+		}
+		if p.UsingItemSlot < 0 || p.UsingItemSlot >= 9 {
+			s.clearBedrockItemUse(p, false)
+			return
+		}
+		stack := p.Inventory[player.HotbarStart+p.UsingItemSlot]
+		if stack.IsEmpty() || stack.ItemID != p.UsingItemID {
+			s.clearBedrockItemUse(p, false)
+			return
+		}
+		if time.Since(p.UsingItemSince) >= player.FoodUseDuration(stack.ItemID) {
+			s.finishBedrockFoodUse(p)
+		}
+	})
+}
+
+func (s *Server) finishBedrockFoodUse(p *player.Player) {
+	if p == nil || p.UsingItemSlot < 0 || p.UsingItemSlot >= 9 {
+		return
+	}
+	slot := player.HotbarStart + p.UsingItemSlot
+	stack := p.Inventory[slot]
+	nutrition, saturation, ok := player.FoodValue(stack.ItemID)
+	if !ok || stack.IsEmpty() || stack.ItemID != p.UsingItemID {
+		s.clearBedrockItemUse(p, false)
+		return
+	}
+	if p.GameMode != player.GameModeCreative {
+		if !p.ConsumeFood(nutrition, saturation) {
+			s.clearBedrockItemUse(p, false)
+			return
+		}
+		consumedID := stack.ItemID
+		p.Inventory[slot].Count--
+		if p.Inventory[slot].Count <= 0 {
+			p.Inventory[slot] = player.ItemStack{}
+		}
+		if remainder := bedrockFoodRemainder(consumedID); remainder != "" {
+			if p.Inventory[slot].IsEmpty() {
+				p.Inventory[slot] = player.ItemStack{ItemID: remainder, Count: 1}
+			} else {
+				p.GiveItem(player.ItemStack{ItemID: remainder, Count: 1})
+			}
+		}
+	}
+	s.clearBedrockItemUse(p, true)
+}
+
+func (s *Server) clearBedrockItemUse(p *player.Player, completed bool) {
+	if p == nil {
+		return
+	}
+	p.UsingItemID = ""
+	p.UsingItemSince = time.Time{}
+	p.UsingItemSlot = -1
+	if s.bedrockListener != nil {
+		s.bedrockListener.BroadcastPlayerUsingItemState(p, completed)
+	}
+}
+
+func bedrockFoodRemainder(itemID string) string {
+	switch itemID {
+	case "minecraft:mushroom_stew", "minecraft:rabbit_stew", "minecraft:beetroot_soup", "minecraft:suspicious_stew":
+		return "minecraft:bowl"
+	case "minecraft:honey_bottle":
+		return "minecraft:glass_bottle"
+	default:
+		return ""
 	}
 }
 
@@ -979,8 +1187,9 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64,
 		return
 	}
 	x, y, z := int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z))
-	feet := s.world.GetBlock(x, y, z).ResourceLocation()
-	head := s.world.GetBlock(x, int(math.Floor(p.Position.Y+1.62)), z).ResourceLocation()
+	playerWorld := s.worldForPlayer(p)
+	feet := playerWorld.GetBlock(x, y, z).ResourceLocation()
+	head := playerWorld.GetBlock(x, int(math.Floor(p.Position.Y+1.62)), z).ResourceLocation()
 	if head == "minecraft:water" {
 		if p.UnderwaterSince.IsZero() {
 			p.UnderwaterSince = now
@@ -1045,6 +1254,10 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 	if p == nil || p.Edition != player.ClientEditionBedrock || p.GameMode == player.GameModeSpectator {
 		return
 	}
+	actionWorld := s.worldForPlayer(p)
+	previousActionWorld := s.bedrockActionWorld
+	s.bedrockActionWorld = actionWorld
+	defer func() { s.bedrockActionWorld = previousActionWorld }()
 	previousHeldSlot := p.HeldSlot
 	if i.HotbarSlot >= 0 && i.HotbarSlot < 9 && int(i.HotbarSlot) != previousHeldSlot {
 		p.HeldSlot = int(i.HotbarSlot)
@@ -1054,11 +1267,14 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 	if p.Position.Distance(center) > 6.5 {
 		return
 	}
+	if i.Action == intent.BlockActionUse && s.duplicateBedrockBlockUse(p, i) {
+		return
+	}
 
 	x, y, z := int(i.Position.X), int(i.Position.Y), int(i.Position.Z)
 	switch i.Action {
 	case intent.BlockActionBreak:
-		block := s.world.GetBlock(x, y, z)
+		block := actionWorld.GetBlock(x, y, z)
 		if block.IsAir() || block.ResourceLocation() == "minecraft:bedrock" {
 			return
 		}
@@ -1067,31 +1283,29 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			Block: block,
 			Tool:  held,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
-				return s.world.GetBlock(x+dx, y+dy, z+dz)
+				return actionWorld.GetBlock(x+dx, y+dy, z+dz)
 			},
 		})
 		containerItems := []coreworld.ContainerItem(nil)
 		if bedrockSpillingContainer(block.ResourceLocation()) {
-			containerItems = s.world.ContainerItems(x, y, z)
+			containerItems = actionWorld.ContainerItems(x, y, z)
 		}
 		partnerY, partnerHalf, hasPartner := coreworld.DoublePlantPartnerY(block, y)
 		partner := coreworld.Air
 		if hasPartner {
-			partner = s.world.GetBlock(x, partnerY, z)
+			partner = actionWorld.GetBlock(x, partnerY, z)
 			hasPartner = partner.ResourceLocation() == block.ResourceLocation() &&
 				partner.Properties["half"] == partnerHalf
 		}
 		if s.bedrockListener != nil {
-			s.bedrockListener.BroadcastBlockBreakEffect(i.Position, block)
+			s.bedrockListener.BroadcastDimensionBlockBreakEffect(p.Dimension, i.Position, block)
 		}
-		s.world.SetBlock(x, y, z, coreworld.Air)
-		change := coreworld.BlockChange{X: x, Y: y, Z: z, Block: coreworld.Air}
-		handler.BroadcastBlockChange(change, s.sessions)
+		s.setBedrockActionBlock(x, y, z, coreworld.Air)
 		if hasPartner {
-			s.world.SetBlock(x, partnerY, z, coreworld.Air)
-			handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: partnerY, Z: z, Block: coreworld.Air}, s.sessions)
+			s.setBedrockActionBlock(x, partnerY, z, coreworld.Air)
 		}
 		s.breakBedrockLinkedBlock(x, y, z, block)
+		s.breakBedrockUnsupportedAbove(x, y, z)
 		if block.ResourceLocation() == "minecraft:redstone_wire" {
 			s.refreshBedrockWireConnections(x, y, z)
 		}
@@ -1099,12 +1313,12 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			for _, item := range containerItems {
 				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count}
 				if !p.GiveItem(stack) {
-					s.newDroppedItem(stack, p.Position, item.Slot+1)
+					s.newDroppedItemForPlayer(p, stack, p.Position, item.Slot+1)
 				}
 			}
 			for _, drop := range drops {
 				if !p.GiveItem(drop) {
-					s.newDroppedItem(drop, p.Position, 0)
+					s.newDroppedItemForPlayer(p, drop, p.Position, 0)
 				}
 			}
 			if wear := player.BlockUseDamage(held.ItemID); wear > 0 {
@@ -1112,12 +1326,12 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			}
 		}
 		if bedrockSpillingContainer(block.ResourceLocation()) {
-			s.world.SetContainerItems(x, y, z, block.ResourceLocation(), nil)
+			actionWorld.SetContainerItems(x, y, z, block.ResourceLocation(), nil)
 		}
 
 	case intent.BlockActionUse:
 		held := p.HeldItem()
-		clicked := s.world.GetBlock(x, y, z)
+		clicked := actionWorld.GetBlock(x, y, z)
 		// Item behaviour has priority over the clicked block, matching vanilla
 		// and Pumpkin (for example, a hoe tills dirt before placement is tried).
 		if s.applyBedrockItemAction(p, i, clicked) {
@@ -1130,13 +1344,21 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		if !bypassActivation && s.bedrockListener != nil {
 			if handler.IsFurnaceContainer(clicked.ResourceLocation()) {
 				s.openBedrockFurnace(p, i.Position, clicked.ResourceLocation())
+			} else if isBedrockGenericContainer(clicked.ResourceLocation()) {
+				s.openBedrockGenericContainer(p, i.Position, clicked.ResourceLocation())
+			} else if isBedrockWorkstation(clicked.ResourceLocation()) {
+				s.openBedrockWorkstation(p, i.Position, clicked.ResourceLocation())
 			}
 			if s.bedrockListener.OpenContainerBlock(p.UUID, int32(x), int32(y), int32(z), clicked.ResourceLocation()) {
-				if !handler.IsFurnaceContainer(clicked.ResourceLocation()) {
+				if isBedrockGenericContainer(clicked.ResourceLocation()) {
+					s.bedrockListener.SyncGenericContainer(p)
+				} else if isBedrockWorkstation(clicked.ResourceLocation()) {
+					s.bedrockListener.SyncWorkstationContainer(p)
+				} else if !handler.IsFurnaceContainer(clicked.ResourceLocation()) {
 					p.OpenContainerKind = clicked.ResourceLocation()
 					p.OpenContainerID = 1
 				} else {
-					state := s.furnaceStateFor(i.Position)
+					state := s.furnaceStateForDimension(p.Dimension, i.Position)
 					s.bedrockListener.SyncFurnaceContainer(p, state.CookTime, state.BurnTime, state.BurnDuration, state.CookDuration)
 				}
 				return
@@ -1164,7 +1386,7 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			boat := corentity.New(s.game.NextEntityID(), newRandomUUID(), boatType, spawn.X, spawn.Y, spawn.Z)
 			boat.Yaw = p.Rotation.Yaw
 			boat.OnGround = true
-			s.world.Entities.Add(boat)
+			actionWorld.Entities.Add(boat)
 			if p.GameMode != player.GameModeCreative {
 				slot := player.HotbarStart + p.HeldSlot
 				p.Inventory[slot].Count--
@@ -1176,6 +1398,43 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		}
 		s.placeBedrockHeldBlock(p, i, clicked)
 	}
+}
+
+// duplicateBedrockBlockUse coalesces the two equivalent interaction reports a
+// modern Bedrock client may send (PlayerAuthInput plus InventoryTransaction).
+// Without this simulation-side guard a door or gate is toggled twice and seems
+// to close immediately even when the adapter-level packets arrived on separate
+// network ticks.
+func (s *Server) duplicateBedrockBlockUse(p *player.Player, i intent.BlockInteractIntent) bool {
+	if p == nil {
+		return false
+	}
+	if s.bedrockBlockUse == nil {
+		s.bedrockBlockUse = make(map[[16]byte]bedrockRecentBlockUse)
+	}
+	// Bedrock may report a door click once against the lower half and once
+	// against the upper half. Normalise both to the lower coordinate before
+	// comparing, and do not include the packet-specific face in the identity.
+	position := i.Position
+	if world := s.worldForPlayer(p); world != nil {
+		block := world.GetBlock(int(position.X), int(position.Y), int(position.Z))
+		if bedrockIsDoor(block.ResourceLocation()) && block.Properties["half"] == "upper" {
+			position.Y--
+		}
+	}
+	now := time.Now()
+	previous, exists := s.bedrockBlockUse[p.UUID]
+	duplicate := exists && previous.dimension == p.Dimension && previous.position == position &&
+		previous.slot == i.HotbarSlot && now.Sub(previous.at) >= 0 &&
+		now.Sub(previous.at) < 300*time.Millisecond
+	s.bedrockBlockUse[p.UUID] = bedrockRecentBlockUse{
+		dimension: p.Dimension,
+		position:  position,
+		face:      i.Face,
+		slot:      i.HotbarSlot,
+		at:        now,
+	}
+	return duplicate
 }
 
 func bedrockSpillingContainer(blockID string) bool {
@@ -1198,12 +1457,16 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 			s.dismountPlayer(attacker)
 			return
 		}
-		if entity, ok := s.world.Entities.Get(i.TargetID); ok && attacker.Position.Distance(entity.Position) <= 4 {
+		if entity, ok := s.worldForPlayer(attacker).Entities.Get(i.TargetID); ok && attacker.Position.Distance(entity.Position) <= 4 {
 			if entity.Type == corentity.TypeVillager && !entity.CanTradeAsVillager() {
 				handler.BroadcastVillagerUnhappy(s.sessions, entity)
 				if s.bedrockListener != nil {
 					s.bedrockListener.BroadcastVillagerUnhappy(entity)
 				}
+				return
+			}
+			if entity.Type == corentity.TypeVillager && attacker.Edition == player.ClientEditionBedrock && s.bedrockListener != nil {
+				s.bedrockListener.OpenVillagerTrade(attacker.UUID, entity)
 				return
 			}
 			if corentity.IsAgeableAnimal(entity.Type) || corentity.IsTameableAnimal(entity.Type) || corentity.IsAnimalVehicle(entity.Type) {
@@ -1233,7 +1496,7 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 
 	var targetPlayer *player.Player
 	s.game.OnlinePlayers(func(candidate *player.Player) {
-		if candidate.EntityID == i.TargetID {
+		if candidate.EntityID == i.TargetID && candidate.Dimension == attacker.Dimension {
 			targetPlayer = candidate
 		}
 	})
@@ -1273,8 +1536,9 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 		return
 	}
 
-	if entity, ok := s.world.Entities.Get(i.TargetID); ok && !entity.Dead && attacker.Position.Distance(entity.Position) <= 3.25 {
-		if s.world.QueueEntityDamageFrom(entity.EntityID, damage, attacker.Position.X, attacker.Position.Z) {
+	if attackerWorld := s.worldForPlayer(attacker); attackerWorld != nil {
+		if entity, ok := attackerWorld.Entities.Get(i.TargetID); ok && !entity.Dead && attacker.Position.Distance(entity.Position) <= 3.25 &&
+			attackerWorld.QueueEntityDamageFrom(entity.EntityID, damage, attacker.Position.X, attacker.Position.Z) {
 			attacker.LastAttack = time.Now()
 			s.damageBedrockHeldItem(attacker, 1)
 		}
@@ -1299,11 +1563,16 @@ func (s *Server) applyBedrockRespawn(i intent.RespawnIntent) {
 	if p.VehicleEntityID != 0 {
 		s.dismountPlayer(p)
 	}
+	previousDimension := p.Dimension
+	p.Dimension = dimensionOverworld
 	p.Revive()
 	if bedSpawn, ok := handler.ResolveBedRespawn(p, s.world); ok {
 		p.Position = bedSpawn
 	} else {
 		p.Position = p.WorldSpawn
+	}
+	if previousDimension != dimensionOverworld && s.bedrockListener != nil {
+		s.bedrockListener.ChangeDimensionForRespawn(p, dimensionOverworld, p.Position)
 	}
 }
 
@@ -1323,9 +1592,18 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	craftingResult := handler.FindBedrockCraftingTableResult(craftingGrid)
 	furnaceSlots := append([]player.ItemStack(nil), p.ContainerSlots...)
 	furnaceOpen := handler.IsFurnaceContainer(p.OpenContainerKind) && len(furnaceSlots) == furnaceSlotCount
+	containerSlots := append([]player.ItemStack(nil), p.ContainerSlots...)
+	containerOpen := (isBedrockGenericContainer(p.OpenContainerKind) || isBedrockWorkstation(p.OpenContainerKind)) &&
+		len(containerSlots) > 0 && len(containerSlots) <= 54
 	carried := p.CarriedItem
 	updateBedrockPersonalCrafting(&inventory)
 	drops := make([]player.ItemStack, 0)
+	type foodEffect struct {
+		nutrition  int32
+		saturation float32
+	}
+	foodEffects := make([]foodEffect, 0, 1)
+	_, simulatedFood, _, _ := p.HealthSnapshot()
 	get := func(slot int16) (player.ItemStack, bool) {
 		if slot == intent.InventoryCursorSlot {
 			return carried, true
@@ -1341,6 +1619,13 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				return player.ItemStack{}, false
 			}
 			return furnaceSlots[slot-intent.InventoryFurnaceInput], true
+		}
+		if slot >= intent.InventoryContainerStart {
+			index := int(slot - intent.InventoryContainerStart)
+			if !containerOpen || index < 0 || index >= len(containerSlots) {
+				return player.ItemStack{}, false
+			}
+			return containerSlots[index], true
 		}
 		if slot < 0 || int(slot) >= len(inventory) {
 			return player.ItemStack{}, false
@@ -1368,6 +1653,17 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				return false
 			}
 			furnaceSlots[slot-intent.InventoryFurnaceInput] = stack
+			return true
+		}
+		if slot >= intent.InventoryContainerStart {
+			index := int(slot - intent.InventoryContainerStart)
+			if !containerOpen || index < 0 || index >= len(containerSlots) {
+				return false
+			}
+			if isBedrockWorkstation(p.OpenContainerKind) && index == bedrockWorkstationOutputIndex(p.OpenContainerKind) && !stack.IsEmpty() {
+				return false
+			}
+			containerSlots[index] = stack
 			return true
 		}
 		if slot < 0 || int(slot) >= len(inventory) || !canPlaceCanonicalInventorySlot(int(slot), stack) {
@@ -1400,6 +1696,13 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		}
 		switch action.Kind {
 		case intent.InventoryActionMove:
+			crafts := max(action.CraftCount, 1)
+			if action.Source == 0 || action.Source == intent.InventoryCraftingTableOutput {
+				if source.Count <= 0 || crafts > 255 || source.Count > 255/crafts {
+					return
+				}
+				source.Count *= crafts
+			}
 			if action.Count <= 0 || action.Count > source.Count || action.Source == action.Destination || action.Destination == 0 || action.Destination == intent.InventoryCraftingTableOutput || action.Destination == intent.InventoryFurnaceOutput {
 				return
 			}
@@ -1425,14 +1728,25 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				return
 			}
 			source.Count -= action.Count
-			if !set(action.Source, source) {
-				return
-			}
 			if action.Source == 0 {
-				consumeBedrockPersonalCrafting(&inventory)
+				for range crafts {
+					current := inventory[0]
+					if current.ItemID != source.ItemID || current.Damage != source.Damage || current.Count*crafts != action.Count {
+						return
+					}
+					consumeBedrockPersonalCrafting(&inventory)
+				}
 			} else if action.Source == intent.InventoryCraftingTableOutput {
-				consumeBedrockCraftingTable(&craftingGrid)
+				for range crafts {
+					current := handler.FindBedrockCraftingTableResult(craftingGrid)
+					if current.ItemID != source.ItemID || current.Damage != source.Damage || current.Count*crafts != action.Count {
+						return
+					}
+					consumeBedrockCraftingTable(&craftingGrid)
+				}
 				craftingResult = handler.FindBedrockCraftingTableResult(craftingGrid)
+			} else if !set(action.Source, source) {
+				return
 			}
 
 		case intent.InventoryActionSwap:
@@ -1462,24 +1776,52 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				return
 			}
 
+		case intent.InventoryActionConsume:
+			if action.Source < player.HotbarStart || action.Source >= player.HotbarStart+9 || action.Count != 1 || simulatedFood >= 20 {
+				return
+			}
+			nutrition, saturation, ok := player.FoodValue(source.ItemID)
+			if !ok {
+				return
+			}
+			source.Count--
+			if !set(action.Source, source) {
+				return
+			}
+			foodEffects = append(foodEffects, foodEffect{nutrition: nutrition, saturation: saturation})
+			simulatedFood = min(20, simulatedFood+nutrition)
+
 		default:
 			return
 		}
 	}
 	updateBedrockPersonalCrafting(&inventory)
+	for _, effect := range foodEffects {
+		if !p.ConsumeFood(effect.nutrition, effect.saturation) {
+			return
+		}
+	}
 	p.Inventory = inventory
 	p.CraftingGrid = craftingGrid
 	p.CraftingResult = handler.FindBedrockCraftingTableResult(craftingGrid)
 	p.CarriedItem = carried
 	if furnaceOpen {
 		p.ContainerSlots = furnaceSlots
-		persistFurnaceSlots(s.world, p.OpenContainerPos, p.OpenContainerKind, furnaceSlots)
-		s.furnaceStateFor(p.OpenContainerPos)
+		persistFurnaceSlots(s.worldForPlayer(p), p.OpenContainerPos, p.OpenContainerKind, furnaceSlots)
+		s.furnaceStateForDimension(p.Dimension, p.OpenContainerPos)
+	} else if containerOpen {
+		p.ContainerSlots = containerSlots
+		if isBedrockGenericContainer(p.OpenContainerKind) {
+			s.persistBedrockGenericContainer(p)
+		}
 	}
 	for index, stack := range drops {
-		if dropped := s.newDroppedItem(stack, p.Position, index); dropped != nil {
+		if dropped := s.newDroppedItemForPlayer(p, stack, p.Position, index); dropped != nil && p.Dimension == dimensionOverworld {
 			handler.BroadcastSpawnMob(dropped, s.sessions)
 		}
+	}
+	if len(foodEffects) > 0 {
+		s.clearBedrockItemUse(p, true)
 	}
 	accepted = true
 }
@@ -1571,6 +1913,17 @@ func (s *Server) damageBedrockHeldItem(p *player.Player, amount int) {
 }
 
 func placementBlockForItem(itemID string) (coreworld.Block, bool) {
+	switch itemID {
+	case "minecraft:wooden_door":
+		// Bedrock still uses the legacy item identity for oak doors.
+		itemID = "minecraft:oak_door"
+	case "minecraft:fence_gate":
+		itemID = "minecraft:oak_fence_gate"
+	case "minecraft:wooden_button":
+		itemID = "minecraft:oak_button"
+	case "minecraft:wooden_pressure_plate":
+		itemID = "minecraft:oak_pressure_plate"
+	}
 	if itemID == "minecraft:redstone" {
 		itemID = "minecraft:redstone_wire"
 	}
@@ -1636,7 +1989,7 @@ func (s *Server) syncBedrockPlayersToJava() {
 	bedrockPlayers := make(map[[16]byte]*player.Player)
 	externalPlayers := make([]*player.Player, 0)
 	s.game.OnlinePlayers(func(p *player.Player) {
-		if p.Edition == player.ClientEditionBedrock {
+		if p.Edition == player.ClientEditionBedrock && p.Dimension == dimensionOverworld {
 			bedrockPlayers[p.UUID] = p
 			externalPlayers = append(externalPlayers, p)
 		}
@@ -1754,6 +2107,9 @@ func (s *Server) tickEntities() {
 
 	for _, e := range allEntities {
 		e.AgeTicks++
+		if !e.Dead {
+			s.tickMobSunlight(e, &hurtEntities)
+		}
 		// ── Dead entity cleanup ───────────────────────────────────────────────
 		if e.Dead {
 			if e.DeathTicks == 0 {
@@ -1771,7 +2127,7 @@ func (s *Server) tickEntities() {
 			continue
 		}
 
-		if e.Type == corentity.TypeItem && s.tryPickupDroppedItem(e) {
+		if e.Type == corentity.TypeItem && s.tryPickupDroppedItem(e, dimensionOverworld) {
 			s.world.Entities.Remove(e.EntityID)
 			deadIDs = append(deadIDs, e.EntityID)
 			continue
@@ -2126,7 +2482,15 @@ func mobDrops(entityType corentity.EntityType, rng *rand.Rand) []player.ItemStac
 }
 
 func (s *Server) newDroppedItem(stack player.ItemStack, position spatial.Vec3, ordinal int) *corentity.Entity {
-	if stack.IsEmpty() {
+	return s.newDroppedItemInWorld(s.bedrockWorld(), stack, position, ordinal)
+}
+
+func (s *Server) newDroppedItemForPlayer(p *player.Player, stack player.ItemStack, position spatial.Vec3, ordinal int) *corentity.Entity {
+	return s.newDroppedItemInWorld(s.worldForPlayer(p), stack, position, ordinal)
+}
+
+func (s *Server) newDroppedItemInWorld(dimensionWorld *coreworld.World, stack player.ItemStack, position spatial.Vec3, ordinal int) *corentity.Entity {
+	if dimensionWorld == nil || stack.IsEmpty() {
 		return nil
 	}
 	id := s.game.NextEntityID()
@@ -2139,7 +2503,7 @@ func (s *Server) newDroppedItem(stack player.ItemStack, position spatial.Vec3, o
 	dropped.VX = math.Cos(angle) * 0.1
 	dropped.VY = 0.2
 	dropped.VZ = math.Sin(angle) * 0.1
-	s.world.Entities.Add(dropped)
+	dimensionWorld.Entities.Add(dropped)
 	return dropped
 }
 
@@ -2175,7 +2539,7 @@ func (s *Server) dropPlayerInventory(p *player.Player) {
 	p.OpenContainerKind = ""
 
 	for index, stack := range stacks {
-		if dropped := s.newDroppedItem(stack, p.Position, index); dropped != nil {
+		if dropped := s.newDroppedItemForPlayer(p, stack, p.Position, index); dropped != nil && p.Dimension == dimensionOverworld {
 			handler.BroadcastSpawnMob(dropped, s.sessions)
 		}
 	}
@@ -2184,13 +2548,13 @@ func (s *Server) dropPlayerInventory(p *player.Player) {
 	}
 }
 
-func (s *Server) tryPickupDroppedItem(e *corentity.Entity) bool {
+func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool {
 	if e.AgeTicks < 10 || e.ItemID == "" || e.ItemCount <= 0 {
 		return false
 	}
 	for _, sess := range s.allPlayerSessions() {
 		p := sess.Player
-		if p == nil || p.Dead || p.GameMode == player.GameModeSpectator {
+		if p == nil || p.Dimension != dimension || p.Dead || p.GameMode == player.GameModeSpectator {
 			continue
 		}
 		dx := p.Position.X - e.Position.X
@@ -2203,13 +2567,58 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity) bool {
 		if !p.GiveItem(stack) {
 			continue
 		}
-		handler.BroadcastCollectItem(e.EntityID, p.EntityID, e.ItemCount, s.sessions)
+		if dimension == dimensionOverworld {
+			handler.BroadcastCollectItem(e.EntityID, p.EntityID, e.ItemCount, s.sessions)
+		}
 		if sess.Conn != nil {
 			_ = handler.SyncPlayerInventory(sess.Conn, p)
 		}
 		return true
 	}
 	return false
+}
+
+// tickAuxiliaryDimensionItems advances drops in dimensions that do not run the
+// Overworld mob simulation. This keeps death/container drops visible,
+// collectible and bounded in lifetime in the Nether and End.
+func (s *Server) tickAuxiliaryDimensionItems() {
+	for dimension, dimensionWorld := range map[int32]*coreworld.World{
+		dimensionNether: s.netherWorld,
+		dimensionEnd:    s.endWorld,
+	} {
+		if dimensionWorld == nil {
+			continue
+		}
+		for _, entity := range dimensionWorld.Entities.Snapshot() {
+			if entity.Type != corentity.TypeItem {
+				continue
+			}
+			entity.AgeTicks++
+			if s.tryPickupDroppedItem(entity, dimension) || entity.AgeTicks >= 6000 || entity.Position.Y < coreworld.WorldMinY-16 {
+				dimensionWorld.Entities.Remove(entity.EntityID)
+				continue
+			}
+
+			if !entity.OnGround {
+				entity.VY -= 0.04
+			}
+			entity.Position.X += entity.VX
+			entity.Position.Y += entity.VY
+			entity.Position.Z += entity.VZ
+			x, z := int(math.Floor(entity.Position.X)), int(math.Floor(entity.Position.Z))
+			groundY := float64(dimensionWorld.GroundYAtOrBelow(x, z, int(math.Floor(entity.Position.Y))) + 1)
+			if entity.Position.Y <= groundY {
+				entity.Position.Y = groundY
+				entity.VY = 0
+				entity.OnGround = true
+			} else {
+				entity.OnGround = false
+				entity.VY *= 0.98
+			}
+			entity.VX *= 0.98
+			entity.VZ *= 0.98
+		}
+	}
 }
 
 func (s *Server) tickClearLag(deadIDs *[]int32) {
@@ -2602,7 +3011,8 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 		if ai.attackCooldown == 0 {
 			ai.attackCooldown = 20 // 1-second cooldown between hits
 			if ai.targetEntityID != 0 {
-				if target, ok := s.world.Entities.Get(ai.targetEntityID); ok && !target.Dead {
+				if target, ok := s.world.Entities.Get(ai.targetEntityID); ok && !target.Dead &&
+					s.mobHasLineOfSight(e, target.Position, 1.4) {
 					damage := float32(7 + ai.rng.Intn(15))
 					s.world.QueueEntityDamageFrom(target.EntityID, damage, e.Position.X, e.Position.Z)
 				}
@@ -2619,6 +3029,9 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 				pdx := sess.Player.Position.X - e.Position.X
 				pdz := sess.Player.Position.Z - e.Position.Z
 				if math.Hypot(pdx, pdz) > 2.5 {
+					continue
+				}
+				if !s.mobHasLineOfSight(e, sess.Player.Position, 1.62) {
 					continue
 				}
 				// Knockback velocity away from golem.
@@ -2678,6 +3091,10 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 			s.tickHostileAgainstEntity(e, ai, entityTarget)
 			return
 		}
+		if isSkeletonArcher(e.Type) {
+			s.setMobUsingItem(e, false)
+			ai.bowDrawTicks = 0
+		}
 		ai.targetEntityID = 0
 		if e.Type == corentity.TypeCreeper && ai.fuseTick > 0 {
 			ai.fuseTick -= 2
@@ -2698,12 +3115,13 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	dx := target.Player.Position.X - e.Position.X
 	dz := target.Player.Position.Z - e.Position.Z
 	distance := math.Hypot(dx, dz)
+	visible := s.mobHasLineOfSight(e, target.Player.Position, 1.62)
 	if distance > 0.001 {
 		e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
 	}
 
 	if e.Type == corentity.TypeCreeper {
-		if distance <= 3 {
+		if distance <= 3 && visible {
 			e.VX, e.VZ = 0, 0
 			ai.fuseTick++
 			if ai.fuseTick == 1 {
@@ -2726,10 +3144,41 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 		}
 	}
 
+	if isSkeletonArcher(e.Type) {
+		if ai.attackCooldown > 0 {
+			ai.attackCooldown--
+		}
+		if ai.bowDrawTicks > 0 {
+			if !visible || distance > 15 {
+				ai.bowDrawTicks = 0
+				s.setMobUsingItem(e, false)
+			} else {
+				ai.bowDrawTicks--
+				if ai.bowDrawTicks == 0 {
+					s.setMobUsingItem(e, false)
+					s.shootMobArrow(e, target.Player)
+					ai.attackCooldown = 20
+				}
+			}
+		}
+		if visible && distance <= 15 && ai.attackCooldown == 0 && ai.bowDrawTicks == 0 {
+			ai.bowDrawTicks = 20
+			s.setMobUsingItem(e, true)
+		}
+		if distance <= 15 {
+			e.VX, e.VZ = 0, 0
+			return
+		}
+		if distance > 0.001 {
+			s.navigateMob(e, ai, target.Player.Position, pumpkinMovementSpeed(e.Type, 1.0))
+		}
+		return
+	}
+
 	if ai.attackCooldown > 0 {
 		ai.attackCooldown--
 	}
-	if distance <= 1.8 && e.Type != corentity.TypeCreeper {
+	if distance <= 1.8 && e.Type != corentity.TypeCreeper && visible {
 		e.VX, e.VZ = 0, 0
 		if ai.attackCooldown == 0 {
 			ai.attackCooldown = 20
@@ -2959,7 +3408,9 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 			if p.VehicleEntityID != 0 {
 				s.dismountPlayer(p)
 			}
+			s.savePlayerData(p)
 			s.game.RemovePlayer(p.UUID)
+			handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 		}()
 
 		if err := handler.HandlePlay(conn, p, s.world, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus); err != nil {
@@ -2988,6 +3439,7 @@ func (s *Server) registerPlayer(result *handler.LoginResult) *player.Player {
 	p.Position.Y = float64(s.world.SurfaceY(s.spawnX, s.spawnZ) + 1)
 	p.Position.Z = float64(s.spawnZ) + 0.5
 	p.WorldSpawn = p.Position
+	s.loadPlayerData(p)
 
 	if err := s.game.AddPlayer(p); err != nil {
 		// Duplicate UUID — extremely rare; log and continue with assigned ID.

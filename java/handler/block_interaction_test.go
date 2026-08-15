@@ -41,6 +41,19 @@ func TestCreativeInventoryUsesProtocol769ItemIDs(t *testing.T) {
 	}
 }
 
+func TestJavaBreakingSupportRemovesFloatingGrassImmediately(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(0, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "dirt"})
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "short_grass"})
+	applyBlockChange(0, 63, 0, coreworld.Air, w, mgr)
+	breakUnsupportedBlocksAbove(0, 63, 0, w, mgr)
+	if got := w.GetBlock(0, 64, 0); !got.IsAir() {
+		t.Fatalf("grass above broken support = %q, want air", got.ResourceLocation())
+	}
+}
+
 func TestUseItemOnProtocol769LayoutPlacesExactBlock(t *testing.T) {
 	p := player.New([16]byte{}, "builder", player.ClientEditionJava)
 	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:acacia_planks", Count: 64}

@@ -276,9 +276,7 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 		return nil
 	}
 	if mode == 1 && slot == 0 {
-		if !p.CraftingResult.IsEmpty() && p.GiveItem(p.CraftingResult) {
-			consumeCraftingIngredients(p)
-		}
+		shiftCraftingResult(p)
 	} else if mode == 0 && slot == 0 {
 		takeCraftingResult(p)
 	} else if mode == 1 {
@@ -733,16 +731,19 @@ func takePersonalCraftingResult(p *player.Player) {
 }
 
 func shiftPersonalCraftingResult(p *player.Player) {
-	result := p.Inventory[0]
-	if result.IsEmpty() {
-		return
+	for {
+		result := p.Inventory[0]
+		if result.IsEmpty() {
+			return
+		}
+		inventory := p.Inventory
+		if !addStackToInventory(&inventory, result) {
+			return
+		}
+		p.Inventory = inventory
+		consumePersonalCraftingIngredients(p)
+		updatePersonalCraftingResult(p)
 	}
-	inventory := p.Inventory
-	if !addStackToInventory(&inventory, result) {
-		return
-	}
-	p.Inventory = inventory
-	consumePersonalCraftingIngredients(p)
 }
 
 func consumePersonalCraftingIngredients(p *player.Player) {
@@ -845,6 +846,23 @@ func takeCraftingResult(p *player.Player) {
 		p.CarriedItem.Count += p.CraftingResult.Count
 	}
 	consumeCraftingIngredients(p)
+}
+
+func shiftCraftingResult(p *player.Player) {
+	for {
+		result := findCraftingResult(p.CraftingGrid)
+		if result.IsEmpty() {
+			p.CraftingResult = player.ItemStack{}
+			return
+		}
+		inventory := p.Inventory
+		if !addStackToInventory(&inventory, result) {
+			p.CraftingResult = result
+			return
+		}
+		p.Inventory = inventory
+		consumeCraftingIngredients(p)
+	}
 }
 
 func consumeCraftingIngredients(p *player.Player) {

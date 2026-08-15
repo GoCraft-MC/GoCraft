@@ -874,3 +874,22 @@ func (g *FlatGenerator) Generate(x, z int32) *Chunk {
 	c.Sections[groundSectionIdx] = sec
 	return c
 }
+
+func setChunkBiome(c *Chunk, biome string) {
+	for index, section := range c.Sections {
+		if section == nil {
+			continue
+		}
+		section.SetUniformBiome(biome)
+		c.Sections[index] = section
+	}
+}
+
+func generatedHash(seed int64, x, y, z int) uint64 {
+	value := uint64(seed) ^ uint64(int64(x))*0x4f1bbcdc6762fda9 ^ uint64(int64(y))*0x632be59bd9b4e019 ^ uint64(int64(z))*0x9e3779b97f4a7c15
+	value ^= value >> 30
+	value *= 0xbf58476d1ce4e5b9
+	value ^= value >> 27
+	value *= 0x94d049bb133111eb
+	return value ^ (value >> 31)
+}

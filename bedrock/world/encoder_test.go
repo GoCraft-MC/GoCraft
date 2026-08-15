@@ -175,32 +175,35 @@ func packedPaletteIndex(words []byte, index, bits int) uint32 {
 	return (word >> bitOffset) & (1<<bits - 1)
 }
 
-func TestBlockNetworkIDsUseStableRegistryHashes(t *testing.T) {
+func TestBlockNetworkIDsUseCurrentPumpkinPaletteHashes(t *testing.T) {
 	encoder := NewEncoder()
 	air := encoder.BlockNetworkID(coreworld.Air)
 	stone := encoder.BlockNetworkID(coreworld.Block{Namespace: `minecraft`, Name: `stone`})
+	if len(encoder.byName[`minecraft:air`]) == 0 || len(encoder.byName[`minecraft:stone`]) == 0 {
+		t.Fatal("embedded Pumpkin palette is missing air or stone")
+	}
+	if air == 0 || stone == 0 || air == stone {
+		t.Fatalf(`palette hashes are invalid: air=%d stone=%d`, air, stone)
+	}
+	// Network hashes are stable: common states must also agree with the
+	// independently embedded Dragonfly registry used elsewhere in the adapter.
 	registry := dfworld.DefaultBlockRegistry
 	registry.Finalize()
-
-	var airRuntimeID, stoneRuntimeID uint32
-	for rid := uint32(0); rid < uint32(registry.BlockCount()); rid++ {
-		name, _, ok := registry.RuntimeIDToState(rid)
-		if !ok {
-			continue
+	for name, got := range map[string]uint32{"minecraft:air": air, "minecraft:stone": stone} {
+		matched := false
+		for runtimeID := uint32(0); runtimeID < uint32(registry.BlockCount()); runtimeID++ {
+			candidate, _, ok := registry.RuntimeIDToState(runtimeID)
+			if !ok || candidate != name {
+				continue
+			}
+			want, ok := registry.RuntimeIDToHash(runtimeID)
+			if ok && want == got {
+				matched = true
+				break
+			}
 		}
-		switch name {
-		case `minecraft:air`:
-			airRuntimeID = rid
-		case `minecraft:stone`:
-			stoneRuntimeID = rid
+		if !matched {
+			t.Fatalf("Pumpkin %s hash %d does not match the independent registry", name, got)
 		}
-	}
-	wantAir, ok := registry.RuntimeIDToHash(airRuntimeID)
-	if !ok || air != wantAir {
-		t.Fatalf(`air network ID = %d, want registry hash %d`, air, wantAir)
-	}
-	wantStone, ok := registry.RuntimeIDToHash(stoneRuntimeID)
-	if !ok || stone != wantStone {
-		t.Fatalf(`stone network ID = %d, want registry hash %d`, stone, wantStone)
 	}
 }

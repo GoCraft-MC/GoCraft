@@ -223,6 +223,9 @@ func bedrockItemIdentity(javaName string) (string, int16, bool) {
 	if mapping, ok := javaToBedrockItemMappings[javaName]; ok {
 		return mapping.name, int16(mapping.metadata), true
 	}
+	if _, ok := pumpkinCreativeRuntimeID(javaName); ok {
+		return javaName, 0, true
+	}
 	// The Bedrock runtime registry contains more vanilla entries than
 	// Dragonfly implements as concrete Go item types. Resolve by encoded name,
 	// exactly as normal GoCraft inventory synchronisation does.
@@ -240,18 +243,27 @@ func bedrockJavaOutput(stack player.ItemStack) (protocol.ItemStack, bool) {
 	mapping, mapped := javaToBedrockItemMappings[stack.ItemID]
 	var runtimeID, blockRuntimeID int32
 	var metadata uint32
-	if mapped {
+	if creativeRuntimeID, ok := pumpkinInventoryRuntimeID(stack.ItemID, mapping, mapped); ok {
+		runtimeID = creativeRuntimeID
+		metadata = uint32(stack.Damage)
+		blockRuntimeID = mapping.blockRuntimeID
+	} else if mapped {
 		runtimeID = mapping.runtimeID
 		metadata = mapping.metadata
 		blockRuntimeID = mapping.blockRuntimeID
 	} else {
-		var meta int16
-		var ok bool
-		runtimeID, meta, ok = dfworld.ItemRuntimeID(namedItem{name: stack.ItemID, meta: int16(stack.Damage)})
-		if !ok {
-			return protocol.ItemStack{}, false
+		if creativeRuntimeID, ok := pumpkinCreativeRuntimeID(stack.ItemID); ok {
+			runtimeID = creativeRuntimeID
+			metadata = uint32(stack.Damage)
+		} else {
+			var meta int16
+			var ok bool
+			runtimeID, meta, ok = dfworld.ItemRuntimeID(namedItem{name: stack.ItemID, meta: int16(stack.Damage)})
+			if !ok {
+				return protocol.ItemStack{}, false
+			}
+			metadata = uint32(uint16(meta))
 		}
-		metadata = uint32(uint16(meta))
 		if item, found := dfworld.ItemByName(stack.ItemID, int16(stack.Damage)); found {
 			if block, isBlock := item.(dfworld.Block); isBlock {
 				blockRuntimeID = creativeBlockNetworkID(block)

@@ -4,7 +4,7 @@
 // the edition-agnostic core simulation through the intent bus.
 //
 // Supported Bedrock protocol: determined by the pinned gophertunnel release.
-//   - gophertunnel fork (HashimTheArab/gophertunnel@1f617284) → Bedrock protocol 2168 (Minecraft BE 1.26.40)
+//   - gophertunnel fork (HashimTheArab/gophertunnel@218ac3ff) → Bedrock protocol 2168 (Minecraft BE 1.26.40)
 //
 // Architecture (sole-writer invariant):
 //
@@ -30,6 +30,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	dfblock "github.com/df-mc/dragonfly/server/block"
@@ -61,6 +62,7 @@ type Listener struct {
 	cfg        config.BedrockConfig
 	bus        *intent.Bus
 	world      *coreworld.World
+	worlds     map[int32]*coreworld.World
 	game       *game.Game
 	encoder    *bedrockworld.Encoder
 	worldSeed  int64
@@ -70,6 +72,7 @@ type Listener struct {
 	difficulty int32
 	sessionsMu sync.RWMutex
 	sessions   map[[16]byte]*bedrockSession
+	screenID   atomic.Uint32
 
 	// spawnNotify maps a client remote address to a channel that is closed/sent
 	// when gophertunnel sends PlayStatus(PlayerSpawn) for that connection.
@@ -85,51 +88,57 @@ type Listener struct {
 }
 
 type bedrockSession struct {
-	conn               *minecraft.Conn
-	uuid               [16]byte
-	entityID           int32
-	displayName        string
-	xuid               string
-	buildPlatform      int32
-	skin               protocol.Skin
-	knownPlayers       map[[16]byte]bedrockPlayerView
-	knownEntities      map[int32]bedrockEntityView
-	lastHealth         float32
-	lastFood           int32
-	lastSaturation     float32
-	lastExhaustion     float32
-	hungerSent         bool
-	wasDead            bool
-	inventorySent      bool
-	lastInventory      [player.InventorySize]player.ItemStack
-	lastHeldSlot       int
-	abilitiesSent      bool
-	lastGameMode       player.GameMode
-	lastAllowFly       bool
-	lastFlying         bool
-	lastFlySpeed       float32
-	lastWalkSpeed      float32
-	lastOperator       bool
-	lastGodMode        bool
-	teleportMu         sync.Mutex
-	teleportPos        *spatial.Vec3
-	stackMu            sync.Mutex
-	stackNetworkIDs    [player.InventorySize]int32
-	craftingNetworkIDs [10]int32
-	furnaceNetworkIDs  [3]int32
-	lastFurnaceSlots   [3]player.ItemStack
-	lastFurnaceData    [4]int32
-	lastFurnaceKind    string
-	furnaceSent        bool
-	cursorStackID      int32
-	nextStackNetworkID int32
-	lastCarriedItem    player.ItemStack
-	lastHeldItem       player.ItemStack
-	clientHeldSlot     int
-	clientHeldSlotSeen bool
-	invOpened          bool // true while the player's own inventory/creative screen is open
-	breakingPos        protocol.BlockPos
-	breaking           bool
+	conn                *minecraft.Conn
+	uuid                [16]byte
+	entityID            int32
+	displayName         string
+	xuid                string
+	buildPlatform       int32
+	skin                protocol.Skin
+	knownPlayers        map[[16]byte]bedrockPlayerView
+	knownEntities       map[int32]bedrockEntityView
+	lastHealth          float32
+	lastFood            int32
+	lastSaturation      float32
+	lastExhaustion      float32
+	hungerSent          bool
+	wasDead             bool
+	inventorySent       bool
+	lastInventory       [player.InventorySize]player.ItemStack
+	lastHeldSlot        int
+	abilitiesSent       bool
+	lastGameMode        player.GameMode
+	lastAllowFly        bool
+	lastFlying          bool
+	lastFlySpeed        float32
+	lastWalkSpeed       float32
+	lastOperator        bool
+	lastGodMode         bool
+	teleportMu          sync.Mutex
+	teleportPos         *spatial.Vec3
+	stackMu             sync.Mutex
+	stackNetworkIDs     [player.InventorySize]int32
+	craftingNetworkIDs  [10]int32
+	furnaceNetworkIDs   [3]int32
+	containerNetworkIDs [54]int32
+	lastFurnaceSlots    [3]player.ItemStack
+	lastFurnaceData     [4]int32
+	lastFurnaceKind     string
+	furnaceSent         bool
+	cursorStackID       int32
+	nextStackNetworkID  int32
+	lastCarriedItem     player.ItemStack
+	lastHeldItem        player.ItemStack
+	clientHeldSlot      int
+	clientHeldSlotSeen  bool
+	invOpened           bool // true while the player's own inventory/creative screen is open
+	breakingPos         protocol.BlockPos
+	breaking            bool
+	lastBlockUsePos     protocol.BlockPos
+	lastBlockUseFace    int32
+	lastBlockUseSlot    int32
+	lastBlockUseAt      time.Time
+	dimension           atomic.Int32
 }
 
 func (s *bedrockSession) expectTeleport(position spatial.Vec3) {
@@ -171,6 +180,8 @@ func NewListener(
 	cfg config.BedrockConfig,
 	bus *intent.Bus,
 	world *coreworld.World,
+	netherWorld *coreworld.World,
+	endWorld *coreworld.World,
 	game *game.Game,
 	worldSeed int64,
 	spawnX, spawnZ int,
@@ -181,6 +192,7 @@ func NewListener(
 		cfg:         cfg,
 		bus:         bus,
 		world:       world,
+		worlds:      map[int32]*coreworld.World{0: world, 1: netherWorld, 2: endWorld},
 		game:        game,
 		encoder:     bedrockworld.NewEncoder(),
 		worldSeed:   worldSeed,
@@ -207,6 +219,13 @@ func NewListener(
 		"total", shapedRecipes+shapelessRecipes,
 	)
 	return l
+}
+
+func (l *Listener) worldForDimension(dimension int32) *coreworld.World {
+	if dimensionWorld := l.worlds[dimension]; dimensionWorld != nil {
+		return dimensionWorld
+	}
+	return l.world
 }
 
 // Listen starts the RakNet UDP listener and blocks until ctx is cancelled or a
@@ -392,6 +411,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		lastHealth:         -1,
 		nextStackNetworkID: 1,
 	}
+	bedrockSess.dimension.Store(result.Dimension)
 	defer func() {
 		l.removeSession(playerUUID)
 		debuglog.Info(debuglog.BedrockLogin, "bedrock: session removed", "displayName", identity.DisplayName)
@@ -544,7 +564,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 
 		// 81 LevelChunks (biome stubs; block data arrives via SubChunkRequest).
 		debuglog.Info(debuglog.BedrockChunks, "bedrock: spawn goroutine: sending LevelChunks", "displayName", identity.DisplayName)
-		if err := l.sendInitialChunks(conn, spawnCX, spawnCZ, chunkRadius); err != nil {
+		if err := l.sendInitialChunks(conn, spawnCX, spawnCZ, chunkRadius, result.Dimension); err != nil {
 			chunkStreamErr <- err
 			return
 		}
@@ -568,9 +588,16 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 			ServerAuthoritativeBlockBreaking: true,
 		},
 		ServerAuthoritativeInventory: true,
-		WorldSeed:                    l.worldSeed,
-		WorldSpawn:                   protocol.BlockPos{int32(l.spawnX), int32(result.Position.Y), int32(l.spawnZ)},
-		ChunkRadius:                  bedrockChunkRadius,
+		// The creative catalogue and every normal inventory stack reference this
+		// exact Pumpkin/BDS 1.26.40 runtime table. Omitting it leaves the client
+		// indexing unknown IDs when Creative search or scrolling is opened and
+		// drops data-driven behaviour such as consumable item components.
+		Items:           bedrockItemRegistry(),
+		BaseGameVersion: protocol.CurrentVersion,
+		WorldSeed:       l.worldSeed,
+		Dimension:       result.Dimension,
+		WorldSpawn:      protocol.BlockPos{int32(l.spawnX), int32(result.Position.Y), int32(l.spawnZ)},
+		ChunkRadius:     bedrockChunkRadius,
 		// Network block hashes are stable across Bedrock palette revisions. The
 		// Dragonfly registry and the 1.26.40 protocol fork do not necessarily use
 		// the same sequential runtime IDs, so palette indices corrupt terrain.
@@ -622,19 +649,20 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 // data included) for a square of chunks around the spawn position.  Sending
 // complete block data avoids the SubChunkRequest/Response round-trip that would
 // deadlock during conn.StartGame().
-func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius int32) error {
+func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius, dimension int32) error {
+	dimensionWorld := l.worldForDimension(dimension)
 	first := true
 	for dx := -radius; dx <= radius; dx++ {
 		for dz := -radius; dz <= radius; dz++ {
 			chunkX, chunkZ := cx+dx, cz+dz
-			chunk := l.world.Chunk(chunkX, chunkZ)
+			chunk := dimensionWorld.Chunk(chunkX, chunkZ)
 			payload, err := l.encoder.EncodeFullChunkPayload(chunk)
 			if err != nil {
 				return fmt.Errorf("sendInitialChunks encode (%d,%d): %w", chunkX, chunkZ, err)
 			}
 			pk := &packet.LevelChunk{
 				Position:      protocol.ChunkPos{chunkX, chunkZ},
-				Dimension:     0, // overworld
+				Dimension:     dimension,
 				SubChunkCount: uint32(coreworld.SectionCount),
 				CacheEnabled:  false,
 				RawPayload:    payload,
@@ -658,21 +686,22 @@ func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius int32)
 
 // sendEnteredChunks announces only columns newly covered by a moved view
 // window. The client unloads columns outside the publisher radius itself.
-func (l *Listener) sendEnteredChunks(conn *minecraft.Conn, oldCX, oldCZ, newCX, newCZ, radius int32) error {
+func (l *Listener) sendEnteredChunks(conn *minecraft.Conn, oldCX, oldCZ, newCX, newCZ, radius, dimension int32) error {
+	dimensionWorld := l.worldForDimension(dimension)
 	for dx := -radius; dx <= radius; dx++ {
 		for dz := -radius; dz <= radius; dz++ {
 			cx, cz := newCX+dx, newCZ+dz
 			if chunkInsideWindow(cx, cz, oldCX, oldCZ, radius) {
 				continue
 			}
-			chunk := l.world.Chunk(cx, cz)
+			chunk := dimensionWorld.Chunk(cx, cz)
 			payload, err := l.encoder.EncodeFullChunkPayload(chunk)
 			if err != nil {
 				return fmt.Errorf("sendEnteredChunks encode (%d,%d): %w", cx, cz, err)
 			}
 			if err := conn.WritePacket(&packet.LevelChunk{
 				Position:      protocol.ChunkPos{cx, cz},
-				Dimension:     0,
+				Dimension:     dimension,
 				SubChunkCount: uint32(coreworld.SectionCount),
 				CacheEnabled:  false,
 				RawPayload:    payload,
@@ -684,9 +713,9 @@ func (l *Listener) sendEnteredChunks(conn *minecraft.Conn, oldCX, oldCZ, newCX, 
 	return nil
 }
 
-func (l *Listener) updateChunkStream(conn *minecraft.Conn, position spatial.Vec3, cx, cz *int32, radius int32) error {
+func (l *Listener) updateChunkStream(conn *minecraft.Conn, position spatial.Vec3, cx, cz, streamDimension *int32, radius, dimension int32) error {
 	newCX, newCZ := chunkCoordinate(position.X), chunkCoordinate(position.Z)
-	if newCX == *cx && newCZ == *cz {
+	if newCX == *cx && newCZ == *cz && dimension == *streamDimension {
 		// Player has not crossed a chunk boundary — nothing to do.
 		// Dragonfly's sendChunks() also skips NCPU when lastChunkPos == chunkPos.
 		return nil
@@ -694,10 +723,15 @@ func (l *Listener) updateChunkStream(conn *minecraft.Conn, position spatial.Vec3
 	if err := conn.WritePacket(initialChunkPublisher(position, radius)); err != nil {
 		return fmt.Errorf("publisher update: %w", err)
 	}
-	if err := l.sendEnteredChunks(conn, *cx, *cz, newCX, newCZ, radius); err != nil {
+	if dimension != *streamDimension {
+		if err := l.sendInitialChunks(conn, newCX, newCZ, radius, dimension); err != nil {
+			return err
+		}
+	} else if err := l.sendEnteredChunks(conn, *cx, *cz, newCX, newCZ, radius, dimension); err != nil {
 		return err
 	}
 	*cx, *cz = newCX, newCZ
+	*streamDimension = dimension
 	return nil
 }
 
@@ -708,6 +742,7 @@ func (l *Listener) updateChunkStream(conn *minecraft.Conn, position spatial.Vec3
 func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSess *bedrockSession, streamCX, streamCZ, streamRadius int32) {
 	playerUUID, displayName := bedrockSess.uuid, bedrockSess.displayName
 	readyForWorldSync := false
+	streamDimension := bedrockSess.dimension.Load()
 	debuglog.Info(debuglog.BedrockLogin, "bedrock: playLoop entered", "displayName", displayName)
 
 	// Close the connection when the server context is cancelled.
@@ -743,7 +778,7 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 				continue
 			}
 			if readyForWorldSync {
-				if err := l.updateChunkStream(conn, position, &streamCX, &streamCZ, streamRadius); err != nil {
+				if err := l.updateChunkStream(conn, position, &streamCX, &streamCZ, &streamDimension, streamRadius, bedrockSess.dimension.Load()); err != nil {
 					slog.Debug("bedrock: updating chunk stream failed", "displayName", displayName, "err", err)
 					return
 				}
@@ -761,7 +796,7 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 				continue
 			}
 			if readyForWorldSync {
-				if err := l.updateChunkStream(conn, position, &streamCX, &streamCZ, streamRadius); err != nil {
+				if err := l.updateChunkStream(conn, position, &streamCX, &streamCZ, &streamDimension, streamRadius, bedrockSess.dimension.Load()); err != nil {
 					slog.Debug("bedrock: updating chunk stream failed", "displayName", displayName, "err", err)
 					return
 				}
@@ -781,7 +816,7 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 			}
 			if inputHasFlag(p.InputData, packet.InputFlagPerformItemInteraction) {
 				if itemData, ok := p.ItemInteractionData.Value(); ok {
-					l.handleUseItemTransaction(playerUUID, &itemData)
+					l.handleUseItemTransaction(bedrockSess, playerUUID, &itemData)
 				}
 			}
 			if inputHasFlag(p.InputData, packet.InputFlagPerformItemStackRequest) {
@@ -790,6 +825,9 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 				}
 			}
 			l.postInputState(playerUUID, p.InputData)
+			if inputHasFlag(p.InputData, packet.InputFlagStartUsingItem) {
+				l.bus.PostStartUseItem(intent.StartUseItemIntent{PlayerUUID: playerUUID, HotbarSlot: -1})
+			}
 
 		case *packet.PlayerAction:
 			l.handlePlayerBlockAction(bedrockSess, playerUUID, p.ActionType, p.BlockPosition, p.BlockFace)
@@ -815,8 +853,10 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 
 		case *packet.InventoryTransaction:
 			switch data := p.TransactionData.(type) {
+			case *protocol.NormalTransactionData:
+				l.handleNormalInventoryTransaction(ctx, conn, bedrockSess, playerUUID, p)
 			case *protocol.UseItemTransactionData:
-				l.handleUseItemTransaction(playerUUID, data)
+				l.handleUseItemTransaction(bedrockSess, playerUUID, data)
 			case *protocol.UseItemOnEntityTransactionData:
 				targetID, ok := canonicalEntityID(data.TargetEntityRuntimeID)
 				if !ok {
@@ -1161,6 +1201,222 @@ func (l *Listener) handleStackRequests(
 	}
 }
 
+// handleNormalInventoryTransaction handles the legacy transaction path that
+// Bedrock still uses for Q/Ctrl+Q drops, even with server-authoritative
+// inventories enabled. The client predicts the slot change, so always send the
+// resulting authoritative slot back after the simulation accepts or rejects it.
+func (l *Listener) handleNormalInventoryTransaction(
+	ctx context.Context,
+	conn *minecraft.Conn,
+	session *bedrockSession,
+	playerUUID [16]byte,
+	pk *packet.InventoryTransaction,
+) {
+	p := l.game.GetPlayer(playerUUID)
+	actions, slots, valid := canonicalNormalDropActions(p, pk)
+	accepted := false
+	if valid {
+		done := make(chan intent.InventoryResult, 1)
+		if l.bus.PostInventory(intent.InventoryIntent{
+			PlayerUUID: playerUUID,
+			Actions:    actions,
+			Done:       done,
+		}) {
+			timer := time.NewTimer(2 * time.Second)
+			select {
+			case result := <-done:
+				accepted = result.Accepted
+			case <-timer.C:
+				slog.Warn("bedrock: normal inventory drop timed out", "player", playerUUID)
+			case <-ctx.Done():
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}
+	} else {
+		slog.Debug("bedrock: rejected unsupported normal inventory transaction",
+			"player", playerUUID, "actions", len(pk.Actions), "legacy_request_id", pk.LegacyRequestID)
+	}
+
+	// LegacyRequestID is the old request/response bridge retained specifically
+	// for transactions such as hotbar drops. A bare success response is enough;
+	// the authoritative InventorySlot packets below carry the final contents.
+	if pk.LegacyRequestID != 0 && conn != nil {
+		status := uint8(protocol.ItemStackResponseStatusError)
+		if accepted {
+			status = protocol.ItemStackResponseStatusOK
+		}
+		_ = conn.WritePacket(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+			Status: status, RequestID: pk.LegacyRequestID,
+		}}})
+	}
+
+	// On rejection the player's canonical inventory is unchanged, but the
+	// client has already removed the item locally. Sending the slots in both
+	// cases also makes successful Q drops visible immediately instead of waiting
+	// for the next world sync tick.
+	if p = l.game.GetPlayer(playerUUID); p != nil {
+		l.sendNormalDropSlots(conn, session, p, slots)
+	}
+}
+
+// canonicalNormalDropActions translates both Bedrock Q-drop encodings into
+// canonical, server-authoritative inventory actions. It deliberately ignores
+// the client-provided item as the server drops the item actually present in the
+// source slot, but verifies that the two modern actions are balanced.
+func canonicalNormalDropActions(p *player.Player, pk *packet.InventoryTransaction) ([]intent.InventoryAction, []byte, bool) {
+	if p == nil || pk == nil {
+		return nil, nil, false
+	}
+
+	if len(pk.Actions) == 0 {
+		// Pumpkin also accepts this compatibility form: A non-zero legacy
+		// request containing the affected inventory slots represents dropping
+		// the complete stack from each slot.
+		if pk.LegacyRequestID == 0 || len(pk.LegacySetItemSlots) == 0 || len(pk.LegacySetItemSlots) > 2 {
+			return nil, nil, false
+		}
+		actions := make([]intent.InventoryAction, 0, len(pk.LegacySetItemSlots))
+		slots := make([]byte, 0, len(pk.LegacySetItemSlots))
+		seen := make(map[byte]struct{})
+		for _, legacy := range pk.LegacySetItemSlots {
+			if legacy.ContainerID != protocol.ContainerHotBar &&
+				legacy.ContainerID != protocol.ContainerInventory &&
+				legacy.ContainerID != protocol.ContainerCombinedHotBarAndInventory {
+				return nil, nil, false
+			}
+			if len(legacy.Slots) == 0 || len(legacy.Slots) > 2 {
+				return nil, nil, false
+			}
+			for _, slot := range legacy.Slots {
+				if _, duplicate := seen[slot]; duplicate {
+					continue
+				}
+				canonical := bedrockInventoryCanonicalSlot(int(slot))
+				if canonical < 0 || p.Inventory[canonical].IsEmpty() {
+					return nil, nil, false
+				}
+				seen[slot] = struct{}{}
+				actions = append(actions, intent.InventoryAction{
+					Kind: intent.InventoryActionDrop, Source: int16(canonical), Count: p.Inventory[canonical].Count,
+				})
+				slots = append(slots, slot)
+			}
+		}
+		return actions, slots, len(actions) != 0
+	}
+
+	if len(pk.Actions) != 2 {
+		return nil, nil, false
+	}
+	var containerAction, worldAction *protocol.InventoryAction
+	for index := range pk.Actions {
+		action := &pk.Actions[index]
+		switch action.SourceType {
+		case protocol.InventoryActionSourceContainer:
+			windowID, present := action.WindowID.Value()
+			if containerAction != nil || !present || windowID != int8(protocol.WindowIDInventory) || action.InventorySlot > 35 {
+				return nil, nil, false
+			}
+			containerAction = action
+		case protocol.InventoryActionSourceWorld:
+			if worldAction != nil || action.InventorySlot != 0 {
+				return nil, nil, false
+			}
+			worldAction = action
+		default:
+			return nil, nil, false
+		}
+	}
+	if containerAction == nil || worldAction == nil ||
+		!networkItemEmpty(worldAction.OldItem.Stack) || networkItemEmpty(worldAction.NewItem.Stack) ||
+		networkItemEmpty(containerAction.OldItem.Stack) {
+		return nil, nil, false
+	}
+
+	slot := byte(containerAction.InventorySlot)
+	canonical := bedrockInventoryCanonicalSlot(int(slot))
+	if canonical < 0 || p.Inventory[canonical].IsEmpty() {
+		return nil, nil, false
+	}
+	dropped := int(worldAction.NewItem.Stack.Count)
+	oldCount := int(containerAction.OldItem.Stack.Count)
+	remaining := oldCount - dropped
+	if dropped <= 0 || oldCount != p.Inventory[canonical].Count || remaining < 0 ||
+		!sameNetworkItem(containerAction.OldItem.Stack, worldAction.NewItem.Stack) {
+		return nil, nil, false
+	}
+	if remaining == 0 {
+		if !networkItemEmpty(containerAction.NewItem.Stack) {
+			return nil, nil, false
+		}
+	} else if networkItemEmpty(containerAction.NewItem.Stack) ||
+		int(containerAction.NewItem.Stack.Count) != remaining ||
+		!sameNetworkItem(containerAction.OldItem.Stack, containerAction.NewItem.Stack) {
+		return nil, nil, false
+	}
+
+	return []intent.InventoryAction{{
+		Kind: intent.InventoryActionDrop, Source: int16(canonical), Count: dropped,
+	}}, []byte{slot}, true
+}
+
+func networkItemEmpty(stack protocol.ItemStack) bool {
+	return stack.NetworkID == 0 && stack.Count == 0
+}
+
+func sameNetworkItem(a, b protocol.ItemStack) bool {
+	return a.NetworkID == b.NetworkID &&
+		a.MetadataValue == b.MetadataValue &&
+		a.BlockRuntimeID == b.BlockRuntimeID
+}
+
+func (l *Listener) sendNormalDropSlots(conn *minecraft.Conn, session *bedrockSession, p *player.Player, slots []byte) {
+	if conn == nil || session == nil || p == nil {
+		return
+	}
+	seen := make(map[byte]struct{}, len(slots))
+	for _, slot := range slots {
+		if _, duplicate := seen[slot]; duplicate {
+			continue
+		}
+		seen[slot] = struct{}{}
+		canonical := bedrockInventoryCanonicalSlot(int(slot))
+		if canonical < 0 {
+			continue
+		}
+		stack := p.Inventory[canonical]
+		session.stackMu.Lock()
+		stackID := session.stackNetworkIDs[canonical]
+		if stack.IsEmpty() {
+			stackID = 0
+			session.stackNetworkIDs[canonical] = 0
+		} else if stackID <= 0 {
+			stackID = session.allocateStackNetworkID()
+			session.stackNetworkIDs[canonical] = stackID
+		}
+		item := l.itemInstance(stack, stackID)
+		session.stackMu.Unlock()
+
+		containerID := byte(protocol.ContainerInventory)
+		if slot < 9 {
+			containerID = protocol.ContainerHotBar
+		}
+		_ = conn.WritePacket(&packet.InventorySlot{
+			WindowID: protocol.WindowIDInventory,
+			Slot:     uint32(slot),
+			Container: protocol.Option(protocol.FullContainerName{
+				ContainerID: containerID,
+			}),
+			NewItem: item,
+		})
+	}
+}
+
 func (l *Listener) sendPersonalCraftingSlots(conn *minecraft.Conn, session *bedrockSession, p *player.Player) {
 	if conn == nil || session == nil || p == nil {
 		return
@@ -1247,6 +1503,15 @@ func (l *Listener) canonicalInventoryActions(
 	recognized := false
 	creativeSelected := false
 	creativeCount := creativeRequestCount(actions)
+	craftCount := 1
+	craftRequest := false
+	for _, raw := range actions {
+		switch raw.(type) {
+		case *protocol.CraftRecipeStackRequestAction, *protocol.AutoCraftRecipeStackRequestAction,
+			*protocol.CraftRecipeOptionalStackRequestAction:
+			craftRequest = true
+		}
+	}
 
 	for _, raw := range actions {
 		switch action := raw.(type) {
@@ -1327,6 +1592,7 @@ func (l *Listener) canonicalInventoryActions(
 				Source:      source,
 				Destination: destination,
 				Count:       int(action.Count),
+				CraftCount:  craftCount,
 			})
 
 		case *protocol.PlaceStackRequestAction:
@@ -1380,10 +1646,31 @@ func (l *Listener) canonicalInventoryActions(
 				Count:  int(action.Count),
 			})
 
-		case *protocol.ConsumeStackRequestAction,
-			*protocol.CraftRecipeStackRequestAction,
-			*protocol.AutoCraftRecipeStackRequestAction,
-			*protocol.CraftRecipeOptionalStackRequestAction,
+		case *protocol.CraftRecipeStackRequestAction:
+			recognized = true
+			craftCount = max(int(action.NumberOfCrafts), 1)
+			continue
+
+		case *protocol.AutoCraftRecipeStackRequestAction:
+			recognized = true
+			craftCount = max(int(action.NumberOfCrafts), 1)
+			continue
+
+		case *protocol.ConsumeStackRequestAction:
+			recognized = true
+			if craftRequest {
+				continue
+			}
+			source, ok := canonicalInventorySlotFor(p, action.Source)
+			if !ok || action.Count == 0 {
+				return nil, false
+			}
+			out = append(out, intent.InventoryAction{
+				Kind: intent.InventoryActionConsume, Source: source, Count: int(action.Count),
+			})
+			continue
+
+		case *protocol.CraftRecipeOptionalStackRequestAction,
 			*protocol.CraftGrindstoneRecipeStackRequestAction,
 			*protocol.CraftLoomRecipeStackRequestAction,
 			*protocol.CraftNonImplementedStackRequestAction:
@@ -1459,6 +1746,11 @@ func canonicalInventorySlotFor(p *player.Player, slot protocol.StackRequestSlotI
 		if p != nil && p.OpenContainerKind == "minecraft:crafting_table" {
 			return intent.InventoryCraftingTableOutput, true
 		}
+		if p != nil {
+			if index, ok := bedrockWorkstationCanonicalSlot(p.OpenContainerKind, slot.Container.ContainerID, slot.Slot); ok {
+				return intent.InventoryContainerStart + int16(index), true
+			}
+		}
 		return 0, true
 	case protocol.ContainerFurnaceIngredient, protocol.ContainerBlastFurnaceIngredient, protocol.ContainerSmokerIngredient:
 		if p == nil || !handler.IsFurnaceContainer(p.OpenContainerKind) || slot.Slot != 0 {
@@ -1476,10 +1768,41 @@ func canonicalInventorySlotFor(p *player.Player, slot protocol.StackRequestSlotI
 		}
 		return intent.InventoryFurnaceOutput, true
 	case protocol.ContainerLevelEntity:
-		if p == nil || !handler.IsFurnaceContainer(p.OpenContainerKind) || slot.Slot > 2 {
+		if p == nil {
 			return 0, false
 		}
-		return intent.InventoryFurnaceInput + int16(slot.Slot), true
+		if handler.IsFurnaceContainer(p.OpenContainerKind) {
+			if slot.Slot > 2 {
+				return 0, false
+			}
+			return intent.InventoryFurnaceInput + int16(slot.Slot), true
+		}
+		if int(slot.Slot) >= len(p.ContainerSlots) || len(p.ContainerSlots) == 0 {
+			return 0, false
+		}
+		return intent.InventoryContainerStart + int16(slot.Slot), true
+	case protocol.ContainerCrafterLevelEntity:
+		if p == nil || p.OpenContainerKind != "minecraft:crafter" || int(slot.Slot) >= len(p.ContainerSlots) {
+			return 0, false
+		}
+		return intent.InventoryContainerStart + int16(slot.Slot), true
+	case protocol.ContainerAnvilInput, protocol.ContainerAnvilMaterial, protocol.ContainerAnvilResultPreview,
+		protocol.ContainerSmithingTableInput, protocol.ContainerSmithingTableMaterial, protocol.ContainerSmithingTableResultPreview,
+		protocol.ContainerSmithingTableTemplate, protocol.ContainerBeaconPayment,
+		protocol.ContainerBrewingStandInput, protocol.ContainerBrewingStandResult, protocol.ContainerBrewingStandFuel,
+		protocol.ContainerEnchantingInput, protocol.ContainerEnchantingMaterial,
+		protocol.ContainerLoomInput, protocol.ContainerLoomDye, protocol.ContainerLoomMaterial, protocol.ContainerLoomResultPreview,
+		protocol.ContainerGrindstoneInput, protocol.ContainerGrindstoneAdditional, protocol.ContainerGrindstoneResultPreview,
+		protocol.ContainerStonecutterInput, protocol.ContainerStonecutterResultPreview,
+		protocol.ContainerCartographyInput, protocol.ContainerCartographyAdditional, protocol.ContainerCartographyResultPreview:
+		if p == nil {
+			return 0, false
+		}
+		index, ok := bedrockWorkstationCanonicalSlot(p.OpenContainerKind, slot.Container.ContainerID, slot.Slot)
+		if !ok || index >= len(p.ContainerSlots) {
+			return 0, false
+		}
+		return intent.InventoryContainerStart + int16(index), true
 	case protocol.ContainerHotBar, protocol.ContainerInventory, protocol.ContainerCombinedHotBarAndInventory:
 		if slot.Slot > 35 {
 			return 0, false
@@ -1505,6 +1828,91 @@ func canonicalInventorySlotFor(p *player.Player, slot protocol.StackRequestSlotI
 	}
 }
 
+func bedrockWorkstationCanonicalSlot(kind string, containerID byte, slot byte) (int, bool) {
+	single := func(index int) (int, bool) { return index, slot == 0 || slot == 50 }
+	switch kind {
+	case "minecraft:anvil", "minecraft:chipped_anvil", "minecraft:damaged_anvil":
+		switch containerID {
+		case protocol.ContainerAnvilInput:
+			return single(0)
+		case protocol.ContainerAnvilMaterial:
+			return single(1)
+		case protocol.ContainerAnvilResultPreview, protocol.ContainerCreatedOutput, protocol.ContainerCraftingOutputPreview:
+			return single(2)
+		}
+	case "minecraft:enchanting_table":
+		if containerID == protocol.ContainerEnchantingInput {
+			return single(0)
+		}
+		if containerID == protocol.ContainerEnchantingMaterial {
+			return single(1)
+		}
+	case "minecraft:grindstone":
+		switch containerID {
+		case protocol.ContainerGrindstoneInput:
+			return single(0)
+		case protocol.ContainerGrindstoneAdditional:
+			return single(1)
+		case protocol.ContainerGrindstoneResultPreview, protocol.ContainerCreatedOutput, protocol.ContainerCraftingOutputPreview:
+			return single(2)
+		}
+	case "minecraft:loom":
+		switch containerID {
+		case protocol.ContainerLoomInput:
+			return single(0)
+		case protocol.ContainerLoomDye:
+			return single(1)
+		case protocol.ContainerLoomMaterial:
+			return single(2)
+		case protocol.ContainerLoomResultPreview, protocol.ContainerCreatedOutput, protocol.ContainerCraftingOutputPreview:
+			return single(3)
+		}
+	case "minecraft:smithing_table":
+		switch containerID {
+		case protocol.ContainerSmithingTableTemplate:
+			return single(0)
+		case protocol.ContainerSmithingTableInput:
+			return single(1)
+		case protocol.ContainerSmithingTableMaterial:
+			return single(2)
+		case protocol.ContainerSmithingTableResultPreview, protocol.ContainerCreatedOutput, protocol.ContainerCraftingOutputPreview:
+			return single(3)
+		}
+	case "minecraft:stonecutter":
+		if containerID == protocol.ContainerStonecutterInput {
+			return single(0)
+		}
+		if containerID == protocol.ContainerStonecutterResultPreview || containerID == protocol.ContainerCreatedOutput || containerID == protocol.ContainerCraftingOutputPreview {
+			return single(1)
+		}
+	case "minecraft:cartography_table":
+		switch containerID {
+		case protocol.ContainerCartographyInput:
+			return single(0)
+		case protocol.ContainerCartographyAdditional:
+			return single(1)
+		case protocol.ContainerCartographyResultPreview, protocol.ContainerCreatedOutput, protocol.ContainerCraftingOutputPreview:
+			return single(2)
+		}
+	case "minecraft:brewing_stand":
+		switch containerID {
+		case protocol.ContainerBrewingStandResult:
+			if slot <= 2 {
+				return int(slot), true
+			}
+		case protocol.ContainerBrewingStandInput:
+			return single(3)
+		case protocol.ContainerBrewingStandFuel:
+			return single(4)
+		}
+	case "minecraft:beacon":
+		if containerID == protocol.ContainerBeaconPayment {
+			return single(0)
+		}
+	}
+	return 0, false
+}
+
 func (s *bedrockSession) allocateStackNetworkID() int32 {
 	if s.nextStackNetworkID <= 0 {
 		s.nextStackNetworkID = 1
@@ -1527,6 +1935,9 @@ func (s *bedrockSession) stackNetworkIDAt(slot int16) int32 {
 	if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
 		return s.furnaceNetworkIDs[slot-intent.InventoryFurnaceInput]
 	}
+	if slot >= intent.InventoryContainerStart && slot < intent.InventoryContainerStart+int16(len(s.containerNetworkIDs)) {
+		return s.containerNetworkIDs[slot-intent.InventoryContainerStart]
+	}
 	if slot < 0 || int(slot) >= len(s.stackNetworkIDs) {
 		return 0
 	}
@@ -1544,6 +1955,10 @@ func (s *bedrockSession) setStackNetworkID(slot int16, id int32) {
 	}
 	if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
 		s.furnaceNetworkIDs[slot-intent.InventoryFurnaceInput] = id
+		return
+	}
+	if slot >= intent.InventoryContainerStart && slot < intent.InventoryContainerStart+int16(len(s.containerNetworkIDs)) {
+		s.containerNetworkIDs[slot-intent.InventoryContainerStart] = id
 		return
 	}
 	if slot < 0 || int(slot) >= len(s.stackNetworkIDs) {
@@ -1605,6 +2020,12 @@ func (l *Listener) applyStackNetworkIDChanges(session *bedrockSession, p *player
 			}
 
 		case *protocol.DestroyStackRequestAction:
+			source, ok := canonicalInventorySlotFor(p, action.Source)
+			if ok && canonicalStackAt(p, source).IsEmpty() {
+				session.setStackNetworkID(source, 0)
+			}
+
+		case *protocol.ConsumeStackRequestAction:
 			source, ok := canonicalInventorySlotFor(p, action.Source)
 			if ok && canonicalStackAt(p, source).IsEmpty() {
 				session.setStackNetworkID(source, 0)
@@ -1722,6 +2143,8 @@ func (l *Listener) stackResponseContainerInfo(session *bedrockSession, p *player
 			add(action.Source)
 		case *protocol.DestroyStackRequestAction:
 			add(action.Source)
+		case *protocol.ConsumeStackRequestAction:
+			add(action.Source)
 		}
 	}
 
@@ -1779,6 +2202,13 @@ func canonicalStackAt(p *player.Player, slot int16) player.ItemStack {
 	}
 	if slot >= intent.InventoryFurnaceInput && slot <= intent.InventoryFurnaceOutput {
 		index := int(slot - intent.InventoryFurnaceInput)
+		if index >= 0 && index < len(p.ContainerSlots) {
+			return p.ContainerSlots[index]
+		}
+		return player.ItemStack{}
+	}
+	if slot >= intent.InventoryContainerStart {
+		index := int(slot - intent.InventoryContainerStart)
 		if index >= 0 && index < len(p.ContainerSlots) {
 			return p.ContainerSlots[index]
 		}
@@ -1970,7 +2400,7 @@ func (l *Listener) postPlayerState(playerUUID [16]byte, state uint8, enabled boo
 	l.bus.PostPlayerState(intent.PlayerStateIntent{PlayerUUID: playerUUID, State: state, Enabled: enabled})
 }
 
-func (l *Listener) handleUseItemTransaction(playerUUID [16]byte, data *protocol.UseItemTransactionData) {
+func (l *Listener) handleUseItemTransaction(session *bedrockSession, playerUUID [16]byte, data *protocol.UseItemTransactionData) {
 	if data == nil {
 		return
 	}
@@ -1982,7 +2412,30 @@ func (l *Listener) handleUseItemTransaction(playerUUID [16]byte, data *protocol.
 	case protocol.UseItemActionBreakBlock:
 		action = intent.BlockActionBreak
 	case protocol.UseItemActionClickBlock:
+		// Holding use produces simulation-tick transactions after the initial
+		// input. Stateful blocks must toggle once, not on every held tick.
+		if data.TriggerType == protocol.TriggerTypeSimulationTick {
+			return
+		}
+		// Some protocol paths carry the same initial transaction both standalone
+		// and embedded in PlayerAuthInput. Collapse that duplicate so doors and
+		// fence gates do not immediately toggle back.
+		now := time.Now()
+		if session != nil && session.lastBlockUsePos == data.BlockPosition &&
+			session.lastBlockUseFace == data.BlockFace && session.lastBlockUseSlot == data.HotBarSlot &&
+			now.Sub(session.lastBlockUseAt) < 40*time.Millisecond {
+			return
+		}
+		if session != nil {
+			session.lastBlockUsePos = data.BlockPosition
+			session.lastBlockUseFace = data.BlockFace
+			session.lastBlockUseSlot = data.HotBarSlot
+			session.lastBlockUseAt = now
+		}
 		action = intent.BlockActionUse
+	case protocol.UseItemActionClickAir:
+		l.bus.PostStartUseItem(intent.StartUseItemIntent{PlayerUUID: playerUUID, HotbarSlot: data.HotBarSlot})
+		return
 	default:
 		return
 	}
@@ -2074,6 +2527,7 @@ func (l *Listener) handleSubChunkRequest(
 	conn *minecraft.Conn,
 	req *packet.SubChunkRequest,
 ) {
+	dimensionWorld := l.worldForDimension(req.Dimension)
 	entries := make([]protocol.SubChunkEntry, 0, len(req.Offsets))
 	for _, off := range req.Offsets {
 		subY := req.Position.Y() + int32(off[1])
@@ -2087,7 +2541,7 @@ func (l *Listener) handleSubChunkRequest(
 		if sectionIndex < 0 || sectionIndex >= coreworld.SectionCount {
 			entry.Result = protocol.SubChunkResultIndexOutOfBounds
 		} else {
-			chunk := l.world.Chunk(chunkX, chunkZ)
+			chunk := dimensionWorld.Chunk(chunkX, chunkZ)
 			var heightMap []int8
 			entry.HeightMapType, heightMap = subChunkHeightMap(chunk, subY)
 			entry.HeightMapData = protocol.Option(heightMap)

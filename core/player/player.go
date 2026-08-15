@@ -92,11 +92,15 @@ type Player struct {
 
 	// FallDistance accumulates downward travel while airborne. Sprinting is
 	// tracked from the client command packet and is used by legacy knockback.
-	FallDistance          float64
-	Sprinting             bool
-	Sneaking              bool
-	UsingItemID           string
-	UsingItemSince        time.Time
+	FallDistance   float64
+	Sprinting      bool
+	Sneaking       bool
+	UsingItemID    string
+	UsingItemSince time.Time
+	// UsingItemSlot is the zero-based hotbar slot captured when a Bedrock item
+	// use begins. It prevents changing slots mid-animation from consuming a
+	// different stack. -1 means no active hand.
+	UsingItemSlot         int
 	LastEnvironmentDamage time.Time
 	UnderwaterSince       time.Time
 
@@ -114,6 +118,11 @@ type Player struct {
 	SpawnPoint    spatial.BlockPos
 	HasSpawnPoint bool
 	WorldSpawn    spatial.Vec3
+	// Dimension uses Bedrock's vanilla IDs: 0 overworld, 1 Nether, 2 End.
+	Dimension int32
+	// PortalCooldownUntil prevents a player standing inside a portal from
+	// immediately bouncing back before they can leave the destination portal.
+	PortalCooldownUntil time.Time
 
 	// Sleeping is true while the player is in the sleep-request state (they
 	// right-clicked a bed at night).  The server tick checks this to decide
@@ -318,6 +327,7 @@ func (p *Player) Revive() {
 	p.Flying = false
 	p.UsingItemID = ""
 	p.UsingItemSince = time.Time{}
+	p.UsingItemSlot = -1
 	p.LastAttack = time.Time{}
 	p.LastEnvironmentDamage = time.Time{}
 	p.UnderwaterSince = time.Time{}
@@ -406,6 +416,7 @@ func New(uuid [16]byte, username string, edition ClientEdition) *Player {
 		MaxHealth:           20,
 		Food:                20,
 		Saturation:          5,
+		UsingItemSlot:       -1,
 		KnockbackHorizontal: 0.4,
 		KnockbackVertical:   0.4,
 	}

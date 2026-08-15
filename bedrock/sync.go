@@ -33,6 +33,7 @@ type bedrockPlayerView struct {
 	inventory [player.InventorySize]player.ItemStack
 	heldSlot  int
 	sleeping  bool
+	usingItem bool
 	health    float32
 	dead      bool
 }
@@ -57,6 +58,8 @@ type bedrockEntityView struct {
 	ownerUUID          [16]byte
 	hasOwner           bool
 	ownerEntityID      int32
+	onFire             bool
+	usingItem          bool
 }
 
 func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
@@ -69,6 +72,8 @@ func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
 		tamed: entity.Tamed, sitting: entity.Sitting, saddled: entity.Saddled,
 		trusting: entity.Trusting, ownerUUID: entity.TameOwnerUUID,
 		hasOwner: entity.HasTameOwner, ownerEntityID: entity.TameOwnerEntityID,
+		onFire:    entity.FireTicks > 0,
+		usingItem: entity.UsingItem,
 	}
 }
 
@@ -90,14 +95,19 @@ func (l *Listener) Sync(tick uint64) {
 
 	players := make([]*player.Player, 0, l.game.OnlineCount())
 	l.game.OnlinePlayers(func(p *player.Player) { players = append(players, p) })
-	entities := l.world.Entities.Snapshot()
+	entitiesByDimension := make(map[int32][]*corentity.Entity, len(l.worlds))
+	for dimension, dimensionWorld := range l.worlds {
+		if dimensionWorld != nil {
+			entitiesByDimension[dimension] = dimensionWorld.Entities.Snapshot()
+		}
+	}
 
 	for _, viewer := range sessions {
 		if tick%20 == 0 {
 			_ = viewer.conn.WritePacket(&packet.SetTime{Time: int32(tick)})
 		}
 		l.syncPlayers(viewer, players, bedrockByUUID, tick)
-		l.syncEntities(viewer, entities, tick)
+		l.syncEntities(viewer, entitiesByDimension[viewer.dimension.Load()], tick)
 		l.syncLocalHealth(viewer, tick)
 		l.syncLocalHunger(viewer, tick)
 		l.syncLocalPlayerState(viewer)
@@ -301,14 +311,14 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 		if p.UUID != viewer.uuid && (previous.inventory != p.Inventory || previous.heldSlot != p.HeldSlot) {
 			l.sendPlayerEquipment(viewer, p)
 		}
-		if previous.sleeping != p.Sleeping {
+		if previous.sleeping != p.Sleeping || previous.usingItem != (p.UsingItemID != "") {
 			_ = viewer.conn.WritePacket(&packet.SetActorData{
 				EntityRuntimeID: playerRuntimeIDForViewer(viewer, p),
 				EntityMetadata:  bedrockPlayerMetadata(p),
 				Tick:            tick,
 			})
 		}
-		viewer.knownPlayers[p.UUID] = bedrockPlayerView{entityID: p.EntityID, position: p.Position, rotation: p.Rotation, inventory: p.Inventory, heldSlot: p.HeldSlot, sleeping: p.Sleeping, health: health, dead: dead}
+		viewer.knownPlayers[p.UUID] = bedrockPlayerView{entityID: p.EntityID, position: p.Position, rotation: p.Rotation, inventory: p.Inventory, heldSlot: p.HeldSlot, sleeping: p.Sleeping, usingItem: p.UsingItemID != "", health: health, dead: dead}
 	}
 
 	for id, previous := range viewer.knownPlayers {
@@ -338,6 +348,9 @@ func playerRuntimeIDForViewer(viewer *bedrockSession, p *player.Player) uint64 {
 func bedrockPlayerInView(viewer, target *player.Player) bool {
 	if viewer == nil || target == nil || viewer.UUID == target.UUID {
 		return viewer != nil && target != nil
+	}
+	if viewer.Dimension != target.Dimension {
+		return false
 	}
 	dx := chunkCoordinate(target.Position.X) - chunkCoordinate(viewer.Position.X)
 	dz := chunkCoordinate(target.Position.Z) - chunkCoordinate(viewer.Position.Z)
@@ -413,7 +426,58 @@ func bedrockPlayerMetadata(p *player.Player) protocol.EntityMetadata {
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLayingDown)
 		metadata[protocol.EntityDataKeyBedPosition] = protocol.BlockPos{p.SpawnPoint.X, p.SpawnPoint.Y, p.SpawnPoint.Z}
 	}
+	if p != nil && p.UsingItemID != "" {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagUsingItem)
+	}
 	return metadata
+}
+
+// BroadcastPlayerUsingItemState immediately starts/stops the Bedrock use-item
+// animation for the local player and observers. A completed use also emits the
+// vanilla use-item event for eating particles and sound.
+func (l *Listener) BroadcastPlayerUsingItemState(p *player.Player, completed bool) {
+	if l == nil || p == nil {
+		return
+	}
+	l.sessionsMu.RLock()
+	viewers := make([]*bedrockSession, 0, len(l.sessions))
+	for _, viewer := range l.sessions {
+		viewers = append(viewers, viewer)
+	}
+	l.sessionsMu.RUnlock()
+	for _, viewer := range viewers {
+		if !bedrockPlayerInView(l.game.GetPlayer(viewer.uuid), p) {
+			continue
+		}
+		runtimeID := playerRuntimeIDForViewer(viewer, p)
+		_ = viewer.conn.WritePacket(&packet.SetActorData{
+			EntityRuntimeID: runtimeID,
+			EntityMetadata:  bedrockPlayerMetadata(p),
+		})
+		if completed {
+			_ = viewer.conn.WritePacket(&packet.ActorEvent{EntityRuntimeID: runtimeID, EventType: packet.ActorEventUseItem})
+			for _, sound := range completedFoodSoundEvents(p, runtimeID) {
+				_ = viewer.conn.WritePacket(sound)
+			}
+		}
+	}
+}
+
+func completedFoodSoundEvents(p *player.Player, runtimeID uint64) [2]*packet.LevelSoundEvent {
+	position := mgl32.Vec3{}
+	if p != nil {
+		position = vec32(p.Position)
+	}
+	makeEvent := func(soundType string) *packet.LevelSoundEvent {
+		return &packet.LevelSoundEvent{
+			SoundType:      soundType,
+			Position:       position,
+			ExtraData:      -1,
+			EntityType:     "minecraft:player",
+			EntityUniqueID: int64(runtimeID),
+		}
+	}
+	return [2]*packet.LevelSoundEvent{makeEvent(packet.SoundEventEat), makeEvent(packet.SoundEventBurp)}
 }
 
 func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.Entity, tick uint64) {
@@ -431,6 +495,7 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 		if !known {
 			if spawn := l.buildAddEntity(viewer, entity); spawn != nil {
 				_ = viewer.conn.WritePacket(spawn)
+				l.sendEntityEquipment(viewer, entity)
 				viewer.knownEntities[entity.EntityID] = newBedrockEntityView(entity)
 			}
 			continue
@@ -492,6 +557,8 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 			previous.sitting != entity.Sitting || previous.saddled != entity.Saddled ||
 			previous.trusting != entity.Trusting || previous.ownerEntityID != entity.TameOwnerEntityID ||
 			previous.ownerUUID != entity.TameOwnerUUID || previous.hasOwner != entity.HasTameOwner ||
+			previous.onFire != (entity.FireTicks > 0) ||
+			previous.usingItem != entity.UsingItem ||
 			entity.Type == corentity.TypeVillager &&
 				(previous.villagerVariant != entity.VillagerVariant || previous.villagerProfession != entity.VillagerProfession ||
 					previous.villagerLevel != entity.VillagerLevel) {
@@ -511,6 +578,20 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 		_ = viewer.conn.WritePacket(&packet.RemoveActor{EntityUniqueID: int64(bedrockRemoteRuntimeID(id))})
 		delete(viewer.knownEntities, id)
 	}
+}
+
+func (l *Listener) sendEntityEquipment(viewer *bedrockSession, entity *corentity.Entity) {
+	if viewer == nil || entity == nil || entity.MainHandItemID == "" {
+		return
+	}
+	_ = viewer.conn.WritePacket(&packet.MobEquipment{
+		EntityRuntimeID: bedrockRemoteRuntimeID(entity.EntityID),
+		NewItem: l.itemInstance(player.ItemStack{
+			ItemID: entity.MainHandItemID,
+			Count:  1,
+		}, 1),
+		WindowID: protocol.WindowIDInventory,
+	})
 }
 
 func canonicalRuntimeIDForViewer(viewer *bedrockSession, entityID int32) uint64 {
@@ -581,6 +662,12 @@ func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corenti
 	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
 	if entity == nil {
 		return metadata
+	}
+	if entity.FireTicks > 0 {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagOnFire)
+	}
+	if entity.UsingItem {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagUsingItem)
 	}
 	if entity.Sleeping {
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLayingDown)
@@ -859,6 +946,97 @@ func (l *Listener) BroadcastVillagerUnhappy(entity *corentity.Entity) {
 	}
 }
 
+// OpenVillagerTrade opens Bedrock's native trading screen and publishes the
+// same canonical offer list used by Java Edition.
+func (l *Listener) OpenVillagerTrade(playerUUID [16]byte, entity *corentity.Entity) bool {
+	if l == nil || entity == nil || entity.Type != corentity.TypeVillager || !entity.CanTradeAsVillager() {
+		return false
+	}
+	l.sessionsMu.RLock()
+	viewer := l.sessions[playerUUID]
+	l.sessionsMu.RUnlock()
+	if viewer == nil {
+		return false
+	}
+	p := l.game.GetPlayer(playerUUID)
+	if p == nil {
+		return false
+	}
+	offers := handler.VillagerTrades(entity.VillagerProfession)
+	serialised, err := bedrockVillagerOffersNBT(offers)
+	if err != nil {
+		slog.Warn("bedrock: encode villager offers", "err", err)
+		return false
+	}
+	level := max(entity.VillagerLevel, 1)
+	_ = viewer.conn.WritePacket(&packet.ContainerOpen{
+		WindowID:                1,
+		ContainerType:           protocol.ContainerTypeTrade,
+		ContainerPosition:       protocol.BlockPos{int32(entity.Position.X), int32(entity.Position.Y), int32(entity.Position.Z)},
+		ContainerEntityUniqueID: int64(bedrockRemoteRuntimeID(entity.EntityID)),
+	})
+	_ = viewer.conn.WritePacket(&packet.UpdateTrade{
+		WindowID:          1,
+		WindowType:        protocol.ContainerTypeTrade,
+		Size:              int32(len(offers)),
+		TradeTier:         level - 1,
+		VillagerUniqueID:  int64(bedrockRemoteRuntimeID(entity.EntityID)),
+		EntityUniqueID:    int64(bedrockSelfRuntimeID),
+		DisplayName:       "Villager",
+		NewTradeUI:        true,
+		DemandBasedPrices: true,
+		SerialisedOffers:  serialised,
+	})
+	p.OpenContainerID = 1
+	p.OpenContainerKind = "minecraft:villager"
+	p.ContainerSlots = make([]player.ItemStack, 3)
+	return true
+}
+
+func bedrockVillagerOffersNBT(offers []handler.VillagerTrade) ([]byte, error) {
+	recipes := make([]map[string]any, 0, len(offers))
+	for _, offer := range offers {
+		buyA, ok := bedrockTradeItemNBT(offer.Input1)
+		if !ok {
+			continue
+		}
+		sell, ok := bedrockTradeItemNBT(offer.Output)
+		if !ok {
+			continue
+		}
+		recipe := map[string]any{
+			"buyA": buyA, "sell": sell,
+			"uses": int32(0), "maxUses": offer.MaxUses,
+			"rewardExp": byte(1), "traderExp": offer.XP,
+			"priceMultiplierA": float32(0.05), "priceMultiplierB": float32(0),
+			"demand": int32(0), "tier": int32(0),
+		}
+		if !offer.Input2.IsEmpty() {
+			if buyB, present := bedrockTradeItemNBT(offer.Input2); present {
+				recipe["buyB"] = buyB
+			}
+		}
+		recipes = append(recipes, recipe)
+	}
+	return nbt.Marshal(struct {
+		Recipes             []map[string]any `nbt:"Recipes"`
+		TierExpRequirements []int32          `nbt:"TierExpRequirements"`
+	}{Recipes: recipes, TierExpRequirements: []int32{0, 10, 70, 150, 250}})
+}
+
+func bedrockTradeItemNBT(stack player.ItemStack) (map[string]any, bool) {
+	name, metadata, ok := bedrockItemIdentity(stack.ItemID)
+	if !ok || stack.IsEmpty() || stack.Count > 127 {
+		return nil, false
+	}
+	return map[string]any{
+		"Count":       byte(stack.Count),
+		"Damage":      int16(metadata),
+		"Name":        name,
+		"WasPickedUp": byte(0),
+	}, true
+}
+
 // BroadcastActorEvent mirrors canonical animal feedback (feeding, hearts and
 // taming result) to every Bedrock viewer.
 func (l *Listener) BroadcastActorEvent(entityID int32, eventType byte) {
@@ -921,6 +1099,9 @@ func (l *Listener) OpenContainerBlock(playerUUID [16]byte, x, y, z int32, blockN
 		viewer.lastFurnaceKind = ""
 		viewer.stackMu.Unlock()
 	}
+	viewer.stackMu.Lock()
+	clear(viewer.containerNetworkIDs[:])
+	viewer.stackMu.Unlock()
 	_ = viewer.conn.WritePacket(&packet.ContainerOpen{
 		WindowID:                1,
 		ContainerType:           containerType,
@@ -928,6 +1109,128 @@ func (l *Listener) OpenContainerBlock(playerUUID [16]byte, x, y, z int32, blockN
 		ContainerEntityUniqueID: -1,
 	})
 	return true
+}
+
+// SyncGenericContainer sends the contents of a chest-like block using the
+// LevelEntity container used by Bedrock stack requests.
+func (l *Listener) SyncGenericContainer(p *player.Player) {
+	if p == nil || len(p.ContainerSlots) == 0 || len(p.ContainerSlots) > 54 {
+		return
+	}
+	l.sessionsMu.RLock()
+	viewer := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if viewer == nil {
+		return
+	}
+
+	viewer.stackMu.Lock()
+	content := make([]protocol.ItemInstance, len(p.ContainerSlots))
+	for slot, stack := range p.ContainerSlots {
+		if stack.IsEmpty() {
+			viewer.containerNetworkIDs[slot] = 0
+		} else if viewer.containerNetworkIDs[slot] == 0 {
+			viewer.containerNetworkIDs[slot] = viewer.allocateStackNetworkID()
+		}
+		content[slot] = l.itemInstance(stack, viewer.containerNetworkIDs[slot])
+	}
+	viewer.stackMu.Unlock()
+
+	containerID := byte(protocol.ContainerLevelEntity)
+	if p.OpenContainerKind == "minecraft:crafter" {
+		containerID = protocol.ContainerCrafterLevelEntity
+	}
+	_ = viewer.conn.WritePacket(&packet.InventoryContent{
+		WindowID: 1,
+		Content:  content,
+		Container: protocol.FullContainerName{
+			ContainerID: containerID,
+		},
+	})
+}
+
+type bedrockWorkstationSlot struct {
+	containerID byte
+	slot        uint32
+	index       int
+}
+
+// SyncWorkstationContainer publishes each workstation slot through the
+// protocol-specific container IDs used by Bedrock stack requests. Without
+// these initial slots, the UI opens visually but rejects every item move.
+func (l *Listener) SyncWorkstationContainer(p *player.Player) {
+	if p == nil {
+		return
+	}
+	descriptors := bedrockWorkstationSlots(p.OpenContainerKind)
+	if len(descriptors) == 0 || len(p.ContainerSlots) == 0 {
+		return
+	}
+	l.sessionsMu.RLock()
+	viewer := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if viewer == nil {
+		return
+	}
+
+	viewer.stackMu.Lock()
+	packets := make([]*packet.InventorySlot, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if descriptor.index < 0 || descriptor.index >= len(p.ContainerSlots) {
+			continue
+		}
+		stack := p.ContainerSlots[descriptor.index]
+		if stack.IsEmpty() {
+			viewer.containerNetworkIDs[descriptor.index] = 0
+		} else if viewer.containerNetworkIDs[descriptor.index] == 0 {
+			viewer.containerNetworkIDs[descriptor.index] = viewer.allocateStackNetworkID()
+		}
+		packets = append(packets, &packet.InventorySlot{
+			WindowID: 1,
+			Slot:     descriptor.slot,
+			Container: protocol.Option(protocol.FullContainerName{
+				ContainerID: descriptor.containerID,
+			}),
+			NewItem: l.itemInstance(stack, viewer.containerNetworkIDs[descriptor.index]),
+		})
+	}
+	viewer.stackMu.Unlock()
+	for _, pk := range packets {
+		_ = viewer.conn.WritePacket(pk)
+	}
+}
+
+func bedrockWorkstationSlots(kind string) []bedrockWorkstationSlot {
+	slot := func(containerID byte, index int) bedrockWorkstationSlot {
+		return bedrockWorkstationSlot{containerID: containerID, index: index}
+	}
+	switch kind {
+	case "minecraft:anvil", "minecraft:chipped_anvil", "minecraft:damaged_anvil":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerAnvilInput, 0), slot(protocol.ContainerAnvilMaterial, 1), slot(protocol.ContainerAnvilResultPreview, 2)}
+	case "minecraft:enchanting_table":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerEnchantingInput, 0), slot(protocol.ContainerEnchantingMaterial, 1)}
+	case "minecraft:grindstone":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerGrindstoneInput, 0), slot(protocol.ContainerGrindstoneAdditional, 1), slot(protocol.ContainerGrindstoneResultPreview, 2)}
+	case "minecraft:loom":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerLoomInput, 0), slot(protocol.ContainerLoomDye, 1), slot(protocol.ContainerLoomMaterial, 2), slot(protocol.ContainerLoomResultPreview, 3)}
+	case "minecraft:smithing_table":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerSmithingTableTemplate, 0), slot(protocol.ContainerSmithingTableInput, 1), slot(protocol.ContainerSmithingTableMaterial, 2), slot(protocol.ContainerSmithingTableResultPreview, 3)}
+	case "minecraft:stonecutter":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerStonecutterInput, 0), slot(protocol.ContainerStonecutterResultPreview, 1)}
+	case "minecraft:cartography_table":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerCartographyInput, 0), slot(protocol.ContainerCartographyAdditional, 1), slot(protocol.ContainerCartographyResultPreview, 2)}
+	case "minecraft:brewing_stand":
+		return []bedrockWorkstationSlot{
+			{containerID: protocol.ContainerBrewingStandResult, slot: 0, index: 0},
+			{containerID: protocol.ContainerBrewingStandResult, slot: 1, index: 1},
+			{containerID: protocol.ContainerBrewingStandResult, slot: 2, index: 2},
+			slot(protocol.ContainerBrewingStandInput, 3), slot(protocol.ContainerBrewingStandFuel, 4),
+		}
+	case "minecraft:beacon":
+		return []bedrockWorkstationSlot{slot(protocol.ContainerBeaconPayment, 0)}
+	default:
+		return nil
+	}
 }
 
 // SyncFurnaceContainer publishes the authoritative three furnace slots and
@@ -1038,12 +1341,27 @@ func bedrockContainerType(blockName string) (byte, bool) {
 		return protocol.ContainerTypeDispenser, true
 	case "minecraft:dropper":
 		return protocol.ContainerTypeDropper, true
+	case "minecraft:crafter":
+		return protocol.ContainerTypeCrafter, true
 	}
 	return 0, false
 }
 
 // BroadcastBlockChange sends one canonical mutation to every Bedrock viewer.
 func (l *Listener) BroadcastBlockChange(change coreworld.BlockChange) {
+	l.broadcastDimensionBlockChange(packet.DimensionOverworld, change)
+}
+
+// DimensionBlockObserver returns a world observer scoped to one Bedrock
+// dimension, preventing updates at identical coordinates leaking to viewers in
+// another dimension.
+func (l *Listener) DimensionBlockObserver(dimension int32) func(coreworld.BlockChange) {
+	return func(change coreworld.BlockChange) {
+		l.broadcastDimensionBlockChange(dimension, change)
+	}
+}
+
+func (l *Listener) broadcastDimensionBlockChange(dimension int32, change coreworld.BlockChange) {
 	networkID := l.encoder.BlockNetworkID(change.Block)
 	l.sessionsMu.RLock()
 	sessions := make([]*bedrockSession, 0, len(l.sessions))
@@ -1052,6 +1370,9 @@ func (l *Listener) BroadcastBlockChange(change coreworld.BlockChange) {
 	}
 	l.sessionsMu.RUnlock()
 	for _, session := range sessions {
+		if session.dimension.Load() != dimension {
+			continue
+		}
 		_ = session.conn.WritePacket(&packet.UpdateBlock{
 			Position:          protocol.BlockPos{int32(change.X), int32(change.Y), int32(change.Z)},
 			NewBlockRuntimeID: networkID,
@@ -1060,9 +1381,61 @@ func (l *Listener) BroadcastBlockChange(change coreworld.BlockChange) {
 	}
 }
 
+// ChangeDimension switches a connected Bedrock player and immediately seeds
+// the destination view so the loading screen can complete.
+func (l *Listener) ChangeDimension(p *player.Player, dimension int32, position spatial.Vec3) {
+	l.changeDimension(p, dimension, position, false)
+}
+
+// ChangeDimensionForRespawn performs the same world switch while marking it
+// as death-driven, which current Bedrock clients require when respawning from
+// the Nether or End into the Overworld.
+func (l *Listener) ChangeDimensionForRespawn(p *player.Player, dimension int32, position spatial.Vec3) {
+	l.changeDimension(p, dimension, position, true)
+}
+
+func (l *Listener) changeDimension(p *player.Player, dimension int32, position spatial.Vec3, respawn bool) {
+	if p == nil {
+		return
+	}
+	l.sessionsMu.RLock()
+	viewer := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if viewer == nil || viewer.dimension.Load() == dimension {
+		return
+	}
+	viewer.dimension.Store(dimension)
+	viewer.expectTeleport(position)
+	screenID := l.screenID.Add(1)
+	_ = viewer.conn.WritePacket(&packet.ChangeDimension{
+		Dimension:       dimension,
+		Position:        playerNetworkPosition(position),
+		Respawn:         respawn,
+		LoadingScreenID: protocol.Option(screenID),
+	})
+	_ = viewer.conn.WritePacket(&packet.PlayStatus{Status: packet.PlayStatusPlayerSpawn})
+	_ = viewer.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: bedrockSelfRuntimeID,
+		ActionType:      protocol.PlayerActionDimensionChangeDone,
+	})
+	_ = viewer.conn.WritePacket(initialChunkPublisher(position, bedrockChunkRadius))
+	cx, cz := chunkCoordinate(position.X), chunkCoordinate(position.Z)
+	go func() {
+		if err := l.sendInitialChunks(viewer.conn, cx, cz, bedrockChunkRadius, dimension); err != nil {
+			slog.Debug("bedrock: dimension chunk stream failed", "dimension", dimension, "err", err)
+		}
+	}()
+}
+
 // BroadcastBlockBreakEffect emits Bedrock's combined destroy particles and
 // block-specific break sound. UpdateBlock alone changes the world silently.
 func (l *Listener) BroadcastBlockBreakEffect(position spatial.BlockPos, block coreworld.Block) {
+	l.BroadcastDimensionBlockBreakEffect(packet.DimensionOverworld, position, block)
+}
+
+// BroadcastDimensionBlockBreakEffect scopes break particles and sounds to
+// viewers of the world where the block was actually broken.
+func (l *Listener) BroadcastDimensionBlockBreakEffect(dimension int32, position spatial.BlockPos, block coreworld.Block) {
 	runtimeID := l.encoder.BlockNetworkID(block)
 	blockPosition := mgl32.Vec3{float32(position.X), float32(position.Y), float32(position.Z)}
 	centre := mgl32.Vec3{blockPosition.X() + 0.5, blockPosition.Y() + 0.5, blockPosition.Z() + 0.5}
@@ -1073,6 +1446,9 @@ func (l *Listener) BroadcastBlockBreakEffect(position spatial.BlockPos, block co
 	}
 	l.sessionsMu.RUnlock()
 	for _, session := range sessions {
+		if session.dimension.Load() != dimension {
+			continue
+		}
 		_ = session.conn.WritePacket(&packet.LevelEvent{
 			EventType: packet.LevelEventStopBlockCracking,
 			Position:  blockPosition,
@@ -1229,20 +1605,31 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 		lightLevel = min(max(stack.Damage, 0), 15)
 		mapped = false
 	}
-	if mapped {
+	if creativeRuntimeID, ok := pumpkinInventoryRuntimeID(stack.ItemID, mapping, mapped); ok && lightLevel < 0 {
+		// Prefer Pumpkin's current Bedrock palette over compatibility mappings.
+		// This matters for newly added items whose generated Java fallback still
+		// points at minecraft:unknown or an older substitute.
+		runtimeID = creativeRuntimeID
+		metadata = uint32(uint16(stack.Damage))
+	} else if mapped {
 		runtimeID, metadata = mapping.runtimeID, mapping.metadata
 	} else {
-		var meta int16
-		var ok bool
 		itemName := stack.ItemID
 		if lightLevel >= 0 {
 			itemName = fmt.Sprintf("minecraft:light_block_%d", lightLevel)
 		}
-		runtimeID, meta, ok = dfworld.ItemRuntimeID(namedItem{name: itemName})
-		if !ok {
-			return protocol.ItemInstance{}
+		if creativeRuntimeID, ok := pumpkinCreativeRuntimeID(itemName); ok {
+			runtimeID = creativeRuntimeID
+			metadata = uint32(uint16(stack.Damage))
+		} else {
+			var meta int16
+			var ok bool
+			runtimeID, meta, ok = dfworld.ItemRuntimeID(namedItem{name: itemName})
+			if !ok {
+				return protocol.ItemInstance{}
+			}
+			metadata = uint32(uint16(meta))
 		}
-		metadata = uint32(uint16(meta))
 	}
 	var nbtData map[string]any
 	if stack.Damage > 0 && lightLevel < 0 {

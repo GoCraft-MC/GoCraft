@@ -9,6 +9,16 @@ online_mode: false
 villagers: true
 difficulty: normal
 default_gamemode: survival
+# Natural-mob caps for a complete 17x17 chunk simulation area. Use 0 to
+# disable a category; smaller loaded areas scale the cap down automatically.
+mob_spawning:
+    hostile: 35
+    passive: 16
+    ambient: 15
+    axolotls: 5
+    underground_water_creatures: 5
+    water_creatures: 5
+    water_ambient: 20
 operators: []
 whitelist:
     enabled: false

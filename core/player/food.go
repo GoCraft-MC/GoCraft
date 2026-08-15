@@ -1,5 +1,7 @@
 package player
 
+import "time"
+
 // FoodValue returns vanilla nutrition and saturation modifier values for
 // common edible items. Unknown and non-food items return ok=false.
 func FoodValue(itemID string) (nutrition int32, saturationModifier float32, ok bool) {
@@ -48,4 +50,24 @@ func FoodValue(itemID string) (nutrition int32, saturationModifier float32, ok b
 		return 10, 0.6, true
 	}
 	return 0, 0, false
+}
+
+// FoodUseDuration returns the vanilla time required to finish eating an item.
+// Most foods take 32 ticks; dried kelp is deliberately twice as fast.
+func FoodUseDuration(itemID string) time.Duration {
+	if itemID == "minecraft:dried_kelp" {
+		return 800 * time.Millisecond
+	}
+	return 1600 * time.Millisecond
+}
+
+// CanAlwaysEat reports foods whose vanilla component permits use with a full
+// hunger bar. Creative players are handled separately by the server.
+func CanAlwaysEat(itemID string) bool {
+	switch itemID {
+	case "minecraft:golden_apple", "minecraft:enchanted_golden_apple", "minecraft:chorus_fruit":
+		return true
+	default:
+		return false
+	}
 }

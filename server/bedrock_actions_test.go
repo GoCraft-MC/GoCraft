@@ -138,6 +138,55 @@ func TestBedrockMechanismsToggleAndButtonReleases(t *testing.T) {
 	}
 }
 
+func TestBedrockWallsAndFenceGatesRefreshFromNeighbours(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	wall := bedrockBlock("cobblestone_wall", map[string]string{"waterlogged": "false"})
+	s.setBedrockActionBlock(0, 64, 0, wall)
+	s.setBedrockActionBlock(2, 64, 0, wall)
+	gate := bedrockBlock("spruce_fence_gate", map[string]string{
+		"facing": "north", "in_wall": "false", "open": "false", "powered": "false",
+	})
+	s.setBedrockActionBlock(1, 64, 0, gate)
+
+	left := s.world.GetBlock(0, 64, 0)
+	right := s.world.GetBlock(2, 64, 0)
+	gotGate := s.world.GetBlock(1, 64, 0)
+	if left.Properties["east"] != "low" || right.Properties["west"] != "low" {
+		t.Fatalf("wall connections = left %v right %v", left.Properties, right.Properties)
+	}
+	if gotGate.Properties["in_wall"] != "true" {
+		t.Fatalf("gate in_wall = %q, want true", gotGate.Properties["in_wall"])
+	}
+
+	if !s.applyBedrockBlockActivation(p, spatial.BlockPos{X: 1, Y: 64, Z: 0}, gotGate) {
+		t.Fatal("spruce fence gate activation was not handled")
+	}
+	if got := s.world.GetBlock(1, 64, 0).Properties["open"]; got != "true" {
+		t.Fatalf("gate open after one click = %q, want true", got)
+	}
+
+	// Placing a full block above a connected wall changes its arms to tall but
+	// must never overwrite the wall itself (the reported glass/wall corruption).
+	s.setBedrockActionBlock(0, 65, 0, bedrockBlock("glass", nil))
+	left = s.world.GetBlock(0, 64, 0)
+	if left.ResourceLocation() != "minecraft:cobblestone_wall" {
+		t.Fatalf("block below glass became %q, want cobblestone wall", left.ResourceLocation())
+	}
+	if left.Properties["east"] != "tall" {
+		t.Fatalf("wall connection below glass = %q, want tall", left.Properties["east"])
+	}
+}
+
+func TestBedrockAdjacentFencesRemainDistinctBlocks(t *testing.T) {
+	s, _ := newBedrockActionTestServer(t)
+	s.setBedrockActionBlock(0, 64, 0, bedrockBlock("oak_fence", nil))
+	s.setBedrockActionBlock(1, 64, 0, bedrockBlock("oak_fence", nil))
+	left, right := s.world.GetBlock(0, 64, 0), s.world.GetBlock(1, 64, 0)
+	if left.ResourceLocation() != "minecraft:oak_fence" || right.ResourceLocation() != "minecraft:oak_fence" {
+		t.Fatalf("adjacent fences corrupted: %+v / %+v", left, right)
+	}
+}
+
 func TestBedrockPlacesDoorBedAndRedstoneDust(t *testing.T) {
 	t.Run("door", func(t *testing.T) {
 		s, p := newBedrockActionTestServer(t)
@@ -179,6 +228,41 @@ func TestBedrockPlacesDoorBedAndRedstoneDust(t *testing.T) {
 			t.Fatalf("redstone placement = %+v", wire)
 		}
 	})
+}
+
+func TestBedrockLegacyCreativeDoorPlacesBothHalvesAndDuplicateUseTogglesOnce(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	p.GameMode = player.GameModeCreative
+	s.world.SetBlock(1, 63, 0, bedrockBlock("stone", nil))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:wooden_door", Count: 1}
+	place := intent.BlockInteractIntent{
+		PlayerUUID: p.UUID, Action: intent.BlockActionUse,
+		Position: spatial.BlockPos{X: 1, Y: 63, Z: 0}, Face: 1, HotbarSlot: 0,
+		ClickX: 0.25, ClickZ: 0.5,
+	}
+	s.applyBedrockBlockInteract(place)
+	s.applyBedrockBlockInteract(place) // PlayerAuthInput/InventoryTransaction duplicate.
+
+	lower, upper := s.world.GetBlock(1, 64, 0), s.world.GetBlock(1, 65, 0)
+	if lower.ResourceLocation() != "minecraft:oak_door" || lower.Properties["half"] != "lower" ||
+		upper.ResourceLocation() != "minecraft:oak_door" || upper.Properties["half"] != "upper" {
+		t.Fatalf("legacy creative door halves = %+v / %+v", lower, upper)
+	}
+
+	use := intent.BlockInteractIntent{
+		PlayerUUID: p.UUID, Action: intent.BlockActionUse,
+		Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}, Face: 2, HotbarSlot: 0,
+	}
+	s.applyBedrockBlockInteract(use)
+	// Current Bedrock may repeat the same physical click against the other
+	// door half with a different face in PlayerAuthInput.
+	use.Position.Y = 65
+	use.Face = 3
+	s.applyBedrockBlockInteract(use)
+	lower, upper = s.world.GetBlock(1, 64, 0), s.world.GetBlock(1, 65, 0)
+	if lower.Properties["open"] != "true" || upper.Properties["open"] != "true" {
+		t.Fatalf("duplicate door click toggled twice or desynchronised halves: lower=%v upper=%v", lower.Properties, upper.Properties)
+	}
 }
 
 func TestBedrockLightBlockKeepsSelectedLevel(t *testing.T) {

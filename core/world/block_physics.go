@@ -154,6 +154,41 @@ func IsSolidLandingSurface(name string) bool {
 	return true
 }
 
+// RequiresGroundSupport reports whether a block must have a block immediately
+// below it. Player-driven block breaking uses this rule to remove fragile
+// plants and floor decorations in the same update as their support, preventing
+// Bedrock clients from retaining a floating visual until the chunk reloads.
+func RequiresGroundSupport(block Block) bool {
+	name := block.ResourceLocation()
+	switch name {
+	case "minecraft:short_grass", "minecraft:grass", "minecraft:fern",
+		"minecraft:tall_grass", "minecraft:large_fern", "minecraft:dead_bush",
+		"minecraft:dandelion", "minecraft:poppy", "minecraft:blue_orchid",
+		"minecraft:allium", "minecraft:azure_bluet", "minecraft:red_tulip",
+		"minecraft:orange_tulip", "minecraft:white_tulip", "minecraft:pink_tulip",
+		"minecraft:oxeye_daisy", "minecraft:cornflower", "minecraft:lily_of_the_valley",
+		"minecraft:wither_rose", "minecraft:torchflower", "minecraft:pink_petals",
+		"minecraft:sunflower", "minecraft:lilac", "minecraft:rose_bush",
+		"minecraft:peony", "minecraft:pitcher_plant",
+		"minecraft:brown_mushroom", "minecraft:red_mushroom",
+		"minecraft:wheat", "minecraft:carrots", "minecraft:potatoes",
+		"minecraft:beetroots", "minecraft:torchflower_crop", "minecraft:pitcher_crop",
+		"minecraft:nether_wart", "minecraft:sweet_berry_bush",
+		"minecraft:sugar_cane", "minecraft:cactus", "minecraft:bamboo",
+		"minecraft:bamboo_sapling", "minecraft:melon_stem", "minecraft:pumpkin_stem",
+		"minecraft:crimson_roots", "minecraft:warped_roots", "minecraft:nether_sprouts",
+		"minecraft:crimson_fungus", "minecraft:warped_fungus",
+		"minecraft:chorus_plant", "minecraft:chorus_flower",
+		"minecraft:torch", "minecraft:soul_torch", "minecraft:redstone_torch",
+		"minecraft:redstone_wire", "minecraft:repeater", "minecraft:comparator",
+		"minecraft:rail", "minecraft:powered_rail", "minecraft:detector_rail",
+		"minecraft:activator_rail", "minecraft:snow", "minecraft:flower_pot":
+		return true
+	}
+	return strings.HasSuffix(name, "_sapling") || strings.HasSuffix(name, "_pressure_plate") ||
+		strings.HasSuffix(name, "_carpet")
+}
+
 // FluidLevel parses the "level" property of a water or lava block.
 // Returns -1 for non-fluid blocks.
 func FluidLevel(b Block) int {

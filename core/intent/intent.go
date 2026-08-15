@@ -51,8 +51,9 @@ type GameplayIntent interface{ isGameplay() }
 
 // JoinResult is the simulation's synchronous response to a JoinIntent.
 type JoinResult struct {
-	EntityID int32
-	Position spatial.Vec3
+	EntityID  int32
+	Position  spatial.Vec3
+	Dimension int32
 	// Err is non-nil if the join was rejected (e.g. duplicate UUID).
 	Err error
 }
@@ -129,6 +130,14 @@ type ConsumeFoodIntent struct {
 	HotbarSlot int32
 }
 
+// StartUseItemIntent starts the server-authoritative use animation for the
+// food in an action-time hotbar slot. A negative slot uses the player's latest
+// selected slot (PlayerAuthInput does not carry a slot snapshot).
+type StartUseItemIntent struct {
+	PlayerUUID [16]byte
+	HotbarSlot int32
+}
+
 const (
 	BlockActionBreak uint8 = iota + 1
 	BlockActionUse
@@ -190,6 +199,9 @@ const (
 	InventoryFurnaceInput        int16 = InventoryCraftingTableOutput + 1
 	InventoryFurnaceFuel         int16 = InventoryFurnaceInput + 1
 	InventoryFurnaceOutput       int16 = InventoryFurnaceFuel + 1
+	// InventoryContainerStart addresses the first slot of an open generic
+	// block container (chest, barrel, hopper, dispenser, or dropper).
+	InventoryContainerStart int16 = InventoryFurnaceOutput + 1
 )
 
 const (
@@ -200,6 +212,9 @@ const (
 	// InventoryActionCreativeGive spawns an item directly into Destination from
 	// the creative pool (no source slot). Only valid in creative game mode.
 	InventoryActionCreativeGive
+	// InventoryActionConsume completes a Bedrock item-use request. Crafting
+	// ingredient Consume actions remain implicit in the output operation.
+	InventoryActionConsume
 )
 
 // InventoryAction describes one protocol-neutral operation in an atomic
@@ -207,11 +222,15 @@ const (
 // InventoryCursorSlot addresses Player.CarriedItem, and the crafting-table
 // constants address the separate 3x3 grid and its derived output. Furnace
 // constants address input, fuel, and result of the open furnace-family block.
+// InventoryContainerStart+n addresses a generic block-container slot.
 type InventoryAction struct {
 	Kind        uint8
 	Source      int16
 	Destination int16
 	Count       int
+	// CraftCount is the number of result batches represented by an output
+	// move. Bedrock supplies it with recipe/auto-craft request actions.
+	CraftCount int
 	// Item is the item to give; only populated for InventoryActionCreativeGive.
 	Item player.ItemStack
 }
@@ -238,6 +257,7 @@ func (ChatIntent) isGameplay()           {}
 func (TeleportIntent) isGameplay()       {}
 func (BlockInteractIntent) isGameplay()  {}
 func (ConsumeFoodIntent) isGameplay()    {}
+func (StartUseItemIntent) isGameplay()   {}
 func (EntityInteractIntent) isGameplay() {}
 func (VehicleMoveIntent) isGameplay()    {}
 func (RespawnIntent) isGameplay()        {}
@@ -330,6 +350,7 @@ func (b *Bus) PostTeleport(i TeleportIntent) bool {
 
 func (b *Bus) PostBlockInteract(i BlockInteractIntent) bool   { return b.tryGameplay(i) }
 func (b *Bus) PostConsumeFood(i ConsumeFoodIntent) bool       { return b.tryGameplay(i) }
+func (b *Bus) PostStartUseItem(i StartUseItemIntent) bool     { return b.tryGameplay(i) }
 func (b *Bus) PostEntityInteract(i EntityInteractIntent) bool { return b.tryGameplay(i) }
 func (b *Bus) PostVehicleMove(i VehicleMoveIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostRespawn(i RespawnIntent) bool               { return b.tryGameplay(i) }

@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/java/handler"
 
+	"github.com/sandertv/gophertunnel/minecraft/nbt"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -30,6 +32,28 @@ func TestBedrockVillagerSpawnCarriesProfessionAndBiomeVariant(t *testing.T) {
 	}
 	if got := spawn.EntityMetadata[protocol.EntityDataKeyTradeTier]; got != int32(2) {
 		t.Fatalf("trade tier = %#v, want zero-based tier 2", got)
+	}
+}
+
+func TestBedrockVillagerOffersUseNetworkNBT(t *testing.T) {
+	offers := handler.VillagerTrades(corentity.VillagerProfessionLibrarian)
+	encoded, err := bedrockVillagerOffersNBT(offers)
+	if err != nil {
+		t.Fatalf("encode offers: %v", err)
+	}
+	var root struct {
+		Recipes             []map[string]any `nbt:"Recipes"`
+		TierExpRequirements []int32          `nbt:"TierExpRequirements"`
+	}
+	if err := nbt.Unmarshal(encoded, &root); err != nil {
+		t.Fatalf("decode offers: %v", err)
+	}
+	if len(root.Recipes) != len(offers) || len(root.TierExpRequirements) != 5 {
+		t.Fatalf("offer NBT = %d recipes/%v tiers, want %d/5", len(root.Recipes), root.TierExpRequirements, len(offers))
+	}
+	firstBuy, ok := root.Recipes[0]["buyA"].(map[string]any)
+	if !ok || firstBuy["Name"] == "" || root.Recipes[0]["sell"] == nil {
+		t.Fatalf("first Bedrock offer is incomplete: %#v", root.Recipes[0])
 	}
 }
 

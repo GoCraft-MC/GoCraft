@@ -251,6 +251,15 @@ type Entity struct {
 	Saddled           bool
 	Temper            int32
 	PoisonTicks       int32
+	// MainHandItemID is the canonical item visibly equipped by a mob. Player
+	// equipment remains in player.Player.Inventory.
+	MainHandItemID string
+	// FireTicks is the remaining time the entity is rendered and damaged as
+	// burning. It is owned by the simulation tick.
+	FireTicks int
+	// UsingItem drives living-entity hand-use metadata, including the bow draw
+	// animation used by skeletons.
+	UsingItem bool
 	// Spatial state — written only by the entity tick goroutine.
 	Position   spatial.Vec3
 	VX, VY, VZ float64 // velocity in blocks/tick
@@ -300,6 +309,10 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	}
 	if t == TypeSkeletonHorse || t == TypeZombieHorse {
 		e.Tamed = true
+	}
+	switch t {
+	case TypeSkeleton, TypeStray, TypeBogged:
+		e.MainHandItemID = "minecraft:bow"
 	}
 	return e
 }

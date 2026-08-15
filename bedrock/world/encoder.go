@@ -2,7 +2,10 @@ package world
 
 import (
 	"bytes"
+	"compress/gzip"
+	_ "embed"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,11 +17,17 @@ import (
 	coreworld "GoCraft/core/world"
 )
 
-// currentBlockVersion is stamped into every persistent palette NBT entry.
-// This matches Dragonfly's CurrentBlockVersion constant (1.16.0.14 encoding).
-// Bedrock clients apply blockupgrader.Upgrade when reading older state versions,
-// so this value is safe to use regardless of which 1.x client connects.
-const currentBlockVersion int32 = 18040335
+// currentBlockVersion is the version stamped into Pumpkin's Bedrock 1.26.40
+// block-state palette. Persistent sub-chunk entries must use the same version
+// as the network hashes resolved below.
+const currentBlockVersion int32 = 18168865
+
+// pumpkinBlockStatesGZIP is Pumpkin's current concatenated LittleEndian NBT
+// block-state stream. It includes the stable network hash for every vanilla
+// state, including both halves and every open/hinge combination of doors.
+//
+//go:embed block_states.nbt.gz
+var pumpkinBlockStatesGZIP []byte
 
 // persistentBlockEntry is the NBT structure of one entry in a persistent sub-chunk palette.
 // It uses the same field names as Dragonfly's blockEntry struct in server/world/chunk/encode.go.
@@ -29,7 +38,8 @@ type persistentBlockEntry struct {
 }
 
 // Encoder translates GoCraft's edition-neutral blocks into stable Bedrock
-// network block hashes using the vanilla registry shipped with Dragonfly.
+// network block hashes using the same current palette as the item and Creative
+// registries sent during login.
 type Encoder struct {
 	mu        sync.RWMutex
 	byName    map[string][]bedrockState
@@ -47,29 +57,57 @@ type bedrockState struct {
 // NewEncoder prepares the vanilla Bedrock state lookup. Dragonfly embeds the
 // block state palette for the same gophertunnel protocol family used here.
 func NewEncoder() *Encoder {
-	registry := dfworld.DefaultBlockRegistry
-	registry.Finalize()
-
+	// Item/block interaction helpers still use Dragonfly's independent vanilla
+	// registry for hardness and item behaviour. Preserve its one-time
+	// initialisation even though network state resolution uses Pumpkin below.
+	dfworld.DefaultBlockRegistry.Finalize()
 	e := &Encoder{
 		byName: make(map[string][]bedrockState),
 		cache:  make(map[string]uint32),
 	}
-	for rid := uint32(0); rid < uint32(registry.BlockCount()); rid++ {
-		name, props, ok := registry.RuntimeIDToState(rid)
-		if !ok {
-			continue
-		}
-		networkID, ok := registry.RuntimeIDToHash(rid)
-		if !ok {
-			continue
-		}
-		e.byName[name] = append(e.byName[name], bedrockState{
-			name: name, networkID: networkID, props: props,
-		})
-	}
+	e.loadPumpkinBlockStates()
 	e.airHash = e.resolve(coreworld.Air)
 	e.stoneHash = e.resolve(coreworld.Block{Namespace: "minecraft", Name: "stone"})
 	return e
+}
+
+func (e *Encoder) loadPumpkinBlockStates() {
+	compressed, err := gzip.NewReader(bytes.NewReader(pumpkinBlockStatesGZIP))
+	if err != nil {
+		panic(fmt.Errorf("bedrock: open embedded Pumpkin block states: %w", err))
+	}
+	defer compressed.Close()
+
+	raw, err := io.ReadAll(compressed)
+	if err != nil {
+		panic(fmt.Errorf("bedrock: decompress embedded Pumpkin block states: %w", err))
+	}
+	reader := bytes.NewReader(raw)
+	decoder := nbt.NewDecoderWithEncoding(reader, nbt.NetworkLittleEndian)
+	count := 0
+	for reader.Len() > 0 {
+		var entry map[string]any
+		err := decoder.Decode(&entry)
+		if err != nil {
+			panic(fmt.Errorf("bedrock: decode embedded Pumpkin block state %d: %w", count, err))
+		}
+		name, nameOK := entry["name"].(string)
+		networkID, networkOK := entry["network_id"].(int32)
+		states, statesOK := entry["states"].(map[string]any)
+		if !nameOK || !networkOK || !statesOK {
+			panic(fmt.Sprintf("bedrock: malformed Pumpkin block state %d (%T/%T/%T)", count, entry["name"], entry["network_id"], entry["states"]))
+		}
+		if name == "" {
+			panic(fmt.Sprintf("bedrock: Pumpkin block state %d has no name", count))
+		}
+		e.byName[name] = append(e.byName[name], bedrockState{
+			name: name, networkID: uint32(networkID), props: states,
+		})
+		count++
+	}
+	if count == 0 {
+		panic("bedrock: embedded Pumpkin block-state palette is empty")
+	}
 }
 
 // BlockNetworkID returns the stable network hash of a Bedrock block state.
@@ -184,6 +222,10 @@ func bedrockVisualBlock(block coreworld.Block) coreworld.Block {
 		return coreworld.Block{Namespace: "minecraft", Name: "light_block_" + strconv.Itoa(level)}
 	case "minecraft:snow":
 		block.Name = "snow_layer"
+	case "minecraft:nether_portal":
+		// Java names the block nether_portal, while Bedrock exposes the same
+		// block as minecraft:portal with a portal_axis state.
+		block.Name = "portal"
 	case "minecraft:redstone_torch", "minecraft:redstone_wall_torch":
 		if block.Properties["lit"] == "false" {
 			block.Name = "unlit_redstone_torch"
@@ -237,7 +279,13 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 		out[key] = value
 		switch key {
 		case "axis":
-			out["pillar_axis"] = raw
+			if block.ResourceLocation() == "minecraft:portal" {
+				out["portal_axis"] = raw
+			} else {
+				out["pillar_axis"] = raw
+			}
+		case "eye":
+			out["end_portal_eye_bit"] = boolByte(raw == "true")
 		case "facing":
 			out["minecraft:cardinal_direction"] = raw
 			if direction, ok := cardinalDirection(raw); ok {
@@ -262,7 +310,9 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 			out["open_bit"] = boolByte(raw == "true")
 		case "powered":
 			out["powered_bit"] = boolByte(raw == "true")
-			out["open_bit"] = boolByte(raw == "true")
+			if block.ResourceLocation() == "minecraft:lever" {
+				out["open_bit"] = boolByte(raw == "true")
+			}
 			out["button_pressed_bit"] = boolByte(raw == "true")
 		case "half":
 			out["upper_block_bit"] = boolByte(raw == "upper")
@@ -349,7 +399,40 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 			out["candles"] = int32(candles - 1)
 		}
 	}
+	if strings.HasSuffix(block.ResourceLocation(), "_door") && !strings.HasSuffix(block.ResourceLocation(), "_trapdoor") {
+		// Bedrock door states encode their cardinal direction one clockwise
+		// rotation from Java's facing property (as Dragonfly's WoodDoor does).
+		out["minecraft:cardinal_direction"] = rotateCardinalRight(properties["facing"])
+	}
+	if strings.HasSuffix(block.ResourceLocation(), "_wall") {
+		for _, direction := range []string{"north", "east", "south", "west"} {
+			connection := properties[direction]
+			if connection == "low" {
+				connection = "short"
+			}
+			if connection == "" {
+				connection = "none"
+			}
+			out["wall_connection_type_"+direction] = connection
+		}
+		out["wall_post_bit"] = boolByte(properties["up"] == "true")
+	}
 	return out
+}
+
+func rotateCardinalRight(facing string) string {
+	switch facing {
+	case "north":
+		return "east"
+	case "east":
+		return "south"
+	case "south":
+		return "west"
+	case "west":
+		return "north"
+	default:
+		return facing
+	}
 }
 
 func propertyValue(raw string) any {

@@ -23,21 +23,39 @@ func openChest(p *player.Player, conn *network.ClientConn, w *coreworld.World, p
 	if p.OpenContainerKind == "minecraft:crafting_table" {
 		returnCraftingGrid(p)
 	}
+	LoadChestContainerState(p, w, pos)
+
+	persistChestContents(p, w)
+	menuType := containerMenuType("minecraft:chest") // generic_9x3 = 2
+	title := "Chest"
+	if p.OpenContainerHasPartner {
+		menuType = doubleChestMenuType
+		title = "Large Chest"
+	}
+	if err := sendOpenScreen(conn, chestContainerID, menuType, title); err != nil {
+		return err
+	}
+	return sendChestContainerContent(conn, p)
+}
+
+// LoadChestContainerState loads a single or double chest into the canonical
+// open-container fields without sending edition-specific packets. Bedrock and
+// Java therefore use exactly the same half ordering and persistence rules.
+func LoadChestContainerState(p *player.Player, w *coreworld.World, pos spatial.BlockPos) {
+	if p == nil || w == nil {
+		return
+	}
 
 	block := w.GetBlock(int(pos.X), int(pos.Y), int(pos.Z))
 	rightPos, leftPos, hasPartner := chestDoubleHalves(block, pos, w)
 
 	slotCount := chestSlotCount
-	menuType := containerMenuType("minecraft:chest") // generic_9x3 = 2
-	title := "Chest"
 	if hasPartner {
 		slotCount = doubleChestSlotCount
-		menuType = doubleChestMenuType
-		title = "Large Chest"
 	}
 
 	p.OpenContainerID = chestContainerID
-	p.OpenContainerKind = "minecraft:chest"
+	p.OpenContainerKind = block.ResourceLocation()
 	p.OpenContainerPos = rightPos
 	p.OpenContainerPartnerPos = leftPos
 	p.OpenContainerHasPartner = hasPartner
@@ -60,12 +78,11 @@ func openChest(p *player.Player, conn *network.ClientConn, w *coreworld.World, p
 	}
 
 	p.ContainerStateID++
-	persistChestContents(p, w)
-	if err := sendOpenScreen(conn, chestContainerID, menuType, title); err != nil {
-		return err
-	}
-	return sendChestContainerContent(conn, p)
 }
+
+// PersistChestContents stores the canonical open chest back into one or both
+// block entities. It is exported for the Bedrock adapter's shared simulation.
+func PersistChestContents(p *player.Player, w *coreworld.World) { persistChestContents(p, w) }
 
 // chestDoubleHalves resolves the right-half and left-half positions for a
 // chest block.  If the block is a single chest, both returned positions equal
@@ -206,10 +223,10 @@ func chestFacingFromBlock(b coreworld.Block, fallback string) string {
 // with the given facing, where right/left are relative to the player standing
 // in front of the chest and looking at it.
 //
-//   facing=north → player at south looking north: right=east (+X), left=west (-X)
-//   facing=south → player at north looking south: right=west (-X), left=east (+X)
-//   facing=east  → player at west looking east:  right=south (+Z), left=north (-Z)
-//   facing=west  → player at east looking west:  right=north (-Z), left=south (+Z)
+//	facing=north → player at south looking north: right=east (+X), left=west (-X)
+//	facing=south → player at north looking south: right=west (-X), left=east (+X)
+//	facing=east  → player at west looking east:  right=south (+Z), left=north (-Z)
+//	facing=west  → player at east looking west:  right=north (-Z), left=south (+Z)
 func chestSidePositions(facing string, pos spatial.BlockPos) (rightPos, leftPos spatial.BlockPos) {
 	switch facing {
 	case "north":
@@ -416,6 +433,10 @@ func chestContainerSlot(p *player.Player, containerSlot int) *player.ItemStack {
 // persistChestContents saves the open container's items back to the world.
 // For double chests slots 0-26 go to the right half and 27-53 to the left half.
 func persistChestContents(p *player.Player, w *coreworld.World) {
+	kind := p.OpenContainerKind
+	if kind != "minecraft:chest" && kind != "minecraft:trapped_chest" {
+		kind = "minecraft:chest"
+	}
 	pos := p.OpenContainerPos
 	if p.OpenContainerHasPartner {
 		// Save right half (slots 0-26).
@@ -426,7 +447,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 				rightItems = append(rightItems, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count})
 			}
 		}
-		w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), "minecraft:chest", rightItems)
+		w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), kind, rightItems)
 
 		// Save left half (slots 27-53).
 		lp := p.OpenContainerPartnerPos
@@ -437,7 +458,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 				leftItems = append(leftItems, coreworld.ContainerItem{Slot: slot - chestSlotCount, ItemID: stack.ItemID, Count: stack.Count})
 			}
 		}
-		w.SetContainerItems(int(lp.X), int(lp.Y), int(lp.Z), "minecraft:chest", leftItems)
+		w.SetContainerItems(int(lp.X), int(lp.Y), int(lp.Z), kind, leftItems)
 		return
 	}
 
@@ -449,6 +470,5 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		}
 		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count})
 	}
-	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), "minecraft:chest", items)
+	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), kind, items)
 }
-

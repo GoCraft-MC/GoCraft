@@ -97,6 +97,7 @@ type naturalSpawnState struct {
 	counts              [8]int
 	localCounts         map[int32][8]int
 	players             []naturalSpawnPlayer
+	categoryCaps        [8]int
 }
 
 func entityWithinSimulationRange(entity *corentity.Entity, players []naturalSpawnPlayer, distance float64) bool {
@@ -138,8 +139,7 @@ func (s *Server) despawnDistantNaturalMobs(players []naturalSpawnPlayer, removed
 }
 
 func (state *naturalSpawnState) globalCap(category mobCategory) int {
-	settings := pumpkinMobCategories[category]
-	return settings.max * state.spawnableChunkCount / pumpkinSpawnableChunkDenominator
+	return state.categoryCaps[category] * state.spawnableChunkCount / pumpkinSpawnableChunkDenominator
 }
 
 func (state *naturalSpawnState) canSpawnGlobal(category mobCategory) bool {
@@ -160,7 +160,7 @@ func (state *naturalSpawnState) playersNearChunk(cx, cz int32) []int32 {
 
 func (state *naturalSpawnState) canSpawnLocal(category mobCategory, cx, cz int32) bool {
 	for _, playerID := range state.playersNearChunk(cx, cz) {
-		if state.localCounts[playerID][category] < pumpkinMobCategories[category].max {
+		if state.localCounts[playerID][category] < state.categoryCaps[category] {
 			return true
 		}
 	}
@@ -241,7 +241,11 @@ func (s *Server) populatePumpkinGenerationCreatures(chunks [][2]int32, players [
 	if simulationAreas < 1 {
 		simulationAreas = 1
 	}
-	populationLimit := pumpkinCreaturePopulationPerArea * simulationAreas
+	populationPerArea := pumpkinCreaturePopulationPerArea
+	if s.cfg != nil {
+		populationPerArea = s.cfg.MobSpawning.Passive
+	}
+	populationLimit := populationPerArea * simulationAreas
 	if populationCount >= populationLimit {
 		return
 	}
@@ -456,6 +460,7 @@ func (s *Server) newNaturalSpawnState(players []naturalSpawnPlayer, chunks [][2]
 		spawnableChunkCount: len(chunks),
 		localCounts:         make(map[int32][8]int, len(players)),
 		players:             players,
+		categoryCaps:        s.naturalSpawnCategoryCaps(),
 	}
 	active := make(map[[2]int32]struct{}, len(chunks))
 	for _, chunk := range chunks {
@@ -476,6 +481,30 @@ func (s *Server) newNaturalSpawnState(players []naturalSpawnPlayer, chunks [][2]
 		state.add(settings.category, cx, cz)
 	}
 	return state
+}
+
+func (s *Server) naturalSpawnCategoryCaps() [8]int {
+	caps := [8]int{
+		pumpkinMobCategories[mobCategoryMonster].max,
+		pumpkinMobCategories[mobCategoryCreature].max,
+		pumpkinMobCategories[mobCategoryAmbient].max,
+		pumpkinMobCategories[mobCategoryAxolotls].max,
+		pumpkinMobCategories[mobCategoryUndergroundWaterCreature].max,
+		pumpkinMobCategories[mobCategoryWaterCreature].max,
+		pumpkinMobCategories[mobCategoryWaterAmbient].max,
+		pumpkinMobCategories[mobCategoryMisc].max,
+	}
+	if s.cfg == nil {
+		return caps
+	}
+	caps[mobCategoryMonster] = s.cfg.MobSpawning.Hostile
+	caps[mobCategoryCreature] = s.cfg.MobSpawning.Passive
+	caps[mobCategoryAmbient] = s.cfg.MobSpawning.Ambient
+	caps[mobCategoryAxolotls] = s.cfg.MobSpawning.Axolotls
+	caps[mobCategoryUndergroundWaterCreature] = s.cfg.MobSpawning.UndergroundWaterCreatures
+	caps[mobCategoryWaterCreature] = s.cfg.MobSpawning.WaterCreatures
+	caps[mobCategoryWaterAmbient] = s.cfg.MobSpawning.WaterAmbient
+	return caps
 }
 
 func filteredSpawningCategories(state *naturalSpawnState, spawnEnemies, spawnPassives bool) []mobCategory {

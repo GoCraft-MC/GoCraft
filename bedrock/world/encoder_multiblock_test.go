@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	coreworld "GoCraft/core/world"
-	dfworld "github.com/df-mc/dragonfly/server/world"
 )
 
 func TestJavaBedsAndOakDoorsMapToVisibleBedrockBlocks(t *testing.T) {
@@ -17,17 +16,9 @@ func TestJavaBedsAndOakDoorsMapToVisibleBedrockBlocks(t *testing.T) {
 		{coreworld.Block{Namespace: `minecraft`, Name: `oak_door`, Properties: map[string]string{`facing`: `east`, `half`: `lower`, `hinge`: `left`, `open`: `false`, `powered`: `false`}}, `minecraft:wooden_door`},
 	}
 	for _, test := range tests {
-		networkID := encoder.BlockNetworkID(test.block)
-		var got string
-		for rid := uint32(0); rid < uint32(dfworld.DefaultBlockRegistry.BlockCount()); rid++ {
-			hash, ok := dfworld.DefaultBlockRegistry.RuntimeIDToHash(rid)
-			if ok && hash == networkID {
-				got, _, _ = dfworld.DefaultBlockRegistry.RuntimeIDToState(rid)
-				break
-			}
-		}
+		got, _ := encoder.resolveState(test.block)
 		if got != test.want {
-			t.Errorf(`%s mapped to %s (network hash %d), want %s`, test.block.ResourceLocation(), got, networkID, test.want)
+			t.Errorf(`%s mapped to %s, want %s`, test.block.ResourceLocation(), got, test.want)
 		}
 	}
 }

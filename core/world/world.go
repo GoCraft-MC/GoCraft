@@ -505,11 +505,13 @@ func (w *World) NearestBiome(x, z int, target string, maxDistance int) (int, int
 }
 
 // BiomeAt returns the canonical biome resource location at a block position.
-// GoCraft's overworld generator can answer this without loading a chunk, which
-// lets the natural spawner use Pumpkin's biome-specific spawn tables without
-// adding disk I/O to the tick goroutine. Other generators use plains.
+// Dimension generators can answer this without loading a chunk, which lets
+// the natural spawner use biome-specific spawn tables without adding disk I/O
+// to the tick goroutine. Generators without biome sampling fall back to plains.
 func (w *World) BiomeAt(x, y, z int) string {
-	generator, ok := w.generator.(*OverworldGenerator)
+	generator, ok := w.generator.(interface {
+		BiomeAt3D(x, y, z int) string
+	})
 	if !ok {
 		return "minecraft:plains"
 	}

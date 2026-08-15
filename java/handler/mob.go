@@ -95,18 +95,27 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		encodeSlot(b, player.ItemStack{ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage})
 		return b.Byte(0xff).Build()
 	}
-	if e.Type != corentity.TypeVillager && !corentity.IsAgeableAnimal(e.Type) && !corentity.IsTameableAnimal(e.Type) && !corentity.IsAnimalVehicle(e.Type) {
-		return nil
-	}
 	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)
+	hasMetadata := false
+	if e.FireTicks > 0 {
+		b = b.Byte(0).VarInt(0).Byte(0x01)
+		hasMetadata = true
+	}
+	if e.UsingItem {
+		b = b.Byte(8).VarInt(0).Byte(0x01)
+		hasMetadata = true
+	}
 	if e.Type == corentity.TypeVillager {
 		b = appendLivingEntitySleepMetadata(b, e.Sleeping, e.VillageBed)
+		hasMetadata = true
 	}
 	if e.Type == corentity.TypeVillager || corentity.IsAgeableAnimal(e.Type) {
 		b = b.Byte(16).VarInt(8).Bool(e.IsBaby) // AgeableMob DATA_BABY_ID.
+		hasMetadata = true
 	}
 
 	if isJavaTamableAnimal(e.Type) {
+		hasMetadata = true
 		flags := byte(0)
 		if e.Sitting {
 			flags |= 0x01
@@ -121,6 +130,7 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		}
 	}
 	if isJavaAbstractHorse(e.Type) {
+		hasMetadata = true
 		flags := byte(0)
 		if e.Tamed {
 			flags |= 0x02
@@ -139,14 +149,20 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 	}
 	if e.Type == corentity.TypePig {
 		b = b.Byte(17).VarInt(8).Bool(e.Saddled)
+		hasMetadata = true
 	}
 	if e.Type == corentity.TypeOcelot {
 		b = b.Byte(17).VarInt(8).Bool(e.Trusting)
+		hasMetadata = true
 	}
 	if e.Type == corentity.TypeStrider {
 		b = b.Byte(19).VarInt(8).Bool(e.Saddled)
+		hasMetadata = true
 	}
 	if e.Type != corentity.TypeVillager {
+		if !hasMetadata {
+			return nil
+		}
 		return b.Byte(0xff).Build()
 	}
 	level := e.VillagerLevel
@@ -163,6 +179,17 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		VarInt(level).
 		Byte(0xff). // metadata list terminator
 		Build()
+}
+
+func buildMobEquipment(e *corentity.Entity) *protocol.Packet {
+	if e == nil || e.MainHandItemID == "" {
+		return nil
+	}
+	b := protocol.NewBuilder(packetIDSetEquipment).
+		VarInt(e.EntityID).
+		Byte(0) // Main hand, final equipment entry.
+	encodeSlot(b, player.ItemStack{ItemID: e.MainHandItemID, Count: 1})
+	return b.Build()
 }
 
 func isJavaTamableAnimal(t corentity.EntityType) bool {
@@ -205,6 +232,51 @@ func BroadcastMobMetadata(e *corentity.Entity, mgr *session.Manager) {
 			_ = s.Conn.WritePacket(pkt)
 		}
 	}()
+}
+
+// BroadcastMobFireState updates the shared entity flags even when fire was
+// extinguished. buildMobMetadata intentionally omits default metadata for most
+// hostiles, so the explicit zero flag is required to clear the flame renderer.
+func BroadcastMobFireState(e *corentity.Entity, mgr *session.Manager) {
+	if e == nil || mgr == nil {
+		return
+	}
+	flags := byte(0)
+	if e.FireTicks > 0 {
+		flags = 0x01
+	}
+	pkt := protocol.NewBuilder(packetIDSetEntityData).
+		VarInt(e.EntityID).
+		Byte(0).
+		VarInt(0).
+		Byte(flags).
+		Byte(0xff).
+		Build()
+	for _, sess := range mgr.SnapshotAll() {
+		_ = sess.Conn.WritePacket(pkt)
+	}
+}
+
+// BroadcastMobUsingItemState starts or stops the living-entity main-hand use
+// animation. Skeletons keep this active for the same 20 draw ticks as Pumpkin.
+func BroadcastMobUsingItemState(e *corentity.Entity, mgr *session.Manager) {
+	if e == nil || mgr == nil {
+		return
+	}
+	flags := byte(0)
+	if e.UsingItem {
+		flags = 0x01
+	}
+	pkt := protocol.NewBuilder(packetIDSetEntityData).
+		VarInt(e.EntityID).
+		Byte(8).
+		VarInt(0).
+		Byte(flags).
+		Byte(0xff).
+		Build()
+	for _, sess := range mgr.SnapshotAll() {
+		_ = sess.Conn.WritePacket(pkt)
+	}
 }
 
 // BroadcastEntityStatus triggers vanilla entity feedback such as love hearts
@@ -380,6 +452,9 @@ func sendExistingMobsTo(conn *network.ClientConn, mobs []*corentity.Entity) {
 		if metadata := buildMobMetadata(e); metadata != nil {
 			_ = conn.WritePacket(metadata)
 		}
+		if equipment := buildMobEquipment(e); equipment != nil {
+			_ = conn.WritePacket(equipment)
+		}
 		if passengers := e.PassengerIDs(); len(passengers) > 0 {
 			_ = conn.WritePacket(buildSetPassengers(e.EntityID, passengers))
 		}
@@ -404,6 +479,9 @@ func sendExistingMobsInViewTo(conn *network.ClientConn, mobs []*corentity.Entity
 		if metadata := buildMobMetadata(e); metadata != nil {
 			_ = conn.WritePacket(metadata)
 		}
+		if equipment := buildMobEquipment(e); equipment != nil {
+			_ = conn.WritePacket(equipment)
+		}
 		if passengers := e.PassengerIDs(); len(passengers) > 0 {
 			_ = conn.WritePacket(buildSetPassengers(e.EntityID, passengers))
 		}
@@ -422,6 +500,9 @@ func BroadcastSpawnMob(e *corentity.Entity, mgr *session.Manager) {
 		_ = s.Conn.WritePacket(pkt)
 		if metadata != nil {
 			_ = s.Conn.WritePacket(metadata)
+		}
+		if equipment := buildMobEquipment(e); equipment != nil {
+			_ = s.Conn.WritePacket(equipment)
 		}
 	}
 }
@@ -600,6 +681,9 @@ func DispatchTickBroadcast(moved []*corentity.Entity, hurtEntities []*corentity.
 			pkts = append(pkts, spawn)
 			if metadata := buildMobMetadata(e); metadata != nil {
 				pkts = append(pkts, metadata)
+			}
+			if equipment := buildMobEquipment(e); equipment != nil {
+				pkts = append(pkts, equipment)
 			}
 		}
 	}

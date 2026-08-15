@@ -1,6 +1,7 @@
 package bedrock
 
 import (
+	"bytes"
 	"strconv"
 	"testing"
 
@@ -9,10 +10,48 @@ import (
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 
-	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
+
+func TestPumpkinItemRegistryCoversCreativeCatalogue(t *testing.T) {
+	registry := bedrockItemRegistry()
+	if len(registry) != 1976 {
+		t.Fatalf("item registry has %d entries, want Pumpkin's complete 1976", len(registry))
+	}
+	byRuntimeID := make(map[int32]string, len(registry))
+	byName := make(map[string]protocol.ItemEntry, len(registry))
+	for _, entry := range registry {
+		if previous, exists := byRuntimeID[int32(entry.RuntimeID)]; exists {
+			t.Fatalf("runtime ID %d is shared by %s and %s", entry.RuntimeID, previous, entry.Name)
+		}
+		if _, exists := byName[entry.Name]; exists {
+			t.Fatalf("duplicate item registry name %s", entry.Name)
+		}
+		byRuntimeID[int32(entry.RuntimeID)] = entry.Name
+		byName[entry.Name] = entry
+	}
+	for _, creative := range pumpkinCreativeItems {
+		if name := byRuntimeID[creative.runtimeID]; name != creative.name {
+			t.Errorf("creative %s uses runtime ID %d registered as %q", creative.name, creative.runtimeID, name)
+		}
+	}
+	if apple, ok := byName["minecraft:apple"]; !ok {
+		t.Fatal("item registry does not contain minecraft:apple")
+	} else if apple.Version == protocol.ItemEntryVersionDataDriven && len(apple.Data) == 0 {
+		t.Fatal("data-driven apple has no item components")
+	}
+}
+
+func TestPumpkinItemRegistryMarshalsAsBedrockPacket(t *testing.T) {
+	var payload bytes.Buffer
+	pk := &packet.ItemRegistry{Items: bedrockItemRegistry()}
+	pk.Marshal(protocol.NewWriter(&payload, 0))
+	if payload.Len() < 100_000 {
+		t.Fatalf("encoded ItemRegistry is only %d bytes; complete table was not written", payload.Len())
+	}
+}
 
 func TestCreativeCatalogueIsPopulated(t *testing.T) {
 	l := &Listener{}
@@ -26,6 +65,53 @@ func TestCreativeCatalogueIsPopulated(t *testing.T) {
 		}
 	}
 	t.Fatal("creative catalogue does not contain minecraft:oak_log")
+}
+
+func TestCreativeCataloguePreservesCurrentPumpkinVariantData(t *testing.T) {
+	l := &Listener{}
+	l.initCreativeContent()
+	if len(l.creativeGroups) != 123 {
+		t.Fatalf("creative group count = %d, want Pumpkin's 123", len(l.creativeGroups))
+	}
+	var nbtVariants, blockVariants int
+	for _, item := range l.creativeItems {
+		if item.GroupIndex >= uint32(len(l.creativeGroups)) {
+			t.Fatalf("item %d has invalid group %d", item.CreativeItemNetworkID, item.GroupIndex)
+		}
+		if len(item.Item.NBTData) != 0 {
+			nbtVariants++
+		}
+		if item.Item.BlockRuntimeID != 0 {
+			blockVariants++
+		}
+	}
+	if nbtVariants != 175 || blockVariants != 939 {
+		t.Fatalf("preserved creative variants = %d NBT/%d block states, want 175/939", nbtVariants, blockVariants)
+	}
+}
+
+func TestCreativeEnchantedBooksKeepDistinctNBTForSearchIndex(t *testing.T) {
+	l := &Listener{}
+	l.initCreativeContent()
+	encoded := make(map[string]struct{})
+	books := 0
+	for _, item := range l.creativeItems {
+		if item.Item.NetworkID != pumpkinCreativeRuntimeIDsByName["minecraft:enchanted_book"] {
+			continue
+		}
+		books++
+		if len(item.Item.NBTData) == 0 {
+			t.Fatalf("enchanted book %d has no NBT variant", item.CreativeItemNetworkID)
+		}
+		var payload bytes.Buffer
+		if err := nbt.NewEncoderWithEncoding(&payload, nbt.LittleEndian).Encode(item.Item.NBTData); err != nil {
+			t.Fatal(err)
+		}
+		encoded[payload.String()] = struct{}{}
+	}
+	if books != 125 || len(encoded) != books {
+		t.Fatalf("enchanted book variants = %d entries/%d distinct NBT, want 125/125", books, len(encoded))
+	}
 }
 
 func TestCanonicalLightItemUsesSelectedBedrockBlockState(t *testing.T) {
@@ -49,6 +135,13 @@ func TestBedrockLightCreativeItemsUseCanonicalJavaIdentity(t *testing.T) {
 		if name != "minecraft:light" || meta != level {
 			t.Fatalf("level %d canonical identity = %q/%d", level, name, meta)
 		}
+	}
+}
+
+func TestBedrockLegacyCreativeDoorUsesCanonicalOakDoor(t *testing.T) {
+	name, meta := canonicalCreativeIdentity("minecraft:wooden_door", 0)
+	if name != "minecraft:oak_door" || meta != 0 {
+		t.Fatalf("wooden door canonical identity = %q/%d, want minecraft:oak_door/0", name, meta)
 	}
 }
 
@@ -255,50 +348,31 @@ func TestPumpkinCopperCreativeArmorIsPristineAndUnstackable(t *testing.T) {
 	}
 }
 
-func TestOnlyUnsupportedPumpkinCreativeEntriesAreSkipped(t *testing.T) {
-	dfworld.DefaultBlockRegistry.Finalize()
-	var root struct {
-		Groups []creativeNBTGroup `nbt:"groups"`
-		Items  []creativeNBTItem  `nbt:"items"`
-	}
-	if err := nbt.Unmarshal(creativeItemsNBT, &root); err != nil {
-		t.Fatal(err)
-	}
-	expected := map[string]struct{}{
-		"minecraft:sulfur_wall":            {},
-		"minecraft:polished_sulfur_wall":   {},
-		"minecraft:sulfur_brick_wall":      {},
-		"minecraft:sulfur_stairs":          {},
-		"minecraft:polished_sulfur_stairs": {},
-		"minecraft:sulfur_brick_stairs":    {},
-		"minecraft:sulfur_slab":            {},
-		"minecraft:polished_sulfur_slab":   {},
-		"minecraft:sulfur_brick_slab":      {},
-		"minecraft:sulfur_bricks":          {},
-		"minecraft:chiseled_sulfur":        {},
-		"minecraft:sulfur":                 {},
-		"minecraft:polished_sulfur":        {},
-		"minecraft:potent_sulfur":          {},
-		"minecraft:sulfur_spike":           {},
-		"minecraft:sulfur_cube_spawn_egg":  {},
-		"minecraft:music_disc_bounce":      {},
-		"minecraft:sulfur_cube_bucket":     {},
-	}
-	seen := make(map[string]struct{}, len(expected))
-	for _, entry := range root.Items {
-		if _, ok := creativeItemStack(entry); !ok {
-			if _, allowed := expected[entry.Name]; !allowed {
-				t.Errorf("unexpectedly skipped creative entry %s/%d", entry.Name, entry.Meta)
-			}
-			seen[entry.Name] = struct{}{}
+func TestEveryPumpkinCreativeEntryHasCurrentRuntimeID(t *testing.T) {
+	for _, entry := range pumpkinCreativeItems {
+		if _, ok := pumpkinCreativeCatalogueStack(entry); !ok {
+			t.Errorf("creative entry %s/%d has no usable runtime ID", entry.name, entry.meta)
 		}
 	}
-	for name := range expected {
-		if _, ok := seen[name]; !ok {
-			t.Errorf("expected unsupported entry %s was not present in Pumpkin's creative source", name)
+	if len(pumpkinCreativeItems) != 1875 {
+		t.Fatalf("generated %d creative entries, want Pumpkin's complete 1875-entry catalogue", len(pumpkinCreativeItems))
+	}
+}
+
+func TestBedrockOnlyCreativeRuntimeIDSurvivesInventorySync(t *testing.T) {
+	l := &Listener{encoder: bedrockworld.NewEncoder()}
+	l.initCreativeContent()
+
+	for creativeID, known := range l.creativeNames {
+		if known.name != "minecraft:normal_stone_slab" {
+			continue
 		}
+		advertised := l.creativeItems[creativeID-1].Item
+		inventory := l.itemInstance(player.ItemStack{ItemID: known.name, Count: 1, Damage: int(known.meta)}, 1).Stack
+		if advertised.NetworkID != -899 || inventory.NetworkID != advertised.NetworkID {
+			t.Fatalf("normal stone slab runtime ID advertised/inventory = %d/%d, want -899/-899", advertised.NetworkID, inventory.NetworkID)
+		}
+		return
 	}
-	if len(seen) != len(expected) {
-		t.Fatalf("skipped %d unique creative entries, want exactly %d known unsupported entries", len(seen), len(expected))
-	}
+	t.Fatal("normal stone slab missing from Pumpkin creative catalogue")
 }

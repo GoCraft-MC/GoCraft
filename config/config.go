@@ -96,6 +96,19 @@ type DebugConfig struct {
 	Profiling            bool `yaml:"profiling"`
 }
 
+// MobSpawningConfig controls the natural-mob caps for one complete 17x17
+// chunk simulation area. Smaller loaded areas scale these values down, and 0
+// disables natural spawning for that category.
+type MobSpawningConfig struct {
+	Hostile                   int `yaml:"hostile"`
+	Passive                   int `yaml:"passive"`
+	Ambient                   int `yaml:"ambient"`
+	Axolotls                  int `yaml:"axolotls"`
+	UndergroundWaterCreatures int `yaml:"underground_water_creatures"`
+	WaterCreatures            int `yaml:"water_creatures"`
+	WaterAmbient              int `yaml:"water_ambient"`
+}
+
 // Config holds all server configuration values.
 type Config struct {
 	// JavaEnabled controls whether the Java Edition TCP listener is started.
@@ -144,7 +157,8 @@ type Config struct {
 	// On peaceful no hostile mobs are spawned and existing ones are removed.
 	Difficulty string `yaml:"difficulty"`
 
-	DefaultGameMode string `yaml:"default_gamemode"`
+	DefaultGameMode string            `yaml:"default_gamemode"`
+	MobSpawning     MobSpawningConfig `yaml:"mob_spawning"`
 
 	// Operators bootstraps named operators. Runtime /op changes are persisted
 	// separately in ops.json, matching the vanilla server convention.
@@ -182,7 +196,16 @@ func defaults() *Config {
 		MaxCachedChunks:   256,
 		Difficulty:        "normal",
 		DefaultGameMode:   "survival",
-		Whitelist:         WhitelistConfig{Enabled: false, Players: []string{}},
+		MobSpawning: MobSpawningConfig{
+			Hostile:                   35,
+			Passive:                   16,
+			Ambient:                   15,
+			Axolotls:                  5,
+			UndergroundWaterCreatures: 5,
+			WaterCreatures:            5,
+			WaterAmbient:              20,
+		},
+		Whitelist: WhitelistConfig{Enabled: false, Players: []string{}},
 		Combat: CombatConfig{
 			AttackCooldown:      false,
 			KnockbackHorizontal: 0.4,
@@ -291,6 +314,19 @@ func (c *Config) validate() error {
 	case "survival", "creative", "adventure", "spectator":
 	default:
 		return fmt.Errorf("default_gamemode %q must be survival, creative, adventure, or spectator", c.DefaultGameMode)
+	}
+	for name, limit := range map[string]int{
+		"hostile":                     c.MobSpawning.Hostile,
+		"passive":                     c.MobSpawning.Passive,
+		"ambient":                     c.MobSpawning.Ambient,
+		"axolotls":                    c.MobSpawning.Axolotls,
+		"underground_water_creatures": c.MobSpawning.UndergroundWaterCreatures,
+		"water_creatures":             c.MobSpawning.WaterCreatures,
+		"water_ambient":               c.MobSpawning.WaterAmbient,
+	} {
+		if limit < 0 || limit > 1000 {
+			return fmt.Errorf("mob_spawning.%s %d must be between 0 and 1000", name, limit)
+		}
 	}
 	if c.Combat.KnockbackHorizontal < 0 || c.Combat.KnockbackHorizontal > 4 {
 		return fmt.Errorf("combat.knockback_horizontal %.3f must be between 0 and 4", c.Combat.KnockbackHorizontal)

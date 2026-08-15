@@ -146,6 +146,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		breakLinkedPlantHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		breakLinkedBedHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		unlinkChestPartner(int(bx), int(by), int(bz), broken, w, mgr)
+		breakUnsupportedBlocksAbove(int(bx), int(by), int(bz), w, mgr)
 		broadcastSoundAt(mgr, blockBreakSound(broken.ResourceLocation()), soundCategoryBlocks,
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 
@@ -209,6 +210,23 @@ func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.Worl
 	other := w.GetBlock(x, otherY, z)
 	if other.ResourceLocation() == broken.ResourceLocation() && other.Properties["half"] == wantHalf {
 		applyBlockChange(x, otherY, z, coreworld.Air, w, mgr)
+	}
+}
+
+func breakUnsupportedBlocksAbove(x, y, z int, w *coreworld.World, mgr *session.Manager) {
+	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {
+		plant := w.GetBlock(x, plantY, z)
+		if !coreworld.RequiresGroundSupport(plant) || !w.GetBlock(x, plantY-1, z).IsAir() {
+			return
+		}
+		partnerY, partnerHalf, hasPartner := coreworld.DoublePlantPartnerY(plant, plantY)
+		applyBlockChange(x, plantY, z, coreworld.Air, w, mgr)
+		if hasPartner {
+			partner := w.GetBlock(x, partnerY, z)
+			if partner.ResourceLocation() == plant.ResourceLocation() && partner.Properties["half"] == partnerHalf {
+				applyBlockChange(x, partnerY, z, coreworld.Air, w, mgr)
+			}
+		}
 	}
 }
 

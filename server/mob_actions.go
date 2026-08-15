@@ -57,7 +57,8 @@ func (s *Server) tickHostileAgainstEntity(attacker *corentity.Entity, ai *mobAI,
 	if ai.attackCooldown > 0 {
 		ai.attackCooldown--
 	}
-	if distance <= 1.8 && math.Abs(target.Position.Y-attacker.Position.Y) <= 2 {
+	if distance <= 1.8 && math.Abs(target.Position.Y-attacker.Position.Y) <= 2 &&
+		s.mobHasLineOfSight(attacker, target.Position, 1.4) {
 		attacker.VX, attacker.VZ = 0, 0
 		if ai.attackCooldown == 0 {
 			ai.attackCooldown = 20

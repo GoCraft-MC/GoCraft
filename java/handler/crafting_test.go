@@ -171,6 +171,49 @@ func TestShiftClickPersonalCraftingInputReturnsItToInventory(t *testing.T) {
 	}
 }
 
+func TestShiftClickPersonalCraftingResultCraftsMaximum(t *testing.T) {
+	p := player.New([16]byte{}, "crafter", player.ClientEditionJava)
+	p.Inventory[1] = player.ItemStack{ItemID: "minecraft:oak_log", Count: 8}
+	updatePersonalCraftingResult(p)
+
+	shiftPersonalCraftingResult(p)
+
+	if !p.Inventory[1].IsEmpty() || !p.Inventory[0].IsEmpty() {
+		t.Fatalf("crafting grid was not exhausted: input=%+v output=%+v", p.Inventory[1], p.Inventory[0])
+	}
+	total := 0
+	for slot := 9; slot < player.InventorySize; slot++ {
+		if p.Inventory[slot].ItemID == "minecraft:oak_planks" {
+			total += p.Inventory[slot].Count
+		}
+	}
+	if total != 32 {
+		t.Fatalf("shift-crafted %d planks, want 32", total)
+	}
+}
+
+func TestShiftClickCraftingTableResultCraftsMaximum(t *testing.T) {
+	p := player.New([16]byte{}, "crafter", player.ClientEditionJava)
+	p.CraftingGrid[0] = player.ItemStack{ItemID: "minecraft:oak_planks", Count: 7}
+	p.CraftingGrid[3] = player.ItemStack{ItemID: "minecraft:oak_planks", Count: 7}
+	p.CraftingResult = findCraftingResult(p.CraftingGrid)
+
+	shiftCraftingResult(p)
+
+	if !p.CraftingGrid[0].IsEmpty() || !p.CraftingGrid[3].IsEmpty() || !p.CraftingResult.IsEmpty() {
+		t.Fatalf("crafting table was not exhausted: grid=%+v result=%+v", p.CraftingGrid, p.CraftingResult)
+	}
+	total := 0
+	for slot := 9; slot < player.InventorySize; slot++ {
+		if p.Inventory[slot].ItemID == "minecraft:stick" {
+			total += p.Inventory[slot].Count
+		}
+	}
+	if total != 28 {
+		t.Fatalf("shift-crafted %d sticks, want 28", total)
+	}
+}
+
 func TestQuickCraftDragPlacesItemsInCraftingTable(t *testing.T) {
 	p := player.New([16]byte{}, "crafter", player.ClientEditionJava)
 	p.CarriedItem = player.ItemStack{ItemID: "minecraft:oak_planks", Count: 2}

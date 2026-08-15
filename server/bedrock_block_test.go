@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
@@ -37,6 +38,32 @@ func TestBedrockBreakingDoublePlantRemovesBothHalves(t *testing.T) {
 		if got := w.GetBlock(0, y, 0); !got.IsAir() {
 			t.Fatalf("plant half y=%d = %q, want air", y, got.ResourceLocation())
 		}
+	}
+}
+
+func TestBedrockBreakingSupportRemovesFloatingGrassImmediately(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	g := game.New()
+	p := player.New([16]byte{42}, "bedrock-gardener", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeCreative
+	p.Position = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	w.SetBlock(0, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "dirt"})
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "short_grass"})
+	s := &Server{game: g, world: w, sessions: session.NewManager()}
+
+	s.applyBedrockBlockInteract(intent.BlockInteractIntent{
+		PlayerUUID: p.UUID, Action: intent.BlockActionBreak,
+		Position: spatial.BlockPos{X: 0, Y: 63, Z: 0}, HotbarSlot: 0,
+	})
+	if support := w.GetBlock(0, 63, 0); !support.IsAir() {
+		t.Fatalf("broken support = %q, want air", support.ResourceLocation())
+	}
+	if grass := w.GetBlock(0, 64, 0); !grass.IsAir() {
+		t.Fatalf("grass above broken support = %q, want air", grass.ResourceLocation())
 	}
 }
 
@@ -295,6 +322,11 @@ func TestBedrockCanConsumeFood(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{game: g}
+	s.applyBedrockStartUseItem(intent.StartUseItemIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
+	if p.UsingItemID != "minecraft:bread" || p.UsingItemSince.IsZero() {
+		t.Fatalf("eating did not start: item=%q since=%v", p.UsingItemID, p.UsingItemSince)
+	}
+	p.UsingItemSince = time.Now().Add(-2 * time.Second)
 	s.applyBedrockConsumeFood(intent.ConsumeFoodIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
 	_, food, saturation, _ := p.HealthSnapshot()
 	if food != 19 || saturation != 6 {
@@ -302,5 +334,58 @@ func TestBedrockCanConsumeFood(t *testing.T) {
 	}
 	if got := p.Inventory[player.HotbarStart].Count; got != 1 {
 		t.Fatalf("bread count = %d, want 1", got)
+	}
+	if p.UsingItemID != "" || !p.UsingItemSince.IsZero() {
+		t.Fatalf("use state remained after eating: %q/%v", p.UsingItemID, p.UsingItemSince)
+	}
+}
+
+func TestBedrockFoodCompletesOnServerTickAndReturnsContainer(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{43}, "bedrock-hungry", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Food = 10
+	p.Saturation = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honey_bottle", Count: 1}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g}
+	s.applyBedrockStartUseItem(intent.StartUseItemIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
+	p.UsingItemSince = time.Now().Add(-2 * time.Second)
+	s.tickBedrockItemUse()
+
+	_, food, saturation, _ := p.HealthSnapshot()
+	if food != 16 || saturation != 1.2 {
+		t.Fatalf("after honey bottle = food %d saturation %.1f, want 16/1.2", food, saturation)
+	}
+	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:glass_bottle" || got.Count != 1 {
+		t.Fatalf("consumed honey bottle remainder = %+v, want one glass bottle", got)
+	}
+	if p.UsingItemID != "" || p.UsingItemSlot != -1 || !p.UsingItemSince.IsZero() {
+		t.Fatalf("completed food retained active state: %q/%d/%v", p.UsingItemID, p.UsingItemSlot, p.UsingItemSince)
+	}
+}
+
+func TestBedrockCreativeFoodAnimatesWithoutConsumingStack(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{44}, "bedrock-creative-eater", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeCreative
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:cooked_chicken", Count: 12}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g}
+	s.applyBedrockStartUseItem(intent.StartUseItemIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
+	if p.UsingItemID != "minecraft:cooked_chicken" {
+		t.Fatalf("creative eating animation did not start: %q", p.UsingItemID)
+	}
+	p.UsingItemSince = time.Now().Add(-2 * time.Second)
+	s.tickBedrockItemUse()
+	if got := p.Inventory[player.HotbarStart].Count; got != 12 {
+		t.Fatalf("creative food count = %d after use, want 12", got)
+	}
+	if p.UsingItemID != "" {
+		t.Fatalf("creative eating animation did not complete: %q", p.UsingItemID)
 	}
 }

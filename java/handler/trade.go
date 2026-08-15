@@ -50,6 +50,35 @@ type tradeItem struct {
 	count    int32
 }
 
+// VillagerTrade is the protocol-neutral view of a trade offer shared with the
+// Bedrock adapter. The Java wire encoder keeps using the private representation
+// below so edition details do not leak into the simulation.
+type VillagerTrade struct {
+	Input1, Input2 player.ItemStack
+	Output         player.ItemStack
+	MaxUses        int32
+	XP             int32
+}
+
+// VillagerTrades returns a detached copy of the offers for a profession.
+func VillagerTrades(profession corentity.VillagerProfession) []VillagerTrade {
+	offers := tradesForProfession(profession)
+	out := make([]VillagerTrade, 0, len(offers))
+	for _, offer := range offers {
+		trade := VillagerTrade{
+			Input1:  player.ItemStack{ItemID: offer.input1.itemName, Count: int(offer.input1.count)},
+			Output:  player.ItemStack{ItemID: offer.output.itemName, Count: int(offer.output.count)},
+			MaxUses: offer.maxUses,
+			XP:      offer.xpPerTrade,
+		}
+		if offer.input2.itemName != "" && offer.input2.count > 0 {
+			trade.Input2 = player.ItemStack{ItemID: offer.input2.itemName, Count: int(offer.input2.count)}
+		}
+		out = append(out, trade)
+	}
+	return out
+}
+
 // defaultVillagerTrades returns the static trade list shown for all villagers.
 // For a biome-aware implementation, pass the villager biome to vary the trades.
 var defaultVillagerTrades = []tradeOffer{

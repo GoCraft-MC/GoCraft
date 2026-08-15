@@ -21,10 +21,36 @@ func newFurnaceTestServer(t *testing.T, blockID string) (*Server, spatial.BlockP
 	})
 	s := &Server{
 		game: game.New(), world: w, sessions: session.NewManager(),
-		furnaces: make(map[spatial.BlockPos]*furnaceState),
+		furnaces: make(map[furnaceKey]*furnaceState),
 	}
 	t.Cleanup(func() { _ = w.Close() })
 	return s, pos
+}
+
+func TestBedrockFurnacesAreIsolatedByDimension(t *testing.T) {
+	s, pos := newFurnaceTestServer(t, "minecraft:furnace")
+	nether := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	t.Cleanup(func() { _ = nether.Close() })
+	s.netherWorld = nether
+	nether.SetBlock(int(pos.X), int(pos.Y), int(pos.Z), bedrockBlock("furnace", map[string]string{"facing": "north", "lit": "false"}))
+
+	overworldState := s.furnaceStateForDimension(dimensionOverworld, pos)
+	netherState := s.furnaceStateForDimension(dimensionNether, pos)
+	if overworldState == netherState {
+		t.Fatal("furnaces at equal coordinates shared state across dimensions")
+	}
+
+	p := player.New([16]byte{62}, "nether-smelter", player.ClientEditionBedrock)
+	p.Dimension = dimensionNether
+	s.openBedrockFurnace(p, pos, "minecraft:furnace")
+	p.ContainerSlots[0] = player.ItemStack{ItemID: "minecraft:ancient_debris", Count: 1}
+	persistFurnaceSlots(s.worldForPlayer(p), pos, p.OpenContainerKind, p.ContainerSlots)
+	if got := nether.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)); len(got) != 1 || got[0].ItemID != "minecraft:ancient_debris" {
+		t.Fatalf("Nether furnace contents = %+v", got)
+	}
+	if got := s.world.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)); len(got) != 0 {
+		t.Fatalf("Overworld furnace was modified by Nether furnace: %+v", got)
+	}
 }
 
 func TestBedrockFurnaceTransactionsAcceptInputAndFuelButProtectOutput(t *testing.T) {

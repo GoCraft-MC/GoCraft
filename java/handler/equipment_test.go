@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
 	"GoCraft/java/protocol"
 )
@@ -34,5 +35,20 @@ func TestExternalEquipmentUsesProtocol769ContinuationSlots(t *testing.T) {
 	first, _ := protocol.ReadByte(r)
 	if first != 0x80 {
 		t.Fatalf("first equipment slot byte = %#x, want continuation main-hand", first)
+	}
+}
+
+func TestSkeletonEquipmentPacketContainsMainHandEntry(t *testing.T) {
+	skeleton := corentity.New(73, [16]byte{}, corentity.TypeSkeleton, 0, 64, 0)
+	pkt := buildMobEquipment(skeleton)
+	if pkt == nil {
+		t.Fatal("skeleton produced no equipment packet")
+	}
+	r := bytes.NewReader(pkt.Data)
+	if id, _ := protocol.ReadVarInt(r); id != skeleton.EntityID {
+		t.Fatalf("equipment entity id = %d, want %d", id, skeleton.EntityID)
+	}
+	if slot, _ := protocol.ReadByte(r); slot != 0 {
+		t.Fatalf("equipment slot = %#x, want final main-hand slot", slot)
 	}
 }
