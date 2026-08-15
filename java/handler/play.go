@@ -650,7 +650,6 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			return fmt.Errorf("dimension %d is unavailable", dimension)
 		}
 		target = destinationWorld.EnsureSafeArrival(target, dimension)
-		destinationCX, destinationCZ := posToChunk(target.X), posToChunk(target.Z)
 		p.InvulnerableUntil = time.Now().Add(10 * time.Second)
 		p.Dimension = dimension
 		p.Position = target
