@@ -72,6 +72,8 @@ func buildCommandsPacket() *protocol.Packet {
 	tpX := addArgument("x", parserDouble, false, noNumberBounds, tpY)
 	tpTarget := addArgument("target", parserGameProfile, true, nil)
 	rootChildren = append(rootChildren, addLiteral("tp", false, tpX, tpTarget))
+	rootChildren = append(rootChildren, addLiteral("world", true,
+		addLiteral("overworld", true), addLiteral("nether", true), addLiteral("end", true)))
 	tpHereTarget := addArgument("player", parserGameProfile, true, nil)
 	rootChildren = append(rootChildren, addLiteral("tphere", false, tpHereTarget))
 

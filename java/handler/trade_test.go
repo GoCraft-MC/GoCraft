@@ -136,6 +136,56 @@ func TestMerchantOfferUsesProtocol769ItemCostLayout(t *testing.T) {
 	}
 }
 
+func TestVillagerTradeCatalogSeparatesEveryProfessionAndLevel(t *testing.T) {
+	professions := []corentity.VillagerProfession{
+		corentity.VillagerProfessionArmorer, corentity.VillagerProfessionButcher,
+		corentity.VillagerProfessionCartographer, corentity.VillagerProfessionCleric,
+		corentity.VillagerProfessionFarmer, corentity.VillagerProfessionFisherman,
+		corentity.VillagerProfessionFletcher, corentity.VillagerProfessionLeatherworker,
+		corentity.VillagerProfessionLibrarian, corentity.VillagerProfessionMason,
+		corentity.VillagerProfessionShepherd, corentity.VillagerProfessionToolsmith,
+		corentity.VillagerProfessionWeaponsmith,
+	}
+	for _, profession := range professions {
+		previous := 0
+		for level := int32(1); level <= 5; level++ {
+			offers := tradesForProfession(profession, level)
+			if len(offers) <= previous {
+				t.Fatalf("%s level %d has %d offers, want more than level %d's %d", profession, level, len(offers), level-1, previous)
+			}
+			for _, offer := range offers {
+				if offer.input1.itemName == "" || offer.output.itemName == "" || offer.tier >= level {
+					t.Fatalf("invalid %s level %d offer: %+v", profession, level, offer)
+				}
+			}
+			previous = len(offers)
+		}
+	}
+	if offers := tradesForProfession(corentity.VillagerProfessionNone, 5); len(offers) != 0 {
+		t.Fatalf("unemployed villager received %d offers", len(offers))
+	}
+}
+
+func TestNoviceArmorerCannotReceiveOtherProfessionTrades(t *testing.T) {
+	denied := map[string]bool{
+		"minecraft:wheat": true, "minecraft:potato": true, "minecraft:carrot": true,
+		"minecraft:paper": true, "minecraft:bookshelf": true,
+		"minecraft:stick": true, "minecraft:arrow": true,
+	}
+	offers := VillagerTrades(corentity.VillagerProfessionArmorer, 1)
+	if len(offers) != 2 {
+		t.Fatalf("novice armorer offers = %d, want vanilla selection of 2", len(offers))
+	}
+	for _, offer := range offers {
+		if denied[offer.Input1.ItemID] || denied[offer.Output.ItemID] || denied[offer.Input2.ItemID] {
+			t.Fatalf("novice armorer leaked another profession's offer: %+v", offer)
+		}
+		if offer.Tier != 0 {
+			t.Fatalf("novice armorer tier = %d, want 0", offer.Tier)
+		}
+	}
+}
+
 func TestVillagerUnhappyFeedbackContainsParticlesAndNoSound(t *testing.T) {
 	villager := corentity.New(91, [16]byte{}, corentity.TypeVillager, 0, 64, 0)
 	packets := villagerUnhappyPackets(villager)

@@ -15,6 +15,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	"GoCraft/internal/debuglog"
+	"GoCraft/java/handler"
 )
 
 const playerDataVersion = 1
@@ -31,10 +32,12 @@ type persistedPlayerData struct {
 	Rotation      spatial.Rotation                       `json:"rotation"`
 	GameMode      player.GameMode                        `json:"game_mode"`
 	Health        float32                                `json:"health"`
+	Dead          bool                                   `json:"dead,omitempty"`
 	Food          int32                                  `json:"food"`
 	Saturation    float32                                `json:"saturation"`
 	Exhaustion    float32                                `json:"exhaustion"`
 	Inventory     [player.InventorySize]player.ItemStack `json:"inventory"`
+	EnderChest    [27]player.ItemStack                   `json:"ender_chest"`
 	HeldSlot      int                                    `json:"held_slot"`
 	SpawnPoint    spatial.BlockPos                       `json:"spawn_point"`
 	HasSpawnPoint bool                                   `json:"has_spawn_point"`
@@ -54,13 +57,13 @@ func formatPlayerUUID(uuid [16]byte) string {
 }
 
 func snapshotPlayerData(p *player.Player) persistedPlayerData {
-	health, food, saturation, _ := p.HealthSnapshot()
+	health, food, saturation, dead := p.HealthSnapshot()
 	_, _, exhaustion := p.HungerSnapshot()
 	return persistedPlayerData{
 		Version: playerDataVersion, Username: p.Username,
 		Position: p.Position, Rotation: p.Rotation, GameMode: p.GameMode,
-		Health: health, Food: food, Saturation: saturation, Exhaustion: exhaustion,
-		Inventory: p.Inventory, HeldSlot: p.HeldSlot,
+		Health: health, Dead: dead, Food: food, Saturation: saturation, Exhaustion: exhaustion,
+		Inventory: p.Inventory, EnderChest: p.EnderChestInventory, HeldSlot: p.HeldSlot,
 		SpawnPoint: p.SpawnPoint, HasSpawnPoint: p.HasSpawnPoint,
 		Dimension: p.Dimension,
 	}
@@ -153,14 +156,30 @@ func applyPersistedPlayerData(p *player.Player, data persistedPlayerData) error 
 			data.Inventory[slot] = player.ItemStack{}
 		}
 	}
+	for slot, stack := range data.EnderChest {
+		if stack.Count < 0 || stack.Count > 127 || stack.Damage < 0 ||
+			(!stack.IsEmpty() && !strings.Contains(stack.ItemID, ":")) {
+			return fmt.Errorf("invalid ender chest stack in slot %d: %+v", slot, stack)
+		}
+		if stack.IsEmpty() {
+			data.EnderChest[slot] = player.ItemStack{}
+		}
+	}
 	p.Position = data.Position
 	p.Rotation = data.Rotation
 	p.GameMode = data.GameMode
-	p.Health = min(max(data.Health, 1), p.MaxHealth)
+	if data.Dead {
+		p.Health = 0
+		p.Dead = true
+	} else {
+		p.Health = min(max(data.Health, 1), p.MaxHealth)
+		p.Dead = false
+	}
 	p.Food = min(max(data.Food, 0), 20)
 	p.Saturation = min(max(data.Saturation, 0), 20)
 	p.Exhaustion = min(max(data.Exhaustion, 0), 4)
 	p.Inventory = data.Inventory
+	p.EnderChestInventory = data.EnderChest
 	p.HeldSlot = data.HeldSlot
 	p.SpawnPoint = data.SpawnPoint
 	p.HasSpawnPoint = data.HasSpawnPoint
@@ -189,6 +208,18 @@ func (s *Server) loadPlayerData(p *player.Player) {
 	if err := applyPersistedPlayerData(p, data); err != nil {
 		slog.Warn("ignored invalid player data", "uuid", p.UUID, "err", err)
 		return
+	}
+	// A client may leave from the death screen without sending the respawn
+	// command. Persist that state explicitly and complete the normal respawn on
+	// the next join instead of silently clamping zero health to one heart.
+	if data.Dead {
+		p.Dimension = dimensionOverworld
+		p.Revive()
+		if bedSpawn, ok := handler.ResolveBedRespawn(p, s.world); ok {
+			p.Position = bedSpawn
+		} else {
+			p.Position = p.WorldSpawn
+		}
 	}
 	debuglog.Info(debuglog.WorldLoading, "loaded player data", "uuid", p.UUID, "position", p.Position)
 }

@@ -24,7 +24,7 @@ func TestBuiltinsRegisterNavigationVersionAndSummonCommands(t *testing.T) {
 
 	for _, name := range []string{
 		"gm", "tp", "tphere", "xyz", "locate", "summon", "version", "ver",
-		"give", "get", "fly", "potioneffect", "walkspeed", "flyspeed",
+		"give", "get", "fly", "potioneffect", "walkspeed", "flyspeed", "world",
 	} {
 		if _, ok := dispatcher.cmds[name]; !ok {
 			t.Errorf("command %q was not registered", name)
@@ -32,6 +32,35 @@ func TestBuiltinsRegisterNavigationVersionAndSummonCommands(t *testing.T) {
 	}
 	if goCraftVersion != "GoCraft 1.21.4" {
 		t.Fatalf("version response = %q", goCraftVersion)
+	}
+}
+
+func TestWorldCommandReportsAndChangesDimension(t *testing.T) {
+	p := player.New([16]byte{}, "traveler", player.ClientEditionJava)
+	p.Operator = true
+	var destination int32 = -1
+	var replies []string
+	ctx := CommandContext{
+		Player: p,
+		ChangeWorld: func(dimension int32) error {
+			destination = dimension
+			p.Dimension = dimension
+			return nil
+		},
+		Reply: func(message string) error {
+			replies = append(replies, message)
+			return nil
+		},
+	}
+	dispatcher := NewDispatcher()
+	RegisterBuiltins(dispatcher)
+	dispatcher.Dispatch("/world", ctx)
+	dispatcher.Dispatch("/world nether", ctx)
+	if destination != 1 {
+		t.Fatalf("destination = %d, want Nether", destination)
+	}
+	if len(replies) != 2 || replies[0] != "Current world: Overworld" || replies[1] != "Traveling to Nether" {
+		t.Fatalf("world replies = %#v", replies)
 	}
 }
 

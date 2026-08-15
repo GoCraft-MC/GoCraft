@@ -650,38 +650,58 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 // complete block data avoids the SubChunkRequest/Response round-trip that would
 // deadlock during conn.StartGame().
 func (l *Listener) sendInitialChunks(conn *minecraft.Conn, cx, cz, radius, dimension int32) error {
+	return l.sendChunkSquare(conn, cx, cz, radius, dimension, false)
+}
+
+func (l *Listener) sendSurroundingChunks(conn *minecraft.Conn, cx, cz, radius, dimension int32) error {
+	return l.sendChunkSquare(conn, cx, cz, radius, dimension, true)
+}
+
+func (l *Listener) sendChunkSquare(conn *minecraft.Conn, cx, cz, radius, dimension int32, skipCenter bool) error {
 	dimensionWorld := l.worldForDimension(dimension)
 	first := true
-	for dx := -radius; dx <= radius; dx++ {
-		for dz := -radius; dz <= radius; dz++ {
-			chunkX, chunkZ := cx+dx, cz+dz
-			chunk := dimensionWorld.Chunk(chunkX, chunkZ)
-			payload, err := l.encoder.EncodeFullChunkPayload(chunk)
-			if err != nil {
-				return fmt.Errorf("sendInitialChunks encode (%d,%d): %w", chunkX, chunkZ, err)
-			}
-			pk := &packet.LevelChunk{
-				Position:      protocol.ChunkPos{chunkX, chunkZ},
-				Dimension:     dimension,
-				SubChunkCount: uint32(coreworld.SectionCount),
-				CacheEnabled:  false,
-				RawPayload:    payload,
-			}
-			if first {
-				first = false
-				debuglog.Info(debuglog.BedrockChunks, "bedrock: LevelChunk sample (full)",
-					"chunkX", pk.Position[0],
-					"chunkZ", pk.Position[1],
-					"subChunkCount", pk.SubChunkCount,
-					"payloadLen", len(pk.RawPayload),
-				)
-			}
-			if err := conn.WritePacket(pk); err != nil {
-				return fmt.Errorf("sendInitialChunks: %w", err)
+	for ring := int32(0); ring <= radius; ring++ {
+		for dx := -ring; dx <= ring; dx++ {
+			for dz := -ring; dz <= ring; dz++ {
+				if (ring > 0 && bedrockAbs32(dx) != ring && bedrockAbs32(dz) != ring) || (skipCenter && dx == 0 && dz == 0) {
+					continue
+				}
+				chunkX, chunkZ := cx+dx, cz+dz
+				chunk := dimensionWorld.Chunk(chunkX, chunkZ)
+				payload, err := l.encoder.EncodeFullChunkPayload(chunk)
+				if err != nil {
+					return fmt.Errorf("sendInitialChunks encode (%d,%d): %w", chunkX, chunkZ, err)
+				}
+				pk := &packet.LevelChunk{
+					Position:      protocol.ChunkPos{chunkX, chunkZ},
+					Dimension:     dimension,
+					SubChunkCount: uint32(coreworld.SectionCount),
+					CacheEnabled:  false,
+					RawPayload:    payload,
+				}
+				if first {
+					first = false
+					debuglog.Info(debuglog.BedrockChunks, "bedrock: LevelChunk sample (full)",
+						"chunkX", pk.Position[0],
+						"chunkZ", pk.Position[1],
+						"subChunkCount", pk.SubChunkCount,
+						"payloadLen", len(pk.RawPayload),
+					)
+				}
+				if err := conn.WritePacket(pk); err != nil {
+					return fmt.Errorf("sendInitialChunks: %w", err)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func bedrockAbs32(value int32) int32 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // sendEnteredChunks announces only columns newly covered by a moved view
@@ -831,6 +851,11 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 
 		case *packet.PlayerAction:
 			l.handlePlayerBlockAction(bedrockSess, playerUUID, p.ActionType, p.BlockPosition, p.BlockFace)
+
+		case *packet.Animate:
+			if p.ActionType == packet.AnimateActionSwingArm && p.EntityRuntimeID == bedrockSelfRuntimeID {
+				l.bus.PostArmSwing(intent.ArmSwingIntent{PlayerUUID: playerUUID, Hand: 0})
+			}
 
 		case *packet.RequestAbility:
 			if p.Ability == packet.AbilityFlying {
@@ -1648,6 +1673,12 @@ func (l *Listener) canonicalInventoryActions(
 
 		case *protocol.CraftRecipeStackRequestAction:
 			recognized = true
+			if p != nil && p.OpenContainerKind == "minecraft:stonecutter" && len(p.ContainerSlots) > 0 {
+				if selection, ok := bedrockStonecutterSelection(action.RecipeNetworkID, p.ContainerSlots[0].ItemID); ok {
+					p.WorkstationSelection = selection
+					handler.UpdateWorkstationResult(p.OpenContainerKind, p.ContainerSlots, selection)
+				}
+			}
 			craftCount = max(int(action.NumberOfCrafts), 1)
 			continue
 

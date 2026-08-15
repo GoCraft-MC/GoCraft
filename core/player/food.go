@@ -71,3 +71,15 @@ func CanAlwaysEat(itemID string) bool {
 		return false
 	}
 }
+
+// FoodRemainder returns the container left behind after a food item is eaten.
+func FoodRemainder(itemID string) string {
+	switch itemID {
+	case "minecraft:mushroom_stew", "minecraft:rabbit_stew", "minecraft:beetroot_soup", "minecraft:suspicious_stew":
+		return "minecraft:bowl"
+	case "minecraft:honey_bottle":
+		return "minecraft:glass_bottle"
+	default:
+		return ""
+	}
+}

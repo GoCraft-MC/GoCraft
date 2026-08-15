@@ -24,7 +24,7 @@ func burnsInDaylight(entityType corentity.EntityType) bool {
 }
 
 func (s *Server) tickMobSunlight(entity *corentity.Entity, hurtEntities *[]*corentity.Entity) {
-	if entity == nil || !burnsInDaylight(entity.Type) || s.world == nil {
+	if entity == nil || s.simulationDimension != dimensionOverworld || !burnsInDaylight(entity.Type) || s.world == nil {
 		return
 	}
 	wasBurning := entity.FireTicks > 0
@@ -128,4 +128,33 @@ func (s *Server) shootMobArrow(shooter *corentity.Entity, target *player.Player)
 	handler.BroadcastSpawnMob(arrow, s.sessions)
 	handler.BroadcastSoundAt(s.sessions, "minecraft:entity.skeleton.shoot", handler.SoundCategoryHostile,
 		shooter.Position.X, shooter.Position.Y+1, shooter.Position.Z, 1, 1)
+}
+
+func (s *Server) shootMobProjectile(shooter *corentity.Entity, target *player.Player, projectileType corentity.EntityType, speed float64, damage float32, sound string) {
+	if shooter == nil || target == nil || s.game == nil || s.world == nil {
+		return
+	}
+	start := spatial.Vec3{X: shooter.Position.X, Y: shooter.Position.Y + 1.35, Z: shooter.Position.Z}
+	dx := target.Position.X - start.X
+	dz := target.Position.Z - start.Z
+	horizontal := math.Hypot(dx, dz)
+	dropCompensation := 0.0
+	if projectileType == corentity.TypePotion {
+		dropCompensation = horizontal * 0.05
+	}
+	dy := target.Position.Y + 0.9 - start.Y + dropCompensation
+	distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	if distance < 0.001 {
+		return
+	}
+	projectile := corentity.New(s.game.NextEntityID(), newRandomUUID(), projectileType, start.X, start.Y, start.Z)
+	projectile.OwnerEntityID = shooter.EntityID
+	projectile.ProjectileDamage = damage
+	projectile.VX, projectile.VY, projectile.VZ = dx/distance*speed, dy/distance*speed, dz/distance*speed
+	s.world.Entities.Add(projectile)
+	handler.BroadcastSpawnMob(projectile, s.sessions)
+	if sound != "" {
+		handler.BroadcastSoundAt(s.sessions, sound, handler.SoundCategoryHostile,
+			shooter.Position.X, shooter.Position.Y+1, shooter.Position.Z, 1, 1)
+	}
 }

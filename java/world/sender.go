@@ -277,6 +277,11 @@ func isSkyTransparent(resourceLocation string) bool {
 	switch resourceLocation {
 	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
 		"minecraft:water", "minecraft:glass", "minecraft:ice",
+		// Block-entity models sample light from their own cell. These are not
+		// full opaque cubes and must retain skylight or they render black after
+		// a chunk resend/reconnect.
+		"minecraft:chest", "minecraft:trapped_chest", "minecraft:ender_chest",
+		"minecraft:barrel", "minecraft:decorated_pot",
 		// Leaves
 		"minecraft:oak_leaves", "minecraft:birch_leaves", "minecraft:spruce_leaves",
 		"minecraft:acacia_leaves", "minecraft:jungle_leaves",

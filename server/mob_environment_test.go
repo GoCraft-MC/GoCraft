@@ -120,3 +120,77 @@ func TestSkeletonDrawsBowAndSpawnsArrow(t *testing.T) {
 	}
 	t.Fatal("skeleton bow attack spawned no owned arrow")
 }
+
+func TestHostileAIIgnoresPlayersInOtherDimensions(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+	g := game.New()
+	overworldPlayer := player.New([16]byte{31}, "overworld", player.ClientEditionBedrock)
+	overworldPlayer.GameMode = player.GameModeSurvival
+	overworldPlayer.Dimension = dimensionOverworld
+	overworldPlayer.Position = spatial.Vec3{X: 1.5, Y: 64, Z: 0.5}
+	if err := g.AddPlayer(overworldPlayer); err != nil {
+		t.Fatal(err)
+	}
+	zombie := corentity.New(g.NextEntityID(), [16]byte{32}, corentity.TypeZombie, 0.5, 64, 0.5)
+	zombie.OnGround = true
+	world.Entities.Add(zombie)
+	s := &Server{
+		cfg: &config.Config{Difficulty: "normal"}, game: g, world: world,
+		sessions: session.NewManager(), mobAIs: make(map[int32]*mobAI), simulationDimension: dimensionNether,
+	}
+
+	s.tickHostileMobAI(zombie)
+	if overworldPlayer.Health != overworldPlayer.MaxHealth {
+		t.Fatalf("Nether zombie damaged Overworld player: health=%.1f", overworldPlayer.Health)
+	}
+	if got := s.closestVisiblePlayer(zombie, 16); got != nil {
+		t.Fatalf("Nether visibility selected player from dimension %d", got.Dimension)
+	}
+	if got := s.naturalSpawnPlayers(); len(got) != 0 {
+		t.Fatalf("Nether spawn set included %d Overworld player(s)", len(got))
+	}
+}
+
+func TestRangedHostileFamiliesSpawnTheirProjectile(t *testing.T) {
+	tests := []struct {
+		name       string
+		mob        corentity.EntityType
+		projectile corentity.EntityType
+	}{
+		{"blaze", corentity.TypeBlaze, corentity.TypeSmallFireball},
+		{"ghast", corentity.TypeGhast, corentity.TypeFireball},
+		{"breeze", corentity.TypeBreeze, corentity.TypeWindCharge},
+		{"witch", corentity.TypeWitch, corentity.TypePotion},
+		{"pillager", corentity.TypePillager, corentity.TypeArrow},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer world.Close()
+			world.Chunk(0, 0)
+			g := game.New()
+			target := player.New([16]byte{byte(index + 70)}, "target", player.ClientEditionBedrock)
+			target.GameMode = player.GameModeSurvival
+			target.Position = spatial.Vec3{X: 8.5, Y: 64, Z: 0.5}
+			if err := g.AddPlayer(target); err != nil {
+				t.Fatal(err)
+			}
+			mob := corentity.New(g.NextEntityID(), [16]byte{byte(index + 80)}, test.mob, 0.5, 64, 0.5)
+			world.Entities.Add(mob)
+			s := &Server{
+				cfg: &config.Config{Difficulty: "normal"}, game: g, world: world,
+				sessions: session.NewManager(), mobAIs: make(map[int32]*mobAI),
+			}
+
+			s.tickHostileMobAI(mob)
+			for _, spawned := range world.Entities.Snapshot() {
+				if spawned.Type == test.projectile && spawned.OwnerEntityID == mob.EntityID {
+					return
+				}
+			}
+			t.Fatalf("%s spawned no %s", test.mob, test.projectile)
+		})
+	}
+}

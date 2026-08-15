@@ -37,6 +37,10 @@ type CommandContext struct {
 	// so the client's chunk view is kept in sync.
 	TeleportTo func(x, y, z float64) error
 
+	// ChangeWorld moves the issuing player to a vanilla dimension and performs
+	// the edition-specific network transition.
+	ChangeWorld func(dimension int32) error
+
 	// TeleportPlayer moves an arbitrary online player through the network
 	// adapter that owns that player. Cross-edition commands such as /tphere
 	// must use this callback instead of mutating the target's position directly.

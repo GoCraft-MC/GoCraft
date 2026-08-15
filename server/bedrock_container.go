@@ -1,6 +1,8 @@
 package server
 
 import (
+	"strings"
+
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -13,7 +15,7 @@ func isBedrockGenericContainer(blockID string) bool {
 		"minecraft:hopper", "minecraft:dispenser", "minecraft:dropper", "minecraft:crafter":
 		return true
 	default:
-		return false
+		return blockID == "minecraft:shulker_box" || strings.HasSuffix(blockID, "_shulker_box")
 	}
 }
 
@@ -31,30 +33,11 @@ func bedrockGenericContainerSize(blockID string) int {
 }
 
 func isBedrockWorkstation(blockID string) bool {
-	switch blockID {
-	case "minecraft:anvil", "minecraft:chipped_anvil", "minecraft:damaged_anvil",
-		"minecraft:enchanting_table", "minecraft:grindstone", "minecraft:loom",
-		"minecraft:smithing_table", "minecraft:stonecutter", "minecraft:brewing_stand",
-		"minecraft:cartography_table", "minecraft:beacon":
-		return true
-	default:
-		return false
-	}
+	return handler.IsWorkstation(blockID)
 }
 
 func bedrockWorkstationSlotCount(blockID string) int {
-	switch blockID {
-	case "minecraft:enchanting_table":
-		return 2
-	case "minecraft:loom", "minecraft:smithing_table":
-		return 4
-	case "minecraft:brewing_stand":
-		return 5
-	case "minecraft:beacon":
-		return 1
-	default:
-		return 3
-	}
+	return handler.WorkstationSlotCount(blockID)
 }
 
 func (s *Server) openBedrockWorkstation(p *player.Player, pos spatial.BlockPos, blockID string) {
@@ -67,6 +50,8 @@ func (s *Server) openBedrockWorkstation(p *player.Player, pos spatial.BlockPos, 
 	p.OpenContainerPartnerPos = spatial.BlockPos{}
 	p.OpenContainerHasPartner = false
 	p.ContainerSlots = make([]player.ItemStack, bedrockWorkstationSlotCount(blockID))
+	p.WorkstationSelection = 0
+	handler.UpdateWorkstationResult(blockID, p.ContainerSlots, p.WorkstationSelection)
 }
 
 func (s *Server) returnBedrockWorkstationItems(p *player.Player) {
@@ -86,16 +71,7 @@ func (s *Server) returnBedrockWorkstationItems(p *player.Player) {
 }
 
 func bedrockWorkstationOutputIndex(blockID string) int {
-	switch blockID {
-	case "minecraft:enchanting_table", "minecraft:brewing_stand", "minecraft:beacon":
-		return -1
-	case "minecraft:loom", "minecraft:smithing_table":
-		return 3
-	case "minecraft:stonecutter":
-		return 1
-	default:
-		return 2
-	}
+	return handler.WorkstationOutputIndex(blockID)
 }
 
 func (s *Server) openBedrockGenericContainer(p *player.Player, pos spatial.BlockPos, blockID string) {
@@ -113,11 +89,15 @@ func (s *Server) openBedrockGenericContainer(p *player.Player, pos spatial.Block
 	p.OpenContainerPartnerPos = spatial.BlockPos{}
 	p.OpenContainerHasPartner = false
 	p.ContainerSlots = make([]player.ItemStack, bedrockGenericContainerSize(blockID))
+	if blockID == "minecraft:ender_chest" {
+		copy(p.ContainerSlots, p.EnderChestInventory[:])
+		return
+	}
 	for _, item := range dimensionWorld.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 		if item.Slot < 0 || item.Slot >= len(p.ContainerSlots) || item.ItemID == "" || item.Count <= 0 {
 			continue
 		}
-		p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count}
+		p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
 	}
 }
 
@@ -129,12 +109,17 @@ func (s *Server) persistBedrockGenericContainer(p *player.Player) {
 		handler.PersistChestContents(p, s.worldForPlayer(p))
 		return
 	}
+	if p.OpenContainerKind == "minecraft:ender_chest" {
+		clear(p.EnderChestInventory[:])
+		copy(p.EnderChestInventory[:], p.ContainerSlots)
+		return
+	}
 	items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots))
 	for slot, stack := range p.ContainerSlots {
 		if stack.IsEmpty() {
 			continue
 		}
-		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count})
+		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
 	}
 	pos := p.OpenContainerPos
 	s.worldForPlayer(p).SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), p.OpenContainerKind, items)

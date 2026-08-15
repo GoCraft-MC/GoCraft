@@ -298,6 +298,28 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.BlockPos, block coreworld.Block) bool {
 	x, y, z := int(pos.X), int(pos.Y), int(pos.Z)
 	name := block.ResourceLocation()
+	if name == "minecraft:decorated_pot" {
+		held := p.HeldItem()
+		if held.IsEmpty() {
+			return true
+		}
+		items := s.bedrockWorld().ContainerItems(x, y, z)
+		var stored player.ItemStack
+		if len(items) > 0 {
+			stored = player.ItemStack{ItemID: items[0].ItemID, Count: items[0].Count, Damage: items[0].Damage}
+		}
+		if !stored.IsEmpty() && (stored.ItemID != held.ItemID || stored.Damage != held.Damage || stored.Count >= player.MaxStackSize(stored.ItemID)) {
+			return true
+		}
+		if stored.IsEmpty() {
+			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage}
+		} else {
+			stored.Count++
+		}
+		s.bedrockWorld().SetContainerItems(x, y, z, name, []coreworld.ContainerItem{{Slot: 0, ItemID: stored.ItemID, Count: stored.Count, Damage: stored.Damage}})
+		s.consumeBedrockHeldItem(p, 1)
+		return true
+	}
 
 	if name == "minecraft:lever" {
 		replacement := bedrockCopyBlock(block)
@@ -318,7 +340,7 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		}
 		return true
 	}
-	if strings.HasSuffix(name, "_trapdoor") && name != "minecraft:iron_trapdoor" {
+	if bedrockIsTrapdoor(name) && name != "minecraft:iron_trapdoor" {
 		replacement := bedrockCopyBlock(block)
 		replacement.Properties["open"] = bedrockToggleBool(block.Properties["open"])
 		s.setBedrockActionBlock(x, y, z, replacement)
@@ -334,7 +356,7 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		s.setBedrockActionBlock(x, y, z, replacement)
 		return true
 	}
-	if strings.HasSuffix(name, "_door") && !strings.HasSuffix(name, "_trapdoor") && name != "minecraft:iron_door" {
+	if bedrockIsDoor(name) && name != "minecraft:iron_door" {
 		nextOpen := bedrockToggleBool(block.Properties["open"])
 		replacement := bedrockCopyBlock(block)
 		replacement.Properties["open"] = nextOpen
@@ -480,6 +502,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		head := bedrockBlock(block.Name, map[string]string{"facing": facing, "occupied": "false", "part": "head"})
 		s.setBedrockActionBlock(px, py, pz, foot)
 		s.setBedrockActionBlock(hx, py, hz, head)
+		data := bedrockBedBlockEntityData(name)
+		s.bedrockWorld().SetBlockEntity(px, py, pz, "minecraft:bed", data)
+		s.bedrockWorld().SetBlockEntity(hx, py, hz, "minecraft:bed", data)
 		s.consumeBedrockHeldItem(p, 1)
 		return true
 	}
@@ -511,7 +536,7 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	if strings.HasSuffix(placed.ResourceLocation(), "_pressure_plate") {
 		s.bedrockWorld().BlockPhysics.SchedulePressurePlate(px, py, pz, s.worldAge, 1)
 	}
-	if strings.HasSuffix(name, "_chest") || name == "minecraft:chest" || name == "minecraft:barrel" {
+	if isBedrockGenericContainer(name) || name == "minecraft:decorated_pot" {
 		s.bedrockWorld().SetContainerItems(px, py, pz, name, nil)
 	}
 	s.consumeBedrockHeldItem(p, 1)
@@ -552,7 +577,10 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		props = map[string]string{"facing": playerFacing, "half": bedrockPlacementHalf(i), "shape": "straight", "waterlogged": "false"}
 	case strings.HasSuffix(name, "_slab"):
 		props = map[string]string{"type": bedrockPlacementHalf(i), "waterlogged": "false"}
-	case strings.HasSuffix(name, "_trapdoor"):
+	case bedrockIsTrapdoor(name):
+		if !bedrockPlacementHasFaceSupport(s.bedrockWorld(), x, y, z, i.Face) {
+			return coreworld.Block{}, false
+		}
 		props = map[string]string{"facing": bedrockFacingForFaceOrPlayer(i.Face, playerFacing), "half": bedrockPlacementHalf(i), "open": "false", "powered": "false", "waterlogged": "false"}
 	case strings.HasSuffix(name, "_fence_gate"):
 		props = map[string]string{"facing": playerFacing, "in_wall": "false", "open": "false", "powered": "false"}
@@ -655,10 +683,19 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		props = map[string]string{"facing": frontFacing, "type": "single", "waterlogged": "false"}
 	case name == "minecraft:barrel":
 		props = map[string]string{"facing": bedrockFacingForFace(i.Face), "open": "false"}
+	case name == "minecraft:hopper":
+		facing := "down"
+		if i.Face >= 2 && i.Face <= 5 {
+			facing = bedrockOppositeFacing(bedrockFacingForFace(i.Face))
+		}
+		props = map[string]string{"facing": facing, "enabled": "true"}
 	case strings.HasSuffix(name, "_furnace") || name == "minecraft:furnace" || name == "minecraft:smoker" ||
 		name == "minecraft:dispenser" || name == "minecraft:dropper" || name == "minecraft:observer" ||
 		name == "minecraft:piston" || name == "minecraft:sticky_piston":
 		props = map[string]string{"facing": frontFacing}
+		if name == "minecraft:dispenser" || name == "minecraft:dropper" {
+			props["triggered"] = "false"
+		}
 		if name == "minecraft:furnace" || strings.HasSuffix(name, "_furnace") || name == "minecraft:smoker" {
 			props["lit"] = "false"
 		}
@@ -684,10 +721,31 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 
 func (s *Server) setBedrockActionBlock(x, y, z int, block coreworld.Block) {
 	s.bedrockWorld().SetBlock(x, y, z, block)
+	if name := block.ResourceLocation(); name != "minecraft:sculk_sensor" && name != "minecraft:calibrated_sculk_sensor" {
+		s.bedrockWorld().EmitVibration(x, y, z)
+	}
 	if s.sessions != nil {
 		handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block}, s.sessions)
 	}
 	s.refreshBedrockConnectedBlocks(x, y, z)
+}
+
+func bedrockBedBlockEntityData(kind string) []byte {
+	colors := map[string]int32{
+		"minecraft:white_bed": 0, "minecraft:orange_bed": 1, "minecraft:magenta_bed": 2,
+		"minecraft:light_blue_bed": 3, "minecraft:yellow_bed": 4, "minecraft:lime_bed": 5,
+		"minecraft:pink_bed": 6, "minecraft:gray_bed": 7, "minecraft:light_gray_bed": 8,
+		"minecraft:cyan_bed": 9, "minecraft:purple_bed": 10, "minecraft:blue_bed": 11,
+		"minecraft:brown_bed": 12, "minecraft:green_bed": 13, "minecraft:red_bed": 14,
+		"minecraft:black_bed": 15,
+	}
+	color := colors[kind]
+	return []byte{
+		0x0a,
+		0x03, 0x00, 0x05, 'c', 'o', 'l', 'o', 'r',
+		byte(color >> 24), byte(color >> 16), byte(color >> 8), byte(color),
+		0x00,
+	}
 }
 
 // refreshBedrockConnectedBlocks mirrors the neighbour-state pass used by
@@ -801,7 +859,7 @@ func bedrockWallFullFace(block coreworld.Block) bool {
 	name := block.ResourceLocation()
 	if bedrockPlacementReplaceable(name) || coreworld.IsFluidBlock(name) || bedrockIsFence(name) ||
 		strings.HasSuffix(name, "_fence_gate") || strings.HasSuffix(name, "_door") ||
-		strings.HasSuffix(name, "_trapdoor") || strings.HasSuffix(name, "_button") ||
+		bedrockIsTrapdoor(name) || strings.HasSuffix(name, "_button") ||
 		strings.HasSuffix(name, "_pressure_plate") || strings.Contains(name, "torch") ||
 		strings.HasSuffix(name, "_sign") || strings.HasSuffix(name, "_wall_sign") ||
 		name == "minecraft:lever" || name == "minecraft:ladder" || name == "minecraft:chain" || name == "minecraft:lantern" {
@@ -1182,7 +1240,13 @@ func (s *Server) refreshBedrockWireConnections(x, y, z int) {
 }
 
 func bedrockIsDoor(name string) bool {
-	return strings.HasSuffix(name, "_door") && !strings.HasSuffix(name, "_trapdoor")
+	return strings.HasSuffix(name, "_door") && !bedrockIsTrapdoor(name)
+}
+
+// Bedrock's canonical oak trapdoor identifier is minecraft:trapdoor. Other
+// wood types (and Java's oak identifier) use the *_trapdoor form.
+func bedrockIsTrapdoor(name string) bool {
+	return name == "minecraft:trapdoor" || strings.HasSuffix(name, "_trapdoor")
 }
 
 func bedrockIsBed(name string) bool {

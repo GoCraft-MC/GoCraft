@@ -46,46 +46,54 @@ const (
 // All known entity types (complete list for Minecraft 1.21.4 / protocol 769).
 const (
 	// ── Passive mobs ─────────────────────────────────────────────────────────
-	TypeAllay           EntityType = "minecraft:allay"
-	TypeArmadillo       EntityType = "minecraft:armadillo"
-	TypeAxolotl         EntityType = "minecraft:axolotl"
-	TypeBat             EntityType = "minecraft:bat"
-	TypeCamel           EntityType = "minecraft:camel"
-	TypeCat             EntityType = "minecraft:cat"
-	TypeChicken         EntityType = "minecraft:chicken"
-	TypeCod             EntityType = "minecraft:cod"
-	TypeCow             EntityType = "minecraft:cow"
-	TypeDonkey          EntityType = "minecraft:donkey"
-	TypeFox             EntityType = "minecraft:fox"
-	TypeFrog            EntityType = "minecraft:frog"
-	TypeGlowSquid       EntityType = "minecraft:glow_squid"
-	TypeGoat            EntityType = "minecraft:goat"
-	TypeHorse           EntityType = "minecraft:horse"
-	TypeMooshroom       EntityType = "minecraft:mooshroom"
-	TypeMule            EntityType = "minecraft:mule"
-	TypeOcelot          EntityType = "minecraft:ocelot"
-	TypePanda           EntityType = "minecraft:panda"
-	TypeParrot          EntityType = "minecraft:parrot"
-	TypePig             EntityType = "minecraft:pig"
-	TypePufferfish      EntityType = "minecraft:pufferfish"
-	TypeRabbit          EntityType = "minecraft:rabbit"
-	TypeSalmon          EntityType = "minecraft:salmon"
-	TypeSheep           EntityType = "minecraft:sheep"
-	TypeSkeletonHorse   EntityType = "minecraft:skeleton_horse"
-	TypeSniffer         EntityType = "minecraft:sniffer"
-	TypeSquid           EntityType = "minecraft:squid"
-	TypeTadpole         EntityType = "minecraft:tadpole"
-	TypeTropicalFish    EntityType = "minecraft:tropical_fish"
-	TypeTurtle          EntityType = "minecraft:turtle"
-	TypeVillager        EntityType = "minecraft:villager"
-	TypeFallingBlock    EntityType = "minecraft:falling_block"
-	TypePrimedTNT       EntityType = "minecraft:tnt"
-	TypeItem            EntityType = "minecraft:item"
-	TypeExperienceOrb   EntityType = "minecraft:experience_orb"
-	TypeArrow           EntityType = "minecraft:arrow"
-	TypeSpectralArrow   EntityType = "minecraft:spectral_arrow"
-	TypeTrident         EntityType = "minecraft:trident"
-	TypeWanderingTrader EntityType = "minecraft:wandering_trader"
+	TypeAllay            EntityType = "minecraft:allay"
+	TypeArmadillo        EntityType = "minecraft:armadillo"
+	TypeAxolotl          EntityType = "minecraft:axolotl"
+	TypeBat              EntityType = "minecraft:bat"
+	TypeCamel            EntityType = "minecraft:camel"
+	TypeCat              EntityType = "minecraft:cat"
+	TypeChicken          EntityType = "minecraft:chicken"
+	TypeCod              EntityType = "minecraft:cod"
+	TypeCow              EntityType = "minecraft:cow"
+	TypeDonkey           EntityType = "minecraft:donkey"
+	TypeFox              EntityType = "minecraft:fox"
+	TypeFrog             EntityType = "minecraft:frog"
+	TypeGlowSquid        EntityType = "minecraft:glow_squid"
+	TypeGoat             EntityType = "minecraft:goat"
+	TypeHorse            EntityType = "minecraft:horse"
+	TypeMooshroom        EntityType = "minecraft:mooshroom"
+	TypeMule             EntityType = "minecraft:mule"
+	TypeOcelot           EntityType = "minecraft:ocelot"
+	TypePanda            EntityType = "minecraft:panda"
+	TypeParrot           EntityType = "minecraft:parrot"
+	TypePig              EntityType = "minecraft:pig"
+	TypePufferfish       EntityType = "minecraft:pufferfish"
+	TypeRabbit           EntityType = "minecraft:rabbit"
+	TypeSalmon           EntityType = "minecraft:salmon"
+	TypeSheep            EntityType = "minecraft:sheep"
+	TypeSkeletonHorse    EntityType = "minecraft:skeleton_horse"
+	TypeSniffer          EntityType = "minecraft:sniffer"
+	TypeSquid            EntityType = "minecraft:squid"
+	TypeTadpole          EntityType = "minecraft:tadpole"
+	TypeTropicalFish     EntityType = "minecraft:tropical_fish"
+	TypeTurtle           EntityType = "minecraft:turtle"
+	TypeVillager         EntityType = "minecraft:villager"
+	TypeFallingBlock     EntityType = "minecraft:falling_block"
+	TypePrimedTNT        EntityType = "minecraft:tnt"
+	TypeItem             EntityType = "minecraft:item"
+	TypeExperienceOrb    EntityType = "minecraft:experience_orb"
+	TypeArrow            EntityType = "minecraft:arrow"
+	TypeSpectralArrow    EntityType = "minecraft:spectral_arrow"
+	TypeTrident          EntityType = "minecraft:trident"
+	TypeWindCharge       EntityType = "minecraft:wind_charge"
+	TypeSnowball         EntityType = "minecraft:snowball"
+	TypeEgg              EntityType = "minecraft:egg"
+	TypeEnderPearl       EntityType = "minecraft:ender_pearl"
+	TypeExperienceBottle EntityType = "minecraft:experience_bottle"
+	TypePotion           EntityType = "minecraft:potion"
+	TypeSmallFireball    EntityType = "minecraft:small_fireball"
+	TypeFireball         EntityType = "minecraft:fireball"
+	TypeWanderingTrader  EntityType = "minecraft:wandering_trader"
 
 	// ── Boats ────────────────────────────────────────────────────────────────
 	TypeOakBoat      EntityType = "minecraft:oak_boat"
@@ -188,6 +196,12 @@ type Entity struct {
 	VillagerVariant    VillagerVariant
 	VillagerProfession VillagerProfession
 	VillagerLevel      int32
+	// VillagerExperience locks the profession once the first trade is made,
+	// matching vanilla's rule that traded villagers do not become unemployed
+	// when their workstation disappears. VillagerHasTraded is kept explicit so
+	// zero-XP custom trades can lock a profession too.
+	VillagerExperience int32
+	VillagerHasTraded  bool
 	// NaturalSpawned distinguishes mobs created by the runtime mob spawner from
 	// generated village residents, commands, and player-created entities. It is
 	// used for distance despawning in the absence of chunk-scoped entity storage.
@@ -195,12 +209,13 @@ type Entity struct {
 
 	// Generated village ownership. HasVillageHome distinguishes assigned
 	// positions from zero-value coordinates used by summoned villagers.
-	HasVillageHome     bool
-	VillageHome        spatial.BlockPos
-	VillageCenter      spatial.BlockPos
-	VillageBed         spatial.BlockPos
-	VillageWorkstation spatial.BlockPos
-	Sleeping           bool
+	HasVillageHome        bool
+	VillageHome           spatial.BlockPos
+	VillageCenter         spatial.BlockPos
+	VillageBed            spatial.BlockPos
+	VillageWorkstation    spatial.BlockPos
+	HasVillageWorkstation bool
+	Sleeping              bool
 
 	// FallingBlock fields — only used when Type == TypeFallingBlock.
 	// FallingBlockStateID is the Java global block-state ID sent in the Spawn
@@ -313,6 +328,12 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	switch t {
 	case TypeSkeleton, TypeStray, TypeBogged:
 		e.MainHandItemID = "minecraft:bow"
+	case TypePillager, TypePiglin:
+		e.MainHandItemID = "minecraft:crossbow"
+	case TypeVindicator:
+		e.MainHandItemID = "minecraft:iron_axe"
+	case TypeWitherSkeleton:
+		e.MainHandItemID = "minecraft:stone_sword"
 	}
 	return e
 }
@@ -432,7 +453,7 @@ func defaultMaxHealth(t EntityType) float32 {
 	// Villager
 	case TypeVillager:
 		return 20
-	case TypeItem, TypeExperienceOrb, TypeArrow, TypeSpectralArrow, TypeTrident:
+	case TypeItem, TypeExperienceOrb, TypeArrow, TypeSpectralArrow, TypeTrident, TypeWindCharge:
 		return 1
 
 	// Boats
@@ -492,7 +513,9 @@ func IsBoat(t EntityType) bool {
 
 func IsProjectile(t EntityType) bool {
 	switch t {
-	case TypeArrow, TypeSpectralArrow, TypeTrident:
+	case TypeArrow, TypeSpectralArrow, TypeTrident, TypeWindCharge,
+		TypeSnowball, TypeEgg, TypeEnderPearl, TypeExperienceBottle,
+		TypePotion, TypeSmallFireball, TypeFireball:
 		return true
 	}
 	return false

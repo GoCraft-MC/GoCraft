@@ -241,7 +241,7 @@ func TestLoginPayload769GoldenAndIndependentTrace(t *testing.T) {
 		t.Fatalf("Login packet ID = 0x%02x, want 0x2c", pkt.ID)
 	}
 
-	const goldenPayloadHex = "010203040001136d696e6563726166743a6f766572776f726c64140a0a00010000136d696e6563726166743a6f766572776f726c64010203040506070800ff000000003f00"
+	const goldenPayloadHex = "010203040003136d696e6563726166743a6f766572776f726c64146d696e6563726166743a7468655f6e6574686572116d696e6563726166743a7468655f656e64140a0a00010000136d696e6563726166743a6f766572776f726c64010203040506070800ff000000003f00"
 	if got := hex.EncodeToString(pkt.Data); got != goldenPayloadHex {
 		t.Fatalf("Login payload differs from protocol-769 golden fixture\n got: %s\nwant: %s", got, goldenPayloadHex)
 	}
@@ -250,7 +250,7 @@ func TestLoginPayload769GoldenAndIndependentTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const goldenFrameHex = "462c" + goldenPayloadHex
+	const goldenFrameHex = "6d2c" + goldenPayloadHex
 	if got := hex.EncodeToString(frame); got != goldenFrameHex {
 		t.Fatalf("Login frame differs from uncompressed golden fixture\n got: %s\nwant: %s", got, goldenFrameHex)
 	}
@@ -266,25 +266,27 @@ func TestLoginPayload769GoldenAndIndependentTrace(t *testing.T) {
 	wantTrace := []loginTraceField{
 		{0, 4, "entityId", "i32", int32(0x01020304)},
 		{4, 5, "hardcore", "bool", false},
-		{5, 6, "worldNames.count", "VarInt", int32(1)},
+		{5, 6, "worldNames.count", "VarInt", int32(3)},
 		{6, 26, "worldNames[0]", "String", "minecraft:overworld"},
-		{26, 27, "maxPlayers", "VarInt", int32(20)},
-		{27, 28, "viewDistance", "VarInt", int32(10)},
-		{28, 29, "simulationDistance", "VarInt", int32(10)},
-		{29, 30, "reducedDebugInfo", "bool", false},
-		{30, 31, "enableRespawnScreen", "bool", true},
-		{31, 32, "doLimitedCrafting", "bool", false},
-		{32, 33, "commonPlayerSpawnInfo.dimensionType", "VarInt", int32(0)},
-		{33, 53, "commonPlayerSpawnInfo.dimensionName", "String", "minecraft:overworld"},
-		{53, 61, "commonPlayerSpawnInfo.hashedSeed", "i64", hashedSeed},
-		{61, 62, "commonPlayerSpawnInfo.gameMode", "i8", byte(0)},
-		{62, 63, "commonPlayerSpawnInfo.previousGameMode", "u8", byte(0xff)},
-		{63, 64, "commonPlayerSpawnInfo.debug", "bool", false},
-		{64, 65, "commonPlayerSpawnInfo.flat", "bool", false},
-		{65, 66, "commonPlayerSpawnInfo.lastDeathLocation.present", "bool", false},
-		{66, 67, "commonPlayerSpawnInfo.portalCooldown", "VarInt", int32(0)},
-		{67, 68, "commonPlayerSpawnInfo.seaLevel", "VarInt", int32(63)},
-		{68, 69, "enforcesSecureChat", "bool", false},
+		{26, 47, "worldNames[1]", "String", "minecraft:the_nether"},
+		{47, 65, "worldNames[2]", "String", "minecraft:the_end"},
+		{65, 66, "maxPlayers", "VarInt", int32(20)},
+		{66, 67, "viewDistance", "VarInt", int32(10)},
+		{67, 68, "simulationDistance", "VarInt", int32(10)},
+		{68, 69, "reducedDebugInfo", "bool", false},
+		{69, 70, "enableRespawnScreen", "bool", true},
+		{70, 71, "doLimitedCrafting", "bool", false},
+		{71, 72, "commonPlayerSpawnInfo.dimensionType", "VarInt", int32(0)},
+		{72, 92, "commonPlayerSpawnInfo.dimensionName", "String", "minecraft:overworld"},
+		{92, 100, "commonPlayerSpawnInfo.hashedSeed", "i64", hashedSeed},
+		{100, 101, "commonPlayerSpawnInfo.gameMode", "i8", byte(0)},
+		{101, 102, "commonPlayerSpawnInfo.previousGameMode", "u8", byte(0xff)},
+		{102, 103, "commonPlayerSpawnInfo.debug", "bool", false},
+		{103, 104, "commonPlayerSpawnInfo.flat", "bool", false},
+		{104, 105, "commonPlayerSpawnInfo.lastDeathLocation.present", "bool", false},
+		{105, 106, "commonPlayerSpawnInfo.portalCooldown", "VarInt", int32(0)},
+		{106, 107, "commonPlayerSpawnInfo.seaLevel", "VarInt", int32(63)},
+		{107, 108, "enforcesSecureChat", "bool", false},
 	}
 	if !reflect.DeepEqual(trace, wantTrace) {
 		t.Fatalf("decoded Login field trace mismatch\n got: %#v\nwant: %#v", trace, wantTrace)
@@ -302,7 +304,7 @@ func TestSendLoginPlayRequiresPlayState(t *testing.T) {
 func TestLoginPayload769IndependentDecoderNamesTruncatedField(t *testing.T) {
 	p := &player.Player{EntityID: 1, GameMode: player.GameModeSurvival}
 	payload := buildLoginPlay(p, 0, 0).Data
-	_, err := decodeLoginPayload769(payload[:60])
+	_, err := decodeLoginPayload769(payload[:99])
 	if err == nil {
 		t.Fatal("decoder accepted truncated hashed seed")
 	}

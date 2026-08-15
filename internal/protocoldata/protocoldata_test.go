@@ -284,6 +284,7 @@ func TestProtocol769PlayPacketIDs(t *testing.T) {
 		{"clientbound", "minecraft:set_entity_data", 0x5d},
 		{"clientbound", "minecraft:set_entity_motion", 0x5f},
 		{"clientbound", "minecraft:set_held_slot", 0x63},
+		{"clientbound", "minecraft:set_passengers", 0x65},
 		{"clientbound", "minecraft:set_time", 0x6b},
 		{"clientbound", "minecraft:sound_entity", 0x6e},
 		{"clientbound", "minecraft:sound", 0x6f},

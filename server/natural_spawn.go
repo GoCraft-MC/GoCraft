@@ -423,7 +423,7 @@ func pumpkinCreaturePopulationSeed(worldSeed int64, cx, cz int32) int64 {
 func (s *Server) naturalSpawnPlayers() []naturalSpawnPlayer {
 	players := make([]naturalSpawnPlayer, 0, s.game.OnlineCount())
 	s.game.OnlinePlayers(func(p *player.Player) {
-		if p.GameMode == player.GameModeSpectator || p.Dead {
+		if p.Dimension != s.simulationDimension || p.GameMode == player.GameModeSpectator || p.Dead {
 			return
 		}
 		players = append(players, naturalSpawnPlayer{id: p.EntityID, position: p.Position})

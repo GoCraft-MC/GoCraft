@@ -181,11 +181,17 @@ func containerItemsTag(items []coreworld.ContainerItem) Tag {
 		if item.Slot < 0 || item.Slot > 255 || item.ItemID == "" || item.Count <= 0 {
 			continue
 		}
-		entries = append(entries, Tag{typ: tagCompound, compound: map[string]Tag{
+		compound := map[string]Tag{
 			"Slot":  {typ: tagByte, byteV: int8(item.Slot)},
 			"id":    {typ: tagString, strV: item.ItemID},
 			"count": {typ: tagInt, intV: int32(item.Count)},
-		}})
+		}
+		if item.Damage > 0 {
+			compound["components"] = Tag{typ: tagCompound, compound: map[string]Tag{
+				"minecraft:damage": {typ: tagInt, intV: int32(item.Damage)},
+			}}
+		}
+		entries = append(entries, Tag{typ: tagCompound, compound: compound})
 	}
 	return Tag{typ: tagList, listElem: tagCompound, listV: entries}
 }

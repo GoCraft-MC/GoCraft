@@ -463,6 +463,30 @@ func (l *Listener) BroadcastPlayerUsingItemState(p *player.Player, completed boo
 	}
 }
 
+// BroadcastPlayerArmSwing sends the Bedrock Animate packet to every other
+// viewer in the attacker's dimension. Bedrock currently exposes one generic
+// swing action, so off-hand Java swings use the same remote animation.
+func (l *Listener) BroadcastPlayerArmSwing(p *player.Player) {
+	if l == nil || p == nil {
+		return
+	}
+	l.sessionsMu.RLock()
+	viewers := make([]*bedrockSession, 0, len(l.sessions))
+	for uuid, viewer := range l.sessions {
+		if uuid != p.UUID && viewer.dimension.Load() == p.Dimension {
+			viewers = append(viewers, viewer)
+		}
+	}
+	l.sessionsMu.RUnlock()
+	for _, viewer := range viewers {
+		_ = viewer.conn.WritePacket(&packet.Animate{
+			ActionType:      packet.AnimateActionSwingArm,
+			EntityRuntimeID: bedrockRemoteRuntimeID(p.EntityID),
+			SwingSource:     packet.AnimateSwingSourceAttack,
+		})
+	}
+}
+
 func completedFoodSoundEvents(p *player.Player, runtimeID uint64) [2]*packet.LevelSoundEvent {
 	position := mgl32.Vec3{}
 	if p != nil {
@@ -946,6 +970,48 @@ func (l *Listener) BroadcastVillagerUnhappy(entity *corentity.Entity) {
 	}
 }
 
+// BroadcastSculkSensorSound mirrors the sensor phase sound to Bedrock clients.
+func (l *Listener) BroadcastSculkSensorSound(position spatial.Vec3, active bool) {
+	if l == nil {
+		return
+	}
+	sound := packet.SoundEventSculkSensorPowerOff
+	if active {
+		sound = packet.SoundEventSculkSensorPowerOn
+	}
+	event := &packet.LevelSoundEvent{SoundType: sound, Position: vec32(position), ExtraData: -1}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(event)
+	}
+}
+
+// BroadcastWindChargeSound sends the native Bedrock throw/burst event.
+func (l *Listener) BroadcastWindChargeSound(position spatial.Vec3, burst bool) {
+	if l == nil {
+		return
+	}
+	sound := packet.SoundEventThrow
+	if burst {
+		sound = packet.SoundEventWindChargeBurst
+	}
+	event := &packet.LevelSoundEvent{SoundType: sound, Position: vec32(position), ExtraData: -1}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(event)
+	}
+}
+
 // OpenVillagerTrade opens Bedrock's native trading screen and publishes the
 // same canonical offer list used by Java Edition.
 func (l *Listener) OpenVillagerTrade(playerUUID [16]byte, entity *corentity.Entity) bool {
@@ -962,13 +1028,13 @@ func (l *Listener) OpenVillagerTrade(playerUUID [16]byte, entity *corentity.Enti
 	if p == nil {
 		return false
 	}
-	offers := handler.VillagerTrades(entity.VillagerProfession)
+	level := max(entity.VillagerLevel, 1)
+	offers := handler.VillagerTrades(entity.VillagerProfession, level)
 	serialised, err := bedrockVillagerOffersNBT(offers)
 	if err != nil {
 		slog.Warn("bedrock: encode villager offers", "err", err)
 		return false
 	}
-	level := max(entity.VillagerLevel, 1)
 	_ = viewer.conn.WritePacket(&packet.ContainerOpen{
 		WindowID:                1,
 		ContainerType:           protocol.ContainerTypeTrade,
@@ -982,7 +1048,7 @@ func (l *Listener) OpenVillagerTrade(playerUUID [16]byte, entity *corentity.Enti
 		TradeTier:         level - 1,
 		VillagerUniqueID:  int64(bedrockRemoteRuntimeID(entity.EntityID)),
 		EntityUniqueID:    int64(bedrockSelfRuntimeID),
-		DisplayName:       "Villager",
+		DisplayName:       bedrockVillagerTradeTitle(entity.VillagerProfession, level),
 		NewTradeUI:        true,
 		DemandBasedPrices: true,
 		SerialisedOffers:  serialised,
@@ -996,45 +1062,72 @@ func (l *Listener) OpenVillagerTrade(playerUUID [16]byte, entity *corentity.Enti
 func bedrockVillagerOffersNBT(offers []handler.VillagerTrade) ([]byte, error) {
 	recipes := make([]map[string]any, 0, len(offers))
 	for _, offer := range offers {
-		buyA, ok := bedrockTradeItemNBT(offer.Input1)
+		buyA, ok := bedrockTradeItemNBT(offer.Input1, true)
 		if !ok {
 			continue
 		}
-		sell, ok := bedrockTradeItemNBT(offer.Output)
+		sell, ok := bedrockTradeItemNBT(offer.Output, false)
 		if !ok {
 			continue
+		}
+		priceMultiplier := offer.PriceMultiplier
+		if priceMultiplier == 0 {
+			priceMultiplier = 0.05
 		}
 		recipe := map[string]any{
 			"buyA": buyA, "sell": sell,
+			"buyCountA": int32(offer.Input1.Count), "buyCountB": int32(0),
 			"uses": int32(0), "maxUses": offer.MaxUses,
 			"rewardExp": byte(1), "traderExp": offer.XP,
-			"priceMultiplierA": float32(0.05), "priceMultiplierB": float32(0),
-			"demand": int32(0), "tier": int32(0),
+			"priceMultiplierA": priceMultiplier, "priceMultiplierB": float32(0),
+			"demand": int32(0), "tier": offer.Tier,
 		}
 		if !offer.Input2.IsEmpty() {
-			if buyB, present := bedrockTradeItemNBT(offer.Input2); present {
+			if buyB, present := bedrockTradeItemNBT(offer.Input2, true); present {
 				recipe["buyB"] = buyB
+				recipe["buyCountB"] = int32(offer.Input2.Count)
 			}
 		}
 		recipes = append(recipes, recipe)
 	}
 	return nbt.Marshal(struct {
-		Recipes             []map[string]any `nbt:"Recipes"`
-		TierExpRequirements []int32          `nbt:"TierExpRequirements"`
-	}{Recipes: recipes, TierExpRequirements: []int32{0, 10, 70, 150, 250}})
+		Recipes             []map[string]any   `nbt:"Recipes"`
+		TierExpRequirements []map[string]int32 `nbt:"TierExpRequirements"`
+	}{Recipes: recipes, TierExpRequirements: []map[string]int32{
+		{"0": 0}, {"1": 10}, {"2": 70}, {"3": 150}, {"4": 250},
+	}})
 }
 
-func bedrockTradeItemNBT(stack player.ItemStack) (map[string]any, bool) {
+func bedrockTradeItemNBT(stack player.ItemStack, cost bool) (map[string]any, bool) {
 	name, metadata, ok := bedrockItemIdentity(stack.ItemID)
 	if !ok || stack.IsEmpty() || stack.Count > 127 {
 		return nil, false
 	}
+	damage := int16(metadata)
+	if cost && damage == 0 {
+		// Bedrock vanilla uses the wildcard damage value for ingredients that
+		// do not require a particular legacy metadata variant.
+		damage = 32767
+	}
 	return map[string]any{
 		"Count":       byte(stack.Count),
-		"Damage":      int16(metadata),
+		"Damage":      damage,
 		"Name":        name,
 		"WasPickedUp": byte(0),
 	}, true
+}
+
+func bedrockVillagerTradeTitle(profession corentity.VillagerProfession, level int32) string {
+	name := strings.TrimPrefix(string(profession), "minecraft:")
+	if name == "" || name == "none" {
+		name = "villager"
+	}
+	name = strings.ToUpper(name[:1]) + strings.ReplaceAll(name[1:], "_", " ")
+	rank := [...]string{"Novice", "Apprentice", "Journeyman", "Expert", "Master"}
+	if level < 1 || level > 5 {
+		level = 1
+	}
+	return name + " - " + rank[level-1]
 }
 
 // BroadcastActorEvent mirrors canonical animal feedback (feeding, hearts and
@@ -1401,7 +1494,7 @@ func (l *Listener) changeDimension(p *player.Player, dimension int32, position s
 	l.sessionsMu.RLock()
 	viewer := l.sessions[p.UUID]
 	l.sessionsMu.RUnlock()
-	if viewer == nil || viewer.dimension.Load() == dimension {
+	if viewer == nil || (!respawn && viewer.dimension.Load() == dimension) {
 		return
 	}
 	viewer.dimension.Store(dimension)
@@ -1413,15 +1506,22 @@ func (l *Listener) changeDimension(p *player.Player, dimension int32, position s
 		Respawn:         respawn,
 		LoadingScreenID: protocol.Option(screenID),
 	})
+	_ = viewer.conn.WritePacket(initialChunkPublisher(position, bedrockChunkRadius))
+	cx, cz := chunkCoordinate(position.X), chunkCoordinate(position.Z)
+	// The destination centre must arrive before DimensionChangeDone. Sending
+	// that acknowledgement first allowed the client to leave its loading
+	// screen with no terrain and render an indefinitely black world.
+	if err := l.sendInitialChunks(viewer.conn, cx, cz, 0, dimension); err != nil {
+		slog.Debug("bedrock: destination centre chunk failed", "dimension", dimension, "err", err)
+		return
+	}
 	_ = viewer.conn.WritePacket(&packet.PlayStatus{Status: packet.PlayStatusPlayerSpawn})
 	_ = viewer.conn.WritePacket(&packet.PlayerAction{
 		EntityRuntimeID: bedrockSelfRuntimeID,
 		ActionType:      protocol.PlayerActionDimensionChangeDone,
 	})
-	_ = viewer.conn.WritePacket(initialChunkPublisher(position, bedrockChunkRadius))
-	cx, cz := chunkCoordinate(position.X), chunkCoordinate(position.Z)
 	go func() {
-		if err := l.sendInitialChunks(viewer.conn, cx, cz, bedrockChunkRadius, dimension); err != nil {
+		if err := l.sendSurroundingChunks(viewer.conn, cx, cz, bedrockChunkRadius, dimension); err != nil {
 			slog.Debug("bedrock: dimension chunk stream failed", "dimension", dimension, "err", err)
 		}
 	}()
@@ -1479,6 +1579,12 @@ func bedrockEntityType(entityType corentity.EntityType) string {
 		return "minecraft:xp_orb"
 	case corentity.TypeSpectralArrow:
 		return "minecraft:arrow"
+	case corentity.TypeWindCharge:
+		return "minecraft:wind_charge_projectile"
+	case corentity.TypeExperienceBottle:
+		return "minecraft:xp_bottle"
+	case corentity.TypePotion:
+		return "minecraft:thrown_potion"
 	case corentity.TypeBambooRaft:
 		return "minecraft:bamboo_raft"
 	case corentity.TypeBambooChestRaft:
@@ -1565,6 +1671,7 @@ var dragonflyDefaultActorIdentifiers = []actorIdentifierEntry{
 	{ID: "minecraft:lightning_bolt"},
 	{ID: "minecraft:lingering_potion"},
 	{ID: "minecraft:snowball"},
+	{ID: "minecraft:wind_charge_projectile"},
 	{ID: "minecraft:splash_potion"},
 	{ID: "minecraft:tnt"},
 	{ID: "dragonfly:text"},

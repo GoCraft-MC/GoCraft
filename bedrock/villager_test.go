@@ -36,14 +36,14 @@ func TestBedrockVillagerSpawnCarriesProfessionAndBiomeVariant(t *testing.T) {
 }
 
 func TestBedrockVillagerOffersUseNetworkNBT(t *testing.T) {
-	offers := handler.VillagerTrades(corentity.VillagerProfessionLibrarian)
+	offers := handler.VillagerTrades(corentity.VillagerProfessionLibrarian, 3)
 	encoded, err := bedrockVillagerOffersNBT(offers)
 	if err != nil {
 		t.Fatalf("encode offers: %v", err)
 	}
 	var root struct {
-		Recipes             []map[string]any `nbt:"Recipes"`
-		TierExpRequirements []int32          `nbt:"TierExpRequirements"`
+		Recipes             []map[string]any   `nbt:"Recipes"`
+		TierExpRequirements []map[string]int32 `nbt:"TierExpRequirements"`
 	}
 	if err := nbt.Unmarshal(encoded, &root); err != nil {
 		t.Fatalf("decode offers: %v", err)
@@ -52,8 +52,23 @@ func TestBedrockVillagerOffersUseNetworkNBT(t *testing.T) {
 		t.Fatalf("offer NBT = %d recipes/%v tiers, want %d/5", len(root.Recipes), root.TierExpRequirements, len(offers))
 	}
 	firstBuy, ok := root.Recipes[0]["buyA"].(map[string]any)
-	if !ok || firstBuy["Name"] == "" || root.Recipes[0]["sell"] == nil {
+	if !ok || firstBuy["Name"] == "" || root.Recipes[0]["sell"] == nil ||
+		root.Recipes[0]["buyCountA"] == nil || root.Recipes[0]["buyCountB"] == nil || root.Recipes[0]["tier"] == nil {
 		t.Fatalf("first Bedrock offer is incomplete: %#v", root.Recipes[0])
+	}
+	if got := firstBuy["Damage"]; got != int16(32767) {
+		t.Fatalf("ingredient wildcard damage = %#v, want 32767", got)
+	}
+	for level, requirement := range []int32{0, 10, 70, 150, 250} {
+		if got := root.TierExpRequirements[level][string(rune('0'+level))]; got != requirement {
+			t.Fatalf("tier %d requirement = %d, want %d", level, got, requirement)
+		}
+	}
+}
+
+func TestBedrockVillagerTradeTitleIncludesProfessionAndRank(t *testing.T) {
+	if got := bedrockVillagerTradeTitle(corentity.VillagerProfessionArmorer, 1); got != "Armorer - Novice" {
+		t.Fatalf("trade title = %q", got)
 	}
 }
 

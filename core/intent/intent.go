@@ -138,6 +138,13 @@ type StartUseItemIntent struct {
 	HotbarSlot int32
 }
 
+// ArmSwingIntent relays a player animation across both protocol adapters.
+// Hand is 0 for main hand and 1 for off hand.
+type ArmSwingIntent struct {
+	PlayerUUID [16]byte
+	Hand       int32
+}
+
 const (
 	BlockActionBreak uint8 = iota + 1
 	BlockActionUse
@@ -258,6 +265,7 @@ func (TeleportIntent) isGameplay()       {}
 func (BlockInteractIntent) isGameplay()  {}
 func (ConsumeFoodIntent) isGameplay()    {}
 func (StartUseItemIntent) isGameplay()   {}
+func (ArmSwingIntent) isGameplay()       {}
 func (EntityInteractIntent) isGameplay() {}
 func (VehicleMoveIntent) isGameplay()    {}
 func (RespawnIntent) isGameplay()        {}
@@ -351,6 +359,7 @@ func (b *Bus) PostTeleport(i TeleportIntent) bool {
 func (b *Bus) PostBlockInteract(i BlockInteractIntent) bool   { return b.tryGameplay(i) }
 func (b *Bus) PostConsumeFood(i ConsumeFoodIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostStartUseItem(i StartUseItemIntent) bool     { return b.tryGameplay(i) }
+func (b *Bus) PostArmSwing(i ArmSwingIntent) bool             { return b.tryGameplay(i) }
 func (b *Bus) PostEntityInteract(i EntityInteractIntent) bool { return b.tryGameplay(i) }
 func (b *Bus) PostVehicleMove(i VehicleMoveIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostRespawn(i RespawnIntent) bool               { return b.tryGameplay(i) }

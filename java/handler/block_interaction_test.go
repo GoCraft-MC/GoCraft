@@ -321,3 +321,151 @@ func TestHoeTillsAndSeedsPlant(t *testing.T) {
 		t.Fatalf("seed count = %d, want 1", got)
 	}
 }
+
+func useItemOnPacket(x, y, z int, face, sequence int32) *protocol.Packet {
+	return protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(x, y, z)).VarInt(face).
+		Float(0.5).Float(0.5).Float(0.5).Bool(false).Bool(false).VarInt(sequence).Build()
+}
+
+func TestJavaDoorPlacementCreatesAndBreaksBothHalves(t *testing.T) {
+	p := player.New([16]byte{}, "builder", player.ClientEditionJava)
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:spruce_door", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(12, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+
+	if err := handleUseItemOn(useItemOnPacket(12, 63, 0, 1, 500), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	lower, upper := w.GetBlock(12, 64, 0), w.GetBlock(12, 65, 0)
+	if lower.ResourceLocation() != "minecraft:spruce_door" || lower.Properties["half"] != "lower" ||
+		upper.ResourceLocation() != "minecraft:spruce_door" || upper.Properties["half"] != "upper" {
+		t.Fatalf("door halves = %s / %s", lower.Key(), upper.Key())
+	}
+	breakLinkedDoorHalf(12, 64, 0, lower, w, mgr)
+	if !w.GetBlock(12, 65, 0).IsAir() {
+		t.Fatal("breaking the lower door left the upper half")
+	}
+}
+
+func TestJavaSneakingPlacesAgainstContainer(t *testing.T) {
+	p := player.New([16]byte{}, "builder", player.ClientEditionJava)
+	p.Sneaking = true
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:stone", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(14, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "barrel"})
+
+	if err := handleUseItemOn(useItemOnPacket(14, 64, 0, 1, 501), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(14, 65, 0).ResourceLocation(); got != "minecraft:stone" {
+		t.Fatalf("block above barrel = %q, want stone", got)
+	}
+}
+
+func TestJavaPlacesRedstoneWireFromDustItem(t *testing.T) {
+	p := player.New([16]byte{}, "engineer", player.ClientEditionJava)
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:redstone", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(16, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+
+	if err := handleUseItemOn(useItemOnPacket(16, 63, 0, 1, 502), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	wire := w.GetBlock(16, 64, 0)
+	if wire.ResourceLocation() != "minecraft:redstone_wire" || wire.Properties["power"] != "0" {
+		t.Fatalf("placed wire = %s", wire.Key())
+	}
+}
+
+func TestJavaBucketPickupAndPlacement(t *testing.T) {
+	p := player.New([16]byte{}, "plumber", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bucket", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(18, 64, 0, coreworld.MakeFluid("minecraft:water", 0))
+
+	if err := handleUseItemOn(useItemOnPacket(18, 64, 0, 1, 503), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !w.GetBlock(18, 64, 0).IsAir() || p.HeldItem().ItemID != "minecraft:water_bucket" {
+		t.Fatalf("pickup result block=%s held=%+v", w.GetBlock(18, 64, 0).Key(), p.HeldItem())
+	}
+	w.SetBlock(18, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	if err := handleUseItemOn(useItemOnPacket(18, 63, 0, 1, 504), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(18, 64, 0); got.ResourceLocation() != "minecraft:water" || coreworld.FluidLevel(got) != 0 {
+		t.Fatalf("placed fluid = %s", got.Key())
+	}
+	if p.HeldItem().ItemID != "minecraft:bucket" {
+		t.Fatalf("held after placement = %+v", p.HeldItem())
+	}
+}
+
+func TestJavaDecoratedPotStoresAnItem(t *testing.T) {
+	p := player.New([16]byte{}, "potter", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:diamond", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(20, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "decorated_pot"})
+
+	if err := handleUseItemOn(useItemOnPacket(20, 64, 0, 1, 505), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	items := w.ContainerItems(20, 64, 0)
+	if len(items) != 1 || items[0].ItemID != "minecraft:diamond" || items[0].Count != 1 {
+		t.Fatalf("pot items = %+v", items)
+	}
+	if p.HeldItem().Count != 1 {
+		t.Fatalf("held count = %d, want 1", p.HeldItem().Count)
+	}
+}
+
+func TestJavaButtonUsesClickedFaceAndStaysAttached(t *testing.T) {
+	p := player.New([16]byte{}, "switcher", player.ClientEditionJava)
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:stone_button", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(22, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+
+	if err := handleUseItemOn(useItemOnPacket(22, 64, 0, 5, 506), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	button := w.GetBlock(23, 64, 0)
+	if button.ResourceLocation() != "minecraft:stone_button" || button.Properties["face"] != "wall" ||
+		button.Properties["facing"] != "east" || button.Properties["powered"] != "false" {
+		t.Fatalf("button state = %s", button.Key())
+	}
+}
+
+func TestJavaBoneMealGrowsCropAndConsumesItem(t *testing.T) {
+	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bone_meal", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(24, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "0"}})
+
+	if err := handleUseItemOn(useItemOnPacket(24, 64, 0, 1, 507), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(24, 64, 0).Properties["age"]; got != "7" {
+		t.Fatalf("wheat age = %q, want 7", got)
+	}
+	if got := p.HeldItem().Count; got != 1 {
+		t.Fatalf("bone meal count = %d, want 1", got)
+	}
+}

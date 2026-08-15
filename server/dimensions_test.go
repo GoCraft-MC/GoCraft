@@ -120,3 +120,23 @@ func TestBedrockNetherDeathDropsAndRespawnsInOverworld(t *testing.T) {
 		t.Fatalf("respawn state: dimension=%d position=%+v spawn=%+v", p.Dimension, p.Position, p.WorldSpawn)
 	}
 }
+
+func TestReconnectPositionMovesOutOfSolidBlocks(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	p := player.New([16]byte{70}, "returning", player.ClientEditionJava)
+	p.Position = spatial.Vec3{X: 3.5, Y: 64, Z: 3.5}
+	p.WorldSpawn = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+	w.SetBlock(3, 63, 3, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(3, 64, 3, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(3, 65, 3, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	s := &Server{world: w}
+
+	if !s.ensurePlayerPositionClear(p) {
+		t.Fatal("colliding saved position was not repaired")
+	}
+	x, y, z := int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z))
+	if !playerStandingSpace(w, x, y, z) {
+		t.Fatalf("repaired position is still unsafe: %+v", p.Position)
+	}
+}

@@ -162,6 +162,16 @@ func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientC
 		return nil
 	}
 	heldSlot := player.HotbarStart + p.HeldSlot
+	if UseThrowable(p, w, mgr, conn, nextEntityID) {
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	}
+	if p.Inventory[heldSlot].ItemID == "minecraft:wind_charge" {
+		UseWindCharge(p, w, mgr, conn, nextEntityID)
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	}
+	if startJavaFoodUse(p, heldSlot, time.Now()) {
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	}
 	if isBoatItem(p.Inventory[heldSlot].ItemID) &&
 		p.GameMode != player.GameModeAdventure && p.GameMode != player.GameModeSpectator {
 		if boat := spawnBoatFromLook(p, w, nextEntityID); boat != nil {
@@ -194,6 +204,92 @@ func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientC
 		}
 	}
 	return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+}
+
+// startJavaFoodUse records the selected food stack and lets the Java client
+// run its normal use animation. Completion remains server-authoritative.
+func startJavaFoodUse(p *player.Player, inventorySlot int, now time.Time) bool {
+	if p == nil || p.Dead || p.GameMode == player.GameModeSpectator || inventorySlot < 0 || inventorySlot >= len(p.Inventory) {
+		return false
+	}
+	stack := p.Inventory[inventorySlot]
+	if stack.IsEmpty() {
+		return false
+	}
+	if _, _, ok := player.FoodValue(stack.ItemID); !ok {
+		return false
+	}
+	_, food, _, _ := p.HealthSnapshot()
+	if p.GameMode != player.GameModeCreative && food >= 20 && !player.CanAlwaysEat(stack.ItemID) {
+		return false
+	}
+	p.UsingItemID = stack.ItemID
+	p.UsingItemSlot = inventorySlot - player.HotbarStart
+	p.UsingItemSince = now
+	return true
+}
+
+// TickJavaFoodUse completes a Java food use once its vanilla duration has
+// elapsed. The server tick calls this independently of client packet traffic.
+func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Manager, now time.Time) bool {
+	if p == nil || p.UsingItemID == "" || p.UsingItemSince.IsZero() {
+		return false
+	}
+	if _, _, ok := player.FoodValue(p.UsingItemID); !ok {
+		return false
+	}
+	if p.UsingItemSlot < 0 || p.UsingItemSlot >= 9 || p.HeldSlot != p.UsingItemSlot {
+		clearJavaFoodUse(p)
+		return false
+	}
+	slot := player.HotbarStart + p.UsingItemSlot
+	stack := p.Inventory[slot]
+	if stack.IsEmpty() || stack.ItemID != p.UsingItemID {
+		clearJavaFoodUse(p)
+		return false
+	}
+	if now.Sub(p.UsingItemSince) < player.FoodUseDuration(stack.ItemID) {
+		return false
+	}
+
+	nutrition, saturation, _ := player.FoodValue(stack.ItemID)
+	consumedID := stack.ItemID
+	if p.GameMode != player.GameModeCreative {
+		if !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(consumedID)) {
+			clearJavaFoodUse(p)
+			return false
+		}
+		p.Inventory[slot].Count--
+		normalizeStack(&p.Inventory[slot])
+		if remainder := player.FoodRemainder(consumedID); remainder != "" {
+			if p.Inventory[slot].IsEmpty() {
+				p.Inventory[slot] = player.ItemStack{ItemID: remainder, Count: 1}
+			} else {
+				p.GiveItem(player.ItemStack{ItemID: remainder, Count: 1})
+			}
+		}
+		if conn != nil {
+			_ = SyncPlayerInventory(conn, p)
+		} else {
+			p.ContainerStateID++
+		}
+	}
+	clearJavaFoodUse(p)
+	_ = sendUpdateHealth(conn, p)
+	BroadcastSoundAt(mgr, "minecraft:entity.generic.eat", soundCategoryPlayers,
+		p.Position.X, p.Position.Y+1.5, p.Position.Z, 1, 1)
+	BroadcastSoundAt(mgr, "minecraft:entity.player.burp", soundCategoryPlayers,
+		p.Position.X, p.Position.Y+1.5, p.Position.Z, 0.5, 1)
+	return true
+}
+
+func clearJavaFoodUse(p *player.Player) {
+	if p == nil {
+		return
+	}
+	p.UsingItemID = ""
+	p.UsingItemSince = time.Time{}
+	p.UsingItemSlot = -1
 }
 
 // ── S→C senders ──────────────────────────────────────────────────────────────

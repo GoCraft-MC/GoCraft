@@ -141,7 +141,11 @@ func decodeContainerItems(list Tag) []coreworld.ContainerItem {
 		if slot < 0 || itemID == "" || count <= 0 {
 			continue
 		}
-		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: itemID, Count: count})
+		damage := 0
+		if components := entry.compound["components"]; components.typ == tagCompound {
+			damage = numericTagValue(components.compound["minecraft:damage"])
+		}
+		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: itemID, Count: count, Damage: damage})
 	}
 	return items
 }

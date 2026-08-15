@@ -90,6 +90,18 @@ func TestPersonalCraftingSupportsShapedTwoByTwoRecipes(t *testing.T) {
 	}
 }
 
+func TestMaceRecipeWorksInEveryCraftingColumn(t *testing.T) {
+	for column := 0; column < 3; column++ {
+		var grid [9]player.ItemStack
+		grid[column] = player.ItemStack{ItemID: "minecraft:heavy_core", Count: 1}
+		grid[3+column] = player.ItemStack{ItemID: "minecraft:breeze_rod", Count: 1}
+		got := FindCraftingTableResult(grid)
+		if got.ItemID != "minecraft:mace" || got.Count != 1 {
+			t.Fatalf("column %d result = %+v, want one mace", column, got)
+		}
+	}
+}
+
 func TestPumpkinBedrockCopperArmorRecipesProducePristineStacks(t *testing.T) {
 	tests := []struct {
 		item       string

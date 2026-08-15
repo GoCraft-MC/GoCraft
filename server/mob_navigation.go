@@ -159,7 +159,7 @@ func (s *Server) closestTemptingPlayer(e *corentity.Entity, maximumDistance floa
 	var closest *player.Player
 	closestDistance := maximumDistance * maximumDistance
 	s.game.OnlinePlayers(func(candidate *player.Player) {
-		if candidate.Dead || candidate.GameMode == player.GameModeSpectator || !isTemptItem(e.Type, candidate.HeldItem().ItemID) {
+		if candidate.Dimension != s.simulationDimension || candidate.Dead || candidate.GameMode == player.GameModeSpectator || !isTemptItem(e.Type, candidate.HeldItem().ItemID) {
 			return
 		}
 		dx, dy, dz := candidate.Position.X-e.Position.X, candidate.Position.Y-e.Position.Y, candidate.Position.Z-e.Position.Z
@@ -178,7 +178,7 @@ func (s *Server) closestVisiblePlayer(e *corentity.Entity, maximumDistance float
 	var closest *player.Player
 	closestDistance := maximumDistance * maximumDistance
 	s.game.OnlinePlayers(func(candidate *player.Player) {
-		if candidate.Dead || candidate.GameMode == player.GameModeSpectator {
+		if candidate.Dimension != s.simulationDimension || candidate.Dead || candidate.GameMode == player.GameModeSpectator {
 			return
 		}
 		dx, dy, dz := candidate.Position.X-e.Position.X, candidate.Position.Y-e.Position.Y, candidate.Position.Z-e.Position.Z

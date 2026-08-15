@@ -3,6 +3,7 @@ package bedrock
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -13,6 +14,11 @@ import (
 )
 
 const bedrockRecipeCompatibilityVersion = "1.21.4"
+
+var (
+	bedrockRecipeNetworkMu sync.RWMutex
+	bedrockRecipeNetwork   = map[uint32]handler.RecipeDescription{}
+)
 
 // bedrockCraftingCatalogue keeps the Java catalogue authoritative and expands
 // Java ingredient alternatives into concrete Bedrock recipe variants. Every
@@ -27,13 +33,14 @@ func bedrockCraftingCatalogue() *packet.CraftingData {
 	dfworld.DefaultBlockRegistry.Finalize()
 
 	data := &packet.CraftingData{ClearRecipes: false}
+	networkRecipes := make(map[uint32]handler.RecipeDescription)
 	unlock := protocol.Option(protocol.RecipeUnlockRequirement{
 		Context: protocol.RecipeUnlockContextAlwaysUnlocked,
 	})
 	var networkID uint32 = 1
 	recipes := append(handler.CraftingRecipeCatalog(), handler.PumpkinBedrockCraftingRecipeCatalog()...)
 	for _, recipe := range recipes {
-		if recipe.Kind != "shaped" && recipe.Kind != "shapeless" && recipe.Kind != "furnace" {
+		if recipe.Kind != "shaped" && recipe.Kind != "shapeless" && recipe.Kind != "furnace" && recipe.Kind != "stonecutter" {
 			continue
 		}
 		variants := bedrockJavaIngredientVariants(recipe)
@@ -63,10 +70,12 @@ func bedrockCraftingCatalogue() *packet.CraftingData {
 					UnlockRequirement: unlock,
 					RecipeNetworkID:   networkID,
 				})
-			case "shapeless", "furnace":
+			case "shapeless", "furnace", "stonecutter":
 				block := "crafting_table"
 				if recipe.Kind == "furnace" {
 					block = strings.TrimPrefix(recipe.Station, "minecraft:")
+				} else if recipe.Kind == "stonecutter" {
+					block = "stonecutter"
 				}
 				data.ShapelessRecipes = append(data.ShapelessRecipes, protocol.ShapelessRecipe{
 					RecipeID:          variant.recipeID,
@@ -78,10 +87,44 @@ func bedrockCraftingCatalogue() *packet.CraftingData {
 					RecipeNetworkID:   networkID,
 				})
 			}
+			networkRecipes[networkID] = recipe
 			networkID++
 		}
 	}
+	bedrockRecipeNetworkMu.Lock()
+	bedrockRecipeNetwork = networkRecipes
+	bedrockRecipeNetworkMu.Unlock()
 	return data
+}
+
+func bedrockStonecutterSelection(networkID uint32, input string) (int, bool) {
+	bedrockRecipeNetworkMu.RLock()
+	recipe, ok := bedrockRecipeNetwork[networkID]
+	bedrockRecipeNetworkMu.RUnlock()
+	if !ok || recipe.Kind != "stonecutter" {
+		return 0, false
+	}
+	selection := 0
+	for _, candidate := range handler.CraftingRecipeCatalog() {
+		if candidate.Kind != "stonecutter" || len(candidate.Ingredients) != 1 {
+			continue
+		}
+		matches := false
+		for _, alternative := range candidate.Ingredients[0].Alternatives {
+			if alternative == input {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		if candidate.Name == recipe.Name {
+			return selection, true
+		}
+		selection++
+	}
+	return 0, false
 }
 
 const maxRecipesPerCraftingDataPacket = 1024

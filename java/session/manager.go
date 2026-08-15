@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"GoCraft/core/player"
+	"GoCraft/core/spatial"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 )
@@ -17,6 +18,9 @@ type Session struct {
 	Player     *player.Player
 	Conn       *network.ClientConn
 	TeleportTo func(x, y, z float64) error
+	// ChangeDimension asks the owning Java play loop to send Respawn, reset its
+	// chunk view, and continue in the destination world.
+	ChangeDimension func(dimension int32, position spatial.Vec3) error
 }
 
 // Manager is a concurrent-safe registry of active Java play sessions.

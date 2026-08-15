@@ -396,6 +396,31 @@ func buildHurtAnimation(entityID int32, yaw float32) *protocol.Packet {
 		Build()
 }
 
+func buildEntityAnimation(entityID int32, animation byte) *protocol.Packet {
+	return protocol.NewBuilder(packetIDEntityAnimation).
+		VarInt(entityID).
+		Byte(animation).
+		Build()
+}
+
+// BroadcastPlayerArmSwing mirrors Vanilla's Animate packet to Java viewers in
+// the same dimension. The source client already predicts its own swing.
+func BroadcastPlayerArmSwing(p *player.Player, hand int32, mgr *session.Manager) {
+	if p == nil || mgr == nil {
+		return
+	}
+	animation := byte(0) // main arm
+	if hand == 1 {
+		animation = 3 // off hand
+	}
+	pkt := buildEntityAnimation(p.EntityID, animation)
+	for _, viewer := range mgr.Snapshot(p.UUID) {
+		if viewer.Player != nil && viewer.Player.Dimension == p.Dimension {
+			_ = viewer.Conn.WritePacket(pkt)
+		}
+	}
+}
+
 // buildEntityEvent constructs ClientboundEntityEventPacket. Status 3 starts
 // the standard living-entity death animation on the vanilla client.
 func buildEntityEvent(entityID int32, status byte) *protocol.Packet {
@@ -503,6 +528,33 @@ func BroadcastSpawnMob(e *corentity.Entity, mgr *session.Manager) {
 		}
 		if equipment := buildMobEquipment(e); equipment != nil {
 			_ = s.Conn.WritePacket(equipment)
+		}
+	}
+}
+
+// BroadcastSpawnMobInDimension sends an entity only to Java players viewing
+// the world that owns it. Bedrock discovers the same canonical entity through
+// its dimension-aware synchroniser.
+func BroadcastSpawnMobInDimension(e *corentity.Entity, mgr *session.Manager, dimension int32) {
+	if e == nil || mgr == nil {
+		return
+	}
+	pkt, ok := buildSpawnMob(e)
+	if !ok {
+		return
+	}
+	metadata := buildMobMetadata(e)
+	equipment := buildMobEquipment(e)
+	for _, current := range mgr.SnapshotAll() {
+		if current.Player == nil || current.Player.Dimension != dimension {
+			continue
+		}
+		_ = current.Conn.WritePacket(pkt)
+		if metadata != nil {
+			_ = current.Conn.WritePacket(metadata)
+		}
+		if equipment != nil {
+			_ = current.Conn.WritePacket(equipment)
 		}
 	}
 }

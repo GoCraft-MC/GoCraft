@@ -28,6 +28,12 @@ func sendUpdateHealth(conn *network.ClientConn, p *player.Player) error {
 	return conn.WritePacket(buildUpdateHealth(p))
 }
 
+// SyncPlayerHealth refreshes hearts, food and saturation for a Java player
+// after an edition-neutral server tick changes survival state.
+func SyncPlayerHealth(conn *network.ClientConn, p *player.Player) error {
+	return sendUpdateHealth(conn, p)
+}
+
 func buildDeathCombatEvent(p *player.Player, message string) *protocol.Packet {
 	return protocol.NewBuilder(packetIDDeathCombatEvent).
 		VarInt(p.EntityID).
@@ -40,7 +46,7 @@ func buildDeathCombatEvent(p *player.Player, message string) *protocol.Packet {
 func buildRespawn(p *player.Player, dimensionTypeID int32, hashedSeed int64) *protocol.Packet {
 	return protocol.NewBuilder(packetIDRespawn).
 		VarInt(dimensionTypeID).
-		String(overworldDimensionName).
+		String(dimensionName(p.Dimension)).
 		Long(hashedSeed).
 		Byte(byte(p.GameMode)).
 		Byte(byte(p.GameMode)).

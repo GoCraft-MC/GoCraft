@@ -90,18 +90,29 @@ func TestVillageResidentsHaveUniqueBedsAndJobs(t *testing.T) {
 		t.Fatalf("resident count = %d, want at least 3 houses", len(residents))
 	}
 	beds := make(map[[3]int32]struct{}, len(residents))
+	jobs := make(map[[3]int32]struct{}, len(residents))
+	unemployed := 0
 	for _, resident := range residents {
 		bed := [3]int32{resident.Bed.X, resident.Bed.Y, resident.Bed.Z}
 		if _, duplicate := beds[bed]; duplicate {
 			t.Fatalf("duplicate bed assignment at %v", bed)
 		}
 		beds[bed] = struct{}{}
-		if resident.Profession == "" || resident.Profession == "minecraft:none" {
-			t.Fatalf("resident at %v has no assigned profession", resident.Home)
+		if resident.Profession == "" || resident.Profession == entity.VillagerProfessionNone {
+			unemployed++
+			if resident.Workstation != (spatial.BlockPos{}) {
+				t.Fatalf("unemployed resident at %v retained workstation %v", resident.Home, resident.Workstation)
+			}
+			continue
 		}
-		if resident.Workstation == (spatial.BlockPos{}) {
-			t.Fatalf("resident at %v has no workstation", resident.Home)
+		job := [3]int32{resident.Workstation.X, resident.Workstation.Y, resident.Workstation.Z}
+		if _, duplicate := jobs[job]; duplicate {
+			t.Fatalf("workstation %v was assigned to multiple villagers", job)
 		}
+		jobs[job] = struct{}{}
+	}
+	if unemployed == 0 {
+		t.Fatal("two-bed houses should leave their second resident unemployed until a free workstation exists")
 	}
 }
 
@@ -120,8 +131,11 @@ func TestGeneratedVillageSpawnsResidentsAndIronGolem(t *testing.T) {
 		switch spawned.Type {
 		case entity.TypeVillager:
 			villagers++
-			if !spawned.HasVillageHome || spawned.VillageBed == (spatial.BlockPos{}) || spawned.VillageWorkstation == (spatial.BlockPos{}) {
+			if !spawned.HasVillageHome || spawned.VillageBed == (spatial.BlockPos{}) {
 				t.Fatalf("unassigned villager: %+v", spawned)
+			}
+			if spawned.VillagerProfession == entity.VillagerProfessionNone && spawned.HasVillageWorkstation {
+				t.Fatalf("unemployed villager claimed a workstation: %+v", spawned)
 			}
 			if spawned.VillageCenter == (spatial.BlockPos{}) {
 				t.Fatal("villager has no village-wide roaming center")

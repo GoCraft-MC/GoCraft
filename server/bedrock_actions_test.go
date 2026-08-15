@@ -214,6 +214,15 @@ func TestBedrockPlacesDoorBedAndRedstoneDust(t *testing.T) {
 		if foot.Properties["part"] != "foot" || head.ResourceLocation() != "minecraft:white_bed" || head.Properties["part"] != "head" {
 			t.Fatalf("bed halves = %+v / %+v", foot, head)
 		}
+		found := map[[3]int]bool{}
+		for _, entity := range s.world.Chunk(0, 0).BlockEntities {
+			if entity.Type == "minecraft:bed" {
+				found[[3]int{entity.X, entity.Y, entity.Z}] = true
+			}
+		}
+		if !found[[3]int{1, 64, 0}] || !found[[3]int{1 + dx, 64, dz}] {
+			t.Fatalf("Bedrock bed block entities = %+v", found)
+		}
 	})
 
 	t.Run("redstone", func(t *testing.T) {

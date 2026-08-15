@@ -12,11 +12,116 @@ import (
 	"GoCraft/java/session"
 )
 
+const windChargeCooldown = 500 * time.Millisecond
+
+// UseThrowable handles the instant-use vanilla throwable family shared by
+// Java and Bedrock. It returns false for items that are not throwables.
+func UseThrowable(p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) bool {
+	if p == nil || w == nil || mgr == nil || nextEntityID == nil || p.Dead || p.GameMode == player.GameModeSpectator {
+		return false
+	}
+	stack := p.HeldItem()
+	projectileType := corentity.EntityType("")
+	speed := 1.5
+	sound := ""
+	switch stack.ItemID {
+	case "minecraft:snowball":
+		projectileType, sound = corentity.TypeSnowball, "minecraft:entity.snowball.throw"
+	case "minecraft:egg":
+		projectileType, sound = corentity.TypeEgg, "minecraft:entity.egg.throw"
+	case "minecraft:ender_pearl":
+		projectileType, sound = corentity.TypeEnderPearl, "minecraft:entity.ender_pearl.throw"
+	case "minecraft:experience_bottle":
+		projectileType, speed, sound = corentity.TypeExperienceBottle, 0.7, "minecraft:entity.experience_bottle.throw"
+	default:
+		return false
+	}
+
+	id := nextEntityID()
+	var uuid [16]byte
+	binary.BigEndian.PutUint32(uuid[:4], uint32(id))
+	copy(uuid[4:], p.UUID[:12])
+	yaw := float64(p.Rotation.Yaw) * math.Pi / 180
+	pitchDegrees := float64(p.Rotation.Pitch)
+	if projectileType == corentity.TypeExperienceBottle {
+		pitchDegrees += 20
+	}
+	pitch := pitchDegrees * math.Pi / 180
+	cosPitch := math.Cos(pitch)
+	projectile := corentity.New(id, uuid, projectileType, p.Position.X, p.Position.Y+1.52, p.Position.Z)
+	projectile.OwnerEntityID = p.EntityID
+	projectile.VX = -math.Sin(yaw) * cosPitch * speed
+	projectile.VY = -math.Sin(pitch) * speed
+	projectile.VZ = math.Cos(yaw) * cosPitch * speed
+	projectile.Yaw, projectile.Pitch = p.Rotation.Yaw, float32(pitchDegrees)
+	w.Entities.Add(projectile)
+	BroadcastSpawnMobInDimension(projectile, mgr, p.Dimension)
+	BroadcastSoundAtDimension(mgr, p.Dimension, sound, soundCategoryPlayers,
+		projectile.Position.X, projectile.Position.Y, projectile.Position.Z, 0.5, 1)
+	if p.GameMode != player.GameModeCreative {
+		slot := player.HotbarStart + p.HeldSlot
+		p.Inventory[slot].Count--
+		normalizeStack(&p.Inventory[slot])
+		p.ContainerStateID++
+		if conn != nil {
+			_ = SyncPlayerInventory(conn, p)
+		}
+	}
+	return true
+}
+
+// UseWindCharge spawns the shared wind-charge projectile for either edition.
+// The caller supplies the edition's live connection (nil for Bedrock).
+func UseWindCharge(p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) bool {
+	if p == nil || w == nil || mgr == nil || nextEntityID == nil || p.Dead || p.GameMode == player.GameModeSpectator ||
+		p.HeldItem().ItemID != "minecraft:wind_charge" {
+		return false
+	}
+	now := time.Now()
+	if !p.LastWindChargeUse.IsZero() && now.Sub(p.LastWindChargeUse) < windChargeCooldown {
+		return true
+	}
+	p.LastWindChargeUse = now
+	id := nextEntityID()
+	var uuid [16]byte
+	binary.BigEndian.PutUint32(uuid[:4], uint32(id))
+	copy(uuid[4:], p.UUID[:12])
+	yaw := float64(p.Rotation.Yaw) * math.Pi / 180
+	pitch := float64(p.Rotation.Pitch) * math.Pi / 180
+	cosPitch := math.Cos(pitch)
+	projectile := corentity.New(id, uuid, corentity.TypeWindCharge, p.Position.X, p.Position.Y+1.52, p.Position.Z)
+	projectile.OwnerEntityID = p.EntityID
+	projectile.VX = -math.Sin(yaw) * cosPitch * 1.5
+	projectile.VY = -math.Sin(pitch) * 1.5
+	projectile.VZ = math.Cos(yaw) * cosPitch * 1.5
+	projectile.Yaw, projectile.Pitch = p.Rotation.Yaw, p.Rotation.Pitch
+	w.Entities.Add(projectile)
+	BroadcastSpawnMobInDimension(projectile, mgr, p.Dimension)
+	BroadcastSoundAtDimension(mgr, p.Dimension, "minecraft:entity.wind_charge.throw", soundCategoryPlayers,
+		projectile.Position.X, projectile.Position.Y, projectile.Position.Z, 0.5, 1)
+	if p.GameMode == player.GameModeSurvival {
+		slot := player.HotbarStart + p.HeldSlot
+		p.Inventory[slot].Count--
+		normalizeStack(&p.Inventory[slot])
+		if conn != nil {
+			_ = SyncPlayerInventory(conn, p)
+		}
+	}
+	return true
+}
+
 func releaseRangedItem(p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) {
+	if _, _, food := player.FoodValue(p.UsingItemID); food {
+		if !TickJavaFoodUse(p, conn, mgr, time.Now()) {
+			clearJavaFoodUse(p)
+		}
+		return
+	}
 	itemID := p.UsingItemID
 	started := p.UsingItemSince
 	p.UsingItemID = ""
 	p.UsingItemSince = time.Time{}
+	p.UsingItemSlot = -1
 	if itemID == "" || started.IsZero() || nextEntityID == nil || w == nil || mgr == nil {
 		return
 	}

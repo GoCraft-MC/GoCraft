@@ -191,6 +191,8 @@ func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network
 		return handleContainerClick(pkt, p, conn, w)
 	case packetIDContainerClose:
 		return handleContainerClose(pkt, p, conn, w)
+	case packetIDContainerButtonClick:
+		return handleWorkstationButtonClick(pkt, p, conn)
 	}
 	return nil
 }
@@ -264,13 +266,17 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 		return nil
 	}
 
-	if windowID == chestContainerID && p.OpenContainerID == windowID && p.OpenContainerKind == "minecraft:chest" {
+	if windowID == chestContainerID && p.OpenContainerID == windowID && isJavaStorageContainer(p.OpenContainerKind) {
 		handleChestClick(p, w, int(slot), button, mode)
 		return sendChestContainerContent(conn, p)
 	}
 	if windowID == furnaceContainerID && p.OpenContainerID == windowID && IsFurnaceContainer(p.OpenContainerKind) {
 		handleFurnaceClick(p, w, int(slot), button, mode)
 		return sendFurnaceContainerContent(conn, p)
+	}
+	if windowID == workstationContainerID && p.OpenContainerID == windowID && IsWorkstation(p.OpenContainerKind) {
+		handleWorkstationClick(p, int(slot), button, mode)
+		return sendChestContainerContent(conn, p)
 	}
 	if windowID != craftingTableContainerID || p.OpenContainerID != windowID || p.OpenContainerKind != "minecraft:crafting_table" {
 		return nil
@@ -299,8 +305,8 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 	if err != nil {
 		return fmt.Errorf("container close: reading ID: %w", err)
 	}
-	if windowID == chestContainerID && p.OpenContainerID == windowID && p.OpenContainerKind == "minecraft:chest" {
-		persistChestContents(p, w)
+	if windowID == chestContainerID && p.OpenContainerID == windowID && isJavaStorageContainer(p.OpenContainerKind) {
+		persistStorageContents(p, w)
 		p.OpenContainerID = 0
 		p.OpenContainerKind = ""
 		p.OpenContainerPos = spatial.BlockPos{}
@@ -324,6 +330,10 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 		p.OpenContainerPos = spatial.BlockPos{}
 		p.ContainerSlots = nil
 		p.ContainerStateID++
+		return sendSetContainerContent(conn, p, p.ContainerStateID)
+	}
+	if windowID == workstationContainerID && p.OpenContainerID == windowID && IsWorkstation(p.OpenContainerKind) {
+		closeWorkstation(p, w)
 		return sendSetContainerContent(conn, p, p.ContainerStateID)
 	}
 	return nil

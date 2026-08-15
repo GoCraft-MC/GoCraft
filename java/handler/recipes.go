@@ -336,12 +336,13 @@ func convertVanillaRecipe(source vanillaRecipe) (recipeDisplay, bool, error) {
 		display.kind = recipeDisplayShaped
 		display.station = "minecraft:crafting_table"
 		display.category = craftingRecipeCategory(source.Category)
-		display.height = int32(len(source.Pattern))
+		pattern := trimShapedPattern(source.Pattern)
+		display.height = int32(len(pattern))
 		if display.height == 0 {
 			return recipeDisplay{}, false, fmt.Errorf("empty shaped pattern")
 		}
-		display.width = int32(utf8.RuneCountInString(source.Pattern[0]))
-		for _, row := range source.Pattern {
+		display.width = int32(utf8.RuneCountInString(pattern[0]))
+		for _, row := range pattern {
 			if int32(utf8.RuneCountInString(row)) != display.width {
 				return recipeDisplay{}, false, fmt.Errorf("inconsistent shaped pattern width")
 			}
@@ -428,6 +429,47 @@ func convertVanillaRecipe(source vanillaRecipe) (recipeDisplay, bool, error) {
 		return recipeDisplay{}, false, fmt.Errorf("unsupported recipe type %s", source.Type)
 	}
 	return display, true, nil
+}
+
+// trimShapedPattern mirrors vanilla's ShapedRecipePattern shrinking step.
+// Datapacks may pad a pattern with spaces for readability (the mace recipe is
+// " # "/" I "); those spaces do not lock the recipe to the middle column.
+func trimShapedPattern(pattern []string) []string {
+	firstRow, lastRow := 0, len(pattern)-1
+	for firstRow <= lastRow && strings.TrimSpace(pattern[firstRow]) == "" {
+		firstRow++
+	}
+	for lastRow >= firstRow && strings.TrimSpace(pattern[lastRow]) == "" {
+		lastRow--
+	}
+	if firstRow > lastRow {
+		return nil
+	}
+	rows := pattern[firstRow : lastRow+1]
+	left, right := -1, -1
+	for _, row := range rows {
+		runes := []rune(row)
+		for index, symbol := range runes {
+			if symbol == ' ' {
+				continue
+			}
+			if left == -1 || index < left {
+				left = index
+			}
+			if index > right {
+				right = index
+			}
+		}
+	}
+	if left < 0 {
+		return nil
+	}
+	trimmed := make([]string, len(rows))
+	for index, row := range rows {
+		runes := []rune(row)
+		trimmed[index] = string(runes[left : right+1])
+	}
+	return trimmed
 }
 
 func craftingRecipeCategory(category string) int32 {

@@ -248,13 +248,11 @@ func (g *OverworldGenerator) VillageResidents(v VillageCenter) []VillageResident
 		// Resident 2 — right bed (only present when house is wide enough)
 		if hw >= 3 {
 			bed2 := spatial.BlockPos{X: int32(house.centerX + hw - 2), Y: int32(house.groundY + 1), Z: int32(house.centerZ + hd - 1)}
-			profession2 := villageProfessionForVariant(house.variant + 1)
 			residents = append(residents, VillageResident{
 				Home: home, Center: center,
-				Spawn:       spatial.BlockPos{X: spawnPos.X + 2, Y: spawnPos.Y, Z: spawnPos.Z},
-				Bed:         bed2,
-				Workstation: workstation,
-				Profession:  profession2,
+				Spawn:      spatial.BlockPos{X: spawnPos.X + 2, Y: spawnPos.Y, Z: spawnPos.Z},
+				Bed:        bed2,
+				Profession: entity.VillagerProfessionNone,
 			})
 		}
 	}
@@ -310,12 +308,12 @@ func addBedBlockEntity(c *Chunk, wx, y, wz int) {
 	// Network NBT (1.20.2+): root compound has NO name field — just type byte
 	// then payload. Format: TAG_Compound(0x0a) | TAG_Int "color"=14 | TAG_End.
 	nbt := []byte{
-		0x0a,                               // TAG_Compound (root, no name in network NBT)
-		0x03,                               // TAG_Int type
-		0x00, 0x05,                         // name length=5
-		'c', 'o', 'l', 'o', 'r',           // "color"
-		0x00, 0x00, 0x00, 0x0e,             // value=14 (red, big-endian)
-		0x00,                               // TAG_End
+		0x0a,       // TAG_Compound (root, no name in network NBT)
+		0x03,       // TAG_Int type
+		0x00, 0x05, // name length=5
+		'c', 'o', 'l', 'o', 'r', // "color"
+		0x00, 0x00, 0x00, 0x0e, // value=14 (red, big-endian)
+		0x00, // TAG_End
 	}
 	c.BlockEntities = append(c.BlockEntities, BlockEntity{
 		X:    wx,

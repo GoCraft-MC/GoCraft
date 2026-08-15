@@ -103,6 +103,9 @@ type Player struct {
 	UsingItemSlot         int
 	LastEnvironmentDamage time.Time
 	UnderwaterSince       time.Time
+	LastVibrationPosition spatial.Vec3
+	HasVibrationPosition  bool
+	LastWindChargeUse     time.Time
 
 	// EntityID is the server-assigned entity ID used in packets.
 	// It is assigned by the game core when the player joins.
@@ -132,6 +135,9 @@ type Player struct {
 	// Inventory holds the player's item slots.
 	// See the InventorySize / HotbarStart constants for the slot layout.
 	Inventory [InventorySize]ItemStack
+	// EnderChestInventory is the player's private, persistent 27-slot storage.
+	// It is shared by every Ender Chest but never stored in a world block entity.
+	EnderChestInventory [27]ItemStack
 
 	// HeldSlot is the currently selected hotbar slot (0–8).
 	HeldSlot int
@@ -145,16 +151,34 @@ type Player struct {
 	OpenContainerHasPartner bool
 	ContainerStateID        int32
 	ContainerSlots          []ItemStack
-	CraftingGrid            [9]ItemStack
-	CraftingResult          ItemStack
-	CarriedItem             ItemStack
-	QuickCraftButton        byte
-	QuickCraftSlots         []int
+	// WorkstationSelection is the zero-based recipe selected in a workstation
+	// such as a stonecutter. It is transient UI state and is reset whenever a
+	// new workstation is opened.
+	WorkstationSelection int
+	CraftingGrid         [9]ItemStack
+	CraftingResult       ItemStack
+	CarriedItem          ItemStack
+	QuickCraftButton     byte
+	QuickCraftSlots      []int
 }
 
 // HeldItem returns the ItemStack in the currently selected hotbar slot.
 func (p *Player) HeldItem() ItemStack {
 	return p.Inventory[HotbarStart+p.HeldSlot]
+}
+
+// RecordMovementVibration reports a footstep-sized movement event at most once
+// per block travelled. Sneaking suppresses it, matching sculk vibration rules.
+func (p *Player) RecordMovementVibration() bool {
+	if p == nil || p.Sneaking {
+		return false
+	}
+	if p.HasVibrationPosition && p.Position.Distance(p.LastVibrationPosition) < 1 {
+		return false
+	}
+	p.LastVibrationPosition = p.Position
+	p.HasVibrationPosition = true
+	return true
 }
 
 // ArmorPoints returns the armour HUD value from the four equipped slots.
@@ -250,12 +274,19 @@ func (p *Player) AddExhaustion(amount float32) {
 // ConsumeFood fills hunger and saturation. It returns false when the player
 // is full and the item should not be consumed.
 func (p *Player) ConsumeFood(nutrition int32, saturationModifier float32) bool {
+	return p.ConsumeFoodAllowFull(nutrition, saturationModifier, false)
+}
+
+// ConsumeFoodAllowFull fills hunger and saturation, optionally permitting an
+// item such as a golden apple to be eaten while the hunger bar is already
+// full. It returns whether the item use should complete and consume the item.
+func (p *Player) ConsumeFoodAllowFull(nutrition int32, saturationModifier float32, allowFull bool) bool {
 	if nutrition <= 0 {
 		return false
 	}
 	p.healthMu.Lock()
 	defer p.healthMu.Unlock()
-	if p.Dead || p.Food >= 20 {
+	if p.Dead || (p.Food >= 20 && !allowFull) {
 		return false
 	}
 	p.Food += nutrition

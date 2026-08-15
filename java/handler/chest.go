@@ -32,10 +32,93 @@ func openChest(p *player.Player, conn *network.ClientConn, w *coreworld.World, p
 		menuType = doubleChestMenuType
 		title = "Large Chest"
 	}
+	if conn == nil {
+		return nil
+	}
 	if err := sendOpenScreen(conn, chestContainerID, menuType, title); err != nil {
 		return err
 	}
 	return sendChestContainerContent(conn, p)
+}
+
+func isJavaStorageContainer(kind string) bool {
+	switch kind {
+	case "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
+		"minecraft:hopper", "minecraft:dispenser", "minecraft:dropper", "minecraft:crafter",
+		"minecraft:ender_chest":
+		return true
+	default:
+		return false
+	}
+}
+
+func javaStorageContainerSize(kind string) int {
+	switch kind {
+	case "minecraft:hopper":
+		return 5
+	case "minecraft:dispenser", "minecraft:dropper", "minecraft:crafter":
+		return 9
+	default:
+		return chestSlotCount
+	}
+}
+
+// openStorageContainer connects the Java screen to canonical block-entity
+// storage. Chests retain their double-chest rules; other storage blocks use a
+// single fixed-size slot array.
+func openStorageContainer(p *player.Player, conn *network.ClientConn, w *coreworld.World, pos spatial.BlockPos, kind string) error {
+	if kind == "minecraft:chest" || kind == "minecraft:trapped_chest" {
+		return openChest(p, conn, w, pos)
+	}
+	if p.OpenContainerKind == "minecraft:crafting_table" {
+		returnCraftingGrid(p)
+	}
+	p.OpenContainerID = chestContainerID
+	p.OpenContainerKind = kind
+	p.OpenContainerPos = pos
+	p.OpenContainerPartnerPos = spatial.BlockPos{}
+	p.OpenContainerHasPartner = false
+	p.ContainerSlots = make([]player.ItemStack, javaStorageContainerSize(kind))
+	if kind == "minecraft:ender_chest" {
+		copy(p.ContainerSlots, p.EnderChestInventory[:])
+	} else {
+		for _, item := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
+			if item.Slot >= 0 && item.Slot < len(p.ContainerSlots) && item.ItemID != "" && item.Count > 0 {
+				p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
+			}
+		}
+	}
+	p.ContainerStateID++
+	if conn == nil {
+		return nil
+	}
+	if err := sendOpenScreen(conn, chestContainerID, containerMenuType(kind), containerTitle(kind)); err != nil {
+		return err
+	}
+	return sendChestContainerContent(conn, p)
+}
+
+// RefreshOpenStorageContainer reloads an already-open Java storage screen
+// after hopper/dropper automation changes its canonical block entity.
+func RefreshOpenStorageContainer(p *player.Player, conn *network.ClientConn, w *coreworld.World) {
+	if p == nil || w == nil || !isJavaStorageContainer(p.OpenContainerKind) || p.OpenContainerKind == "minecraft:ender_chest" {
+		return
+	}
+	kind, position := p.OpenContainerKind, p.OpenContainerPos
+	if kind == "minecraft:chest" || kind == "minecraft:trapped_chest" {
+		LoadChestContainerState(p, w, position)
+	} else {
+		p.ContainerSlots = make([]player.ItemStack, javaStorageContainerSize(kind))
+		for _, item := range w.ContainerItems(int(position.X), int(position.Y), int(position.Z)) {
+			if item.Slot >= 0 && item.Slot < len(p.ContainerSlots) && item.ItemID != "" && item.Count > 0 {
+				p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
+			}
+		}
+		p.ContainerStateID++
+	}
+	if conn != nil {
+		_ = sendChestContainerContent(conn, p)
+	}
 }
 
 // LoadChestContainerState loads a single or double chest into the canonical
@@ -64,7 +147,7 @@ func LoadChestContainerState(p *player.Player, w *coreworld.World, pos spatial.B
 	// Right half → slots 0-26.
 	for _, item := range w.ContainerItems(int(rightPos.X), int(rightPos.Y), int(rightPos.Z)) {
 		if item.Slot >= 0 && item.Slot < chestSlotCount && item.ItemID != "" && item.Count > 0 {
-			p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count}
+			p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
 		}
 	}
 	// Left half → slots 27-53.
@@ -72,7 +155,7 @@ func LoadChestContainerState(p *player.Player, w *coreworld.World, pos spatial.B
 		for _, item := range w.ContainerItems(int(leftPos.X), int(leftPos.Y), int(leftPos.Z)) {
 			slot := item.Slot + chestSlotCount
 			if item.Slot >= 0 && item.Slot < chestSlotCount && slot < slotCount && item.ItemID != "" && item.Count > 0 {
-				p.ContainerSlots[slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count}
+				p.ContainerSlots[slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
 			}
 		}
 	}
@@ -298,7 +381,30 @@ func handleChestClick(p *player.Player, w *coreworld.World, slot int, button byt
 		shiftChestSlot(p, slot)
 	}
 	p.ContainerStateID++
-	persistChestContents(p, w)
+	persistStorageContents(p, w)
+}
+
+func persistStorageContents(p *player.Player, w *coreworld.World) {
+	if p == nil || w == nil || !isJavaStorageContainer(p.OpenContainerKind) {
+		return
+	}
+	if p.OpenContainerKind == "minecraft:chest" || p.OpenContainerKind == "minecraft:trapped_chest" {
+		persistChestContents(p, w)
+		return
+	}
+	if p.OpenContainerKind == "minecraft:ender_chest" {
+		clear(p.EnderChestInventory[:])
+		copy(p.EnderChestInventory[:], p.ContainerSlots)
+		return
+	}
+	items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots))
+	for slot, stack := range p.ContainerSlots {
+		if !stack.IsEmpty() {
+			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
+		}
+	}
+	pos := p.OpenContainerPos
+	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), p.OpenContainerKind, items)
 }
 
 func clickChestSlot(p *player.Player, containerSlot int, button byte) {
@@ -444,7 +550,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		for slot := 0; slot < chestSlotCount && slot < len(p.ContainerSlots); slot++ {
 			stack := p.ContainerSlots[slot]
 			if !stack.IsEmpty() {
-				rightItems = append(rightItems, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count})
+				rightItems = append(rightItems, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
 			}
 		}
 		w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), kind, rightItems)
@@ -455,7 +561,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		for slot := chestSlotCount; slot < doubleChestSlotCount && slot < len(p.ContainerSlots); slot++ {
 			stack := p.ContainerSlots[slot]
 			if !stack.IsEmpty() {
-				leftItems = append(leftItems, coreworld.ContainerItem{Slot: slot - chestSlotCount, ItemID: stack.ItemID, Count: stack.Count})
+				leftItems = append(leftItems, coreworld.ContainerItem{Slot: slot - chestSlotCount, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
 			}
 		}
 		w.SetContainerItems(int(lp.X), int(lp.Y), int(lp.Z), kind, leftItems)
@@ -468,7 +574,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		if stack.IsEmpty() {
 			continue
 		}
-		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count})
+		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
 	}
 	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), kind, items)
 }

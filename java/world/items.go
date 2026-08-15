@@ -45,6 +45,10 @@ func IsPlaceableAsBlock(itemID string) bool {
 // ItemIDToBlock returns the canonical Block for an item resource location.
 // For most block items the block shares the same resource location as the item.
 func ItemIDToBlock(itemID string) coreworld.Block {
+	// A handful of items place a block with a different resource location.
+	if itemID == "minecraft:redstone" {
+		itemID = "minecraft:redstone_wire"
+	}
 	ns, name := "minecraft", itemID
 	if i := len("minecraft:"); len(itemID) > i && itemID[:i] == "minecraft:" {
 		name = itemID[i:]

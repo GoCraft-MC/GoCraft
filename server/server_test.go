@@ -87,6 +87,22 @@ func TestVillagerSnapsToBedAndWakesBesideIt(t *testing.T) {
 	}
 }
 
+func TestVillagerNeverSleepsOnNonBedPOI(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(3, 64, 4, coreworld.Block{Namespace: "minecraft", Name: "oak_door", Properties: map[string]string{"half": "lower"}})
+	server := &Server{world: w, worldAge: 13000, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(10, [16]byte{}, corentity.TypeVillager, 3.5, 64, 4.5)
+	villager.HasVillageHome = true
+	villager.VillageBed = spatial.BlockPos{X: 3, Y: 64, Z: 4}
+	villager.Sleeping = true
+	server.mobAIs[villager.EntityID] = &mobAI{sleepingWas: true}
+
+	if !server.tickPassiveMobAI(villager) || villager.Sleeping {
+		t.Fatal("villager remained asleep on a non-bed POI")
+	}
+}
+
 func TestSleepRequiresAndWakesBothEditions(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer w.Close()

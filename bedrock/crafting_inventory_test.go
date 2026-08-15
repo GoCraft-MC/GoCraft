@@ -106,7 +106,7 @@ func TestBedrockCraftingDataContainsJavaAndPumpkinRecipes(t *testing.T) {
 	expectedTotal := 0
 	for _, recipe := range sourceRecipes {
 		sourceRecipeIDs[recipe.Name] = struct{}{}
-		if recipe.Kind == "shaped" || recipe.Kind == "shapeless" || recipe.Kind == "furnace" {
+		if recipe.Kind == "shaped" || recipe.Kind == "shapeless" || recipe.Kind == "furnace" || recipe.Kind == "stonecutter" {
 			sourceCraftingRecipes++
 			variants := bedrockJavaIngredientVariants(recipe)
 			expectedTotal += len(variants)
@@ -127,7 +127,7 @@ func TestBedrockCraftingDataContainsJavaAndPumpkinRecipes(t *testing.T) {
 		}
 		missing := make([]string, 0, max(sourceCraftingRecipes-total, 0))
 		for _, recipe := range sourceRecipes {
-			if recipe.Kind != "shaped" && recipe.Kind != "shapeless" && recipe.Kind != "furnace" {
+			if recipe.Kind != "shaped" && recipe.Kind != "shapeless" && recipe.Kind != "furnace" && recipe.Kind != "stonecutter" {
 				continue
 			}
 			if _, ok := advertised[recipe.Name]; !ok {

@@ -6,6 +6,7 @@ import (
 
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
+	coreworld "GoCraft/core/world"
 )
 
 func TestPlayerDataStoreRoundTrip(t *testing.T) {
@@ -27,6 +28,7 @@ func TestPlayerDataStoreRoundTrip(t *testing.T) {
 	source.Inventory[24] = player.ItemStack{ItemID: "minecraft:oak_planks", Count: 48}
 	source.Inventory[player.HotbarStart+4] = player.ItemStack{ItemID: "minecraft:diamond_pickaxe", Count: 1, Damage: 57}
 	source.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:shield", Count: 1, Damage: 4}
+	source.EnderChestInventory[7] = player.ItemStack{ItemID: "minecraft:nether_star", Count: 2}
 
 	// Saving twice exercises replacement of an existing file, which is
 	// especially important on Windows where the server commonly runs.
@@ -56,6 +58,9 @@ func TestPlayerDataStoreRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(restored.Inventory, source.Inventory) {
 		t.Fatalf("inventory mismatch: got %#v, want %#v", restored.Inventory, source.Inventory)
 	}
+	if !reflect.DeepEqual(restored.EnderChestInventory, source.EnderChestInventory) {
+		t.Fatalf("ender chest mismatch: got %#v, want %#v", restored.EnderChestInventory, source.EnderChestInventory)
+	}
 	if restored.HeldSlot != source.HeldSlot || restored.GameMode != source.GameMode {
 		t.Fatalf("player settings mismatch: slot/mode %d/%d, want %d/%d", restored.HeldSlot, restored.GameMode, source.HeldSlot, source.GameMode)
 	}
@@ -66,6 +71,32 @@ func TestPlayerDataStoreRoundTrip(t *testing.T) {
 	}
 	if !restored.HasSpawnPoint || restored.SpawnPoint != source.SpawnPoint {
 		t.Fatalf("spawn point mismatch: got %+v/%t", restored.SpawnPoint, restored.HasSpawnPoint)
+	}
+}
+
+func TestReconnectFromDeathScreenRespawnsAtFullHealth(t *testing.T) {
+	store := newPlayerDataStore(t.TempDir())
+	uuid := [16]byte{0xde, 0xad}
+	dead := player.New(uuid, "dead-player", player.ClientEditionJava)
+	dead.Position = spatial.Vec3{X: 80.5, Y: 12, Z: -20.5}
+	dead.Dimension = dimensionEnd
+	dead.ApplyDamage(dead.MaxHealth, "test")
+	if err := store.save(uuid, snapshotPlayerData(dead)); err != nil {
+		t.Fatal(err)
+	}
+
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	restored := player.New(uuid, "dead-player", player.ClientEditionJava)
+	restored.WorldSpawn = spatial.Vec3{X: 0.5, Y: 65, Z: 0.5}
+	s := &Server{world: w, playerStore: store}
+	s.loadPlayerData(restored)
+	health, food, saturation, isDead := restored.HealthSnapshot()
+	if isDead || health != restored.MaxHealth || food != 20 || saturation != 5 {
+		t.Fatalf("restored survival state = health %.1f food %d saturation %.1f dead %t", health, food, saturation, isDead)
+	}
+	if restored.Dimension != dimensionOverworld || restored.Position != restored.WorldSpawn {
+		t.Fatalf("restored location = dim %d pos %+v, want overworld spawn %+v", restored.Dimension, restored.Position, restored.WorldSpawn)
 	}
 }
 

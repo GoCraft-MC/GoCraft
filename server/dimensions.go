@@ -16,7 +16,7 @@ const (
 )
 
 func (s *Server) tryBedrockPortalTravel(p *player.Player) bool {
-	if p == nil || p.Edition != player.ClientEditionBedrock || time.Now().Before(p.PortalCooldownUntil) {
+	if p == nil || time.Now().Before(p.PortalCooldownUntil) {
 		return false
 	}
 	currentWorld := s.worldForPlayer(p)
@@ -65,15 +65,82 @@ func (s *Server) tryBedrockPortalTravel(p *player.Player) bool {
 		target.X = math.Floor(target.X) + 1.5
 		target.Z = math.Floor(target.Z) + 0.5
 	}
+	p.PortalCooldownUntil = time.Now().Add(4 * time.Second)
+	target = destinationWorld.EnsureSafeArrival(target, destination)
+	p.InvulnerableUntil = time.Now().Add(10 * time.Second)
+	if p.Edition == player.ClientEditionJava {
+		if javaSession, ok := s.sessions.Get(p.UUID); ok && javaSession.ChangeDimension != nil {
+			if err := javaSession.ChangeDimension(destination, target); err == nil {
+				return true
+			}
+		}
+		return false
+	}
 	p.Dimension = destination
 	p.Position = target
 	p.FallDistance = 0
 	p.OnGround = false
-	p.PortalCooldownUntil = time.Now().Add(4 * time.Second)
 	if s.bedrockListener != nil {
 		s.bedrockListener.ChangeDimension(p, destination, target)
 	}
 	return true
+}
+
+func (s *Server) commandWorldTarget(p *player.Player, destination int32) spatial.Vec3 {
+	world := s.worldForDimension(destination)
+	if destination == dimensionOverworld {
+		return p.WorldSpawn
+	}
+	if destination == dimensionEnd {
+		x, z := 100, 0
+		return spatial.Vec3{X: 100.5, Y: float64(world.SurfaceY(x, z) + 1), Z: 0.5}
+	}
+	x := int(math.Floor(p.Position.X / 8))
+	z := int(math.Floor(p.Position.Z / 8))
+	y := s.safePortalY(world, x, z)
+	return spatial.Vec3{X: float64(x) + 0.5, Y: float64(y), Z: float64(z) + 0.5}
+}
+
+// ensurePlayerPositionClear preserves a saved location when its feet and head
+// are passable. If blocks were placed into that space while the player was
+// offline, it moves them to the nearest supported two-block-high opening.
+func (s *Server) ensurePlayerPositionClear(p *player.Player) bool {
+	if p == nil {
+		return false
+	}
+	w := s.worldForPlayer(p)
+	x := int(math.Floor(p.Position.X))
+	y := int(math.Floor(p.Position.Y))
+	z := int(math.Floor(p.Position.Z))
+	if playerStandingSpace(w, x, y, z) {
+		return false
+	}
+	for distance := 1; distance <= 16; distance++ {
+		for _, candidateY := range []int{y + distance, y - distance} {
+			if candidateY < coreworld.WorldMinY+1 || candidateY >= coreworld.WorldMaxY || !playerStandingSpace(w, x, candidateY, z) {
+				continue
+			}
+			p.Position = spatial.Vec3{X: p.Position.X, Y: float64(candidateY), Z: p.Position.Z}
+			return true
+		}
+	}
+	if p.Dimension == dimensionOverworld {
+		p.Position = p.WorldSpawn
+	} else {
+		p.Position = w.EnsureSafeArrival(s.commandWorldTarget(p, p.Dimension), p.Dimension)
+	}
+	return true
+}
+
+func playerStandingSpace(w *coreworld.World, x, y, z int) bool {
+	if w == nil || y <= coreworld.WorldMinY || y >= coreworld.WorldMaxY {
+		return false
+	}
+	feet := w.GetBlock(x, y, z).ResourceLocation()
+	head := w.GetBlock(x, y+1, z).ResourceLocation()
+	below := w.GetBlock(x, y-1, z).ResourceLocation()
+	return !coreworld.IsEntitySupportBlock(feet) && !coreworld.IsEntitySupportBlock(head) &&
+		coreworld.IsEntitySupportBlock(below) && !coreworld.IsFluidBlock(below)
 }
 
 func (s *Server) safePortalY(world *coreworld.World, x, z int) int {
@@ -88,64 +155,14 @@ func (s *Server) safePortalY(world *coreworld.World, x, z int) int {
 // igniteNetherPortal recognises the standard 4x5 obsidian frame in either
 // horizontal axis and fills its 2x3 interior.
 func (s *Server) igniteNetherPortal(clickedX, clickedY, clickedZ int) bool {
-	for _, axis := range []string{"x", "z"} {
-		for horizontalOffset := -3; horizontalOffset <= 0; horizontalOffset++ {
-			for verticalOffset := -4; verticalOffset <= 0; verticalOffset++ {
-				left, bottom := horizontalOffset, clickedY+verticalOffset
-				baseX, baseZ := clickedX, clickedZ
-				if axis == "x" {
-					baseX = clickedX + left
-				} else {
-					baseZ = clickedZ + left
-				}
-				if s.isNetherPortalFrame(baseX, bottom, baseZ, axis) {
-					s.fillNetherPortal(baseX, bottom, baseZ, axis)
-					return true
-				}
-			}
-		}
+	changes, ok := coreworld.NetherPortalInterior(s.bedrockWorld(), clickedX, clickedY, clickedZ)
+	if !ok {
+		return false
 	}
-	return false
-}
-
-func (s *Server) isNetherPortalFrame(baseX, bottom, baseZ int, axis string) bool {
-	world := s.bedrockWorld()
-	for horizontal := 0; horizontal < 4; horizontal++ {
-		for vertical := 0; vertical < 5; vertical++ {
-			// Vanilla permits the four corner blocks to be omitted.
-			border := (horizontal == 0 || horizontal == 3) && vertical >= 1 && vertical <= 3 ||
-				(vertical == 0 || vertical == 4) && horizontal >= 1 && horizontal <= 2
-			interior := horizontal >= 1 && horizontal <= 2 && vertical >= 1 && vertical <= 3
-			x, z := baseX, baseZ
-			if axis == "x" {
-				x += horizontal
-			} else {
-				z += horizontal
-			}
-			block := world.GetBlock(x, bottom+vertical, z)
-			if border && block.ResourceLocation() != "minecraft:obsidian" {
-				return false
-			}
-			if interior && !bedrockPlacementReplaceable(block.ResourceLocation()) {
-				return false
-			}
-		}
+	for _, change := range changes {
+		s.setBedrockActionBlock(change.X, change.Y, change.Z, change.Block)
 	}
 	return true
-}
-
-func (s *Server) fillNetherPortal(baseX, bottom, baseZ int, axis string) {
-	for horizontal := 1; horizontal <= 2; horizontal++ {
-		for vertical := 1; vertical <= 3; vertical++ {
-			x, z := baseX, baseZ
-			if axis == "x" {
-				x += horizontal
-			} else {
-				z += horizontal
-			}
-			s.setBedrockActionBlock(x, bottom+vertical, z, bedrockBlock("nether_portal", map[string]string{"axis": axis}))
-		}
-	}
 }
 
 func (s *Server) ensureNetherPortalAt(x, bottom, z int, axis string) {

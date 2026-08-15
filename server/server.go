@@ -74,6 +74,10 @@ type Server struct {
 	world       *coreworld.World
 	netherWorld *coreworld.World
 	endWorld    *coreworld.World
+	// simulationDimension is zero on the primary server and is overridden on
+	// the short-lived per-dimension simulation view used by shared physics
+	// helpers. Entity IDs and mutable registries remain shared.
+	simulationDimension int32
 	// bedrockActionWorld is set only while the sole simulation goroutine is
 	// applying one Bedrock block intent, allowing shared action helpers to work
 	// in all dimensions without changing their public shape.
@@ -229,16 +233,27 @@ func New(cfg *config.Config) (*Server, error) {
 			return nil, fmt.Errorf("server: opening Anvil storage %s: %w", cfg.WorldDir, err)
 		}
 		storage = st
-		netherStorageInstance, storageErr := anvil.NewStorage(filepath.Join(cfg.WorldDir, "DIM-1"))
+		netherDirectory, endDirectory := dimensionWorldDirectories(cfg.WorldDir)
+		if storageErr := prepareDimensionWorldDirectory(netherDirectory, filepath.Join(cfg.WorldDir, "DIM-1")); storageErr != nil {
+			return nil, fmt.Errorf("server: preparing Nether directory: %w", storageErr)
+		}
+		if storageErr := prepareDimensionWorldDirectory(endDirectory, filepath.Join(cfg.WorldDir, "DIM1")); storageErr != nil {
+			return nil, fmt.Errorf("server: preparing End directory: %w", storageErr)
+		}
+		netherStorageInstance, storageErr := anvil.NewStorage(netherDirectory)
 		if storageErr != nil {
 			return nil, fmt.Errorf("server: opening Nether storage: %w", storageErr)
 		}
-		endStorageInstance, storageErr := anvil.NewStorage(filepath.Join(cfg.WorldDir, "DIM1"))
+		endStorageInstance, storageErr := anvil.NewStorage(endDirectory)
 		if storageErr != nil {
 			return nil, fmt.Errorf("server: opening End storage: %w", storageErr)
 		}
 		netherStorage, endStorage = netherStorageInstance, endStorageInstance
 		debuglog.Info(debuglog.WorldLoading, "server: opened Anvil world", "worldDir", cfg.WorldDir, "storage", "disk")
+		slog.Info("dimension worlds ready",
+			"overworld", cfg.WorldDir,
+			"nether", netherDirectory,
+			"end", endDirectory)
 	} else {
 		// In-memory world: resolve seed without persisting.
 		cfg.WorldSeed = resolveWorldSeed(cfg.WorldSeed, "")
@@ -677,10 +692,12 @@ func (s *Server) safeTick() {
 	}()
 	s.tickIntents()
 	s.tickBedrockItemUse()
+	s.tickJavaItemUse()
 	s.tickFurnaces()
+	s.tickContainerAutomation()
 	s.tickEntities()
 	s.tickAuxiliaryDimensionItems()
-	s.tickBedrockHunger()
+	s.tickPlayerHunger()
 	if s.bedrockListener != nil {
 		s.bedrockListener.Sync(uint64(s.worldAge))
 		s.syncBedrockPlayersToJava()
@@ -696,26 +713,33 @@ func (s *Server) safeTick() {
 	}
 }
 
-// tickBedrockHunger applies the survival consequences of the Bedrock hunger
-// attributes. Movement exhaustion is accumulated in applyMove; this periodic
-// pass handles natural regeneration and starvation.
-func (s *Server) tickBedrockHunger() {
-	if s.worldAge%80 != 0 {
-		return
-	}
+// tickPlayerHunger applies natural regeneration and starvation to both
+// editions. Movement exhaustion is accumulated by each movement adapter.
+func (s *Server) tickPlayerHunger() {
 	s.game.OnlinePlayers(func(p *player.Player) {
-		if p.Edition != player.ClientEditionBedrock || p.GameMode != player.GameModeSurvival || p.Dead {
+		if p.GameMode != player.GameModeSurvival || p.Dead {
 			return
 		}
-		health, food, _, _ := p.HealthSnapshot()
-		if food >= 18 && health < p.MaxHealth {
+		target := &session.Session{Player: p}
+		if p.Edition == player.ClientEditionJava {
+			if javaSession, ok := s.sessions.Get(p.UUID); ok && javaSession != nil {
+				target = javaSession
+			}
+		}
+		health, food, saturation, _ := p.HealthSnapshot()
+		fastRegeneration := food == 20 && saturation > 0 && s.worldAge%10 == 0
+		slowRegeneration := food >= 18 && (!fastRegeneration && s.worldAge%80 == 0)
+		if health < p.MaxHealth && (fastRegeneration || slowRegeneration) {
 			if p.Heal(1) {
 				p.AddExhaustion(6)
+				if p.Edition == player.ClientEditionJava {
+					_ = handler.SyncPlayerHealth(target.Conn, p)
+				}
 			}
 			return
 		}
-		if food == 0 {
-			handler.DamagePlayer(&session.Session{Player: p}, 1, "starved to death", s.sessions)
+		if food == 0 && s.worldAge%80 == 0 {
+			handler.DamagePlayer(target, 1, "starved to death", s.sessions)
 		}
 	})
 }
@@ -748,6 +772,8 @@ func (s *Server) tickIntents() {
 			s.applyBedrockConsumeFood(i)
 		case intent.StartUseItemIntent:
 			s.applyBedrockStartUseItem(i)
+		case intent.ArmSwingIntent:
+			s.applyArmSwing(i)
 		case intent.EntityInteractIntent:
 			s.applyEntityInteract(i)
 		case intent.VehicleMoveIntent:
@@ -772,6 +798,17 @@ func (s *Server) tickIntents() {
 		case intent.ContainerCloseIntent:
 			s.applyBedrockContainerClose(i)
 		}
+	}
+}
+
+func (s *Server) applyArmSwing(i intent.ArmSwingIntent) {
+	p := s.game.GetPlayer(i.PlayerUUID)
+	if p == nil || p.Dead || (i.Hand != 0 && i.Hand != 1) {
+		return
+	}
+	handler.BroadcastPlayerArmSwing(p, i.Hand, s.sessions)
+	if s.bedrockListener != nil {
+		s.bedrockListener.BroadcastPlayerArmSwing(p)
 	}
 }
 
@@ -852,9 +889,9 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	}
 	p.WorldSpawn = p.Position
 	s.loadPlayerData(p)
-	if p.Edition == player.ClientEditionJava && p.Dimension != dimensionOverworld {
-		p.Dimension = dimensionOverworld
-		p.Position = p.WorldSpawn
+	s.ensurePlayerPositionClear(p)
+	if p.Dimension != dimensionOverworld {
+		p.InvulnerableUntil = time.Now().Add(10 * time.Second)
 	}
 	if err := s.game.AddPlayer(p); err != nil {
 		slog.Warn("applyJoin: duplicate player UUID",
@@ -953,6 +990,11 @@ func (s *Server) applyMove(m intent.MoveIntent) {
 	p.Position = m.Position
 	p.Rotation = m.Rotation
 	p.OnGround = m.OnGround
+	if p.RecordMovementVibration() {
+		if movementWorld := s.worldForPlayer(p); movementWorld != nil {
+			movementWorld.EmitVibration(int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z)))
+		}
+	}
 	if p.VehicleEntityID != 0 {
 		if vehicle, ok := s.worldForPlayer(p).Entities.Get(p.VehicleEntityID); ok && corentity.IsRideableVehicle(vehicle.Type) && vehicle.RiderEntityID == p.EntityID {
 			vehicle.Position.X = m.Position.X
@@ -1004,6 +1046,23 @@ func (s *Server) applyBedrockStartUseItem(i intent.StartUseItemIntent) {
 		return
 	}
 	stack := p.Inventory[player.HotbarStart+hotbar]
+	previousHeldSlot := p.HeldSlot
+	p.HeldSlot = hotbar
+	if handler.UseThrowable(p, s.worldForPlayer(p), s.sessions, nil, s.game.NextEntityID) {
+		p.HeldSlot = previousHeldSlot
+		return
+	}
+	p.HeldSlot = previousHeldSlot
+	if stack.ItemID == "minecraft:wind_charge" {
+		previousHeldSlot := p.HeldSlot
+		p.HeldSlot = hotbar
+		used := handler.UseWindCharge(p, s.worldForPlayer(p), s.sessions, nil, s.game.NextEntityID)
+		p.HeldSlot = previousHeldSlot
+		if used && s.bedrockListener != nil {
+			s.bedrockListener.BroadcastWindChargeSound(spatial.Vec3{X: p.Position.X, Y: p.Position.Y + 1.52, Z: p.Position.Z}, false)
+		}
+		return
+	}
 	if _, _, ok := player.FoodValue(stack.ItemID); !ok || stack.IsEmpty() {
 		return
 	}
@@ -1048,6 +1107,23 @@ func (s *Server) tickBedrockItemUse() {
 	})
 }
 
+func (s *Server) tickJavaItemUse() {
+	if s.game == nil {
+		return
+	}
+	now := time.Now()
+	s.game.OnlinePlayers(func(p *player.Player) {
+		if p.Edition != player.ClientEditionJava || p.UsingItemID == "" || p.UsingItemSince.IsZero() {
+			return
+		}
+		current, ok := s.sessions.Get(p.UUID)
+		if !ok || current == nil {
+			return
+		}
+		handler.TickJavaFoodUse(p, current.Conn, s.sessions, now)
+	})
+}
+
 func (s *Server) finishBedrockFoodUse(p *player.Player) {
 	if p == nil || p.UsingItemSlot < 0 || p.UsingItemSlot >= 9 {
 		return
@@ -1060,7 +1136,7 @@ func (s *Server) finishBedrockFoodUse(p *player.Player) {
 		return
 	}
 	if p.GameMode != player.GameModeCreative {
-		if !p.ConsumeFood(nutrition, saturation) {
+		if !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(stack.ItemID)) {
 			s.clearBedrockItemUse(p, false)
 			return
 		}
@@ -1093,14 +1169,7 @@ func (s *Server) clearBedrockItemUse(p *player.Player, completed bool) {
 }
 
 func bedrockFoodRemainder(itemID string) string {
-	switch itemID {
-	case "minecraft:mushroom_stew", "minecraft:rabbit_stew", "minecraft:beetroot_soup", "minecraft:suspicious_stew":
-		return "minecraft:bowl"
-	case "minecraft:honey_bottle":
-		return "minecraft:glass_bottle"
-	default:
-		return ""
-	}
+	return player.FoodRemainder(itemID)
 }
 
 // allPlayerSessions adapts every canonical online player to the Java combat
@@ -1109,6 +1178,9 @@ func bedrockFoodRemainder(itemID string) string {
 func (s *Server) allPlayerSessions() []*session.Session {
 	out := make([]*session.Session, 0, s.game.OnlineCount())
 	s.game.OnlinePlayers(func(p *player.Player) {
+		if p.Dimension != s.simulationDimension {
+			return
+		}
 		if javaSession, ok := s.sessions.Get(p.UUID); ok {
 			out = append(out, javaSession)
 			return
@@ -1116,6 +1188,40 @@ func (s *Server) allPlayerSessions() []*session.Session {
 		out = append(out, &session.Session{Player: p})
 	})
 	return out
+}
+
+func (s *Server) javaSessionsForDimension(dimension int32) *session.Manager {
+	filtered := session.NewManager()
+	if s == nil || s.sessions == nil {
+		return filtered
+	}
+	for _, current := range s.sessions.SnapshotAll() {
+		if current != nil && current.Player != nil && current.Player.Dimension == dimension {
+			filtered.Add(current)
+		}
+	}
+	return filtered
+}
+
+// dimensionSimulation returns a lightweight view over one canonical dimension.
+// Fields containing locks/atomics are deliberately not copied; mutable maps and
+// allocators that are owned by the single simulation goroutine stay shared.
+func (s *Server) dimensionSimulation(dimension int32, dimensionWorld *coreworld.World) *Server {
+	return &Server{
+		cfg: s.cfg, game: s.game,
+		world: dimensionWorld, netherWorld: s.netherWorld, endWorld: s.endWorld,
+		simulationDimension: dimension,
+		spawnX:              s.spawnX,
+		spawnZ:              s.spawnZ,
+		regProvider:         s.regProvider,
+		chunkSender:         s.chunkSender,
+		sessions:            s.javaSessionsForDimension(dimension),
+		bedrockListener:     s.bedrockListener,
+		mobAIs:              s.mobAIs,
+		worldAge:            s.worldAge,
+		spawnRNG:            s.spawnRNG,
+		furnaces:            s.furnaces,
+	}
 }
 
 func (s *Server) sendLegacyPlayerKnockback(target *session.Session, sourceX, sourceZ, horizontal, vertical float64) {
@@ -1166,7 +1272,10 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64,
 		return
 	}
 	target := &session.Session{Player: p}
-	if !p.OnGround {
+	playerWorld := s.worldForPlayer(p)
+	if playerWorld != nil && playerWorld.TouchesWater(p.Position.X, p.Position.Y, p.Position.Z) {
+		p.FallDistance = 0
+	} else if !p.OnGround {
 		if drop := previousY - p.Position.Y; drop > 0 {
 			p.FallDistance += drop
 		}
@@ -1177,7 +1286,6 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64,
 			handler.DamagePlayer(target, damage, "hit the ground too hard", s.sessions)
 		}
 	}
-
 	now := time.Now()
 	if p.Position.Y < coreworld.WorldMinY-16 {
 		if now.Sub(p.LastEnvironmentDamage) >= 500*time.Millisecond {
@@ -1187,7 +1295,6 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64,
 		return
 	}
 	x, y, z := int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z))
-	playerWorld := s.worldForPlayer(p)
 	feet := playerWorld.GetBlock(x, y, z).ResourceLocation()
 	head := playerWorld.GetBlock(x, int(math.Floor(p.Position.Y+1.62)), z).ResourceLocation()
 	if head == "minecraft:water" {
@@ -1226,7 +1333,7 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 		}
 		ctx := handler.CommandContext{
 			Player:  p,
-			World:   s.world,
+			World:   s.worldForPlayer(p),
 			Manager: s.sessions,
 		}
 		if s.bedrockListener != nil && p.Edition == player.ClientEditionBedrock {
@@ -1239,6 +1346,22 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 				p.Position = spatial.Vec3{X: x, Y: y, Z: z}
 				p.FallDistance = 0
 				s.bedrockListener.TeleportPlayer(p, p.Position, uint64(s.worldAge))
+				return nil
+			}
+			ctx.ChangeWorld = func(dimension int32) error {
+				if dimension < dimensionOverworld || dimension > dimensionEnd {
+					return fmt.Errorf("invalid dimension %d", dimension)
+				}
+				destinationWorld := s.worldForDimension(dimension)
+				target := destinationWorld.EnsureSafeArrival(s.commandWorldTarget(p, dimension), dimension)
+				destinationCX, destinationCZ := coreworld.ChunkCoordsFor(int(math.Floor(target.X)), int(math.Floor(target.Z)))
+				destinationWorld.QueuePregeneration(destinationCX, destinationCZ, min(int32(s.cfg.PreGenerateRadius), 2))
+				p.InvulnerableUntil = time.Now().Add(10 * time.Second)
+				p.Dimension = dimension
+				p.Position = target
+				p.FallDistance = 0
+				p.OnGround = false
+				s.bedrockListener.ChangeDimension(p, dimension, target)
 				return nil
 			}
 		}
@@ -1311,7 +1434,7 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		}
 		if p.GameMode != player.GameModeCreative {
 			for _, item := range containerItems {
-				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count}
+				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
 				if !p.GiveItem(stack) {
 					s.newDroppedItemForPlayer(p, stack, p.Position, item.Slot+1)
 				}
@@ -1438,8 +1561,8 @@ func (s *Server) duplicateBedrockBlockUse(p *player.Player, i intent.BlockIntera
 }
 
 func bedrockSpillingContainer(blockID string) bool {
-	return blockID == "minecraft:chest" || blockID == "minecraft:trapped_chest" || blockID == "minecraft:barrel" ||
-		handler.IsFurnaceContainer(blockID)
+	return (isBedrockGenericContainer(blockID) && blockID != "minecraft:ender_chest") ||
+		blockID == "minecraft:decorated_pot" || handler.IsFurnaceContainer(blockID)
 }
 
 func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
@@ -1595,6 +1718,10 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	containerSlots := append([]player.ItemStack(nil), p.ContainerSlots...)
 	containerOpen := (isBedrockGenericContainer(p.OpenContainerKind) || isBedrockWorkstation(p.OpenContainerKind)) &&
 		len(containerSlots) > 0 && len(containerSlots) <= 54
+	workstationOpen := isBedrockWorkstation(p.OpenContainerKind) && containerOpen
+	if workstationOpen {
+		handler.UpdateWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
+	}
 	carried := p.CarriedItem
 	updateBedrockPersonalCrafting(&inventory)
 	drops := make([]player.ItemStack, 0)
@@ -1660,10 +1787,13 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			if !containerOpen || index < 0 || index >= len(containerSlots) {
 				return false
 			}
-			if isBedrockWorkstation(p.OpenContainerKind) && index == bedrockWorkstationOutputIndex(p.OpenContainerKind) && !stack.IsEmpty() {
+			if workstationOpen && index == bedrockWorkstationOutputIndex(p.OpenContainerKind) && !stack.IsEmpty() {
 				return false
 			}
 			containerSlots[index] = stack
+			if workstationOpen {
+				handler.UpdateWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
+			}
 			return true
 		}
 		if slot < 0 || int(slot) >= len(inventory) || !canPlaceCanonicalInventorySlot(int(slot), stack) {
@@ -1694,6 +1824,8 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		if !ok || source.IsEmpty() {
 			return
 		}
+		workstationOutput := workstationOpen && action.Source >= intent.InventoryContainerStart &&
+			int(action.Source-intent.InventoryContainerStart) == bedrockWorkstationOutputIndex(p.OpenContainerKind)
 		switch action.Kind {
 		case intent.InventoryActionMove:
 			crafts := max(action.CraftCount, 1)
@@ -1706,7 +1838,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			if action.Count <= 0 || action.Count > source.Count || action.Source == action.Destination || action.Destination == 0 || action.Destination == intent.InventoryCraftingTableOutput || action.Destination == intent.InventoryFurnaceOutput {
 				return
 			}
-			if (action.Source == 0 || action.Source == intent.InventoryCraftingTableOutput) && action.Count != source.Count {
+			if (action.Source == 0 || action.Source == intent.InventoryCraftingTableOutput || workstationOutput) && action.Count != source.Count {
 				// Crafting outputs are indivisible: One result stack consumes one
 				// item from every occupied ingredient slot.
 				return
@@ -1745,11 +1877,20 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 					consumeBedrockCraftingTable(&craftingGrid)
 				}
 				craftingResult = handler.FindBedrockCraftingTableResult(craftingGrid)
+			} else if workstationOutput {
+				result, ok := handler.TakeWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
+				if !ok || result.ItemID != source.ItemID || result.Count != action.Count || result.Damage != source.Damage {
+					return
+				}
 			} else if !set(action.Source, source) {
 				return
 			}
 
 		case intent.InventoryActionSwap:
+			if workstationOutput || (workstationOpen && action.Destination >= intent.InventoryContainerStart &&
+				int(action.Destination-intent.InventoryContainerStart) == bedrockWorkstationOutputIndex(p.OpenContainerKind)) {
+				return
+			}
 			destination, ok := get(action.Destination)
 			if !ok || action.Source == action.Destination ||
 				!canPlaceBedrockFurnaceSlot(action.Source, destination) || !canPlaceBedrockFurnaceSlot(action.Destination, source) ||
@@ -1762,13 +1903,23 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				return
 			}
 			drops = append(drops, player.ItemStack{ItemID: source.ItemID, Count: action.Count, Damage: source.Damage})
+			if workstationOutput {
+				if action.Count != source.Count {
+					return
+				}
+				result, ok := handler.TakeWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
+				if !ok || result.ItemID != source.ItemID || result.Count != action.Count || result.Damage != source.Damage {
+					return
+				}
+				continue
+			}
 			source.Count -= action.Count
 			if !set(action.Source, source) {
 				return
 			}
 
 		case intent.InventoryActionDestroy:
-			if p.GameMode != player.GameModeCreative || action.Count <= 0 || action.Count > source.Count {
+			if workstationOutput || p.GameMode != player.GameModeCreative || action.Count <= 0 || action.Count > source.Count {
 				return
 			}
 			source.Count -= action.Count
@@ -1810,6 +1961,9 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		persistFurnaceSlots(s.worldForPlayer(p), p.OpenContainerPos, p.OpenContainerKind, furnaceSlots)
 		s.furnaceStateForDimension(p.Dimension, p.OpenContainerPos)
 	} else if containerOpen {
+		if workstationOpen {
+			handler.UpdateWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
+		}
 		p.ContainerSlots = containerSlots
 		if isBedrockGenericContainer(p.OpenContainerKind) {
 			s.persistBedrockGenericContainer(p)
@@ -2049,6 +2203,15 @@ func (s *Server) syncBedrockPlayersToJava() {
 func (s *Server) tickEntities() {
 	start := time.Now()
 	s.worldAge++
+	// Java movement is handled directly by its play loop rather than posted as
+	// a MoveIntent, so check its portal occupancy from the common server tick.
+	if s.game != nil {
+		s.game.OnlinePlayers(func(p *player.Player) {
+			if p.Edition == player.ClientEditionJava {
+				s.tryBedrockPortalTravel(p)
+			}
+		})
+	}
 
 	const (
 		gravity = -0.08 // blocks/tick² downward acceleration
@@ -2235,7 +2398,7 @@ func (s *Server) tickEntities() {
 		endPhys := s.timings.measure(sectionPhysics)
 		// ── Gravity ───────────────────────────────────────────────────────────
 		inWater := s.entityInWater(e)
-		if !e.OnGround && !inWater {
+		if !e.OnGround && !inWater && !isFlyingMob(e.Type) {
 			e.VY += gravity
 		}
 
@@ -2339,6 +2502,9 @@ func (s *Server) tickEntities() {
 	}
 	if s.worldAge%20 == 0 {
 		handler.DispatchWorldTime(s.worldAge, s.worldAge%24000, s.sessions)
+		for _, villager := range s.world.RefreshVillagerProfessions(10) {
+			handler.BroadcastVillagerMetadata(villager, s.sessions)
+		}
 		for _, change := range s.world.TickFarmland(s.worldAge, 64) {
 			handler.BroadcastBlockChange(change, s.sessions)
 		}
@@ -2396,7 +2562,7 @@ func (s *Server) spawnMobDrops(e *corentity.Entity) []*corentity.Entity {
 	stacks := mobDrops(e.Type, s.spawnRNG)
 	spawned := make([]*corentity.Entity, 0, len(stacks))
 	for index, stack := range stacks {
-		if dropped := s.newDroppedItem(stack, e.Position, index); dropped != nil {
+		if dropped := s.newDroppedItemInWorld(s.world, stack, e.Position, index); dropped != nil {
 			spawned = append(spawned, dropped)
 		}
 	}
@@ -2578,9 +2744,10 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool
 	return false
 }
 
-// tickAuxiliaryDimensionItems advances drops in dimensions that do not run the
-// Overworld mob simulation. This keeps death/container drops visible,
-// collectible and bounded in lifetime in the Nether and End.
+// tickAuxiliaryDimensionItems advances entities in dimensions that do not use
+// the Overworld's primary entity pass. Keeping a dimension-local Server view is
+// important: AI navigation, collisions, damage, projectiles and broadcasts must
+// all use the same world and may never target players in another dimension.
 func (s *Server) tickAuxiliaryDimensionItems() {
 	for dimension, dimensionWorld := range map[int32]*coreworld.World{
 		dimensionNether: s.netherWorld,
@@ -2589,36 +2756,193 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 		if dimensionWorld == nil {
 			continue
 		}
-		for _, entity := range dimensionWorld.Entities.Snapshot() {
-			if entity.Type != corentity.TypeItem {
-				continue
-			}
-			entity.AgeTicks++
-			if s.tryPickupDroppedItem(entity, dimension) || entity.AgeTicks >= 6000 || entity.Position.Y < coreworld.WorldMinY-16 {
-				dimensionWorld.Entities.Remove(entity.EntityID)
-				continue
-			}
+		simulation := s.dimensionSimulation(dimension, dimensionWorld)
 
-			if !entity.OnGround {
-				entity.VY -= 0.04
+		var (
+			moved        []*corentity.Entity
+			hurtEntities []*corentity.Entity
+			deathIDs     []int32
+			deadIDs      []int32
+			spawned      []*corentity.Entity
+		)
+		for entityID, event := range dimensionWorld.DrainEntityDamage() {
+			entity, ok := dimensionWorld.Entities.Get(entityID)
+			if !ok || entity.Dead {
+				continue
 			}
-			entity.Position.X += entity.VX
-			entity.Position.Y += entity.VY
-			entity.Position.Z += entity.VZ
-			x, z := int(math.Floor(entity.Position.X)), int(math.Floor(entity.Position.Z))
-			groundY := float64(dimensionWorld.GroundYAtOrBelow(x, z, int(math.Floor(entity.Position.Y))) + 1)
-			if entity.Position.Y <= groundY {
-				entity.Position.Y = groundY
-				entity.VY = 0
-				entity.OnGround = true
-			} else {
-				entity.OnGround = false
-				entity.VY *= 0.98
+			entity.Damage(event.Amount)
+			if isPassiveMob(entity.Type) && !entity.Dead {
+				simulation.startPassiveMobPanic(entity, event)
 			}
-			entity.VX *= 0.98
-			entity.VZ *= 0.98
+			hurtEntities = append(hurtEntities, entity)
 		}
+
+		simulationPlayers := simulation.naturalSpawnPlayers()
+		allEntities := dimensionWorld.Entities.Snapshot()
+		simulation.tickAnimalLifecycle(allEntities)
+		for _, entity := range allEntities {
+			entity.AgeTicks++
+			if entity.Dead {
+				if entity.DeathTicks == 0 {
+					simulation.dismountEntityPassengers(entity)
+					deathIDs = append(deathIDs, entity.EntityID)
+					spawned = append(spawned, simulation.spawnMobDrops(entity)...)
+				}
+				entity.DeathTicks++
+				if entity.DeathTicks >= 20 {
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					delete(s.mobAIs, entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+				}
+				continue
+			}
+			switch {
+			case entity.Type == corentity.TypeItem:
+				if simulation.tryPickupDroppedItem(entity, dimension) || entity.AgeTicks >= 6000 || entity.Position.Y < coreworld.WorldMinY-16 {
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+					continue
+				}
+				if !entity.OnGround {
+					entity.VY -= 0.04
+				}
+				entity.Position.X += entity.VX
+				entity.Position.Y += entity.VY
+				entity.Position.Z += entity.VZ
+				x, z := int(math.Floor(entity.Position.X)), int(math.Floor(entity.Position.Z))
+				groundY := float64(dimensionWorld.GroundYAtOrBelow(x, z, int(math.Floor(entity.Position.Y))) + 1)
+				if entity.Position.Y <= groundY {
+					entity.Position.Y = groundY
+					entity.VY = 0
+					entity.OnGround = true
+				} else {
+					entity.OnGround = false
+					entity.VY *= 0.98
+				}
+				entity.VX *= 0.98
+				entity.VZ *= 0.98
+				moved = append(moved, entity)
+			case corentity.IsProjectile(entity.Type):
+				if simulation.tickProjectile(entity) || entity.Position.Y < coreworld.WorldMinY-16 {
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+					continue
+				}
+				moved = append(moved, entity)
+			case entity.Type == corentity.TypePrimedTNT:
+				entity.FuseTicks--
+				if entity.FuseTicks <= 0 {
+					simulation.explodeTNT(entity.Position.X, entity.Position.Y, entity.Position.Z)
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+					continue
+				}
+				entity.VY -= 0.04
+				entity.Position.X += entity.VX
+				entity.Position.Y += entity.VY
+				entity.Position.Z += entity.VZ
+				moved = append(moved, entity)
+			case isPassiveMob(entity.Type), isHostileMob(entity.Type),
+				entity.Type == corentity.TypeIronGolem, entity.Type == corentity.TypeSnowGolem:
+				if !entityWithinSimulationRange(entity, simulationPlayers, 128) {
+					entity.VX, entity.VY, entity.VZ = 0, 0, 0
+					continue
+				}
+				previous := entity.Position
+				if isPassiveMob(entity.Type) {
+					if simulation.tickPassiveMobAI(entity) && entity.Type == corentity.TypeVillager {
+						handler.BroadcastVillagerSleepState(entity, simulation.sessions)
+					}
+				} else if entity.Type == corentity.TypeIronGolem || entity.Type == corentity.TypeSnowGolem {
+					simulation.tickGolemAI(entity)
+				} else {
+					simulation.tickHostileMobAI(entity)
+				}
+				if entity.Dead {
+					continue
+				}
+				if simulation.tickAuxiliaryMobPhysics(entity, previous) {
+					moved = append(moved, entity)
+				}
+			}
+		}
+		handler.DispatchTickBroadcast(moved, hurtEntities, deathIDs, deadIDs, spawned, simulation.sessions)
 	}
+}
+
+func (s *Server) tickAuxiliaryMobPhysics(entity *corentity.Entity, previous spatial.Vec3) bool {
+	if entity.Sleeping {
+		entity.VX, entity.VY, entity.VZ = 0, 0, 0
+		entity.OnGround = true
+		return entity.Position != previous
+	}
+	const (
+		gravity = -0.08
+		drag    = 0.98
+		minVel  = 1e-6
+	)
+	inWater := s.entityInWater(entity)
+	if !entity.OnGround && !inWater && !isFlyingMob(entity.Type) {
+		entity.VY += gravity
+	}
+
+	nextX := entity.Position.X + entity.VX
+	if canMove, loaded := s.world.CanEntityOccupyIfLoaded(nextX, entity.Position.Y, entity.Position.Z); loaded && canMove {
+		entity.Position.X = nextX
+	} else if loaded && entity.OnGround && entity.VX != 0 {
+		if canStep, stepLoaded := s.world.CanEntityOccupyIfLoaded(nextX, entity.Position.Y+1, entity.Position.Z); stepLoaded && canStep {
+			entity.Position.X = nextX
+			entity.Position.Y = math.Floor(entity.Position.Y) + 1
+			entity.VY = 0
+		} else if stepLoaded {
+			entity.VX = 0
+		}
+	} else if loaded {
+		entity.VX = 0
+	}
+	entity.Position.Y += entity.VY
+	nextZ := entity.Position.Z + entity.VZ
+	if canMove, loaded := s.world.CanEntityOccupyIfLoaded(entity.Position.X, entity.Position.Y, nextZ); loaded && canMove {
+		entity.Position.Z = nextZ
+	} else if loaded && entity.OnGround && entity.VZ != 0 {
+		if canStep, stepLoaded := s.world.CanEntityOccupyIfLoaded(entity.Position.X, entity.Position.Y+1, nextZ); stepLoaded && canStep {
+			entity.Position.Z = nextZ
+			entity.Position.Y = math.Floor(entity.Position.Y) + 1
+			entity.VY = 0
+		} else if stepLoaded {
+			entity.VZ = 0
+		}
+	} else if loaded {
+		entity.VZ = 0
+	}
+
+	x, z := int(math.Floor(entity.Position.X)), int(math.Floor(entity.Position.Z))
+	cx, cz := coreworld.ChunkCoordsFor(x, z)
+	groundY := previous.Y
+	if s.world.IsChunkLoaded(cx, cz) {
+		groundY = float64(s.world.GroundYAtOrBelow(x, z, int(math.Floor(math.Max(previous.Y, entity.Position.Y)))) + 1)
+	}
+	if entity.Position.Y <= groundY {
+		entity.Position.Y = groundY
+		entity.VY = 0
+		entity.OnGround = true
+	} else {
+		entity.OnGround = false
+	}
+	horizontalDrag := drag
+	if inWater {
+		horizontalDrag = 0.8
+		entity.VY *= 0.8
+	}
+	entity.VX *= horizontalDrag
+	entity.VZ *= horizontalDrag
+	if math.Abs(entity.VX) < minVel {
+		entity.VX = 0
+	}
+	if math.Abs(entity.VZ) < minVel {
+		entity.VZ = 0
+	}
+	return entity.Position != previous
 }
 
 func (s *Server) tickClearLag(deadIDs *[]int32) {
@@ -2730,6 +3054,16 @@ func isHostileMob(t corentity.EntityType) bool {
 	return false
 }
 
+func isFlyingMob(t corentity.EntityType) bool {
+	switch t {
+	case corentity.TypeAllay, corentity.TypeBat, corentity.TypeBee, corentity.TypeBlaze,
+		corentity.TypeGhast, corentity.TypeParrot, corentity.TypePhantom,
+		corentity.TypeVex, corentity.TypeWither:
+		return true
+	}
+	return false
+}
+
 func (s *Server) mobAIFor(e *corentity.Entity) *mobAI {
 	ai, ok := s.mobAIs[e.EntityID]
 	if ok {
@@ -2790,7 +3124,11 @@ func (s *Server) startPassiveMobPanic(e *corentity.Entity, hit coreworld.EntityD
 func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 	ai := s.mobAIFor(e)
 	wasAsleep := ai.sleepingWas
-	if wasAsleep && !e.Sleeping && e.Type == corentity.TypeVillager {
+	validBed := s.validVillagerBed(e)
+	if e.Type == corentity.TypeVillager && e.Sleeping && !validBed {
+		e.Sleeping = false
+	}
+	if wasAsleep && !e.Sleeping && e.Type == corentity.TypeVillager && validBed {
 		s.wakeVillagerBesideBed(e)
 	}
 
@@ -2840,7 +3178,7 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 
 	// Assigned villagers return to their own bed at night and stay there until
 	// morning. The canonical Sleeping flag is adapter-independent state.
-	if e.Type == corentity.TypeVillager && e.HasVillageHome {
+	if e.Type == corentity.TypeVillager && e.HasVillageHome && validBed {
 		dayTime := s.worldAge % 24000
 		if dayTime >= 12542 && dayTime < 23460 {
 			targetX := float64(e.VillageBed.X) + 0.5
@@ -2887,6 +3225,22 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 	ai.sleepingWas = e.Sleeping
 	return wasAsleep != e.Sleeping
 
+}
+
+// validVillagerBed prevents a POI coordinate (or the zero value) from being
+// treated as a bed. Legacy door-only villages used to copy their house door
+// into VillageBed, which made villagers render the sleeping pose on doors and
+// arbitrary replacement blocks.
+func (s *Server) validVillagerBed(e *corentity.Entity) bool {
+	if s == nil || s.world == nil || e == nil || e.Type != corentity.TypeVillager || !e.HasVillageHome || e.VillageBed == (spatial.BlockPos{}) {
+		return false
+	}
+	bed := s.world.GetBlock(int(e.VillageBed.X), int(e.VillageBed.Y), int(e.VillageBed.Z))
+	if !strings.HasSuffix(bed.ResourceLocation(), "_bed") {
+		return false
+	}
+	part := bed.Properties["part"]
+	return part == "" || part == "head"
 }
 
 func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {
@@ -3144,6 +3498,28 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 		}
 	}
 
+	if projectileType, speed, damage, attackRange, cooldown, sound, ranged := hostileRangedAttack(e.Type); ranged {
+		if ai.attackCooldown > 0 {
+			ai.attackCooldown--
+		}
+		if visible && distance <= attackRange && ai.attackCooldown == 0 {
+			s.shootMobProjectile(e, target.Player, projectileType, speed, damage, sound)
+			ai.attackCooldown = cooldown
+		}
+		if isFlyingMob(e.Type) {
+			destinationY := target.Player.Position.Y + 2
+			e.VY = math.Max(-0.15, math.Min(0.15, (destinationY-e.Position.Y)*0.04))
+		}
+		if distance <= attackRange*0.75 {
+			e.VX, e.VZ = 0, 0
+			return
+		}
+		if distance > 0.001 {
+			s.navigateMob(e, ai, target.Player.Position, pumpkinMovementSpeed(e.Type, 1.0))
+		}
+		return
+	}
+
 	if isSkeletonArcher(e.Type) {
 		if ai.attackCooldown > 0 {
 			ai.attackCooldown--
@@ -3227,6 +3603,22 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	}
 }
 
+func hostileRangedAttack(t corentity.EntityType) (corentity.EntityType, float64, float32, float64, int, string, bool) {
+	switch t {
+	case corentity.TypeBlaze:
+		return corentity.TypeSmallFireball, 0.75, 5, 16, 40, "minecraft:entity.blaze.shoot", true
+	case corentity.TypeGhast:
+		return corentity.TypeFireball, 0.6, 0, 32, 60, "minecraft:entity.ghast.shoot", true
+	case corentity.TypeBreeze:
+		return corentity.TypeWindCharge, 0.7, 1, 24, 30, "minecraft:entity.breeze.shoot", true
+	case corentity.TypeWitch:
+		return corentity.TypePotion, 0.75, 6, 10, 60, "minecraft:entity.witch.throw", true
+	case corentity.TypePillager, corentity.TypeIllusioner:
+		return corentity.TypeArrow, 1.6, 4, 15, 40, "minecraft:entity.arrow.shoot", true
+	}
+	return "", 0, 0, 0, 0, "", false
+}
+
 func hostileAttackDamage(t corentity.EntityType) float32 {
 	switch t {
 	case corentity.TypeSilverfish, corentity.TypeEndermite:
@@ -3259,7 +3651,16 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 		return true
 	}
 	start := projectile.Position
-	projectile.VY -= 0.05
+	switch projectile.Type {
+	case corentity.TypeWindCharge, corentity.TypeSmallFireball, corentity.TypeFireball:
+		// Constant-velocity projectiles do not fall.
+	case corentity.TypeSnowball, corentity.TypeEgg, corentity.TypeEnderPearl:
+		projectile.VY -= 0.03
+	case corentity.TypeExperienceBottle, corentity.TypePotion:
+		projectile.VY -= 0.07
+	default:
+		projectile.VY -= 0.05
+	}
 	projectile.Position.X += projectile.VX
 	projectile.Position.Y += projectile.VY
 	projectile.Position.Z += projectile.VZ
@@ -3286,7 +3687,13 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 		z := start.Z + (projectile.Position.Z-start.Z)*t
 		block := s.world.GetBlock(int(math.Floor(x)), int(math.Floor(y)), int(math.Floor(z)))
 		if coreworld.IsEntitySupportBlock(block.ResourceLocation()) {
-			handler.BroadcastSoundAt(s.sessions, "minecraft:entity.arrow.hit", handler.SoundCategoryPlayers, x, y, z, 1, 1)
+			if projectile.Type == corentity.TypeWindCharge {
+				s.explodeWindCharge(projectile, spatial.Vec3{X: x, Y: y, Z: z})
+			}
+			s.resolveProjectileImpact(projectile, spatial.Vec3{X: x, Y: y, Z: z})
+			if projectile.Type == corentity.TypeArrow || projectile.Type == corentity.TypeSpectralArrow || projectile.Type == corentity.TypeTrident {
+				handler.BroadcastSoundAt(s.sessions, "minecraft:entity.arrow.hit", handler.SoundCategoryPlayers, x, y, z, 1, 1)
+			}
 			return true
 		}
 	}
@@ -3309,6 +3716,10 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 		if handler.DamagePlayerLegacy(target, projectile.ProjectileDamage, "was shot by "+shooterName, s.sessions) {
 			s.sendLegacyPlayerKnockback(target, start.X, start.Z, 0.25, 0.1)
 		}
+		if projectile.Type == corentity.TypeWindCharge {
+			s.explodeWindCharge(projectile, projectile.Position)
+		}
+		s.resolveProjectileImpact(projectile, projectile.Position)
 		return true
 	}
 
@@ -3319,11 +3730,147 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 		}
 		centre := spatial.Vec3{X: target.Position.X, Y: target.Position.Y + 0.8, Z: target.Position.Z}
 		if pointSegmentDistanceSquared(centre, start, projectile.Position) <= 0.8*0.8 {
-			s.world.QueueEntityDamageFrom(target.EntityID, projectile.ProjectileDamage, start.X, start.Z)
+			if projectile.Type == corentity.TypeWindCharge {
+				s.explodeWindCharge(projectile, projectile.Position)
+			} else if damage := projectileDamageAgainst(projectile, target); damage > 0 {
+				s.world.QueueEntityDamageFrom(target.EntityID, damage, start.X, start.Z)
+			}
+			s.resolveProjectileImpact(projectile, projectile.Position)
 			return true
 		}
 	}
 	return false
+}
+
+func projectileDamageAgainst(projectile, target *corentity.Entity) float32 {
+	if projectile == nil || target == nil {
+		return 0
+	}
+	if projectile.Type == corentity.TypeSnowball && target.Type == corentity.TypeBlaze {
+		return 3
+	}
+	return projectile.ProjectileDamage
+}
+
+func (s *Server) resolveProjectileImpact(projectile *corentity.Entity, position spatial.Vec3) {
+	if projectile == nil {
+		return
+	}
+	switch projectile.Type {
+	case corentity.TypeEnderPearl:
+		for _, target := range s.allPlayerSessions() {
+			if target.Player == nil || target.Player.EntityID != projectile.OwnerEntityID || target.Player.Dead {
+				continue
+			}
+			destination := position
+			destination.Y = math.Max(float64(coreworld.WorldMinY+1), math.Min(float64(coreworld.WorldMaxY-2), destination.Y))
+			if ok, loaded := s.world.CanEntityOccupyIfLoaded(destination.X, destination.Y, destination.Z); loaded && !ok {
+				destination.Y = math.Floor(destination.Y) + 1
+			}
+			target.Player.Position = destination
+			target.Player.FallDistance = 0
+			if target.Conn != nil && target.TeleportTo != nil {
+				_ = target.TeleportTo(destination.X, destination.Y, destination.Z)
+			} else if s.bedrockListener != nil {
+				s.bedrockListener.TeleportPlayer(target.Player, destination, uint64(s.worldAge))
+			}
+			handler.DamagePlayerLegacy(target, 5, "hit the ground too hard", s.sessions)
+			handler.BroadcastSoundAt(s.sessions, "minecraft:entity.enderman.teleport", handler.SoundCategoryPlayers,
+				destination.X, destination.Y, destination.Z, 1, 1)
+			return
+		}
+	case corentity.TypeEgg:
+		if s.game == nil {
+			return
+		}
+		roll := int(projectile.EntityID*1103515245+12345) & 0x7fffffff
+		if roll%8 != 0 {
+			return
+		}
+		count := 1
+		if roll%32 == 0 {
+			count = 4
+		}
+		for index := 0; index < count; index++ {
+			chicken := corentity.New(s.game.NextEntityID(), newRandomUUID(), corentity.TypeChicken,
+				position.X+float64(index%2)*0.2, position.Y, position.Z+float64(index/2)*0.2)
+			chicken.IsBaby = true
+			s.world.Entities.Add(chicken)
+			handler.BroadcastSpawnMob(chicken, s.sessions)
+		}
+	case corentity.TypeSmallFireball:
+		x, y, z := int(math.Floor(position.X)), int(math.Floor(position.Y)), int(math.Floor(position.Z))
+		for _, candidate := range [][3]int{{x, y + 1, z}, {x, y, z}, {x + 1, y, z}, {x - 1, y, z}, {x, y, z + 1}, {x, y, z - 1}} {
+			if s.world.GetBlock(candidate[0], candidate[1], candidate[2]).ResourceLocation() != "minecraft:air" {
+				continue
+			}
+			below := s.world.GetBlock(candidate[0], candidate[1]-1, candidate[2])
+			if !coreworld.IsEntitySupportBlock(below.ResourceLocation()) {
+				continue
+			}
+			fire := coreworld.Block{Namespace: "minecraft", Name: "fire", Properties: map[string]string{"age": "0"}}
+			s.world.SetBlock(candidate[0], candidate[1], candidate[2], fire)
+			handler.BroadcastBlockChange(coreworld.BlockChange{X: candidate[0], Y: candidate[1], Z: candidate[2], Block: fire}, s.sessions)
+			break
+		}
+		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.blaze.burn", handler.SoundCategoryHostile,
+			position.X, position.Y, position.Z, 1, 1)
+	case corentity.TypeFireball:
+		s.explodeAt(position.X, position.Y, position.Z, 1, "was fireballed")
+	case corentity.TypePotion:
+		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.splash_potion.break", handler.SoundCategoryHostile,
+			position.X, position.Y, position.Z, 1, 1)
+	case corentity.TypeExperienceBottle:
+		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.splash_potion.break", handler.SoundCategoryPlayers,
+			position.X, position.Y, position.Z, 1, 1)
+	}
+}
+
+func (s *Server) explodeWindCharge(projectile *corentity.Entity, position spatial.Vec3) {
+	const radius = 5.0
+	handler.BroadcastSoundAt(s.sessions, "minecraft:entity.wind_charge.wind_burst", handler.SoundCategoryPlayers,
+		position.X, position.Y, position.Z, 1, 1)
+	if s.bedrockListener != nil {
+		s.bedrockListener.BroadcastWindChargeSound(position, true)
+	}
+	if s.world != nil {
+		s.world.EmitVibration(int(math.Floor(position.X)), int(math.Floor(position.Y)), int(math.Floor(position.Z)))
+	}
+	for _, target := range s.allPlayerSessions() {
+		if target == nil || target.Player == nil || target.Player.Dead {
+			continue
+		}
+		dx := target.Player.Position.X - position.X
+		dy := target.Player.Position.Y + 0.9 - position.Y
+		dz := target.Player.Position.Z - position.Z
+		distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
+		if distance >= radius {
+			continue
+		}
+		if distance < 0.1 {
+			dx, dy, dz, distance = 0, 1, 0, 1
+		}
+		strength := (1 - distance/radius) * 1.35
+		s.sendPlayerVelocity(target, dx/distance*strength, max(0.35, dy/distance*strength+0.35), dz/distance*strength)
+	}
+	for _, target := range s.world.Entities.Snapshot() {
+		if target == projectile || target.Dead || corentity.IsProjectile(target.Type) {
+			continue
+		}
+		dx, dy, dz := target.Position.X-position.X, target.Position.Y+0.8-position.Y, target.Position.Z-position.Z
+		distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
+		if distance >= radius {
+			continue
+		}
+		if distance < 0.1 {
+			dx, dy, dz, distance = 0, 1, 0, 1
+		}
+		strength := (1 - distance/radius) * 1.35
+		target.VX += dx / distance * strength
+		target.VY += max(0.35, dy/distance*strength+0.35)
+		target.VZ += dz / distance * strength
+		target.OnGround = false
+	}
 }
 
 func pointSegmentDistanceSquared(point, start, end spatial.Vec3) float64 {
@@ -3413,7 +3960,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 			handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 		}()
 
-		if err := handler.HandlePlay(conn, p, s.world, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus); err != nil {
+		if err := handler.HandlePlay(conn, p, s.world, s.worldForDimension, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus); err != nil {
 			slog.Debug("play error", "remote", remote, "err", err)
 		}
 
@@ -3525,16 +4072,29 @@ func loadSavedWorldAge(worldDir string) (int64, bool) {
 //     it to a FallingBlock entity and clear the world block.
 //   - updateFluid: spread water or lava into adjacent passable positions.
 func (s *Server) tickBlockPhysics() {
+	for dimension, dimensionWorld := range map[int32]*coreworld.World{
+		dimensionOverworld: s.world,
+		dimensionNether:    s.netherWorld,
+		dimensionEnd:       s.endWorld,
+	} {
+		if dimensionWorld == nil {
+			continue
+		}
+		simulation := s.dimensionSimulation(dimension, dimensionWorld)
+		simulation.tickBlockPhysicsWorld()
+	}
+}
+
+func (s *Server) tickBlockPhysicsWorld() {
 	due := s.world.BlockPhysics.DrainDue(s.worldAge)
+	blockChanges := s.activateSculkSensors(s.world.DrainVibrations())
 
 	// Flush redstone — may produce visual changes and newly-powered loads.
 	redstone := s.world.Redstone.FlushUpdates()
 
-	if len(due) == 0 && len(redstone.Changes) == 0 {
+	if len(due) == 0 && len(redstone.Changes) == 0 && len(redstone.PoweredLoads) == 0 && len(blockChanges) == 0 {
 		return
 	}
-
-	var blockChanges []coreworld.BlockChange
 
 	for _, u := range due {
 		switch u.Kind {
@@ -3554,6 +4114,8 @@ func (s *Server) tickBlockPhysics() {
 			s.processComposterUpdate(u.X, u.Y, u.Z, &blockChanges)
 		case coreworld.UpdatePressurePlate:
 			s.processPressurePlateUpdate(u.X, u.Y, u.Z, &blockChanges)
+		case coreworld.UpdateSculkSensor:
+			s.processSculkSensorUpdate(u.X, u.Y, u.Z, &blockChanges)
 		}
 	}
 
@@ -3563,8 +4125,12 @@ func (s *Server) tickBlockPhysics() {
 		switch block.ResourceLocation() {
 		case "minecraft:tnt":
 			s.activateTNT(pos[0], pos[1], pos[2], &blockChanges)
+		case "minecraft:dropper", "minecraft:dispenser":
+			s.activateDropperOrDispenser(s.world, s.simulationDimension, pos[0], pos[1], pos[2], block.ResourceLocation(), &blockChanges)
+		case "minecraft:crafter":
+			s.activateCrafter(s.world, s.simulationDimension, pos[0], pos[1], pos[2])
 		}
-		// Pistons, dispensers, etc. can be added here.
+		// Pistons are handled by their dedicated movement system.
 	}
 
 	blockChanges = append(blockChanges, redstone.Changes...)
@@ -3573,6 +4139,81 @@ func (s *Server) tickBlockPhysics() {
 	for _, bc := range blockChanges {
 		handler.BroadcastBlockChange(bc, s.sessions)
 	}
+}
+
+func (s *Server) activateSculkSensors(events [][3]int) []coreworld.BlockChange {
+	if s == nil || s.world == nil || len(events) == 0 {
+		return nil
+	}
+	activated := make(map[[3]int]struct{})
+	changes := make([]coreworld.BlockChange, 0)
+	for _, event := range events {
+		for y := max(coreworld.WorldMinY, event[1]-8); y <= min(coreworld.WorldMaxY, event[1]+8); y++ {
+			for z := event[2] - 8; z <= event[2]+8; z++ {
+				for x := event[0] - 8; x <= event[0]+8; x++ {
+					dx, dy, dz := x-event[0], y-event[1], z-event[2]
+					distanceSquared := dx*dx + dy*dy + dz*dz
+					chunkX, chunkZ := int32(math.Floor(float64(x)/16)), int32(math.Floor(float64(z)/16))
+					if distanceSquared > 64 || !s.world.IsChunkLoaded(chunkX, chunkZ) {
+						continue
+					}
+					position := [3]int{x, y, z}
+					if _, exists := activated[position]; exists {
+						continue
+					}
+					block := s.world.GetBlock(x, y, z)
+					name := block.ResourceLocation()
+					phase := block.Properties["sculk_sensor_phase"]
+					if (name != "minecraft:sculk_sensor" && name != "minecraft:calibrated_sculk_sensor") ||
+						(phase != "" && phase != "inactive") {
+						continue
+					}
+					replacement := bedrockCopyBlock(block)
+					replacement.Properties["sculk_sensor_phase"] = "active"
+					distance := math.Sqrt(float64(distanceSquared))
+					power := max(1, 15-int(math.Floor(distance*15/8)))
+					replacement.Properties["power"] = strconv.Itoa(power)
+					s.world.SetBlock(x, y, z, replacement)
+					s.world.BlockPhysics.ScheduleSculkSensor(x, y, z, s.worldAge, 30)
+					activated[position] = struct{}{}
+					changes = append(changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: replacement})
+					handler.BroadcastSoundAt(s.sessions, "minecraft:block.sculk_sensor.clicking", handler.SoundCategoryBlocks,
+						float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+					if s.bedrockListener != nil {
+						s.bedrockListener.BroadcastSculkSensorSound(spatial.Vec3{X: float64(x) + 0.5, Y: float64(y) + 0.5, Z: float64(z) + 0.5}, true)
+					}
+				}
+			}
+		}
+	}
+	return changes
+}
+
+func (s *Server) processSculkSensorUpdate(x, y, z int, changes *[]coreworld.BlockChange) {
+	block := s.world.GetBlock(x, y, z)
+	name := block.ResourceLocation()
+	if name != "minecraft:sculk_sensor" && name != "minecraft:calibrated_sculk_sensor" {
+		return
+	}
+	replacement := bedrockCopyBlock(block)
+	switch block.Properties["sculk_sensor_phase"] {
+	case "active":
+		replacement.Properties["sculk_sensor_phase"] = "cooldown"
+		replacement.Properties["power"] = "0"
+		s.world.BlockPhysics.ScheduleSculkSensor(x, y, z, s.worldAge, 10)
+		handler.BroadcastSoundAt(s.sessions, "minecraft:block.sculk_sensor.clicking_stop", handler.SoundCategoryBlocks,
+			float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+		if s.bedrockListener != nil {
+			s.bedrockListener.BroadcastSculkSensorSound(spatial.Vec3{X: float64(x) + 0.5, Y: float64(y) + 0.5, Z: float64(z) + 0.5}, false)
+		}
+	case "cooldown":
+		replacement.Properties["sculk_sensor_phase"] = "inactive"
+		replacement.Properties["power"] = "0"
+	default:
+		return
+	}
+	s.world.SetBlock(x, y, z, replacement)
+	*changes = append(*changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: replacement})
 }
 
 func (s *Server) processButtonUpdate(x, y, z int, changes *[]coreworld.BlockChange) {
@@ -4284,7 +4925,8 @@ func (s *Server) tickVillagerBreeding() {
 		baby.VillageHome = parent.VillageHome
 		baby.VillageCenter = parent.VillageCenter
 		baby.VillageBed = freeBed
-		baby.VillageWorkstation = parent.VillageWorkstation
+		baby.VillageWorkstation = spatial.BlockPos{}
+		baby.HasVillageWorkstation = false
 		baby.IsBaby = true
 		baby.OnGround = true
 		s.world.Entities.Add(baby)

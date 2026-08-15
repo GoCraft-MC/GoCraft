@@ -47,6 +47,7 @@ type ContainerItem struct {
 	Slot   int
 	ItemID string
 	Count  int
+	Damage int
 }
 
 // HighestBlockY returns the highest non-air block in the local x/z column.

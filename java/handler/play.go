@@ -31,7 +31,40 @@ const (
 	gameEventStartWaitingForChunks = 13
 )
 
-const overworldDimensionName = "minecraft:overworld"
+const (
+	overworldDimensionName = "minecraft:overworld"
+	netherDimensionName    = "minecraft:the_nether"
+	endDimensionName       = "minecraft:the_end"
+)
+
+func dimensionName(dimension int32) string {
+	switch dimension {
+	case 1:
+		return netherDimensionName
+	case 2:
+		return endDimensionName
+	default:
+		return overworldDimensionName
+	}
+}
+
+func dimensionCommandTarget(p *player.Player, w *coreworld.World, dimension int32) spatial.Vec3 {
+	if dimension == 0 {
+		return p.WorldSpawn
+	}
+	if dimension == 2 {
+		x, z := 100, 0
+		return spatial.Vec3{X: float64(x) + 0.5, Y: float64(w.SurfaceY(x, z) + 1), Z: float64(z) + 0.5}
+	}
+	x := int(math.Floor(p.Position.X / 8))
+	z := int(math.Floor(p.Position.Z / 8))
+	for y := 32; y <= 118; y++ {
+		if safeRespawnSpace(w, x, y, z) {
+			return spatial.Vec3{X: float64(x) + 0.5, Y: float64(y), Z: float64(z) + 0.5}
+		}
+	}
+	return spatial.Vec3{X: float64(x) + 0.5, Y: float64(w.SurfaceY(x, z) + 1), Z: float64(z) + 0.5}
+}
 
 // keepAliveInterval is how often the server sends a Keep Alive to the client.
 const keepAliveInterval = 10 * time.Second
@@ -55,7 +88,7 @@ const keepAliveTimeout = 30 * time.Second
 //	C→S  Confirm Teleport (ID 1)   (0x00)
 //	S→C  Level Chunk With Light    (0x28) × (2·viewRadius+1)² — initial burst
 //	     … keep-alive / movement / play loop …
-func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, reg registry.Provider, worldSeed int64, worldAge func() int64, viewDistance, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
+func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, worldForDimension func(int32) *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, reg registry.Provider, worldSeed int64, worldAge func() int64, viewDistance, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
 	if viewDistance < 2 {
 		viewDistance = 2
@@ -63,12 +96,21 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 	if preGenerateRadius < viewDistance+2 {
 		preGenerateRadius = viewDistance + 2
 	}
-	dimensionTypeID, err := reg.DimensionTypeID(overworldDimensionName)
-	if err != nil {
-		return fmt.Errorf("play: resolving overworld dimension type: %w", err)
+	if worldForDimension != nil {
+		if resolved := worldForDimension(p.Dimension); resolved != nil {
+			w = resolved
+		}
+	}
+	var dimensionTypeIDs [3]int32
+	for dimension := int32(0); dimension < 3; dimension++ {
+		typeID, err := reg.DimensionTypeID(dimensionName(dimension))
+		if err != nil {
+			return fmt.Errorf("play: resolving %s dimension type: %w", dimensionName(dimension), err)
+		}
+		dimensionTypeIDs[dimension] = typeID
 	}
 	hashedSeed := obfuscateSeed(worldSeed)
-	if err := sendLoginPlay(conn, p, dimensionTypeID, hashedSeed, viewDistance); err != nil {
+	if err := sendLoginPlay(conn, p, dimensionTypeIDs[p.Dimension], hashedSeed, viewDistance); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
 	if err := sendPlayerAbilities(conn, p); err != nil {
@@ -134,7 +176,7 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		"uuid", p.UUID,
 	)
 
-	return playLoop(conn, p, teleportID, w, sender, mgr, cmds, dimensionTypeID, hashedSeed, viewDistance, preGenerateRadius, nextEntityID, intentBus)
+	return playLoop(conn, p, teleportID, w, worldForDimension, sender, mgr, cmds, dimensionTypeIDs, hashedSeed, viewDistance, preGenerateRadius, nextEntityID, intentBus)
 }
 
 // ── Clientbound packet helpers ────────────────────────────────────────────────
@@ -198,26 +240,28 @@ func buildLoginPlay(p *player.Player, dimensionTypeID int32, hashedSeed int64) *
 func buildLoginPlayWithDistances(p *player.Player, dimensionTypeID int32, hashedSeed int64, viewDistance, simulationDistance int32) *protocol.Packet {
 	return protocol.NewBuilder(packetIDPlayLogin).
 		Int(p.EntityID).
-		Bool(false).                    // is_hardcore
-		VarInt(1).                      // dimension count
-		String(overworldDimensionName). // dimension names[0]
-		VarInt(20).                     // max_players (informational)
-		VarInt(viewDistance).           // view_distance
-		VarInt(simulationDistance).     // simulation_distance
-		Bool(false).                    // reduced_debug_info
-		Bool(true).                     // enable_respawn_screen
-		Bool(false).                    // do_limited_crafting
-		VarInt(dimensionTypeID).        // direct dimension_type registry ID
-		String(overworldDimensionName). // dimension_name
-		Long(hashedSeed).               // SHA-256-obfuscated world seed
-		Byte(byte(p.GameMode)).         // game_mode (raw signed byte on wire)
-		Byte(0xFF).                     // previous_game_mode: raw 0xFF = -1
-		Bool(false).                    // is_debug
-		Bool(false).                    // is_flat
-		Bool(false).                    // no last_death_location follows
-		VarInt(0).                      // portal_cooldown
-		VarInt(63).                     // sea_level (present in protocol 769)
-		Bool(false).                    // enforces_secure_chat
+		Bool(false).                        // is_hardcore
+		VarInt(3).                          // dimension count
+		String(overworldDimensionName).     // dimension names[0]
+		String(netherDimensionName).        // dimension names[1]
+		String(endDimensionName).           // dimension names[2]
+		VarInt(20).                         // max_players (informational)
+		VarInt(viewDistance).               // view_distance
+		VarInt(simulationDistance).         // simulation_distance
+		Bool(false).                        // reduced_debug_info
+		Bool(true).                         // enable_respawn_screen
+		Bool(false).                        // do_limited_crafting
+		VarInt(dimensionTypeID).            // direct dimension_type registry ID
+		String(dimensionName(p.Dimension)). // dimension_name
+		Long(hashedSeed).                   // SHA-256-obfuscated world seed
+		Byte(byte(p.GameMode)).             // game_mode (raw signed byte on wire)
+		Byte(0xFF).                         // previous_game_mode: raw 0xFF = -1
+		Bool(false).                        // is_debug
+		Bool(false).                        // is_flat
+		Bool(false).                        // no last_death_location follows
+		VarInt(0).                          // portal_cooldown
+		VarInt(63).                         // sea_level (present in protocol 769)
+		Bool(false).                        // enforces_secure_chat
 		Build()
 }
 
@@ -462,7 +506,7 @@ func sendForgetChunk(conn *network.ClientConn, cx, cz int32) error {
 //     chunk boundary.
 //
 // On exit the session is removed from mgr and all other players are notified.
-func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, dimensionTypeID int32, hashedSeed int64, viewRadius, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
+func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, worldForDimension func(int32) *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, dimensionTypeIDs [3]int32, hashedSeed int64, viewRadius, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
@@ -477,6 +521,11 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	// loop applies them so chunk maps and teleport-confirmation state remain
 	// single-threaded.
 	teleportRequests := make(chan spatial.Vec3, 8)
+	type dimensionRequest struct {
+		dimension int32
+		position  spatial.Vec3
+	}
+	dimensionRequests := make(chan dimensionRequest, 4)
 	sess := &session.Session{
 		Player: p,
 		Conn:   conn,
@@ -486,6 +535,17 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 				return nil
 			default:
 				return fmt.Errorf("player teleport queue is full")
+			}
+		},
+		ChangeDimension: func(dimension int32, position spatial.Vec3) error {
+			if dimension < 0 || dimension > 2 {
+				return fmt.Errorf("invalid dimension %d", dimension)
+			}
+			select {
+			case dimensionRequests <- dimensionRequest{dimension: dimension, position: position}:
+				return nil
+			default:
+				return fmt.Errorf("player dimension queue is full")
 			}
 		},
 	}
@@ -552,14 +612,20 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		newCZ := posToChunk(z)
 		if streamRespawn {
 			streamRespawn = false
-			w.QueuePregeneration(newCX, newCZ, preGenerateRadius)
 			keys := chunkKeysAround(newCX, newCZ, viewRadius)
-			nearCount := 9
+			nearCount := 1
 			if len(keys) < nearCount {
 				nearCount = len(keys)
 			}
 			if err := sendChunkKeys(conn, w, sender, sentChunks, keys[:nearCount]); err != nil {
 				return fmt.Errorf(`send nearby respawn chunks: %w`, err)
+			}
+			// Generate only the immediately surrounding ring in the background.
+			// Queuing the full configured radius before the centre chunk used to
+			// starve the synchronous chunk request and leave the client stuck on
+			// Loading terrain (or a black destination dimension).
+			if preGenerateRadius > 0 {
+				w.QueuePregeneration(newCX, newCZ, 1)
 			}
 			pendingRespawnChunks = append(pendingRespawnChunks, keys[nearCount:]...)
 			broadcastGeneratedEntities(w, mgr)
@@ -575,6 +641,49 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		lastChunkX, lastChunkZ = newCX, newCZ
 		return nil
 	}
+	changeDimension := func(dimension int32, target spatial.Vec3) error {
+		if dimension < 0 || dimension > 2 || worldForDimension == nil {
+			return fmt.Errorf("dimension %d is unavailable", dimension)
+		}
+		destinationWorld := worldForDimension(dimension)
+		if destinationWorld == nil {
+			return fmt.Errorf("dimension %d is unavailable", dimension)
+		}
+		target = destinationWorld.EnsureSafeArrival(target, dimension)
+		destinationCX, destinationCZ := posToChunk(target.X), posToChunk(target.Z)
+		p.InvulnerableUntil = time.Now().Add(10 * time.Second)
+		p.Dimension = dimension
+		p.Position = target
+		p.FallDistance = 0
+		p.OnGround = false
+		w = destinationWorld
+		if err := conn.WritePacket(buildRespawn(p, dimensionTypeIDs[dimension], hashedSeed)); err != nil {
+			return fmt.Errorf("respawn packet: %w", err)
+		}
+		_ = sendUpdateHealth(conn, p)
+		_ = sendPlayerAbilities(conn, p)
+		_ = sendCombatAttributes(conn, p)
+		_ = sendArmorAttributes(conn, p)
+		_ = sendSetContainerContent(conn, p, p.ContainerStateID)
+		sentChunks = make(map[[2]int32]struct{})
+		pendingRespawnChunks = nil
+		streamRespawn = true
+		if err := teleportTo(target.X, target.Y, target.Z); err != nil {
+			return fmt.Errorf("destination position: %w", err)
+		}
+		broadcastPosition(mgr, p)
+		return nil
+	}
+	changeWorldCommand := func(dimension int32) error {
+		if dimension == p.Dimension {
+			return nil
+		}
+		destinationWorld := worldForDimension(dimension)
+		if destinationWorld == nil {
+			return fmt.Errorf("destination world is unavailable")
+		}
+		return changeDimension(dimension, dimensionCommandTarget(p, destinationWorld, dimension))
+	}
 	// ── Keep-alive state ─────────────────────────────────────────────────────
 	var (
 		keepAliveSeq   atomic.Int64
@@ -589,6 +698,10 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	// ── Main loop ────────────────────────────────────────────────────────────
 	for {
 		select {
+		case request := <-dimensionRequests:
+			if err := changeDimension(request.dimension, request.position); err != nil {
+				return fmt.Errorf("play loop: applying queued dimension change: %w", err)
+			}
 		case destination := <-teleportRequests:
 			if err := teleportTo(destination.X, destination.Y, destination.Z); err != nil {
 				return fmt.Errorf("play loop: applying queued teleport: %w", err)
@@ -597,7 +710,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		}
 		broadcastGeneratedEntities(w, mgr)
 		if len(pendingRespawnChunks) > 0 {
-			batchSize := 16
+			batchSize := 4
 			if len(pendingRespawnChunks) < batchSize {
 				batchSize = len(pendingRespawnChunks)
 			}
@@ -680,7 +793,11 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Broadcast position/rotation to all other sessions on every movement.
 		if posChanged {
-			applyPlayerFallDamage(sess, prevY, prevOnGround, mgr)
+			if p.RecordMovementVibration() {
+				w.EmitVibration(int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z)))
+			}
+			applyJavaMovementExhaustion(p, prevX, prevZ, conn)
+			applyPlayerFallDamage(sess, prevY, prevOnGround, w, mgr)
 			applyPlayerEnvironmentalDamage(sess, w, mgr)
 			broadcastPosition(mgr, p)
 		}
@@ -710,7 +827,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 				} else {
 					p.Position = p.WorldSpawn
 				}
-				if err := conn.WritePacket(buildRespawn(p, dimensionTypeID, hashedSeed)); err != nil {
+				if err := conn.WritePacket(buildRespawn(p, dimensionTypeIDs[p.Dimension], hashedSeed)); err != nil {
 					return fmt.Errorf("play loop: respawn packet: %w", err)
 				}
 				if err := sendUpdateHealth(conn, p); err != nil {
@@ -732,7 +849,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Chat and commands need the session manager and dispatcher.
 		if pkt.ID == packetIDChatMessage || pkt.ID == packetIDChatCommand {
-			if err := handleChatPacket(pkt, p, mgr, cmds, w, conn, teleportTo); err != nil {
+			if err := handleChatPacket(pkt, p, mgr, cmds, w, conn, teleportTo, changeWorldCommand); err != nil {
 				slog.Warn("chat error", "player", p.Username, "err", err)
 			}
 		}
@@ -748,6 +865,11 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if pkt.ID == packetIDInteract {
 			if err := handleInteractPacket(pkt, p, w, conn, mgr, intentBus); err != nil {
 				slog.Warn("interact error", "player", p.Username, "err", err)
+			}
+		}
+		if pkt.ID == packetIDSwingArm {
+			if err := handleSwingArmPacket(pkt, p, intentBus); err != nil {
+				slog.Warn("swing arm error", "player", p.Username, "err", err)
 			}
 		}
 
@@ -779,7 +901,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 				slog.Warn("use item error", "player", p.Username, "err", err)
 			}
 		}
-		if pkt.ID == packetIDContainerClick || pkt.ID == packetIDContainerClose {
+		if pkt.ID == packetIDContainerClick || pkt.ID == packetIDContainerClose || pkt.ID == packetIDContainerButtonClick {
 			if err := handleContainerPacket(pkt, p, conn, w); err != nil {
 				slog.Warn("container error", "player", p.Username, "err", err)
 			}
@@ -803,6 +925,36 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 			lastChunkX, lastChunkZ = newChunkX, newChunkZ
 		}
+	}
+}
+
+func handleSwingArmPacket(pkt *protocol.Packet, p *player.Player, bus *intent.Bus) error {
+	hand, err := protocol.ReadVarInt(pkt.Reader())
+	if err != nil {
+		return fmt.Errorf("reading swing hand: %w", err)
+	}
+	if hand < 0 || hand > 1 {
+		return fmt.Errorf("invalid swing hand %d", hand)
+	}
+	if bus != nil {
+		bus.PostArmSwing(intent.ArmSwingIntent{PlayerUUID: p.UUID, Hand: hand})
+	}
+	return nil
+}
+
+func applyJavaMovementExhaustion(p *player.Player, previousX, previousZ float64, conn *network.ClientConn) {
+	if p == nil || p.GameMode != player.GameModeSurvival || p.Dead || p.Flying || !p.Sprinting {
+		return
+	}
+	distance := math.Hypot(p.Position.X-previousX, p.Position.Z-previousZ)
+	if distance <= 0 || distance > 10 {
+		return
+	}
+	foodBefore, saturationBefore, _ := p.HungerSnapshot()
+	p.AddExhaustion(float32(distance * 0.1))
+	foodAfter, saturationAfter, _ := p.HungerSnapshot()
+	if foodAfter != foodBefore || saturationAfter != saturationBefore {
+		_ = sendUpdateHealth(conn, p)
 	}
 }
 
@@ -1086,12 +1238,16 @@ func handlePlayPacket(pkt *protocol.Packet, p *player.Player, pendingAliveID *in
 	return false, nil
 }
 
-func applyPlayerFallDamage(sess *session.Session, previousY float64, previousOnGround bool, mgr *session.Manager) {
+func applyPlayerFallDamage(sess *session.Session, previousY float64, previousOnGround bool, w *coreworld.World, mgr *session.Manager) {
 	if sess == nil || sess.Player == nil {
 		return
 	}
 	p := sess.Player
 	if p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator || p.Flying || p.Dead {
+		p.FallDistance = 0
+		return
+	}
+	if w != nil && w.TouchesWater(p.Position.X, p.Position.Y, p.Position.Z) {
 		p.FallDistance = 0
 		return
 	}

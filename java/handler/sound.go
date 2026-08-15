@@ -60,12 +60,32 @@ func buildSoundAt(name string, category int32, x, y, z float64, volume, pitch fl
 // SoundCategoryHostile is the sound category for hostile mobs.
 const SoundCategoryHostile int32 = 5
 
+// SoundCategoryBlocks is the sound category for block mechanisms.
+const SoundCategoryBlocks int32 = soundCategoryBlocks
+
 // SoundCategoryPlayers is the sound category for player weapon effects.
 const SoundCategoryPlayers int32 = soundCategoryPlayers
 
 // BroadcastSoundAt plays a positioned sound event to all connected players.
 func BroadcastSoundAt(mgr *session.Manager, name string, category int32, x, y, z float64, volume, pitch float32) {
 	broadcastSoundAt(mgr, name, category, x, y, z, volume, pitch)
+}
+
+// BroadcastSoundAtDimension avoids leaking positional sounds between worlds
+// that happen to share the same coordinates.
+func BroadcastSoundAtDimension(mgr *session.Manager, dimension int32, name string, category int32, x, y, z float64, volume, pitch float32) {
+	if mgr == nil {
+		return
+	}
+	pkt := buildSoundAt(name, category, x, y, z, volume, pitch)
+	if pkt == nil {
+		return
+	}
+	for _, current := range mgr.SnapshotAll() {
+		if current.Player != nil && current.Player.Dimension == dimension {
+			_ = current.Conn.WritePacket(pkt)
+		}
+	}
 }
 
 // BroadcastVillagerUnhappy mirrors Pumpkin's set_unhappy interaction: the

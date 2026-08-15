@@ -6,6 +6,7 @@
   "clientbound": {
     "minecraft:bundle_delimiter": 0,
     "minecraft:spawn_entity": 1,
+	"minecraft:animate": 3,
     "minecraft:acknowledge_block_change": 5,
     "minecraft:block_update": 9,
     "minecraft:chunk_batch_finished": 12,
@@ -52,7 +53,7 @@
     "minecraft:update_mob_effect": 125,
     "minecraft:update_attributes": 124,
     "minecraft:update_recipes": 126,
-    "minecraft:set_passengers": 85,
+    "minecraft:set_passengers": 101,
     "minecraft:update_health": 98
   },
   "serverbound": {
@@ -73,7 +74,9 @@
     "minecraft:set_creative_mode_slot": 54,
     "minecraft:use_item_on": 60,
     "minecraft:use_item": 61,
+	"minecraft:swing": 58,
     "minecraft:interact": 24,
+	"minecraft:container_button_click": 15,
     "minecraft:container_click": 16,
     "minecraft:container_close": 17,
 	"minecraft:move_vehicle": 32,

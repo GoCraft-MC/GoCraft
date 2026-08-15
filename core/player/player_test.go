@@ -105,3 +105,16 @@ func TestHungerExhaustionAndFoodConsumption(t *testing.T) {
 		t.Fatalf("after bread = food %d saturation %.1f, want 20/6", food, saturation)
 	}
 }
+
+func TestAlwaysEdibleFoodCanBeConsumedAtFullHunger(t *testing.T) {
+	p := New([16]byte{3}, "golden", ClientEditionJava)
+	p.Food = 20
+	p.Saturation = 0
+	if !p.ConsumeFoodAllowFull(4, 1.2, true) {
+		t.Fatal("always-edible food was rejected at full hunger")
+	}
+	food, saturation, _ := p.HungerSnapshot()
+	if food != 20 || saturation != 9.6 {
+		t.Fatalf("full-hunger golden food result = %d/%.1f, want 20/9.6", food, saturation)
+	}
+}

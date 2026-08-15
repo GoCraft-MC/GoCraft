@@ -39,6 +39,8 @@ type World struct {
 
 	blockObserverMu sync.RWMutex
 	blockObserver   func(BlockChange)
+	vibrationMu     sync.Mutex
+	vibrations      map[[3]int]struct{}
 
 	pregenQueue  chan [2]int32
 	pregenQueued map[[2]int32]struct{}
@@ -135,6 +137,7 @@ func New(gen Generator, storage Storage, villagersEnabled bool) *World {
 		villagersEnabled:     villagersEnabled,
 		spawnedVillages:      make(map[[2]int]struct{}),
 		pendingDamage:        make(map[int32]EntityDamage),
+		vibrations:           make(map[[3]int]struct{}),
 		villageBeds:          make(map[spatial.BlockPos]struct{}),
 		villageDoors:         make(map[spatial.BlockPos]Block),
 		villageJobs:          make(map[spatial.BlockPos]entity.VillagerProfession),
@@ -149,6 +152,33 @@ func New(gen Generator, storage Storage, villagersEnabled bool) *World {
 		go w.pregenerationWorker()
 	}
 	return w
+}
+
+// EmitVibration queues a game event that nearby sculk sensors may detect on
+// the simulation tick. Coordinates identify the sound/event source block.
+func (w *World) EmitVibration(x, y, z int) {
+	if w == nil {
+		return
+	}
+	w.vibrationMu.Lock()
+	w.vibrations[[3]int{x, y, z}] = struct{}{}
+	w.vibrationMu.Unlock()
+}
+
+// DrainVibrations returns the deduplicated game events queued since the last
+// simulation tick.
+func (w *World) DrainVibrations() [][3]int {
+	if w == nil {
+		return nil
+	}
+	w.vibrationMu.Lock()
+	events := make([][3]int, 0, len(w.vibrations))
+	for event := range w.vibrations {
+		events = append(events, event)
+	}
+	clear(w.vibrations)
+	w.vibrationMu.Unlock()
+	return events
 }
 
 // Chunk returns the chunk at (x, z).  Lookup order:
@@ -267,6 +297,7 @@ func (w *World) Chunk(x, z int32) *Chunk {
 					v.VillageCenter = resident.Center
 					v.VillageBed = resident.Bed
 					v.VillageWorkstation = resident.Workstation
+					v.HasVillageWorkstation = resident.Profession != entity.VillagerProfessionNone && resident.Workstation != (spatial.BlockPos{})
 					v.OnGround = true
 					w.Entities.Add(v)
 					w.spawnedMu.Lock()
@@ -611,7 +642,7 @@ func (w *World) CanEntityOccupy(x, y, z float64) bool {
 func entitySupportBlock(name string) bool {
 	switch name {
 	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
-		"minecraft:water", "minecraft:lava", "minecraft:short_grass",
+		"minecraft:water", "minecraft:lava", "minecraft:nether_portal", "minecraft:end_portal", "minecraft:end_gateway", "minecraft:short_grass",
 		"minecraft:grass", "minecraft:tall_grass", "minecraft:fern",
 		"minecraft:large_fern", "minecraft:wheat", "minecraft:carrots",
 		"minecraft:potatoes", "minecraft:beetroots", "minecraft:dandelion",
@@ -888,6 +919,54 @@ func (w *World) ContainerItems(x, y, z int) []ContainerItem {
 	return nil
 }
 
+// LoadedBlockEntities returns a deep snapshot of block entities from chunks
+// already resident in memory. Automation uses this to tick hoppers without
+// generating or loading unrelated chunks.
+func (w *World) LoadedBlockEntities() []BlockEntity {
+	if w == nil {
+		return nil
+	}
+	w.mu.RLock()
+	chunks := make([]*Chunk, 0, len(w.chunks))
+	for _, chunk := range w.chunks {
+		chunks = append(chunks, chunk)
+	}
+	w.mu.RUnlock()
+
+	w.containerMu.RLock()
+	entities := make([]BlockEntity, 0)
+	for _, chunk := range chunks {
+		for _, entity := range chunk.BlockEntities {
+			copyEntity := entity
+			copyEntity.Data = append([]byte(nil), entity.Data...)
+			copyEntity.Items = append([]ContainerItem(nil), entity.Items...)
+			entities = append(entities, copyEntity)
+		}
+	}
+	w.containerMu.RUnlock()
+	return entities
+}
+
+// TouchesWater reports whether the vertical player volume at the supplied
+// feet position intersects water (including waterlogged blocks). Entering
+// water resets vanilla fall distance immediately, before the player reaches
+// the floor below the fluid.
+func (w *World) TouchesWater(x, y, z float64) bool {
+	if w == nil {
+		return false
+	}
+	bx, bz := int(math.Floor(x)), int(math.Floor(z))
+	minY := int(math.Floor(y))
+	maxY := int(math.Floor(y + 1.799999))
+	for by := minY; by <= maxY; by++ {
+		block := w.GetBlock(bx, by, bz)
+		if block.ResourceLocation() == "minecraft:water" || block.Properties["waterlogged"] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
 // SetContainerItems stores canonical container contents in the owning chunk.
 // The Anvil adapter serialises these entries into the block entity Items list.
 func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []ContainerItem) {
@@ -922,6 +1001,40 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 		c.BlockEntities = append(c.BlockEntities, BlockEntity{
 			X: x, Y: y, Z: z, Type: blockEntityType, Data: []byte{10, 0},
 			Items: append([]ContainerItem(nil), clean...),
+		})
+	}
+	w.containerMu.Unlock()
+
+	w.mu.Lock()
+	key := [2]int32{cx, cz}
+	w.chunks[key] = c
+	w.touchChunkLocked(key)
+	w.dirty[key] = struct{}{}
+	w.mu.Unlock()
+}
+
+// SetBlockEntity stores or replaces the non-container block entity at a world
+// position. Data must be an anonymous network-NBT compound. It is copied so
+// callers cannot mutate persisted chunk state after this method returns.
+func (w *World) SetBlockEntity(x, y, z int, blockEntityType string, data []byte) {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+
+	w.containerMu.Lock()
+	updated := false
+	for index := range c.BlockEntities {
+		entity := &c.BlockEntities[index]
+		if entity.X == x && entity.Y == y && entity.Z == z {
+			entity.Type = blockEntityType
+			entity.Data = append([]byte(nil), data...)
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		c.BlockEntities = append(c.BlockEntities, BlockEntity{
+			X: x, Y: y, Z: z, Type: blockEntityType, Data: append([]byte(nil), data...),
 		})
 	}
 	w.containerMu.Unlock()

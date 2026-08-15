@@ -35,12 +35,12 @@ const maxChatLength = 256
 // handleChatPacket dispatches an incoming chat or command packet.
 // Called from the play loop after handlePlayPacket for packets that need
 // access to the session manager.
-func handleChatPacket(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn, teleportTo func(x, y, z float64) error) error {
+func handleChatPacket(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn, teleportTo func(x, y, z float64) error, changeWorld func(int32) error) error {
 	switch pkt.ID {
 	case packetIDChatMessage:
-		return handleChatMessage(pkt, p, mgr, cmds, w, conn, teleportTo)
+		return handleChatMessage(pkt, p, mgr, cmds, w, conn, teleportTo, changeWorld)
 	case packetIDChatCommand:
-		return handleChatCommand(pkt, p, mgr, cmds, w, conn, teleportTo)
+		return handleChatCommand(pkt, p, mgr, cmds, w, conn, teleportTo, changeWorld)
 	}
 	return nil
 }
@@ -57,7 +57,7 @@ func handleChatPacket(pkt *protocol.Packet, p *player.Player, mgr *session.Manag
 //	Byte[]  signature (256 bytes, only if has_signature)
 //	VarInt  message_count
 //	Fixed BitSet (20 bits) acknowledged
-func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn, teleportTo func(x, y, z float64) error) error {
+func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn, teleportTo func(x, y, z float64) error, changeWorld func(int32) error) error {
 	r := pkt.Reader()
 	msg, err := protocol.ReadString(r)
 	if err != nil {
@@ -77,7 +77,7 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 	// 1.19+ has a dedicated Chat Command packet. Handle both paths.
 	if strings.HasPrefix(msg, "/") {
 		slog.Info("command (via chat)", "player", p.Username, "input", msg)
-		cmds.Dispatch(msg, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr, TeleportTo: teleportTo})
+		cmds.Dispatch(msg, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr, TeleportTo: teleportTo, ChangeWorld: changeWorld})
 		return nil
 	}
 
@@ -98,14 +98,14 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 //	…       argument signatures × argument_count (ignored)
 //	VarInt  message_count
 //	Fixed BitSet (20 bits) acknowledged
-func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn, teleportTo func(x, y, z float64) error) error {
+func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Manager, cmds *Dispatcher, w *coreworld.World, conn *network.ClientConn, teleportTo func(x, y, z float64) error, changeWorld func(int32) error) error {
 	r := pkt.Reader()
 	cmd, err := protocol.ReadString(r)
 	if err != nil {
 		return fmt.Errorf("reading chat command string: %w", err)
 	}
 	slog.Info("command", "player", p.Username, "command", cmd)
-	cmds.Dispatch(cmd, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr, TeleportTo: teleportTo})
+	cmds.Dispatch(cmd, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr, TeleportTo: teleportTo, ChangeWorld: changeWorld})
 	return nil
 }
 

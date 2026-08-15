@@ -7,7 +7,7 @@ package handler
 // position, and sneaking exits the boat.
 //
 // Relevant packets (Java 1.21.4 / protocol 769):
-//   CB  set_passengers  (0x55 = 85)  — tells client who is riding what
+//   CB  set_passengers  (0x65 = 101) — tells client who is riding what
 //   SB  move_vehicle    (0x1B = 27)  — client updates boat position while riding
 //   SB  player_input    (0x20 = 32)  — one-byte input flags; shift = dismount
 //   SB  player_command  (0x19 = 25)  — action 8 = leave vehicle
@@ -173,6 +173,10 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 		return fmt.Errorf("player_command: action: %w", err)
 	}
 	switch action {
+	case 0: // START_SNEAKING
+		p.Sneaking = true
+	case 1: // STOP_SNEAKING
+		p.Sneaking = false
 	case 2: // LEAVE_BED
 		if p.Sleeping {
 			p.Sleeping = false

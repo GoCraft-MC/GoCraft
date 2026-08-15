@@ -3,12 +3,103 @@ package world
 import (
 	"encoding/binary"
 	"math"
+	"sort"
 	"strings"
 
 	"GoCraft/core/entity"
 	"GoCraft/core/spatial"
 	"GoCraft/internal/debuglog"
 )
+
+// RefreshVillagerProfessions validates workstation claims and assigns free job
+// sites to adult villagers. A workstation has one owner, and a villager may
+// have exactly one profession. Villagers that have traded retain their
+// profession when the workstation is removed, matching vanilla behaviour.
+// The entity tick goroutine is the sole caller in production.
+func (w *World) RefreshVillagerProfessions(radius int32) []*entity.Entity {
+	if w == nil || radius < 1 {
+		return nil
+	}
+	values := w.Entities.Snapshot()
+	sort.Slice(values, func(i, j int) bool { return values[i].EntityID < values[j].EntityID })
+	claimed := make(map[spatial.BlockPos]int32)
+	changed := make(map[int32]*entity.Entity)
+
+	for _, villager := range values {
+		if villager == nil || villager.Type != entity.TypeVillager || villager.Dead || villager.IsBaby ||
+			villager.VillagerProfession == entity.VillagerProfessionNitwit || !villager.HasVillageWorkstation {
+			continue
+		}
+		position := villager.VillageWorkstation
+		profession, valid := villageProfessionForWorkstation(w.GetBlock(int(position.X), int(position.Y), int(position.Z)).ResourceLocation())
+		_, duplicate := claimed[position]
+		if valid && profession == villager.VillagerProfession && !duplicate {
+			claimed[position] = villager.EntityID
+			continue
+		}
+
+		villager.HasVillageWorkstation = false
+		villager.VillageWorkstation = spatial.BlockPos{}
+		if !villager.VillagerHasTraded && villager.VillagerExperience == 0 {
+			villager.VillagerProfession = entity.VillagerProfessionNone
+			villager.VillagerLevel = 1
+		}
+		changed[villager.EntityID] = villager
+	}
+
+	verticalRadius := int32(4)
+	for _, villager := range values {
+		if villager == nil || villager.Type != entity.TypeVillager || villager.Dead || villager.IsBaby ||
+			villager.VillagerProfession == entity.VillagerProfessionNitwit || villager.HasVillageWorkstation {
+			continue
+		}
+		required := villager.VillagerProfession
+		origin := spatial.BlockPos{X: int32(math.Floor(villager.Position.X)), Y: int32(math.Floor(villager.Position.Y)), Z: int32(math.Floor(villager.Position.Z))}
+		best := spatial.BlockPos{}
+		bestProfession := entity.VillagerProfessionNone
+		bestDistance := int64(math.MaxInt64)
+		found := false
+		for y := origin.Y - verticalRadius; y <= origin.Y+verticalRadius; y++ {
+			for x := origin.X - radius; x <= origin.X+radius; x++ {
+				for z := origin.Z - radius; z <= origin.Z+radius; z++ {
+					position := spatial.BlockPos{X: x, Y: y, Z: z}
+					if _, used := claimed[position]; used {
+						continue
+					}
+					profession, ok := villageProfessionForWorkstation(w.GetBlock(int(x), int(y), int(z)).ResourceLocation())
+					if !ok || (required != "" && required != entity.VillagerProfessionNone && profession != required) {
+						continue
+					}
+					dx, dy, dz := int64(x-origin.X), int64(y-origin.Y), int64(z-origin.Z)
+					distance := dx*dx + dy*dy + dz*dz
+					if distance < bestDistance {
+						best, bestProfession, bestDistance, found = position, profession, distance, true
+					}
+				}
+			}
+		}
+		if !found {
+			continue
+		}
+		villager.VillageWorkstation = best
+		villager.HasVillageWorkstation = true
+		claimed[best] = villager.EntityID
+		if required == "" || required == entity.VillagerProfessionNone {
+			villager.VillagerProfession = bestProfession
+			villager.VillagerLevel = 1
+			villager.VillagerExperience = 0
+		}
+		changed[villager.EntityID] = villager
+	}
+
+	result := make([]*entity.Entity, 0, len(changed))
+	for _, villager := range values {
+		if current := changed[villager.EntityID]; current != nil {
+			result = append(result, current)
+		}
+	}
+	return result
+}
 
 type discoveredVillageResident struct {
 	home, center, spawn, bed, workstation spatial.BlockPos
@@ -113,7 +204,7 @@ func (w *World) discoverLoadedVillagePopulation(chunk *Chunk) {
 		spawn.Z++
 		w.spawnedVillageHomes[door] = struct{}{}
 		residents = append(residents, discoveredVillageResident{
-			home: door, center: center, spawn: spawn, bed: door,
+			home: door, center: center, spawn: spawn,
 			workstation: workstation, profession: profession,
 			variant: w.discoveredVillageVariant(center),
 		})
@@ -155,6 +246,7 @@ func (w *World) discoverLoadedVillagePopulation(chunk *Chunk) {
 		villager.VillageCenter = resident.center
 		villager.VillageBed = resident.bed
 		villager.VillageWorkstation = resident.workstation
+		villager.HasVillageWorkstation = resident.profession != entity.VillagerProfessionNone && resident.workstation != (spatial.BlockPos{})
 		villager.OnGround = true
 		// Spawn 1 baby for every 4 adults — gives the village a lived-in feel.
 		if i%4 == 3 {

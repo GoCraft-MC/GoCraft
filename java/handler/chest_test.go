@@ -10,6 +10,53 @@ import (
 	"GoCraft/java/session"
 )
 
+func TestJavaGenericStoragePersistsAcrossCloseAndReopen(t *testing.T) {
+	for _, kind := range []string{"minecraft:hopper", "minecraft:dropper", "minecraft:barrel", "minecraft:dispenser", "minecraft:crafter"} {
+		t.Run(kind, func(t *testing.T) {
+			p := player.New([16]byte{}, "storer", player.ClientEditionJava)
+			w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer w.Close()
+			pos := spatial.BlockPos{X: 4, Y: 64, Z: 4}
+			w.SetBlock(4, 64, 4, coreworld.Block{Namespace: "minecraft", Name: kind[len("minecraft:"):]})
+			if err := openStorageContainer(p, nil, w, pos, kind); err != nil {
+				t.Fatal(err)
+			}
+			p.ContainerSlots[0] = player.ItemStack{ItemID: "minecraft:diamond", Count: 3}
+			persistStorageContents(p, w)
+			p.ContainerSlots = nil
+			if err := openStorageContainer(p, nil, w, pos, kind); err != nil {
+				t.Fatal(err)
+			}
+			if got := p.ContainerSlots[0]; got.ItemID != "minecraft:diamond" || got.Count != 3 {
+				t.Fatalf("reopened slot = %+v", got)
+			}
+		})
+	}
+}
+
+func TestJavaEnderChestUsesPrivatePlayerStorage(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	pos := spatial.BlockPos{X: 7, Y: 64, Z: 7}
+	w.SetBlock(7, 64, 7, coreworld.Block{Namespace: "minecraft", Name: "ender_chest"})
+	first := player.New([16]byte{1}, "first", player.ClientEditionJava)
+	second := player.New([16]byte{2}, "second", player.ClientEditionJava)
+	first.EnderChestInventory[0] = player.ItemStack{ItemID: "minecraft:diamond", Count: 4}
+
+	if err := openStorageContainer(first, nil, w, pos, "minecraft:ender_chest"); err != nil {
+		t.Fatal(err)
+	}
+	if got := first.ContainerSlots[0]; got.ItemID != "minecraft:diamond" || got.Count != 4 {
+		t.Fatalf("first private slot = %+v", got)
+	}
+	if err := openStorageContainer(second, nil, w, pos, "minecraft:ender_chest"); err != nil {
+		t.Fatal(err)
+	}
+	if !second.ContainerSlots[0].IsEmpty() {
+		t.Fatalf("second player saw first player's item: %+v", second.ContainerSlots[0])
+	}
+}
+
 func TestSurvivalPlacesChestIntoReplaceableGrass(t *testing.T) {
 	p := player.New([16]byte{}, "builder", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival

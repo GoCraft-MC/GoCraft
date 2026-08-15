@@ -66,6 +66,7 @@ func RegisterBuiltins(d *Dispatcher) {
 	d.RegisterOperator(`gamemode`, cmdGameMode)
 	d.RegisterOperator(`gm`, cmdGameMode)
 	d.RegisterOperator(`tp`, cmdTp)
+	d.RegisterOperator(`world`, cmdWorld)
 	d.RegisterOperator(`tphere`, cmdTpHere)
 	d.RegisterOperator(`locate`, cmdLocate)
 	d.RegisterOperator(`summon`, cmdSummon)
@@ -144,6 +145,7 @@ func registerBuiltinsWithoutPermissions(d *Dispatcher) {
 	d.Register("gamemode", cmdGameMode)
 	d.Register("gm", cmdGameMode) // short alias
 	d.Register("tp", cmdTp)
+	d.Register("world", cmdWorld)
 	d.Register("tphere", cmdTpHere)
 	d.Register("xyz", cmdXYZ)
 	d.Register("locate", cmdLocate)
@@ -281,6 +283,50 @@ func cmdXYZ(ctx CommandContext) error {
 		position.X, position.Y, position.Z, block.X, block.Y, block.Z, chunkX, chunkZ,
 	))
 	return nil
+}
+
+func worldCommandName(dimension int32) string {
+	switch dimension {
+	case 1:
+		return "Nether"
+	case 2:
+		return "End"
+	default:
+		return "Overworld"
+	}
+}
+
+func cmdWorld(ctx CommandContext) error {
+	if ctx.Player == nil {
+		return fmt.Errorf("player state is unavailable")
+	}
+	if len(ctx.Args) == 0 {
+		return sendCommandMessage(ctx, "Current world: "+worldCommandName(ctx.Player.Dimension))
+	}
+	if len(ctx.Args) != 1 {
+		return fmt.Errorf("usage: /world <overworld|nether|end>")
+	}
+	var destination int32
+	switch strings.ToLower(strings.TrimPrefix(ctx.Args[0], "minecraft:")) {
+	case "overworld", "world":
+		destination = 0
+	case "nether", "the_nether":
+		destination = 1
+	case "end", "the_end":
+		destination = 2
+	default:
+		return fmt.Errorf("unknown world %q; use overworld, nether, or end", ctx.Args[0])
+	}
+	if destination == ctx.Player.Dimension {
+		return sendCommandMessage(ctx, "Already in "+worldCommandName(destination))
+	}
+	if ctx.ChangeWorld == nil {
+		return fmt.Errorf("dimension changing is unavailable")
+	}
+	if err := ctx.ChangeWorld(destination); err != nil {
+		return err
+	}
+	return sendCommandMessage(ctx, "Traveling to "+worldCommandName(destination))
 }
 
 const (

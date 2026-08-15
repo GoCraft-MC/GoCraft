@@ -33,7 +33,7 @@ func TestStorageRegionRoundTrip(t *testing.T) {
 		Z:     int(chunk.Z)*16 + 3,
 		Type:  "minecraft:furnace",
 		Data:  testBlockEntityPayload(),
-		Items: []coreworld.ContainerItem{{Slot: 2, ItemID: "minecraft:iron_ingot", Count: 17}},
+		Items: []coreworld.ContainerItem{{Slot: 2, ItemID: "minecraft:iron_pickaxe", Count: 1, Damage: 37}},
 	}}
 
 	neighbor := &coreworld.Chunk{X: 34, Z: -1}
@@ -87,7 +87,7 @@ func TestStorageRegionRoundTrip(t *testing.T) {
 	if got := loaded.BlockEntities[0]; got.Type != "minecraft:furnace" || got.X != chunk.BlockEntities[0].X || got.Y != 64 || got.Z != chunk.BlockEntities[0].Z || !bytes.Equal(got.Data, chunk.BlockEntities[0].Data) {
 		t.Fatalf("block entity differs after disk round trip: %+v", got)
 	}
-	if got := loaded.BlockEntities[0].Items; len(got) != 1 || got[0].Slot != 2 || got[0].ItemID != "minecraft:iron_ingot" || got[0].Count != 17 {
+	if got := loaded.BlockEntities[0].Items; len(got) != 1 || got[0].Slot != 2 || got[0].ItemID != "minecraft:iron_pickaxe" || got[0].Count != 1 || got[0].Damage != 37 {
 		t.Fatalf("container items differ after disk round trip: %+v", got)
 	}
 

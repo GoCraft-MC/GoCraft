@@ -62,6 +62,9 @@ clear_lag:
         passive_mobs: false
         hostile_mobs: false
 world_storage: disk
+# Dimension layout: Overworld is here; sibling folders with suffixes _nether
+# and _end are created at server startup (world, world_nether, world_end).
+# Existing world/DIM-1 and world/DIM1 data is copied automatically once.
 world_dir: world
 world_seed: 0
 view_distance: 8

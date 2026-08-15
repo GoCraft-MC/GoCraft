@@ -38,11 +38,13 @@ const villagerWindowID = int32(1)
 // tradeOffer defines a single merchant trade: items the player pays (up to two
 // inputs) and the item they receive.
 type tradeOffer struct {
-	input1     tradeItem
-	input2     tradeItem // zero-value means no second input
-	output     tradeItem
-	maxUses    int32
-	xpPerTrade int32
+	input1          tradeItem
+	input2          tradeItem // zero-value means no second input
+	output          tradeItem
+	maxUses         int32
+	xpPerTrade      int32
+	tier            int32 // zero-based Bedrock tier
+	priceMultiplier float32
 }
 
 type tradeItem struct {
@@ -54,22 +56,27 @@ type tradeItem struct {
 // Bedrock adapter. The Java wire encoder keeps using the private representation
 // below so edition details do not leak into the simulation.
 type VillagerTrade struct {
-	Input1, Input2 player.ItemStack
-	Output         player.ItemStack
-	MaxUses        int32
-	XP             int32
+	Input1, Input2  player.ItemStack
+	Output          player.ItemStack
+	MaxUses         int32
+	XP              int32
+	Tier            int32
+	PriceMultiplier float32
 }
 
-// VillagerTrades returns a detached copy of the offers for a profession.
-func VillagerTrades(profession corentity.VillagerProfession) []VillagerTrade {
-	offers := tradesForProfession(profession)
+// VillagerTrades returns a detached copy of the unlocked offers for exactly one
+// profession. The optional level defaults to novice for compatibility.
+func VillagerTrades(profession corentity.VillagerProfession, levels ...int32) []VillagerTrade {
+	offers := tradesForProfession(profession, levels...)
 	out := make([]VillagerTrade, 0, len(offers))
 	for _, offer := range offers {
 		trade := VillagerTrade{
-			Input1:  player.ItemStack{ItemID: offer.input1.itemName, Count: int(offer.input1.count)},
-			Output:  player.ItemStack{ItemID: offer.output.itemName, Count: int(offer.output.count)},
-			MaxUses: offer.maxUses,
-			XP:      offer.xpPerTrade,
+			Input1:          player.ItemStack{ItemID: offer.input1.itemName, Count: int(offer.input1.count)},
+			Output:          player.ItemStack{ItemID: offer.output.itemName, Count: int(offer.output.count)},
+			MaxUses:         offer.maxUses,
+			XP:              offer.xpPerTrade,
+			Tier:            offer.tier,
+			PriceMultiplier: offer.priceMultiplier,
 		}
 		if offer.input2.itemName != "" && offer.input2.count > 0 {
 			trade.Input2 = player.ItemStack{ItemID: offer.input2.itemName, Count: int(offer.input2.count)}
@@ -77,46 +84,6 @@ func VillagerTrades(profession corentity.VillagerProfession) []VillagerTrade {
 		out = append(out, trade)
 	}
 	return out
-}
-
-// defaultVillagerTrades returns the static trade list shown for all villagers.
-// For a biome-aware implementation, pass the villager biome to vary the trades.
-var defaultVillagerTrades = []tradeOffer{
-	// Farmer: sell wheat to the villager for emeralds
-	{
-		input1:     tradeItem{"minecraft:wheat", 20},
-		output:     tradeItem{"minecraft:emerald", 1},
-		maxUses:    12,
-		xpPerTrade: 5,
-	},
-	// Farmer: buy bread with an emerald
-	{
-		input1:     tradeItem{"minecraft:emerald", 1},
-		output:     tradeItem{"minecraft:bread", 6},
-		maxUses:    12,
-		xpPerTrade: 5,
-	},
-	// Librarian: sell paper for emeralds
-	{
-		input1:     tradeItem{"minecraft:paper", 24},
-		output:     tradeItem{"minecraft:emerald", 1},
-		maxUses:    12,
-		xpPerTrade: 3,
-	},
-	// General: buy an apple with an emerald
-	{
-		input1:     tradeItem{"minecraft:emerald", 1},
-		output:     tradeItem{"minecraft:apple", 4},
-		maxUses:    12,
-		xpPerTrade: 3,
-	},
-	// Farmer: sell carrots for emeralds
-	{
-		input1:     tradeItem{"minecraft:carrot", 22},
-		output:     tradeItem{"minecraft:emerald", 1},
-		maxUses:    12,
-		xpPerTrade: 3,
-	},
 }
 
 // handleInteractPacket parses a C→S Interact (0x19) packet.
@@ -254,7 +221,7 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 	if err := sendOpenScreen(conn, villagerWindowID, merchantContainerType, "Villager"); err != nil {
 		return fmt.Errorf("interact: opening screen: %w", err)
 	}
-	if err := sendMerchantOffers(conn, villagerWindowID, tradesForProfession(entity.VillagerProfession)); err != nil {
+	if err := sendMerchantOffers(conn, villagerWindowID, tradesForProfession(entity.VillagerProfession, entity.VillagerLevel), entity.VillagerLevel); err != nil {
 		return fmt.Errorf("interact: sending offers: %w", err)
 	}
 	return nil
@@ -298,11 +265,11 @@ func sendOpenScreen(conn *network.ClientConn, windowID, windowType int32, title 
 //	VarInt  villager_xp
 //	Bool    is_regular_villager
 //	Bool    can_restock
-func sendMerchantOffers(conn *network.ClientConn, windowID int32, trades []tradeOffer) error {
-	return conn.WritePacket(buildMerchantOffers(windowID, trades))
+func sendMerchantOffers(conn *network.ClientConn, windowID int32, trades []tradeOffer, levels ...int32) error {
+	return conn.WritePacket(buildMerchantOffers(windowID, trades, levels...))
 }
 
-func buildMerchantOffers(windowID int32, trades []tradeOffer) *protocol.Packet {
+func buildMerchantOffers(windowID int32, trades []tradeOffer, levels ...int32) *protocol.Packet {
 	b := protocol.NewBuilder(packetIDMerchantOffers).
 		VarInt(windowID).
 		VarInt(int32(len(trades)))
@@ -317,16 +284,24 @@ func buildMerchantOffers(windowID int32, trades []tradeOffer) *protocol.Packet {
 			encodeTradeCost(b, trade.input2)
 		}
 
+		priceMultiplier := trade.priceMultiplier
+		if priceMultiplier == 0 {
+			priceMultiplier = 0.05
+		}
 		b.Bool(false).
 			Int(0).
 			Int(trade.maxUses).
 			Int(trade.xpPerTrade).
 			Int(0).
-			Float(0.05).
+			Float(priceMultiplier).
 			Int(0)
 	}
 
-	return b.VarInt(1).
+	level := int32(1)
+	if len(levels) > 0 && levels[0] >= 1 && levels[0] <= 5 {
+		level = levels[0]
+	}
+	return b.VarInt(level).
 		VarInt(0).
 		Bool(true).
 		Bool(true).
@@ -364,21 +339,25 @@ func encodeTradingSlot(b *protocol.Builder, item tradeItem) {
 		VarInt(0)  // components_to_remove
 }
 
-func tradesForProfession(profession corentity.VillagerProfession) []tradeOffer {
-	switch profession {
-	case corentity.VillagerProfessionLibrarian:
-		return []tradeOffer{
-			{input1: tradeItem{"minecraft:paper", 24}, output: tradeItem{"minecraft:emerald", 1}, maxUses: 12, xpPerTrade: 3},
-			{input1: tradeItem{"minecraft:emerald", 1}, output: tradeItem{"minecraft:bookshelf", 1}, maxUses: 12, xpPerTrade: 5},
-		}
-	case corentity.VillagerProfessionFletcher:
-		return []tradeOffer{
-			{input1: tradeItem{"minecraft:stick", 32}, output: tradeItem{"minecraft:emerald", 1}, maxUses: 16, xpPerTrade: 2},
-			{input1: tradeItem{"minecraft:emerald", 1}, output: tradeItem{"minecraft:arrow", 16}, maxUses: 12, xpPerTrade: 2},
-		}
-	default:
-		return defaultVillagerTrades
+func tradesForProfession(profession corentity.VillagerProfession, levels ...int32) []tradeOffer {
+	level := int32(1)
+	if len(levels) > 0 {
+		level = levels[0]
 	}
+	if level < 1 {
+		level = 1
+	} else if level > 5 {
+		level = 5
+	}
+	pools, ok := vanillaVillagerTradeCatalog[profession]
+	if !ok {
+		return nil
+	}
+	offers := make([]tradeOffer, 0, level*2)
+	for current := int32(1); current <= level; current++ {
+		offers = append(offers, pools[current]...)
+	}
+	return offers
 }
 
 func playerAttackCooldown(p *player.Player) time.Duration {

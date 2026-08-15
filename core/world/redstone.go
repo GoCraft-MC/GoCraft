@@ -242,6 +242,10 @@ func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 		if block.Properties["powered"] == "true" {
 			return 15
 		}
+	case "minecraft:sculk_sensor", "minecraft:calibrated_sculk_sensor":
+		if block.Properties["sculk_sensor_phase"] == "active" {
+			return atoi(block.Properties["power"])
+		}
 	default:
 		if strings.HasSuffix(name, "_button") && block.Properties["powered"] == "true" {
 			return 15
@@ -261,6 +265,20 @@ func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 // applyPowerState updates the visual/functional block state when power changes.
 // Returns (BlockChange, true) if the block visually changed.
 func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block, powered bool) (BlockChange, bool) {
+	if name == "minecraft:trapdoor" || strings.HasSuffix(name, "_trapdoor") {
+		newBlock := block
+		newBlock.Properties = make(map[string]string, len(block.Properties)+2)
+		for key, value := range block.Properties {
+			newBlock.Properties[key] = value
+		}
+		newBlock.Properties["open"] = boolStr(powered)
+		newBlock.Properties["powered"] = boolStr(powered)
+		if block.Properties["open"] == newBlock.Properties["open"] && block.Properties["powered"] == newBlock.Properties["powered"] {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+	}
 	switch name {
 	case "minecraft:redstone_lamp":
 		var newName string

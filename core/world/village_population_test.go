@@ -59,6 +59,9 @@ func TestLegacyDoorClusterSpawnsResidentsWithoutBeds(t *testing.T) {
 	for _, value := range world.Entities.Snapshot() {
 		if value.Type == entity.TypeVillager {
 			villagers++
+			if value.VillageBed != (struct{ X, Y, Z int32 }{}) {
+				t.Fatalf("legacy villager received non-bed POI as VillageBed: %+v", value.VillageBed)
+			}
 		}
 	}
 	if villagers != 3 {

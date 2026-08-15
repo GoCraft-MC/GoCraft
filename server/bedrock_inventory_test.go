@@ -11,6 +11,17 @@ import (
 	"GoCraft/java/session"
 )
 
+func TestBedrockShulkerBoxesUsePersistentGenericContainer(t *testing.T) {
+	for _, blockID := range []string{"minecraft:shulker_box", "minecraft:red_shulker_box"} {
+		if !isBedrockGenericContainer(blockID) {
+			t.Fatalf("%s is not recognized as a Bedrock storage container", blockID)
+		}
+		if got := bedrockGenericContainerSize(blockID); got != 27 {
+			t.Fatalf("%s slot count = %d, want 27", blockID, got)
+		}
+	}
+}
+
 func TestBedrockInventoryCanEquipArmorAuthoritatively(t *testing.T) {
 	g := game.New()
 	p := player.New([16]byte{9}, "bedrock", player.ClientEditionBedrock)
@@ -116,6 +127,35 @@ func TestBedrockCartographyTableAcceptsInputsAndReturnsThemOnClose(t *testing.T)
 	}
 	if !foundMap || !foundPaper {
 		t.Fatalf("cartography inputs were not returned: map=%v paper=%v inventory=%+v", foundMap, foundPaper, p.Inventory)
+	}
+}
+
+func TestBedrockSmithingOutputConsumesInputs(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{45}, "bedrock-smith", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:netherite_upgrade_smithing_template", Count: 1}
+	p.Inventory[player.HotbarStart+1] = player.ItemStack{ItemID: "minecraft:diamond_axe", Count: 1, Damage: 4}
+	p.Inventory[player.HotbarStart+2] = player.ItemStack{ItemID: "minecraft:netherite_ingot", Count: 1}
+	_ = g.AddPlayer(p)
+	s := &Server{game: g, sessions: session.NewManager()}
+	s.openBedrockWorkstation(p, spatial.BlockPos{}, "minecraft:smithing_table")
+
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{PlayerUUID: p.UUID, Actions: []intent.InventoryAction{
+		{Kind: intent.InventoryActionMove, Source: player.HotbarStart, Destination: intent.InventoryContainerStart, Count: 1},
+		{Kind: intent.InventoryActionMove, Source: player.HotbarStart + 1, Destination: intent.InventoryContainerStart + 1, Count: 1},
+		{Kind: intent.InventoryActionMove, Source: player.HotbarStart + 2, Destination: intent.InventoryContainerStart + 2, Count: 1},
+		{Kind: intent.InventoryActionMove, Source: intent.InventoryContainerStart + 3, Destination: intent.InventoryCursorSlot, Count: 1},
+	}, Done: done})
+	if result := <-done; !result.Accepted {
+		t.Fatal("valid Bedrock smithing transaction was rejected")
+	}
+	if p.CarriedItem.ItemID != "minecraft:netherite_axe" || p.CarriedItem.Damage != 4 {
+		t.Fatalf("smithing cursor = %+v", p.CarriedItem)
+	}
+	if !p.ContainerSlots[0].IsEmpty() || !p.ContainerSlots[1].IsEmpty() || !p.ContainerSlots[2].IsEmpty() {
+		t.Fatalf("smithing ingredients remain: %+v", p.ContainerSlots)
 	}
 }
 

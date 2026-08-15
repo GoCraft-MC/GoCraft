@@ -5,9 +5,42 @@ import (
 	"testing"
 
 	"GoCraft/core/player"
+	"GoCraft/core/spatial"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
 )
+
+func TestEnteringWaterCancelsAccumulatedFallDamage(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(3, 70, 4, coreworld.Block{Namespace: "minecraft", Name: "water", Properties: map[string]string{"level": "0"}})
+	p := player.New([16]byte{}, "diver", player.ClientEditionJava)
+	p.Position = spatial.Vec3{X: 3.5, Y: 70, Z: 4.5}
+	p.OnGround = true
+	p.FallDistance = 18
+	sess := &session.Session{Player: p}
+
+	applyPlayerFallDamage(sess, 72, false, w, nil)
+	if p.FallDistance != 0 || p.Health != p.MaxHealth {
+		t.Fatalf("water landing state: fall=%.1f health=%.1f", p.FallDistance, p.Health)
+	}
+}
+
+func TestJavaSprintingConsumesHunger(t *testing.T) {
+	p := player.New([16]byte{}, "runner", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Sprinting = true
+	p.Saturation = 0
+	p.Exhaustion = 3.95
+	p.Position = spatial.Vec3{X: 1, Y: 64, Z: 0}
+
+	applyJavaMovementExhaustion(p, 0, 0, nil)
+	food, _, exhaustion := p.HungerSnapshot()
+	if food != 19 || exhaustion <= 0 || exhaustion >= 1 {
+		t.Fatalf("sprint hunger = food %d exhaustion %.2f, want 19 and rollover remainder", food, exhaustion)
+	}
+}
 
 func TestReviveProvidesRespawnInvulnerability(t *testing.T) {
 	p := &player.Player{
