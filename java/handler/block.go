@@ -535,7 +535,7 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			return openFurnace(p, conn, w, spatial.BlockPos{X: bx, Y: by, Z: bz}, targetBlock.ResourceLocation())
 		}
 		if IsWorkstation(targetBlock.ResourceLocation()) {
-			return openWorkstation(p, conn, spatial.BlockPos{X: bx, Y: by, Z: bz}, targetBlock.ResourceLocation())
+			return openWorkstation(p, conn, w, spatial.BlockPos{X: bx, Y: by, Z: bz}, targetBlock.ResourceLocation())
 		}
 		return sendOpenScreen(conn, 1, menuType, title)
 	}
@@ -645,6 +645,15 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	case block.ResourceLocation() == "minecraft:decorated_pot":
 		applyBlockChange(px, py, pz, block, w, mgr)
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
+	case block.ResourceLocation() == "minecraft:grindstone":
+		block.Properties = javaGrindstonePlacementState(face, p.Rotation.Yaw)
+		applyBlockChange(px, py, pz, block, w, mgr)
+	case block.ResourceLocation() == "minecraft:loom" ||
+		block.ResourceLocation() == "minecraft:stonecutter" ||
+		block.ResourceLocation() == "minecraft:cartography_table" ||
+		block.ResourceLocation() == "minecraft:smithing_table":
+		block.Properties = map[string]string{"facing": chestFacingFromYaw(p.Rotation.Yaw)}
+		applyBlockChange(px, py, pz, block, w, mgr)
 	default:
 		applyBlockChange(px, py, pz, block, w, mgr)
 	}
@@ -999,6 +1008,29 @@ func javaButtonPlacementState(block coreworld.Block, face int32, yaw float32, w 
 	}
 	block.Properties = map[string]string{"face": buttonFace, "facing": facing, "powered": "false"}
 	return block, true
+}
+
+// javaGrindstonePlacementState returns the block properties for a grindstone
+// based on the clicked face and the player's yaw. Grindstone supports floor,
+// wall, and ceiling mounting (like a button) but has no support requirement.
+func javaGrindstonePlacementState(face int32, yaw float32) map[string]string {
+	gFace := "wall"
+	facing := bedFacingFromYaw(yaw)
+	switch face {
+	case 0:
+		gFace = "ceiling"
+	case 1:
+		gFace = "floor"
+	case 2:
+		facing = "north"
+	case 3:
+		facing = "south"
+	case 4:
+		facing = "west"
+	case 5:
+		facing = "east"
+	}
+	return map[string]string{"face": gFace, "facing": facing}
 }
 
 func replaceJavaBucket(p *player.Player, replacement string) {
