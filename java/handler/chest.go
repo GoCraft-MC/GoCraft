@@ -14,6 +14,11 @@ const (
 	chestSlotCount             = 27 // single chest
 	doubleChestSlotCount       = 54 // double chest
 	doubleChestMenuType  int32 = 5  // minecraft:generic_9x6
+
+	// CrafterDisabledSlotMetaIndex is a sentinel slot index stored in the
+	// block entity to persist the 9-bit disabled-slot bitmask. It is never
+	// a real inventory slot (crafter has slots 0-8 only).
+	CrafterDisabledSlotMetaIndex = 255
 )
 
 // openChest opens a single or double chest at pos.  For double chests the
@@ -79,10 +84,15 @@ func openStorageContainer(p *player.Player, conn *network.ClientConn, w *corewor
 	p.OpenContainerPartnerPos = spatial.BlockPos{}
 	p.OpenContainerHasPartner = false
 	p.ContainerSlots = make([]player.ItemStack, javaStorageContainerSize(kind))
+	p.CrafterDisabledSlots = 0
 	if kind == "minecraft:ender_chest" {
 		copy(p.ContainerSlots, p.EnderChestInventory[:])
 	} else {
 		for _, item := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
+			if item.Slot == CrafterDisabledSlotMetaIndex {
+				p.CrafterDisabledSlots = uint16(item.Damage)
+				continue
+			}
 			if item.Slot >= 0 && item.Slot < len(p.ContainerSlots) && item.ItemID != "" && item.Count > 0 {
 				p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
 			}
@@ -95,7 +105,13 @@ func openStorageContainer(p *player.Player, conn *network.ClientConn, w *corewor
 	if err := sendOpenScreen(conn, chestContainerID, containerMenuType(kind), containerTitle(kind)); err != nil {
 		return err
 	}
-	return sendChestContainerContent(conn, p)
+	if err := sendChestContainerContent(conn, p); err != nil {
+		return err
+	}
+	if kind == "minecraft:crafter" {
+		return sendCrafterSlotStates(conn, p)
+	}
+	return nil
 }
 
 // RefreshOpenStorageContainer reloads an already-open Java storage screen
@@ -397,11 +413,14 @@ func persistStorageContents(p *player.Player, w *coreworld.World) {
 		copy(p.EnderChestInventory[:], p.ContainerSlots)
 		return
 	}
-	items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots))
+	items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots)+1)
 	for slot, stack := range p.ContainerSlots {
 		if !stack.IsEmpty() {
 			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
 		}
+	}
+	if p.OpenContainerKind == "minecraft:crafter" && p.CrafterDisabledSlots != 0 {
+		items = append(items, coreworld.ContainerItem{Slot: CrafterDisabledSlotMetaIndex, Damage: int(p.CrafterDisabledSlots)})
 	}
 	pos := p.OpenContainerPos
 	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), p.OpenContainerKind, items)
@@ -577,4 +596,57 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
 	}
 	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), kind, items)
+}
+
+// sendCrafterSlotStates sends SetContainerData for each of the 9 crafter
+// slots so the client knows which are disabled (value=1) vs enabled (value=0).
+func sendCrafterSlotStates(conn *network.ClientConn, p *player.Player) error {
+	for slot := 0; slot < 9; slot++ {
+		value := int32(0)
+		if p.CrafterDisabledSlots>>uint(slot)&1 == 1 {
+			value = 1
+		}
+		pkt := protocol.NewBuilder(packetIDSetContainerData).
+			VarInt(int32(chestContainerID)).
+			VarInt(int32(slot)).
+			VarInt(value).
+			Build()
+		if err := conn.WritePacket(pkt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// handleCrafterButtonClick toggles a crafter slot's disabled state when the
+// player right-clicks its slot header. The Java client sends a
+// ContainerButtonClick with buttonID = slot index (0-8).
+func handleCrafterButtonClick(p *player.Player, conn *network.ClientConn, w *coreworld.World, buttonID int32) error {
+	if p == nil || p.OpenContainerKind != "minecraft:crafter" || buttonID < 0 || buttonID >= 9 {
+		return nil
+	}
+	// Toggle the bit.
+	p.CrafterDisabledSlots ^= 1 << uint(buttonID)
+	// Clear the slot's item if it's now disabled.
+	if p.CrafterDisabledSlots>>uint(buttonID)&1 == 1 && int(buttonID) < len(p.ContainerSlots) {
+		if !p.ContainerSlots[buttonID].IsEmpty() {
+			p.GiveItem(p.ContainerSlots[buttonID])
+			p.ContainerSlots[buttonID] = player.ItemStack{}
+		}
+	}
+	persistStorageContents(p, w)
+	p.ContainerStateID++
+	if conn == nil {
+		return nil
+	}
+	value := int32(0)
+	if p.CrafterDisabledSlots>>uint(buttonID)&1 == 1 {
+		value = 1
+	}
+	pkt := protocol.NewBuilder(packetIDSetContainerData).
+		VarInt(int32(chestContainerID)).
+		VarInt(buttonID).
+		VarInt(value).
+		Build()
+	return conn.WritePacket(pkt)
 }

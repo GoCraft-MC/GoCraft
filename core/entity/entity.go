@@ -93,6 +93,7 @@ const (
 	TypePotion           EntityType = "minecraft:potion"
 	TypeSmallFireball    EntityType = "minecraft:small_fireball"
 	TypeFireball         EntityType = "minecraft:fireball"
+	TypeEyeOfEnder       EntityType = "minecraft:eye_of_ender"
 	TypeWanderingTrader  EntityType = "minecraft:wandering_trader"
 
 	// ── Boats ────────────────────────────────────────────────────────────────

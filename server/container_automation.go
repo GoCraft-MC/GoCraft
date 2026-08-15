@@ -369,8 +369,20 @@ func (s *Server) activateCrafter(world *coreworld.World, dimension int32, x, y, 
 	if !ok || kind != "minecraft:crafter" || len(stacks) != 9 {
 		return
 	}
+	// Load the disabled-slot bitmask from the block entity metadata slot.
+	var disabledSlots uint16
+	for _, item := range world.ContainerItems(x, y, z) {
+		if item.Slot == handler.CrafterDisabledSlotMetaIndex {
+			disabledSlots = uint16(item.Damage)
+			break
+		}
+	}
 	var grid [9]player.ItemStack
-	copy(grid[:], stacks)
+	for i, stack := range stacks {
+		if disabledSlots>>uint(i)&1 == 0 {
+			grid[i] = stack
+		}
+	}
 	result := handler.FindCraftingTableResult(grid)
 	if result.IsEmpty() {
 		handler.BroadcastSoundAt(s.javaSessionsForDimension(dimension), "minecraft:block.dispenser.fail", handler.SoundCategoryBlocks,

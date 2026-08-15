@@ -110,6 +110,40 @@ func UseWindCharge(p *player.Player, w *coreworld.World, mgr *session.Manager, c
 	return true
 }
 
+// UseEnderEye spawns an eye-of-ender projectile that flies upward and forward
+// in the player's look direction. In vanilla the projectile homes toward the
+// nearest stronghold; GoCraft spawns the entity so it is at least visible
+// and broadcast to all nearby players. The entity is removed after ~80 ticks
+// by the simulation tick (same lifecycle as throwables).
+func UseEnderEye(p *player.Player, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32) {
+	if p == nil || w == nil || mgr == nil || nextEntityID == nil || p.Dead || p.GameMode == player.GameModeSpectator {
+		return
+	}
+	id := nextEntityID()
+	var uuid [16]byte
+	binary.BigEndian.PutUint32(uuid[:4], uint32(id))
+	copy(uuid[4:], p.UUID[:12])
+	yaw := float64(p.Rotation.Yaw) * math.Pi / 180
+	pitch := float64(p.Rotation.Pitch) * math.Pi / 180
+	cosPitch := math.Cos(pitch)
+	const speed = 0.9
+	eye := corentity.New(id, uuid, corentity.TypeEyeOfEnder, p.Position.X, p.Position.Y+1.62, p.Position.Z)
+	eye.OwnerEntityID = p.EntityID
+	eye.VX = -math.Sin(yaw) * cosPitch * speed
+	eye.VY = -math.Sin(pitch)*speed + 0.15 // slight upward arc like vanilla
+	eye.VZ = math.Cos(yaw) * cosPitch * speed
+	eye.Yaw, eye.Pitch = p.Rotation.Yaw, p.Rotation.Pitch
+	w.Entities.Add(eye)
+	BroadcastSpawnMobInDimension(eye, mgr, p.Dimension)
+	BroadcastSoundAtDimension(mgr, p.Dimension, "minecraft:entity.ender_eye.launch", soundCategoryPlayers,
+		eye.Position.X, eye.Position.Y, eye.Position.Z, 0.5, 1)
+	if p.GameMode != player.GameModeCreative {
+		slot := player.HotbarStart + p.HeldSlot
+		p.Inventory[slot].Count--
+		normalizeStack(&p.Inventory[slot])
+	}
+}
+
 func releaseRangedItem(p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) {
 	if _, _, food := player.FoodValue(p.UsingItemID); food {
 		if !TickJavaFoodUse(p, conn, mgr, time.Now()) {

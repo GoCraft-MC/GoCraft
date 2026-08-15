@@ -151,6 +151,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		breakUnsupportedBlocksAbove(int(bx), int(by), int(bz), w, mgr)
 		broadcastSoundAt(mgr, blockBreakSound(broken.ResourceLocation()), soundCategoryBlocks,
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
+		w.EmitVibration(int(bx), int(by), int(bz))
 
 		// Give drop to player in survival/adventure mode.
 		inventoryChanged := false
@@ -589,6 +590,51 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	}
 
 	block := javaworld.ItemIDToBlock(held.ItemID)
+	// Slab merging: when clicking a slab of the same block type at the matching
+	// half, replace it with a double slab at the slab's position instead of
+	// placing a new block at the adjacent position.
+	if strings.HasSuffix(block.ResourceLocation(), "_slab") {
+		targetSlab := w.GetBlock(int(bx), int(by), int(bz))
+		if targetSlab.ResourceLocation() == block.ResourceLocation() {
+			targetType := targetSlab.Properties["type"]
+			canMerge := false
+			switch face {
+			case 1: // clicking top of target
+				canMerge = targetType == "bottom"
+			case 0: // clicking bottom of target
+				canMerge = targetType == "top"
+			default:
+				// clicking a side: merge if cursor Y places us on the matching half
+				if cursorY < 0.5 {
+					canMerge = targetType == "bottom"
+				} else {
+					canMerge = targetType == "top"
+				}
+			}
+			if canMerge {
+				double := copyBlockProperties(targetSlab)
+				double.Properties["type"] = "double"
+				applyBlockChange(int(bx), int(by), int(bz), double, w, mgr)
+				if p.GameMode == player.GameModeSurvival {
+					slot := player.HotbarStart + p.HeldSlot
+					p.Inventory[slot].Count--
+					normalizeStack(&p.Inventory[slot])
+					p.ContainerStateID++
+					if sess, ok := mgr.Get(p.UUID); ok {
+						_ = sendSetContainerContent(sess.Conn, p, p.ContainerStateID)
+					}
+				}
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
+		// Place as top/bottom slab based on face and cursor position.
+		slabType := "bottom"
+		if face == 0 || (face >= 2 && cursorY >= 0.5) {
+			slabType = "top"
+		}
+		block.Properties = map[string]string{"type": slabType, "waterlogged": "false"}
+	}
 	if block.ResourceLocation() == "minecraft:redstone_wire" {
 		if !coreworld.IsSolidLandingSurface(w.GetBlock(px, py-1, pz).ResourceLocation()) {
 			sendAcknowledgeBlockChange(mgr, p, seq)
