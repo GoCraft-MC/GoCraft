@@ -158,6 +158,9 @@ type Player struct {
 	CraftingGrid         [9]ItemStack
 	CraftingResult       ItemStack
 	CarriedItem          ItemStack
+	// CrafterDisabledSlots is a 9-bit bitmask (bit N = slot N is disabled)
+	// for the currently open crafter block. Persisted to the block entity.
+	CrafterDisabledSlots uint16
 	QuickCraftButton     byte
 	QuickCraftSlots      []int
 }

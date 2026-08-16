@@ -192,6 +192,17 @@ func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network
 	case packetIDContainerClose:
 		return handleContainerClose(pkt, p, conn, w)
 	case packetIDContainerButtonClick:
+		if p.OpenContainerKind == "minecraft:crafter" {
+			r := pkt.Reader()
+			if _, err := protocol.ReadVarInt(r); err != nil { // windowID
+				return err
+			}
+			buttonID, err := protocol.ReadVarInt(r)
+			if err != nil {
+				return err
+			}
+			return handleCrafterButtonClick(p, conn, w, buttonID)
+		}
 		return handleWorkstationButtonClick(pkt, p, conn)
 	}
 	return nil

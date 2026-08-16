@@ -186,6 +186,29 @@ func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientC
 		p.UsingItemID = p.Inventory[heldSlot].ItemID
 		p.UsingItemSince = time.Now()
 		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:map":
+		// Empty map → filled map. Map ID is derived from a global counter stored
+		// in the Damage field of the resulting item (damage=0 → mapID=0, etc.).
+		// The client renders the map content separately; for now we just convert
+		// the item so it has an item type the client recognises as a map.
+		if p.GameMode != player.GameModeSpectator {
+			if p.GameMode == player.GameModeCreative {
+				// Creative: give a filled map without consuming the original.
+				p.GiveItem(player.ItemStack{ItemID: "minecraft:filled_map", Count: 1})
+			} else {
+				p.Inventory[heldSlot].Count--
+				normalizeStack(&p.Inventory[heldSlot])
+				p.GiveItem(player.ItemStack{ItemID: "minecraft:filled_map", Count: 1})
+			}
+			p.ContainerStateID++
+			if err := sendSetContainerContent(conn, p, p.ContainerStateID); err != nil {
+				return err
+			}
+		}
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:ender_eye":
+		UseEnderEye(p, w, mgr, nextEntityID)
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
 	}
 	armorSlot := armorInventorySlot(p.Inventory[heldSlot].ItemID)
 	if armorSlot < 5 {

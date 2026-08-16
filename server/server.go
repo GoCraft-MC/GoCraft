@@ -1052,6 +1052,11 @@ func (s *Server) applyBedrockStartUseItem(i intent.StartUseItemIntent) {
 		p.HeldSlot = previousHeldSlot
 		return
 	}
+	if stack.ItemID == "minecraft:ender_eye" {
+		handler.UseEnderEye(p, s.worldForPlayer(p), s.sessions, s.game.NextEntityID)
+		p.HeldSlot = previousHeldSlot
+		return
+	}
 	p.HeldSlot = previousHeldSlot
 	if stack.ItemID == "minecraft:wind_charge" {
 		previousHeldSlot := p.HeldSlot
@@ -4174,6 +4179,7 @@ func (s *Server) activateSculkSensors(events [][3]int) []coreworld.BlockChange {
 					power := max(1, 15-int(math.Floor(distance*15/8)))
 					replacement.Properties["power"] = strconv.Itoa(power)
 					s.world.SetBlock(x, y, z, replacement)
+					s.world.Redstone.NotifyChange(x, y, z)
 					s.world.BlockPhysics.ScheduleSculkSensor(x, y, z, s.worldAge, 30)
 					activated[position] = struct{}{}
 					changes = append(changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: replacement})
@@ -4213,6 +4219,7 @@ func (s *Server) processSculkSensorUpdate(x, y, z int, changes *[]coreworld.Bloc
 		return
 	}
 	s.world.SetBlock(x, y, z, replacement)
+	s.world.Redstone.NotifyChange(x, y, z)
 	*changes = append(*changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: replacement})
 }
 
