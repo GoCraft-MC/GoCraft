@@ -327,7 +327,7 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 		p.ContainerStateID++
 		return sendSetContainerContent(conn, p, p.ContainerStateID)
 	}
-	if windowID == craftingTableContainerID && p.OpenContainerID == windowID {
+	if windowID == craftingTableContainerID && p.OpenContainerID == windowID && p.OpenContainerKind == "minecraft:crafting_table" {
 		returnCraftingGrid(p)
 		p.OpenContainerID = 0
 		p.OpenContainerKind = ""

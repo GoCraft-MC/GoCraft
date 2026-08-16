@@ -388,8 +388,8 @@ func cmdVersion(ctx CommandContext) error {
 }
 
 func cmdSummon(ctx CommandContext) error {
-	if len(ctx.Args) < 1 || len(ctx.Args) > 2 {
-		return fmt.Errorf("usage: /summon <mob> [villager_profession]")
+	if len(ctx.Args) < 1 {
+		return fmt.Errorf("usage: /summon <mob> [x y z] [villager_profession]")
 	}
 	if ctx.Player == nil || ctx.World == nil || ctx.Manager == nil {
 		return fmt.Errorf("world state is unavailable")
@@ -403,14 +403,30 @@ func cmdSummon(ctx CommandContext) error {
 		return fmt.Errorf("unknown mob %q; use tab completion", ctx.Args[0])
 	}
 
+	// Parse optional coordinates: /summon <mob> <x> <y> <z>
+	summonX := ctx.Player.Position.X + 1.5
+	summonY := ctx.Player.Position.Y
+	summonZ := ctx.Player.Position.Z
+	remainArgs := ctx.Args[1:]
+	if len(remainArgs) >= 3 {
+		if x, err := strconv.ParseFloat(remainArgs[0], 64); err == nil {
+			if y, err := strconv.ParseFloat(remainArgs[1], 64); err == nil {
+				if z, err := strconv.ParseFloat(remainArgs[2], 64); err == nil {
+					summonX, summonY, summonZ = x, y, z
+					remainArgs = remainArgs[3:]
+				}
+			}
+		}
+	}
+
 	professionName := "normal"
-	if len(ctx.Args) == 2 {
+	if len(remainArgs) >= 1 {
 		if mobName != "villager" {
 			return fmt.Errorf("villager professions can only be used with /summon villager")
 		}
-		professionName = strings.ToLower(strings.TrimPrefix(ctx.Args[1], "minecraft:"))
+		professionName = strings.ToLower(strings.TrimPrefix(remainArgs[0], "minecraft:"))
 		if !containsName(villagerProfessionNames, professionName) {
-			return fmt.Errorf("unknown villager profession %q; use tab completion", ctx.Args[1])
+			return fmt.Errorf("unknown villager profession %q; use tab completion", remainArgs[0])
 		}
 	}
 
@@ -421,14 +437,13 @@ func cmdSummon(ctx CommandContext) error {
 	uuid[6] = (uuid[6] & 0x0f) | 0x40
 	uuid[8] = (uuid[8] & 0x3f) | 0x80
 
-	position := ctx.Player.Position
 	entity := corentity.New(
 		ctx.NextEntityID(),
 		uuid,
 		corentity.EntityType("minecraft:"+mobName),
-		position.X+1.5,
-		position.Y,
-		position.Z,
+		summonX,
+		summonY,
+		summonZ,
 	)
 	entity.OnGround = ctx.Player.OnGround
 	if mobName == "villager" {
@@ -541,32 +556,36 @@ func buildGameModeUpdate(p *player.Player) *protocol.Packet {
 
 func cmdTp(ctx CommandContext) error {
 	if len(ctx.Args) == 0 {
-		return fmt.Errorf("usage: /tp <x> <y> <z>  or  /tp <player>")
+		return fmt.Errorf("usage: /tp <x> <y> <z>  |  /tp <player>  |  /tp <player> <x> <y> <z>")
 	}
 
+	// /tp <x> <y> <z> — teleport self to coordinates.
 	if len(ctx.Args) >= 3 {
-		// Coordinate teleport.
-		x, err := strconv.ParseFloat(ctx.Args[0], 64)
-		if err != nil {
-			return fmt.Errorf("invalid x: %q", ctx.Args[0])
+		x, errX := strconv.ParseFloat(ctx.Args[0], 64)
+		y, errY := strconv.ParseFloat(ctx.Args[1], 64)
+		z, errZ := strconv.ParseFloat(ctx.Args[2], 64)
+		if errX == nil && errY == nil && errZ == nil {
+			if err := ctx.TeleportTo(x, y, z); err != nil {
+				return fmt.Errorf("teleporting: %w", err)
+			}
+			_ = sendSystemMessage(ctx.Conn,
+				fmt.Sprintf("Teleported to %.2f %.2f %.2f", x, y, z))
+			return nil
 		}
-		y, err := strconv.ParseFloat(ctx.Args[1], 64)
-		if err != nil {
-			return fmt.Errorf("invalid y: %q", ctx.Args[1])
-		}
-		z, err := strconv.ParseFloat(ctx.Args[2], 64)
-		if err != nil {
-			return fmt.Errorf("invalid z: %q", ctx.Args[2])
-		}
-		if err := ctx.TeleportTo(x, y, z); err != nil {
-			return fmt.Errorf("teleporting: %w", err)
-		}
-		_ = sendSystemMessage(ctx.Conn,
-			fmt.Sprintf("Teleported to %.2f %.2f %.2f", x, y, z))
-		return nil
 	}
 
-	// Player-name teleport.
+	// /tp <player> <x> <y> <z> — teleport another player to coordinates.
+	if len(ctx.Args) >= 4 {
+		targetName := ctx.Args[0]
+		x, errX := strconv.ParseFloat(ctx.Args[1], 64)
+		y, errY := strconv.ParseFloat(ctx.Args[2], 64)
+		z, errZ := strconv.ParseFloat(ctx.Args[3], 64)
+		if errX == nil && errY == nil && errZ == nil {
+			return tpPlayerToCoords(ctx, targetName, x, y, z)
+		}
+	}
+
+	// /tp <player> — teleport self to player.
 	targetName := ctx.Args[0]
 	if ctx.FindPlayer != nil {
 		if target := ctx.FindPlayer(targetName); target != nil {
@@ -589,6 +608,32 @@ func cmdTp(ctx CommandContext) error {
 			}
 			_ = sendSystemMessage(ctx.Conn,
 				fmt.Sprintf("Teleported to %s", s.Player.Username))
+			return nil
+		}
+	}
+	return fmt.Errorf("player not found: %s", targetName)
+}
+
+func tpPlayerToCoords(ctx CommandContext, targetName string, x, y, z float64) error {
+	if ctx.TeleportPlayer == nil {
+		return fmt.Errorf("teleport service is unavailable")
+	}
+	// Find the target player.
+	if ctx.FindPlayer != nil {
+		if target := ctx.FindPlayer(targetName); target != nil {
+			if err := ctx.TeleportPlayer(target, x, y, z); err != nil {
+				return fmt.Errorf("teleporting %s: %w", target.Username, err)
+			}
+			_ = sendCommandMessage(ctx, fmt.Sprintf("Teleported %s to %.2f %.2f %.2f", target.Username, x, y, z))
+			return nil
+		}
+	}
+	for _, s := range ctx.Manager.SnapshotAll() {
+		if strings.EqualFold(s.Player.Username, targetName) {
+			if err := ctx.TeleportPlayer(s.Player, x, y, z); err != nil {
+				return fmt.Errorf("teleporting %s: %w", s.Player.Username, err)
+			}
+			_ = sendCommandMessage(ctx, fmt.Sprintf("Teleported %s to %.2f %.2f %.2f", s.Player.Username, x, y, z))
 			return nil
 		}
 	}
