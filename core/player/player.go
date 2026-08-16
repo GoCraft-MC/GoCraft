@@ -106,6 +106,10 @@ type Player struct {
 	LastVibrationPosition spatial.Vec3
 	HasVibrationPosition  bool
 	LastWindChargeUse     time.Time
+	// CrossbowLoaded is true when the player has completed a full crossbow draw
+	// (≥25 ticks). Vanilla crossbow requires two actions: draw to load, then
+	// right-click again to fire. Cleared on fire or on slot change.
+	CrossbowLoaded bool
 
 	// EntityID is the server-assigned entity ID used in packets.
 	// It is assigned by the game core when the player joins.

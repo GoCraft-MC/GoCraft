@@ -179,11 +179,17 @@ func releaseRangedItem(p *player.Player, w *coreworld.World, mgr *session.Manage
 		speed = power * 3
 		damage = float32(2 + power*4)
 	case "minecraft:crossbow":
+		// Vanilla crossbow: releasing after ≥25 ticks loads the crossbow but
+		// does NOT fire. A second right-click fires the loaded arrow.
 		if ticks < 25 || !consumeArrow(p) {
 			return
 		}
-		speed, damage = 3.15, 9
-		sound = "minecraft:item.crossbow.shoot"
+		p.CrossbowLoaded = true
+		if mgr != nil {
+			BroadcastSoundAt(mgr, "minecraft:item.crossbow.loading_end", soundCategoryPlayers,
+				p.Position.X, p.Position.Y, p.Position.Z, 1, 1)
+		}
+		return
 	case "minecraft:trident":
 		if ticks < 10 {
 			return
@@ -213,6 +219,36 @@ func releaseRangedItem(p *player.Player, w *coreworld.World, mgr *session.Manage
 	w.Entities.Add(projectile)
 	BroadcastSpawnMob(projectile, mgr)
 	BroadcastSoundAt(mgr, sound, soundCategoryPlayers,
+		projectile.Position.X, projectile.Position.Y, projectile.Position.Z, 1, 1)
+	damageHeldItem(p, conn, 1)
+}
+
+// fireCrossbowLoaded fires the stored arrow from a loaded crossbow.
+// Called when the player right-clicks with a crossbow that has CrossbowLoaded=true.
+func fireCrossbowLoaded(p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) {
+	if p == nil || w == nil || mgr == nil || nextEntityID == nil || p.Dead || p.GameMode == player.GameModeSpectator {
+		return
+	}
+	id := nextEntityID()
+	var uuid [16]byte
+	binary.BigEndian.PutUint32(uuid[:4], uint32(id))
+	copy(uuid[4:], p.UUID[:12])
+	yaw := float64(p.Rotation.Yaw) * math.Pi / 180
+	pitch := float64(p.Rotation.Pitch) * math.Pi / 180
+	cosPitch := math.Cos(pitch)
+	const speed = 3.15
+	const damage = float32(9)
+	projectile := corentity.New(id, uuid, corentity.TypeArrow, p.Position.X, p.Position.Y+1.52, p.Position.Z)
+	projectile.OwnerEntityID = p.EntityID
+	projectile.ProjectileDamage = damage
+	projectile.VX = -math.Sin(yaw) * cosPitch * speed
+	projectile.VY = -math.Sin(pitch) * speed
+	projectile.VZ = math.Cos(yaw) * cosPitch * speed
+	projectile.Yaw = p.Rotation.Yaw
+	projectile.Pitch = p.Rotation.Pitch
+	w.Entities.Add(projectile)
+	BroadcastSpawnMob(projectile, mgr)
+	BroadcastSoundAt(mgr, "minecraft:item.crossbow.shoot", soundCategoryPlayers,
 		projectile.Position.X, projectile.Position.Y, projectile.Position.Z, 1, 1)
 	damageHeldItem(p, conn, 1)
 }
