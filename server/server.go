@@ -140,6 +140,7 @@ type mobAI struct {
 	attackCooldown int // ticks until next melee swing
 	bowDrawTicks   int // ticks remaining before a skeleton releases its arrow
 	fuseTick       int // creeper fuse progress (30 ticks to detonation)
+	angered        bool // enderman: true once provoked (by staring), stays true until target lost
 	path           []spatial.Vec3
 	pathIndex      int
 	pathGoal       spatial.BlockPos
@@ -1612,14 +1613,22 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 	if attacker == nil || attacker.Dead || attacker.GameMode == player.GameModeSpectator {
 		return
 	}
-	damage := player.LegacyAttackDamage(attacker.HeldItem().ItemID)
+	heldID := attacker.HeldItem().ItemID
+	damage := player.LegacyAttackDamage(heldID)
 	if attacker.AttackCooldown {
-		if value, _, ok := player.AttackAttributes(attacker.HeldItem().ItemID); ok {
+		if value, _, ok := player.AttackAttributes(heldID); ok {
 			damage = value
 		}
 		if !attacker.LastAttack.IsZero() && time.Since(attacker.LastAttack) < 625*time.Millisecond {
 			return
 		}
+	}
+	// Mace smash attack: while falling, each block of fall distance adds bonus damage.
+	// Vanilla formula: bonus = 3 * floor(fallDistance) when fallDistance ≥ 1.5.
+	// Source: vanilla Mace item and PumpkinMC mace item logic.
+	isMaceSmash := heldID == "minecraft:mace" && !attacker.OnGround && attacker.FallDistance >= 1.5
+	if isMaceSmash {
+		damage += float32(math.Floor(attacker.FallDistance)) * 3
 	}
 
 	var targetPlayer *player.Player
@@ -1643,6 +1652,10 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 			damaged = handler.DamagePlayerFromSource(targetSession, damage, "was slain by "+attacker.Username, s.sessions, attacker.Position.X, attacker.Position.Z)
 		}
 		if damaged {
+			// Mace smash: reset fall distance so the attacker takes no fall damage.
+			if isMaceSmash {
+				attacker.FallDistance = 0
+			}
 			horizontal, vertical := attacker.KnockbackHorizontal, attacker.KnockbackVertical
 			if horizontal <= 0 {
 				horizontal = 0.4
@@ -3482,11 +3495,21 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 		dz := candidate.Player.Position.Z - e.Position.Z
 		distance := math.Hypot(dx, dz)
 		if distance < nearest && math.Abs(candidate.Player.Position.Y-e.Position.Y) <= 16 {
+			// Endermen only target players who stare at them (unless already angered).
+			if e.Type == corentity.TypeEnderman && !ai.angered {
+				if !isPlayerStaringAtEnderman(candidate.Player, e) {
+					continue
+				}
+				ai.angered = true
+			}
 			nearest = distance
 			target = candidate
 		}
 	}
 	if target == nil {
+		if e.Type == corentity.TypeEnderman {
+			ai.angered = false
+		}
 		if entityTarget := s.closestPumpkinEntityTarget(e, nearest); entityTarget != nil {
 			s.tickHostileAgainstEntity(e, ai, entityTarget)
 			return

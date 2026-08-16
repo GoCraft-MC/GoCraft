@@ -341,6 +341,18 @@ func (p *Player) HealFull() bool {
 	return true
 }
 
+// RestoreFromTotem is called when a totem of undying prevents death.
+// The player's Dead flag is cleared, health set to 1, and invulnerability
+// applied for 1 second so residual damage packets don't immediately re-kill.
+func (p *Player) RestoreFromTotem() {
+	p.healthMu.Lock()
+	defer p.healthMu.Unlock()
+	p.Health = 1
+	p.Dead = false
+	p.LastDamageCause = ""
+	p.InvulnerableUntil = time.Now().Add(1 * time.Second)
+}
+
 // Revive restores a dead player to the standard full survival state.
 func (p *Player) Revive() {
 	p.healthMu.Lock()

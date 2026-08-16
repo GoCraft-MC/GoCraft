@@ -307,7 +307,70 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 		p.Position.X, p.Position.Y+1.5, p.Position.Z, 1, 1)
 	BroadcastSoundAt(mgr, "minecraft:entity.player.burp", soundCategoryPlayers,
 		p.Position.X, p.Position.Y+1.5, p.Position.Z, 0.5, 1)
+	applyFoodEffect(conn, p, consumedID)
 	return true
+}
+
+// applyFoodEffect sends any status-effect side effects for eating a food item.
+// Vanilla data source: Pumpkin-master living.rs and vanilla food component data.
+func applyFoodEffect(conn *network.ClientConn, p *player.Player, itemID string) {
+	if conn == nil {
+		return
+	}
+	effectID := func(name string) int32 { return javaworld.MobEffectID(name) }
+	sendEffect := func(name string, amplifier, durationTicks int32) {
+		id := effectID(name)
+		if id < 0 {
+			return
+		}
+		pkt := protocol.NewBuilder(packetIDUpdateMobEffect).
+			VarInt(p.EntityID).
+			VarInt(id).
+			VarInt(amplifier).
+			VarInt(durationTicks).
+			Byte(0x06).
+			Build()
+		_ = conn.WritePacket(pkt)
+	}
+	// Probability gate using entity ID as a simple deterministic seed.
+	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff
+	roll100 := roll % 100
+	switch itemID {
+	case "minecraft:rotten_flesh":
+		// 80% chance of Hunger I for 30 s (600 ticks). Vanilla: amplifier 0 = level I.
+		if roll100 < 80 {
+			sendEffect("minecraft:hunger", 0, 600)
+		}
+	case "minecraft:chicken":
+		// 30% chance of Hunger I for 30 s.
+		if roll100 < 30 {
+			sendEffect("minecraft:hunger", 0, 600)
+		}
+	case "minecraft:spider_eye":
+		// 100% Poison I for 5 s (100 ticks).
+		sendEffect("minecraft:poison", 0, 100)
+	case "minecraft:poisonous_potato":
+		// 60% chance of Poison IV for 5 s (100 ticks).
+		if roll100 < 60 {
+			sendEffect("minecraft:poison", 3, 100)
+		}
+	case "minecraft:pufferfish":
+		// Poison IV 60 s (1200t), Hunger III 15 s (300t), Nausea II 15 s (300t).
+		sendEffect("minecraft:poison", 3, 1200)
+		sendEffect("minecraft:hunger", 2, 300)
+		sendEffect("minecraft:nausea", 1, 300)
+	case "minecraft:golden_apple":
+		// Regeneration II 5 s (100t), Absorption I 2 min (2400t).
+		sendEffect("minecraft:regeneration", 1, 100)
+		sendEffect("minecraft:absorption", 0, 2400)
+	case "minecraft:enchanted_golden_apple":
+		// Regeneration V 30 s (600t), Absorption IV 2 min (2400t),
+		// Resistance I 5 min (6000t), Fire Resistance I 5 min (6000t).
+		sendEffect("minecraft:regeneration", 4, 600)
+		sendEffect("minecraft:absorption", 3, 2400)
+		sendEffect("minecraft:resistance", 0, 6000)
+		sendEffect("minecraft:fire_resistance", 0, 6000)
+	}
 }
 
 func clearJavaFoodUse(p *player.Player) {
