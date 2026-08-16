@@ -106,6 +106,14 @@ type Player struct {
 	LastVibrationPosition spatial.Vec3
 	HasVibrationPosition  bool
 	LastWindChargeUse     time.Time
+	// LastAttackerEntityID is the entity ID of the last mob that dealt damage to
+	// this player. Used by tamed wolves to select a retaliation target.
+	// Reset to 0 when the player respawns or the wolf loses the target.
+	LastAttackerEntityID int32
+	// LastAttackedEntityID is the entity ID of the last entity this player hit.
+	// Used by tamed wolves (OwnerHurtTarget) to assist during player combat.
+	LastAttackedEntityID int32
+
 	// CrossbowLoaded is true when the player has completed a full crossbow draw
 	// (≥25 ticks). Vanilla crossbow requires two actions: draw to load, then
 	// right-click again to fire. Cleared on fire or on slot change.

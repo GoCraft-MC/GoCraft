@@ -1681,6 +1681,7 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 		if entity, ok := attackerWorld.Entities.Get(i.TargetID); ok && !entity.Dead && attacker.Position.Distance(entity.Position) <= 3.25 &&
 			attackerWorld.QueueEntityDamageFrom(entity.EntityID, damage, attacker.Position.X, attacker.Position.Z) {
 			attacker.LastAttack = time.Now()
+			attacker.LastAttackedEntityID = entity.EntityID
 			s.damageBedrockHeldItem(attacker, 1)
 		}
 	}
@@ -3174,6 +3175,98 @@ func (s *Server) startPassiveMobPanic(e *corentity.Entity, hit coreworld.EntityD
 	e.Sleeping = false
 }
 
+// tickTamedWolfCombat handles combat for a tamed wolf when its owner is under
+// attack or actively fighting. Implements OwnerHurtByTargetGoal and
+// OwnerHurtTargetGoal from PumpkinMC wolf.rs. Returns true when the wolf is
+// actively pursuing a target (so normal wander AI should be skipped).
+func (s *Server) tickTamedWolfCombat(e *corentity.Entity, ai *mobAI) bool {
+	if e == nil || !e.Tamed || e.Sitting || s.world == nil {
+		return false
+	}
+	// Find the owner session.
+	var ownerSession *session.Session
+	for _, sess := range s.allPlayerSessions() {
+		if sess.Player == nil {
+			continue
+		}
+		if e.TameOwnerEntityID != 0 && sess.Player.EntityID == e.TameOwnerEntityID {
+			ownerSession = sess
+			break
+		}
+	}
+	if ownerSession == nil || ownerSession.Player == nil {
+		return false
+	}
+	owner := ownerSession.Player
+
+	// Determine which entity to target:
+	// 1. Whoever just hurt the owner (OwnerHurtByTargetGoal)
+	// 2. Whoever the owner just attacked (OwnerHurtTargetGoal)
+	targetEntityID := int32(0)
+	if owner.LastAttackerEntityID != 0 {
+		targetEntityID = owner.LastAttackerEntityID
+	} else if owner.LastAttackedEntityID != 0 {
+		targetEntityID = owner.LastAttackedEntityID
+	}
+	if targetEntityID == 0 {
+		// No combat cue — but if the wolf already has a target, continue chasing.
+		if ai.hasTarget && ai.targetEntityID != 0 {
+			targetEntityID = ai.targetEntityID
+		} else {
+			return false
+		}
+	}
+
+	target, ok := s.world.Entities.Get(targetEntityID)
+	if !ok || target.Dead || target.EntityID == e.EntityID {
+		ai.hasTarget = false
+		ai.targetEntityID = 0
+		return false
+	}
+
+	// Wolf stays within 16 blocks of its owner; give up if the target wanders too far.
+	distOwner := math.Hypot(e.Position.X-owner.Position.X, e.Position.Z-owner.Position.Z)
+	if distOwner > 16 {
+		ai.hasTarget = false
+		ai.targetEntityID = 0
+		return false
+	}
+
+	ai.hasTarget = true
+	ai.targetEntityID = targetEntityID
+	ai.targetX, ai.targetZ = target.Position.X, target.Position.Z
+
+	dx := target.Position.X - e.Position.X
+	dz := target.Position.Z - e.Position.Z
+	dist := math.Hypot(dx, dz)
+	if dist > 0.001 {
+		e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	}
+
+	if ai.attackCooldown > 0 {
+		ai.attackCooldown--
+	}
+
+	const wolfMeleeRange = 1.8
+	if dist <= wolfMeleeRange && ai.attackCooldown == 0 {
+		ai.attackCooldown = 20
+		if s.mobHasLineOfSight(e, target.Position, 1.4) {
+			// Wolf deals 2-4 damage depending on variant (use 4 base).
+			s.world.QueueEntityDamageFrom(target.EntityID, 4, e.Position.X, e.Position.Z)
+			handler.BroadcastSoundAt(s.sessions, "minecraft:entity.wolf.hurt", handler.SoundCategoryHostile,
+				e.Position.X, e.Position.Y, e.Position.Z, 1, 1)
+		}
+		e.VX, e.VZ = 0, 0
+		return true
+	}
+
+	const wolfSpeed = 0.3
+	if !s.navigateMob(e, ai, spatial.Vec3{X: ai.targetX, Y: e.Position.Y, Z: ai.targetZ}, wolfSpeed) {
+		e.VX, e.VZ = dx/dist*wolfSpeed, dz/dist*wolfSpeed
+	}
+	return true
+}
+
 // tickPassiveMobAI advances wander AI for a single passive mob.
 // Returns true if the entity's Sleeping state changed this tick (so the caller
 // can broadcast a pose metadata update).
@@ -3182,6 +3275,13 @@ func (s *Server) startPassiveMobPanic(e *corentity.Entity, hit coreworld.EntityD
 // All other passive mobs roam freely, occasionally pausing.
 func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 	ai := s.mobAIFor(e)
+
+	// Tamed wolves with a live target assist their owner in combat.
+	if e.Type == corentity.TypeWolf && e.Tamed && !e.Sitting {
+		if s.tickTamedWolfCombat(e, ai) {
+			return false
+		}
+	}
 	wasAsleep := ai.sleepingWas
 	validBed := s.validVillagerBed(e)
 	if e.Type == corentity.TypeVillager && e.Sleeping && !validBed {
@@ -3642,6 +3742,7 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 			handler.DamagePlayerFromSource(target, damage, "was slain by a "+name, s.sessions, e.Position.X, e.Position.Z)
 			healthAfter, _, _, _ := target.Player.HealthSnapshot()
 			if healthAfter < healthBefore {
+				target.Player.LastAttackerEntityID = e.EntityID
 				s.sendLegacyPlayerKnockback(target, e.Position.X, e.Position.Z, 0.4, 0.4)
 			}
 		}
