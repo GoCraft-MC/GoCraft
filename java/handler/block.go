@@ -755,6 +755,25 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		}
 		placed.Properties["powered"] = "false"
 		applyBlockChange(px, py, pz, placed, w, mgr)
+	case block.ResourceLocation() == "minecraft:chain" ||
+		block.ResourceLocation() == "minecraft:end_rod" ||
+		strings.HasSuffix(block.ResourceLocation(), "_pillar") ||
+		block.ResourceLocation() == "minecraft:basalt" ||
+		block.ResourceLocation() == "minecraft:polished_basalt" ||
+		block.ResourceLocation() == "minecraft:bone_block" ||
+		block.ResourceLocation() == "minecraft:hay_block" ||
+		block.ResourceLocation() == "minecraft:purpur_pillar" ||
+		block.ResourceLocation() == "minecraft:quartz_pillar":
+		// Axis-rotatable blocks: face determines orientation.
+		axis := "y"
+		switch face {
+		case 2, 3: // north/south face → z axis
+			axis = "z"
+		case 4, 5: // west/east face → x axis
+			axis = "x"
+		}
+		block.Properties = map[string]string{"axis": axis}
+		applyBlockChange(px, py, pz, block, w, mgr)
 	case isJavaStorageContainer(block.ResourceLocation()):
 		switch block.ResourceLocation() {
 		case "minecraft:hopper":
