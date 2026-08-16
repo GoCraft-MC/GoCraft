@@ -76,12 +76,70 @@ func reducedDamage(p *player.Player, damage float32, legacyArmor bool) float32 {
 
 // DamagePlayer applies a normal survival hit using modern armour reduction.
 func DamagePlayer(target *session.Session, rawDamage float32, cause string, mgr *session.Manager) bool {
-	return damagePlayer(target, rawDamage, cause, mgr, false, false)
+	return damagePlayerFromPos(target, rawDamage, cause, mgr, 0, 0, true, false)
+}
+
+// DamagePlayerFromSource applies damage to a player with a known attacker position
+// so the shield blocking direction check can determine if the hit is from the front.
+func DamagePlayerFromSource(target *session.Session, rawDamage float32, cause string, mgr *session.Manager, srcX, srcZ float64) bool {
+	return damagePlayerFromPos(target, rawDamage, cause, mgr, srcX, srcZ, false, false)
 }
 
 // DamagePlayerLegacy applies the pre-1.9 armour formula used by legacy PvP.
 func DamagePlayerLegacy(target *session.Session, rawDamage float32, cause string, mgr *session.Manager) bool {
-	return damagePlayer(target, rawDamage, cause, mgr, true, false)
+	return damagePlayerFromPos(target, rawDamage, cause, mgr, 0, 0, true, false)
+}
+
+// isShieldBypassDamage returns true for damage types that bypass a held shield.
+func isShieldBypassDamage(cause string) bool {
+	switch cause {
+	case "fell out of the world", "hit the ground too hard", "drowned",
+		"tried to swim in lava", "went up in flames", "was pricked to death",
+		"froze to death", "starved to death":
+		return true
+	}
+	return false
+}
+
+func damagePlayerFromPos(target *session.Session, rawDamage float32, cause string, mgr *session.Manager, srcX, srcZ float64, noSource, bypassInvulnerability bool) bool {
+	if target == nil || target.Player == nil || rawDamage <= 0 {
+		return false
+	}
+	p := target.Player
+
+	// Shield blocking check (based on PumpkinMC living.rs:2448-2503).
+	// If the player is using a shield and the attack is from the front, block it.
+	if !bypassInvulnerability && !isShieldBypassDamage(cause) && !noSource {
+		shieldInMain := p.Inventory[player.HotbarStart+p.HeldSlot].ItemID == "minecraft:shield"
+		shieldInOff := p.Inventory[player.OffhandSlot].ItemID == "minecraft:shield"
+		usingShield := (shieldInMain || shieldInOff) &&
+			p.UsingItemID == "minecraft:shield" &&
+			!p.UsingItemSince.IsZero() &&
+			time.Since(p.UsingItemSince) >= 250*time.Millisecond
+
+		if usingShield {
+			// Check if the attack comes from the front hemisphere.
+			// Player's look direction: yaw 0=south (+Z), 90=west (-X), 180=north (-Z), -90=east (+X).
+			yawRad := float64(p.Rotation.Yaw) * math.Pi / 180
+			lookX := -math.Sin(yawRad)
+			lookZ := math.Cos(yawRad)
+			dx, dz := p.Position.X-srcX, p.Position.Z-srcZ
+			dist := math.Hypot(dx, dz)
+			if dist > 0.001 {
+				dx, dz = dx/dist, dz/dist
+			}
+			// Dot product < 0 means attack comes from in front.
+			if lookX*dx+lookZ*dz < 0 {
+				if mgr != nil {
+					BroadcastSoundAt(mgr, "minecraft:item.shield.block", soundCategoryPlayers,
+						p.Position.X, p.Position.Y, p.Position.Z, 1, 1)
+				}
+				return false // Damage fully blocked
+			}
+		}
+	}
+
+	return damagePlayer(target, rawDamage, cause, mgr, false, bypassInvulnerability)
 }
 
 func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr *session.Manager, legacyArmor, bypassInvulnerability bool) bool {

@@ -186,6 +186,10 @@ func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientC
 		p.UsingItemID = p.Inventory[heldSlot].ItemID
 		p.UsingItemSince = time.Now()
 		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:shield":
+		p.UsingItemID = "minecraft:shield"
+		p.UsingItemSince = time.Now()
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
 	case "minecraft:map":
 		// Empty map → filled map. Map ID is derived from a global counter stored
 		// in the Damage field of the resulting item (damage=0 → mapID=0, etc.).

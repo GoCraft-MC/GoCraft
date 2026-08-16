@@ -1638,9 +1638,9 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 		}
 		var damaged bool
 		if attacker.AttackCooldown {
-			damaged = handler.DamagePlayer(targetSession, damage, "was slain by "+attacker.Username, s.sessions)
+			damaged = handler.DamagePlayerFromSource(targetSession, damage, "was slain by "+attacker.Username, s.sessions, attacker.Position.X, attacker.Position.Z)
 		} else {
-			damaged = handler.DamagePlayerLegacy(targetSession, damage, "was slain by "+attacker.Username, s.sessions)
+			damaged = handler.DamagePlayerFromSource(targetSession, damage, "was slain by "+attacker.Username, s.sessions, attacker.Position.X, attacker.Position.Z)
 		}
 		if damaged {
 			horizontal, vertical := attacker.KnockbackHorizontal, attacker.KnockbackVertical
@@ -2239,6 +2239,10 @@ func (s *Server) tickEntities() {
 			continue
 		}
 		entity.Damage(event.Amount)
+		if !entity.Dead && event.HasSource {
+			// Apply knockback to all mobs when damaged by a player.
+			s.applyMobKnockback(entity, event)
+		}
 		if isPassiveMob(entity.Type) && !entity.Dead {
 			s.startPassiveMobPanic(entity, event)
 		}
@@ -2382,7 +2386,11 @@ func (s *Server) tickEntities() {
 			if e.Type == corentity.TypeIronGolem || e.Type == corentity.TypeSnowGolem {
 				s.tickGolemAI(e)
 			} else if isHostileMob(e.Type) {
-				s.tickHostileMobAI(e)
+				// Stagger hostile AI: run full AI every 2 ticks per mob.
+				// This halves hostile-mob CPU cost without losing reactivity.
+				if e.AgeTicks%2 == 0 {
+					s.tickHostileMobAI(e)
+				}
 			}
 			endAI()
 		}
@@ -2776,6 +2784,9 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				continue
 			}
 			entity.Damage(event.Amount)
+			if !entity.Dead && event.HasSource {
+				simulation.applyMobKnockback(entity, event)
+			}
 			if isPassiveMob(entity.Type) && !entity.Dead {
 				simulation.startPassiveMobPanic(entity, event)
 			}
@@ -3088,6 +3099,36 @@ func (s *Server) mobAIFor(e *corentity.Entity) *mobAI {
 	}
 	s.mobAIs[e.EntityID] = ai
 	return ai
+}
+
+// applyMobKnockback applies a hit-direction velocity impulse to any mob that
+// was just damaged. Passive mobs also get a full panic via startPassiveMobPanic;
+// this function ensures hostile mobs also visually fly back.
+func (s *Server) applyMobKnockback(e *corentity.Entity, hit coreworld.EntityDamage) {
+	if !hit.HasSource {
+		return
+	}
+	ai := s.mobAIFor(e)
+	dx, dz := e.Position.X-hit.SourceX, e.Position.Z-hit.SourceZ
+	distance := math.Hypot(dx, dz)
+	if distance < 0.01 {
+		angle := ai.rng.Float64() * 2 * math.Pi
+		dx, dz, distance = math.Cos(angle), math.Sin(angle), 1
+	}
+	horizontal := 0.4
+	vertical := 0.4
+	if s.cfg != nil {
+		horizontal = s.cfg.Combat.KnockbackHorizontal
+		vertical = s.cfg.Combat.KnockbackVertical
+	}
+	e.VX = dx / distance * horizontal
+	e.VZ = dz / distance * horizontal
+	if e.OnGround {
+		e.VY = vertical
+	}
+	ai.knockbackTick = 4
+	ai.dirX = dx / distance
+	ai.dirZ = dz / distance
 }
 
 // startPassiveMobPanic makes a recently hurt passive mob jump and sprint away
@@ -3575,7 +3616,7 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 				damage *= 1.5
 			}
 			name := strings.ReplaceAll(strings.TrimPrefix(string(e.Type), "minecraft:"), "_", " ")
-			handler.DamagePlayer(target, damage, "was slain by a "+name, s.sessions)
+			handler.DamagePlayerFromSource(target, damage, "was slain by a "+name, s.sessions, e.Position.X, e.Position.Z)
 			healthAfter, _, _, _ := target.Player.HealthSnapshot()
 			if healthAfter < healthBefore {
 				s.sendLegacyPlayerKnockback(target, e.Position.X, e.Position.Z, 0.4, 0.4)
@@ -4695,7 +4736,7 @@ func (s *Server) explodeAt(cx, cy, cz, radius float64, playerDeathCause string) 
 		}
 		impact := 1 - distance/(radius*2)
 		damage := float32(((impact*impact+impact)/2)*7*(radius*2) + 1)
-		if handler.DamagePlayer(sess, damage, playerDeathCause, s.sessions) {
+		if handler.DamagePlayerFromSource(sess, damage, playerDeathCause, s.sessions, cx, cz) {
 			s.sendLegacyPlayerKnockback(sess, cx, cz, impact*1.2, impact*0.8)
 		}
 	}
