@@ -477,7 +477,7 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	held := p.HeldItem()
 	heldBefore := held.ItemID
 	usedDamageableTool := isBlockUseTool(heldBefore)
-	if hand == 0 && useToolOrPlant(int(bx), int(by), int(bz), face, targetBlock, p, w, mgr) {
+	if hand == 0 && useToolOrPlant(int(bx), int(by), int(bz), face, targetBlock, p, w, mgr, conn) {
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		if usedDamageableTool {
 			damageHeldItem(p, conn, 1)
@@ -520,6 +520,50 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		handleBedInteract(p, int(bx), int(by), int(bz), w, conn, mgr)
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		return nil
+	}
+
+	// Cake right-click: consume a slice (based on PumpkinMC cake.rs).
+	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:cake" {
+		if p.GameMode != player.GameModeSpectator {
+			if eatCakeSlice(p, int(bx), int(by), int(bz), targetBlock, w, mgr, conn) {
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
+	}
+
+	// Candle right-click: snuff lit candle, or add candle to unlit candle stack.
+	if !bypassActivation && isCandleBlock(targetBlock.ResourceLocation()) {
+		if targetBlock.Properties["lit"] == "true" {
+			// Snuff the candle.
+			snuffed := copyBlockProperties(targetBlock)
+			snuffed.Properties["lit"] = "false"
+			applyBlockChange(int(bx), int(by), int(bz), snuffed, w, mgr)
+			broadcastSoundAt(mgr, "minecraft:block.candle.extinguish", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		// Add another candle (same color, up to 4).
+		if !held.IsEmpty() && held.ItemID == candleItemForBlock(targetBlock.ResourceLocation()) {
+			candles, _ := strconv.Atoi(targetBlock.Properties["candles"])
+			if candles < 4 {
+				added := copyBlockProperties(targetBlock)
+				added.Properties["candles"] = strconv.Itoa(candles + 1)
+				applyBlockChange(int(bx), int(by), int(bz), added, w, mgr)
+				if p.GameMode == player.GameModeSurvival {
+					slot := player.HotbarStart + p.HeldSlot
+					p.Inventory[slot].Count--
+					normalizeStack(&p.Inventory[slot])
+					p.ContainerStateID++
+					if sess, ok := mgr.Get(p.UUID); ok {
+						_ = sendSetContainerContent(sess.Conn, p, p.ContainerStateID)
+					}
+				}
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
 	}
 
 	if menuType := containerMenuType(targetBlock.ResourceLocation()); !bypassActivation && menuType >= 0 {
@@ -585,11 +629,20 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		return nil
 	}
-	if !existing.IsAir() {
+	// Track if we are placing into water so we can waterlog the block.
+	placingInWater := existing.ResourceLocation() == "minecraft:water"
+	if !existing.IsAir() && existing.ResourceLocation() != "minecraft:water" && existing.ResourceLocation() != "minecraft:lava" {
 		breakLinkedPlantHalf(px, py, pz, existing, w, mgr)
 	}
 
 	block := javaworld.ItemIDToBlock(held.ItemID)
+	// Apply waterlogged property when placing into a water source.
+	if placingInWater && blockSupportsWaterlogging(block.ResourceLocation()) {
+		if block.Properties == nil {
+			block.Properties = map[string]string{}
+		}
+		block.Properties["waterlogged"] = "true"
+	}
 	// Slab merging: when clicking a slab of the same block type at the matching
 	// half, replace it with a double slab at the slab's position instead of
 	// placing a new block at the adjacent position.
@@ -685,6 +738,10 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			block.Properties = map[string]string{"facing": chestFacingFromYaw(p.Rotation.Yaw), "triggered": "false"}
 		case "minecraft:crafter":
 			block.Properties = map[string]string{"orientation": "north_up", "crafting": "false", "triggered": "false"}
+		default:
+			if isShulkerBox(block.ResourceLocation()) {
+				block.Properties = map[string]string{"facing": shulkerBoxFacing(face)}
+			}
 		}
 		applyBlockChange(px, py, pz, block, w, mgr)
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
@@ -731,6 +788,27 @@ func javaHopperFacing(clickedFace int32) string {
 	}
 }
 
+// shulkerBoxFacing returns the facing property for a shulker box based on the
+// clicked face. The shulker box opens toward the face it was placed on.
+func shulkerBoxFacing(face int32) string {
+	switch face {
+	case 0: // bottom face clicked → opens downward
+		return "down"
+	case 1: // top face clicked → opens upward (default)
+		return "up"
+	case 2:
+		return "south"
+	case 3:
+		return "north"
+	case 4:
+		return "east"
+	case 5:
+		return "west"
+	default:
+		return "up"
+	}
+}
+
 func placementReplaceable(blockName string) bool {
 	switch blockName {
 	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
@@ -742,14 +820,36 @@ func placementReplaceable(blockName string) bool {
 		"minecraft:cornflower", "minecraft:lily_of_the_valley", "minecraft:blue_orchid",
 		"minecraft:sunflower", "minecraft:lilac", "minecraft:rose_bush", "minecraft:peony",
 		"minecraft:wither_rose", "minecraft:torchflower", "minecraft:brown_mushroom",
-		"minecraft:red_mushroom", "minecraft:snow", "minecraft:vine", "minecraft:fire":
+		"minecraft:red_mushroom", "minecraft:snow", "minecraft:vine", "minecraft:fire",
+		"minecraft:water", "minecraft:lava":
 		return true
 	default:
 		return false
 	}
 }
 
-func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.Player, w *coreworld.World, mgr *session.Manager) bool {
+// blockSupportsWaterlogging returns true for blocks that have a waterlogged property.
+func blockSupportsWaterlogging(blockName string) bool {
+	switch blockName {
+	case "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
+		"minecraft:hopper", "minecraft:dispenser", "minecraft:dropper",
+		"minecraft:stairs", "minecraft:slab", "minecraft:fence", "minecraft:fence_gate",
+		"minecraft:wall", "minecraft:lantern", "minecraft:campfire",
+		"minecraft:sea_pickle", "minecraft:coral", "minecraft:coral_fan",
+		"minecraft:coral_block", "minecraft:kelp", "minecraft:seagrass":
+		return true
+	}
+	// Many blocks support waterlogging by suffix
+	for _, suffix := range []string{"_stairs", "_slab", "_fence", "_fence_gate", "_wall",
+		"_trapdoor", "_door", "_sign", "_button", "_pressure_plate"} {
+		if strings.HasSuffix(blockName, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn) bool {
 	held := p.HeldItem()
 	if held.IsEmpty() {
 		return false
@@ -868,6 +968,10 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 			sound = "minecraft:item.bucket.empty_lava"
 		}
 		broadcastSoundAt(mgr, sound, soundCategoryPlayers, float64(px)+0.5, float64(py)+0.5, float64(pz)+0.5, 1, 1)
+		// Fluid interaction: lava meeting water → cobblestone/obsidian.
+		if held.ItemID == "minecraft:lava_bucket" || held.ItemID == "minecraft:water_bucket" {
+			checkFluidInteraction(px, py, pz, w, mgr)
+		}
 		return true
 	}
 	if isHoe(held.ItemID) {
@@ -941,6 +1045,30 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 					p.Inventory[slot].Count--
 					normalizeStack(&p.Inventory[slot])
 				}
+				return true
+			}
+		}
+		// Light campfire / soul campfire.
+		if target.ResourceLocation() == "minecraft:campfire" || target.ResourceLocation() == "minecraft:soul_campfire" {
+			if target.Properties["lit"] != "true" {
+				lit := copyBlockProperties(target)
+				lit.Properties["lit"] = "true"
+				applyBlockChange(x, y, z, lit, w, mgr)
+				broadcastSoundAt(mgr, "minecraft:item.flintandsteel.use", soundCategoryBlocks,
+					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+				damageHeldItem(p, conn, 1)
+				return true
+			}
+		}
+		// Light candles / candle cake.
+		if isCandleBlock(target.ResourceLocation()) {
+			if target.Properties["lit"] != "true" {
+				lit := copyBlockProperties(target)
+				lit.Properties["lit"] = "true"
+				applyBlockChange(x, y, z, lit, w, mgr)
+				broadcastSoundAt(mgr, "minecraft:block.candle.ignite", soundCategoryBlocks,
+					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+				damageHeldItem(p, conn, 1)
 				return true
 			}
 		}
@@ -1079,6 +1207,97 @@ func javaGrindstonePlacementState(face int32, yaw float32) map[string]string {
 	return map[string]string{"face": gFace, "facing": facing}
 }
 
+// checkFluidInteraction checks if a newly placed fluid block at (x,y,z) should
+// create cobblestone or obsidian by reacting with an adjacent opposite fluid.
+// Based on PumpkinMC: lava (still) + water neighbor → obsidian; lava (flowing)
+// + water neighbor → cobblestone.
+func checkFluidInteraction(x, y, z int, w *coreworld.World, mgr *session.Manager) {
+	placed := w.GetBlock(x, y, z)
+	placedLoc := placed.ResourceLocation()
+	isLava := placedLoc == "minecraft:lava"
+	isWater := placedLoc == "minecraft:water"
+	if !isLava && !isWater {
+		return
+	}
+	// Neighbor offsets: N, S, E, W, Up, Down
+	neighbors := [6][3]int{{0, 0, -1}, {0, 0, 1}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}}
+	for i, off := range neighbors {
+		nx, ny, nz := x+off[0], y+off[1], z+off[2]
+		neighbor := w.GetBlock(nx, ny, nz)
+		nLoc := neighbor.ResourceLocation()
+		if isLava && nLoc == "minecraft:water" {
+			// Lava meets water → cobblestone or obsidian.
+			// Still lava (level 0) + water = obsidian; flowing = cobblestone.
+			level := coreworld.FluidLevel(placed)
+			var result coreworld.Block
+			if i == 4 {
+				// Water above lava → lava stays, water becomes stone (not cobblestone).
+				// (Skip — vanilla only generates stone in special still-lava cases.)
+				continue
+			}
+			if level == 0 {
+				result = coreworld.Block{Namespace: "minecraft", Name: "obsidian"}
+			} else {
+				result = coreworld.Block{Namespace: "minecraft", Name: "cobblestone"}
+			}
+			applyBlockChange(x, y, z, result, w, mgr)
+			broadcastSoundAt(mgr, "minecraft:block.lava.extinguish", soundCategoryBlocks,
+				float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+			return
+		}
+		if isWater && nLoc == "minecraft:lava" {
+			// Water meets lava → lava becomes cobblestone (or obsidian if still).
+			level := coreworld.FluidLevel(neighbor)
+			var result coreworld.Block
+			if level == 0 {
+				result = coreworld.Block{Namespace: "minecraft", Name: "obsidian"}
+			} else {
+				result = coreworld.Block{Namespace: "minecraft", Name: "cobblestone"}
+			}
+			applyBlockChange(nx, ny, nz, result, w, mgr)
+			broadcastSoundAt(mgr, "minecraft:block.lava.extinguish", soundCategoryBlocks,
+				float64(nx)+0.5, float64(ny)+0.5, float64(nz)+0.5, 1, 1)
+		}
+	}
+}
+
+// eatCakeSlice handles right-clicking a placed cake block.
+// Based on PumpkinMC cake.rs: each bite restores 2 hunger and 0.4 saturation.
+// The "bites" block property goes from 0 to 6; at bites=6 the block is removed.
+// Returns true if a slice was consumed (or the attempt was made).
+func eatCakeSlice(p *player.Player, x, y, z int, cake coreworld.Block, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn) bool {
+	bites := 0
+	if s, ok := cake.Properties["bites"]; ok {
+		fmt.Sscanf(s, "%d", &bites)
+	}
+	if bites > 6 {
+		return false
+	}
+
+	// Restore 2 hunger + 0.4 saturation in survival/adventure.
+	if p.GameMode != player.GameModeCreative {
+		if !p.ConsumeFoodAllowFull(2, 0.1, false) {
+			return false // Too full to eat
+		}
+		if conn != nil {
+			_ = sendUpdateHealth(conn, p)
+		}
+	}
+
+	bites++
+	if bites >= 7 {
+		// Last slice eaten — remove the cake.
+		applyBlockChange(x, y, z, coreworld.Air, w, mgr)
+	} else {
+		updated := copyBlockProperties(cake)
+		updated.Properties["bites"] = strconv.Itoa(bites)
+		applyBlockChange(x, y, z, updated, w, mgr)
+	}
+	broadcastSoundAt(mgr, "minecraft:entity.generic.eat", soundCategoryPlayers,
+		float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+	return true
+}
+
 func replaceJavaBucket(p *player.Player, replacement string) {
 	if p == nil || p.GameMode == player.GameModeCreative {
 		return
@@ -1094,6 +1313,33 @@ func replaceJavaBucket(p *player.Player, replacement string) {
 
 func isChestBlock(blockName string) bool {
 	return blockName == "minecraft:chest" || blockName == "minecraft:trapped_chest" || blockName == "minecraft:barrel"
+}
+
+// candleItemForBlock returns the item ID that matches a candle block.
+func candleItemForBlock(blockName string) string {
+	// Candle cake variants don't accept additional candles.
+	if strings.HasSuffix(blockName, "_candle_cake") {
+		return ""
+	}
+	// "minecraft:white_candle" → "minecraft:white_candle" (block and item share ID).
+	if strings.HasSuffix(blockName, "_candle") || blockName == "minecraft:candle" {
+		return blockName
+	}
+	return ""
+}
+
+// isCandleBlock returns true for all candle and candle cake block variants.
+func isCandleBlock(name string) bool {
+	if name == "minecraft:candle" || name == "minecraft:candle_cake" {
+		return true
+	}
+	for _, color := range []string{"white", "orange", "magenta", "light_blue", "yellow", "lime",
+		"pink", "gray", "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"} {
+		if name == "minecraft:"+color+"_candle" || name == "minecraft:"+color+"_candle_cake" {
+			return true
+		}
+	}
+	return false
 }
 
 // isBedBlock reports whether a resource location is one of the 16 bed colours.
