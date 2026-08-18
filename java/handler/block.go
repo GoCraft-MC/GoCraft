@@ -522,6 +522,22 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		return nil
 	}
 
+	// Lever right-click: toggle powered state.
+	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:lever" {
+		toggled := copyBlockProperties(targetBlock)
+		if toggled.Properties["powered"] == "true" {
+			toggled.Properties["powered"] = "false"
+		} else {
+			toggled.Properties["powered"] = "true"
+		}
+		applyBlockChange(int(bx), int(by), int(bz), toggled, w, mgr)
+		sound := "minecraft:block.lever.click"
+		broadcastSoundAt(mgr, sound, soundCategoryBlocks,
+			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 0.3, 0.6)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+
 	// Cake right-click: consume a slice (based on PumpkinMC cake.rs).
 	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:cake" {
 		if p.GameMode != player.GameModeSpectator {
@@ -693,7 +709,7 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
-		block.Properties = map[string]string{"north": "none", "east": "none", "south": "none", "west": "none", "power": "0"}
+		block.Properties = redstoneWireConnections(px, py, pz, w)
 	}
 	slog.Info("block place", "player", p.Username,
 		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
@@ -729,6 +745,15 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
+		applyBlockChange(px, py, pz, placed, w, mgr)
+	case block.ResourceLocation() == "minecraft:lever":
+		// Lever uses the same face/facing layout as buttons.
+		placed, ok := javaButtonPlacementState(block, face, p.Rotation.Yaw, w, px, py, pz)
+		if !ok {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		placed.Properties["powered"] = "false"
 		applyBlockChange(px, py, pz, placed, w, mgr)
 	case isJavaStorageContainer(block.ResourceLocation()):
 		switch block.ResourceLocation() {
@@ -1960,4 +1985,49 @@ func consumePlacedBoat(p *player.Player, conn *network.ClientConn) {
 	if conn != nil {
 		_ = SyncPlayerInventory(conn, p)
 	}
+}
+
+// redstoneWireConnections returns the block properties for a redstone wire
+// placed at (x, y, z), computing side connections based on neighbors.
+// A side connects ("side" value) when an adjacent block is redstone wire or a
+// powered component that emits redstone. For simplicity we connect to adjacent
+// redstone_wire blocks at the same level, one above, or one below.
+// PumpkinMC reference: redstone_wire.rs connection logic.
+func redstoneWireConnections(x, y, z int, w *coreworld.World) map[string]string {
+	props := map[string]string{"north": "none", "east": "none", "south": "none", "west": "none", "power": "0"}
+	type offset struct {
+		dx, dz int
+		dir    string
+	}
+	neighbors := []offset{{0, -1, "north"}, {1, 0, "east"}, {0, 1, "south"}, {-1, 0, "west"}}
+	isRedstoneConnectable := func(rl string) bool {
+		return rl == "minecraft:redstone_wire" || rl == "minecraft:lever" ||
+			rl == "minecraft:redstone_torch" || rl == "minecraft:redstone_wall_torch" ||
+			rl == "minecraft:redstone_block" || rl == "minecraft:target" ||
+			strings.HasSuffix(rl, "_button") || strings.HasSuffix(rl, "_pressure_plate") ||
+			rl == "minecraft:observer" || rl == "minecraft:repeater" || rl == "minecraft:comparator"
+	}
+	for _, n := range neighbors {
+		nx, nz := x+n.dx, z+n.dz
+		same := w.GetBlock(nx, y, nz)
+		if isRedstoneConnectable(same.ResourceLocation()) {
+			props[n.dir] = "side"
+			continue
+		}
+		// Check one block up (wire on top of solid block next to us).
+		if coreworld.IsEntitySupportBlock(same.ResourceLocation()) {
+			up := w.GetBlock(nx, y+1, nz)
+			if up.ResourceLocation() == "minecraft:redstone_wire" {
+				props[n.dir] = "up"
+				continue
+			}
+		}
+		// Check one block down (wire on the ground on the other side of a step).
+		below := w.GetBlock(nx, y-1, nz)
+		if below.ResourceLocation() == "minecraft:redstone_wire" &&
+			!coreworld.IsEntitySupportBlock(w.GetBlock(nx, y, nz).ResourceLocation()) {
+			props[n.dir] = "side"
+		}
+	}
+	return props
 }

@@ -9,6 +9,7 @@ import (
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
+	javaworld "GoCraft/java/world"
 )
 
 // buildUpdateHealth synchronizes the hearts, hunger, and saturation HUD.
@@ -57,6 +58,78 @@ func buildRespawn(p *player.Player, dimensionTypeID int32, hashedSeed int64) *pr
 		VarInt(63).  // sea level
 		Byte(0).     // do not preserve attributes or entity metadata
 		Build()
+}
+
+// sendMobEffect sends a single status effect to the target connection.
+// amplifier is 0-based (0 = level I). durationTicks is in game ticks (20/s).
+func sendMobEffect(conn *network.ClientConn, entityID int32, effectName string, amplifier, durationTicks int32) {
+	if conn == nil {
+		return
+	}
+	effectID := javaworld.MobEffectID(effectName)
+	if effectID < 0 {
+		return
+	}
+	pkt := protocol.NewBuilder(packetIDUpdateMobEffect).
+		VarInt(entityID).
+		VarInt(effectID).
+		VarInt(amplifier).
+		VarInt(durationTicks).
+		Byte(0x06). // show particles and icon
+		Build()
+	_ = conn.WritePacket(pkt)
+}
+
+// tryConsumeTotem checks if the player holds a totem of undying in main or
+// offhand. If found, it consumes the totem, resets health to 1, applies
+// vanilla totem effects, and returns true (death is prevented).
+// Per PumpkinMC living.rs:1853-1931 and vanilla EntityLiving.java.
+func tryConsumeTotem(target *session.Session) bool {
+	if target == nil || target.Player == nil {
+		return false
+	}
+	p := target.Player
+
+	// Check main hand then offhand for a totem of undying.
+	heldSlot := player.HotbarStart + p.HeldSlot
+	offSlot := player.OffhandSlot
+	totemSlot := -1
+	for _, s := range []int{heldSlot, offSlot} {
+		if p.Inventory[s].ItemID == "minecraft:totem_of_undying" {
+			totemSlot = s
+			break
+		}
+	}
+	if totemSlot < 0 {
+		return false
+	}
+
+	// Consume the totem.
+	p.Inventory[totemSlot].Count--
+	normalizeStack(&p.Inventory[totemSlot])
+	if target.Conn != nil {
+		_ = SyncPlayerInventory(target.Conn, p)
+	}
+
+	// Restore to 1 HP and clear dead flag.
+	p.RestoreFromTotem()
+	_ = sendUpdateHealth(target.Conn, p)
+
+	// Send entity status 35 = "totem of undying animation" to all viewers.
+	// (EntityStatus ProtectedFromDeath = 35 in Java protocol.)
+	pkt := protocol.NewBuilder(packetIDEntityEvent).
+		Int(p.EntityID).
+		Byte(35).
+		Build()
+	if target.Conn != nil {
+		_ = target.Conn.WritePacket(pkt)
+	}
+
+	// Apply effects: Absorption II (100t), Regeneration II (900t), Fire Resistance I (800t).
+	sendMobEffect(target.Conn, p.EntityID, "minecraft:absorption", 1, 100)
+	sendMobEffect(target.Conn, p.EntityID, "minecraft:regeneration", 1, 900)
+	sendMobEffect(target.Conn, p.EntityID, "minecraft:fire_resistance", 0, 800)
+	return true
 }
 
 // reducedDamage applies vanilla's current armour/toughness formula. PvP can
@@ -182,6 +255,10 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 		BroadcastHurtAnimation(p.EntityID, p.Rotation.Yaw, mgr)
 	}
 	if died {
+		// Totem of undying: if the player holds one, prevent death.
+		if tryConsumeTotem(target) {
+			return true
+		}
 		if p.OnDeath != nil {
 			p.OnDeath(p)
 		}

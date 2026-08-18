@@ -23,8 +23,24 @@ func burnsInDaylight(entityType corentity.EntityType) bool {
 	}
 }
 
+// tickEndermanWater applies 1 damage per tick when an enderman touches water
+// or rain, matching PumpkinMC enderman.rs mob_tick water/rain check.
+func (s *Server) tickEndermanWater(entity *corentity.Entity, hurtEntities *[]*corentity.Entity) {
+	if entity == nil || entity.Type != corentity.TypeEnderman || s.world == nil {
+		return
+	}
+	if s.entityInWater(entity) {
+		entity.Damage(1)
+		*hurtEntities = append(*hurtEntities, entity)
+	}
+}
+
 func (s *Server) tickMobSunlight(entity *corentity.Entity, hurtEntities *[]*corentity.Entity) {
-	if entity == nil || s.simulationDimension != dimensionOverworld || !burnsInDaylight(entity.Type) || s.world == nil {
+	if entity == nil || s.world == nil {
+		return
+	}
+	s.tickEndermanWater(entity, hurtEntities)
+	if s.simulationDimension != dimensionOverworld || !burnsInDaylight(entity.Type) {
 		return
 	}
 	wasBurning := entity.FireTicks > 0
@@ -87,6 +103,44 @@ func (s *Server) mobHasLineOfSight(attacker *corentity.Entity, target spatial.Ve
 		}
 	}
 	return true
+}
+
+// isPlayerStaringAtEnderman returns true if the player is looking directly at
+// the enderman's eye region. Matches PumpkinMC enderman.rs:is_player_staring.
+// The angular threshold is dot > 1 - 0.025/distance (vanilla cone test).
+func isPlayerStaringAtEnderman(p *player.Player, e *corentity.Entity) bool {
+	if p == nil || e == nil {
+		return false
+	}
+	// Carved pumpkin helmet grants immunity to provoking endermen.
+	// Slot 5 = helmet in the Java inventory layout (slots 5-8 = armor).
+	if p.Inventory[5].ItemID == "minecraft:carved_pumpkin" {
+		return false
+	}
+	const endermanEyeHeight = 2.55
+	const playerEyeHeight = 1.62
+
+	endermanEyeY := e.Position.Y + endermanEyeHeight
+	playerEyeY := p.Position.Y + playerEyeHeight
+
+	// Player look direction from yaw/pitch (same convention as velocity formula).
+	yawRad := -float64(p.Rotation.Yaw) * math.Pi / 180
+	pitchRad := float64(p.Rotation.Pitch) * math.Pi / 180
+	cosPitch := math.Cos(pitchRad)
+	lookX := math.Sin(yawRad) * cosPitch
+	lookY := -math.Sin(pitchRad)
+	lookZ := math.Cos(yawRad) * cosPitch
+
+	dx := e.Position.X - p.Position.X
+	dy := endermanEyeY - playerEyeY
+	dz := e.Position.Z - p.Position.Z
+	distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	if distance < 0.1 {
+		return false
+	}
+
+	dot := lookX*(dx/distance) + lookY*(dy/distance) + lookZ*(dz/distance)
+	return dot > 1.0-0.025/distance
 }
 
 func isSkeletonArcher(entityType corentity.EntityType) bool {
