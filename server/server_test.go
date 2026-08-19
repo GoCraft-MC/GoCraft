@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math/rand"
 	"testing"
 
 	corentity "GoCraft/core/entity"
@@ -96,7 +97,7 @@ func TestVillagerNeverSleepsOnNonBedPOI(t *testing.T) {
 	villager.HasVillageHome = true
 	villager.VillageBed = spatial.BlockPos{X: 3, Y: 64, Z: 4}
 	villager.Sleeping = true
-	server.mobAIs[villager.EntityID] = &mobAI{sleepingWas: true}
+	server.mobAIs[villager.EntityID] = &mobAI{sleepingWas: true, rng: rand.New(rand.NewSource(1))}
 
 	if !server.tickPassiveMobAI(villager) || villager.Sleeping {
 		t.Fatal("villager remained asleep on a non-bed POI")

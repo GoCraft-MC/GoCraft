@@ -150,6 +150,7 @@ type mobAI struct {
 	hasWanderGoal  bool
 	lookTick       int
 	lookX, lookZ   float64
+	bedClaimTick   int // ticks until next unclaimed-bed scan (villagers only)
 }
 
 type crossPlayerView struct {
@@ -3283,6 +3284,15 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 		}
 	}
 	wasAsleep := ai.sleepingWas
+	// Run bed-claiming / bed-validation once per second for villagers.
+	if e.Type == corentity.TypeVillager {
+		if ai.bedClaimTick <= 0 {
+			s.claimVillagerBed(e)
+			ai.bedClaimTick = 20
+		} else {
+			ai.bedClaimTick--
+		}
+	}
 	validBed := s.validVillagerBed(e)
 	if e.Type == corentity.TypeVillager && e.Sleeping && !validBed {
 		e.Sleeping = false
@@ -3400,6 +3410,68 @@ func (s *Server) validVillagerBed(e *corentity.Entity) bool {
 	}
 	part := bed.Properties["part"]
 	return part == "" || part == "head"
+}
+
+// claimVillagerBed scans the ±16 X/Z, ±4 Y block neighbourhood for an
+// unclaimed bed head, mirroring PumpkinMC's brute-force POI scan. When one is
+// found the villager's HasVillageHome / VillageBed are set so it will navigate
+// to the bed at night. The scan is cheap enough to run once per second.
+func (s *Server) claimVillagerBed(e *corentity.Entity) {
+	if s == nil || s.world == nil || e == nil || e.Type != corentity.TypeVillager {
+		return
+	}
+	// If the villager already has a home, validate it; clear if the bed is gone.
+	if e.HasVillageHome {
+		if !s.validVillagerBed(e) {
+			e.HasVillageHome = false
+			e.VillageBed = spatial.BlockPos{}
+		}
+		return
+	}
+	// Build a set of already-claimed beds to skip.
+	occupied := make(map[[3]int32]struct{})
+	for _, other := range s.world.Entities.Snapshot() {
+		if other.EntityID != e.EntityID && other.Type == corentity.TypeVillager && other.HasVillageHome {
+			occupied[[3]int32{other.VillageBed.X, other.VillageBed.Y, other.VillageBed.Z}] = struct{}{}
+		}
+	}
+	// Scan ±16 X/Z, ±4 Y for the nearest unclaimed bed head.
+	px, py, pz := int(math.Floor(e.Position.X)), int(math.Floor(e.Position.Y)), int(math.Floor(e.Position.Z))
+	bestDistSq := math.MaxFloat64
+	found := false
+	var best spatial.BlockPos
+	for bx := px - 16; bx <= px+16; bx++ {
+		for by := py - 4; by <= py+4; by++ {
+			for bz := pz - 16; bz <= pz+16; bz++ {
+				blk := s.world.GetBlock(bx, by, bz)
+				if !strings.HasSuffix(blk.ResourceLocation(), "_bed") {
+					continue
+				}
+				part := blk.Properties["part"]
+				if part != "" && part != "head" {
+					continue
+				}
+				key := [3]int32{int32(bx), int32(by), int32(bz)}
+				if _, taken := occupied[key]; taken {
+					continue
+				}
+				dx := float64(bx) + 0.5 - e.Position.X
+				dy := float64(by) + 0.5 - e.Position.Y
+				dz := float64(bz) + 0.5 - e.Position.Z
+				distSq := dx*dx + dy*dy + dz*dz
+				if distSq < bestDistSq {
+					bestDistSq = distSq
+					best = spatial.BlockPos{X: int32(bx), Y: int32(by), Z: int32(bz)}
+					found = true
+				}
+			}
+		}
+	}
+	if found {
+		e.VillageBed = best
+		e.HasVillageHome = true
+		e.VillageCenter = spatial.BlockPos{X: best.X, Y: best.Y, Z: best.Z}
+	}
 }
 
 func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {
