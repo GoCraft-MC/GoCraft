@@ -96,6 +96,10 @@ func handleSetHeldItem(pkt *protocol.Packet, p *player.Player) error {
 	if slot < 0 || slot > 8 {
 		return fmt.Errorf("set held item: slot %d out of range 0-8", slot)
 	}
+	if p.HeldSlot != int(slot) {
+		// Changing slots unloads the crossbow — the player must redraw.
+		p.CrossbowLoaded = false
+	}
 	p.HeldSlot = int(slot)
 	slog.Debug("held item changed", "player", p.Username, "slot", slot)
 	return nil
@@ -182,7 +186,19 @@ func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientC
 		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
 	}
 	switch p.Inventory[heldSlot].ItemID {
-	case "minecraft:bow", "minecraft:crossbow", "minecraft:trident":
+	case "minecraft:crossbow":
+		// If the crossbow is already loaded, right-click fires it immediately
+		// (vanilla two-step: draw to load, click to fire).
+		if p.CrossbowLoaded {
+			p.CrossbowLoaded = false
+			fireCrossbowLoaded(p, w, mgr, conn, nextEntityID)
+			return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+		}
+		// Not loaded — start the draw animation.
+		p.UsingItemID = "minecraft:crossbow"
+		p.UsingItemSince = time.Now()
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:bow", "minecraft:trident":
 		p.UsingItemID = p.Inventory[heldSlot].ItemID
 		p.UsingItemSince = time.Now()
 		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
