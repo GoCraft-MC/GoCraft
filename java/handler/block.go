@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"math/rand"
 	"strconv"
 	"strings"
 
@@ -906,6 +907,8 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				p.Inventory[slot].Count--
 				normalizeStack(&p.Inventory[slot])
 			}
+			broadcastSoundAt(mgr, "minecraft:item.bone_meal.use", soundCategoryBlocks,
+				float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
 			return true
 		}
 		if replacement, ok := javaBoneMealGrowth(target); ok {
@@ -1184,8 +1187,15 @@ func javaBoneMealGrowth(target coreworld.Block) (coreworld.Block, bool) {
 		if age >= maxAge {
 			return coreworld.Block{}, false
 		}
+		// Vanilla: advance by a random 2-5 stages, capped at maxAge.
+		// (PumpkinMC crop/mod.rs: bonemeal_age_increase = random_range(2..=5))
+		increase := 2 + rand.Intn(4) //nolint:gosec
+		newAge := age + increase
+		if newAge > maxAge {
+			newAge = maxAge
+		}
 		replacement := copyBlockProperties(target)
-		replacement.Properties["age"] = strconv.Itoa(maxAge)
+		replacement.Properties["age"] = strconv.Itoa(newAge)
 		return replacement, true
 	}
 	if strings.HasSuffix(target.ResourceLocation(), "_sapling") && target.ResourceLocation() != "minecraft:bamboo_sapling" {
