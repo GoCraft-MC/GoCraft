@@ -4693,40 +4693,122 @@ func (s *Server) explodeTNT(cx, cy, cz float64) {
 	s.explodeAt(cx, cy, cz, 4, "blew up")
 }
 
-func (s *Server) explodeAt(cx, cy, cz, radius float64, playerDeathCause string) {
-	var changes []coreworld.BlockChange
+// explosionBlastResistance returns the blast resistance for a block resource
+// location. Values follow the vanilla Minecraft table (most blocks 0-6,
+// stone/ores 6, obsidian/reinforced-deepslate 1200). Bedrock is represented
+// as math.MaxFloat64 so rays always terminate at it.
+func explosionBlastResistance(name string) float64 {
+	switch name {
+	case "minecraft:bedrock", "minecraft:barrier", "minecraft:command_block",
+		"minecraft:chain_command_block", "minecraft:repeating_command_block",
+		"minecraft:structure_block", "minecraft:jigsaw":
+		return math.MaxFloat64
+	case "minecraft:obsidian", "minecraft:crying_obsidian",
+		"minecraft:reinforced_deepslate", "minecraft:end_portal_frame",
+		"minecraft:end_portal", "minecraft:end_gateway":
+		return 1200
+	case "minecraft:anvil", "minecraft:chipped_anvil", "minecraft:damaged_anvil":
+		return 1200
+	case "minecraft:ender_chest":
+		return 22.5
+	case "minecraft:water", "minecraft:lava":
+		return 100
+	case "minecraft:stone", "minecraft:cobblestone", "minecraft:stone_bricks",
+		"minecraft:mossy_cobblestone", "minecraft:mossy_stone_bricks",
+		"minecraft:cracked_stone_bricks", "minecraft:chiseled_stone_bricks",
+		"minecraft:infested_stone", "minecraft:deepslate",
+		"minecraft:cobbled_deepslate", "minecraft:polished_deepslate",
+		"minecraft:deepslate_bricks", "minecraft:cracked_deepslate_bricks",
+		"minecraft:deepslate_tiles", "minecraft:cracked_deepslate_tiles",
+		"minecraft:chiseled_deepslate", "minecraft:smooth_stone",
+		"minecraft:granite", "minecraft:polished_granite",
+		"minecraft:diorite", "minecraft:polished_diorite",
+		"minecraft:andesite", "minecraft:polished_andesite",
+		"minecraft:bricks", "minecraft:nether_bricks",
+		"minecraft:red_nether_bricks", "minecraft:sandstone",
+		"minecraft:red_sandstone", "minecraft:end_stone",
+		"minecraft:end_stone_bricks", "minecraft:purpur_block",
+		"minecraft:purpur_pillar":
+		return 6
+	case "minecraft:iron_block", "minecraft:gold_block",
+		"minecraft:diamond_block", "minecraft:emerald_block",
+		"minecraft:netherite_block":
+		return 6
+	// Default: soft blocks (dirt, sand, wood, leaves, etc.) ≈ 0.
+	default:
+		return 0
+	}
+}
 
-	// Destroy blocks in explosion radius with probability based on distance.
-	for dx := -int(radius) - 1; dx <= int(radius)+1; dx++ {
-		for dy := -int(radius) - 1; dy <= int(radius)+1; dy++ {
-			for dz := -int(radius) - 1; dz <= int(radius)+1; dz++ {
-				dist := math.Sqrt(float64(dx*dx + dy*dy + dz*dz))
-				if dist > radius {
+func (s *Server) explodeAt(cx, cy, cz, radius float64, playerDeathCause string) {
+	// Vanilla ray-cast explosion algorithm (converted from PumpkinMC explosion.rs).
+	// Cast rays from all points on the outer face of a 16×16×16 cube centred on
+	// the explosion. Each ray gets a randomised power and loses energy from block
+	// resistance as it travels in 0.3-block steps.
+	type blockKey struct{ x, y, z int }
+	destroyed := make(map[blockKey]bool)
+
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			for z := 0; z < 16; z++ {
+				// Only the outer shell of the 16³ cube.
+				if x > 0 && x < 15 && y > 0 && y < 15 && z > 0 && z < 15 {
 					continue
 				}
-				bx := int(math.Round(cx)) + dx
-				by := int(math.Round(cy)) + dy
-				bz := int(math.Round(cz)) + dz
-				block := s.world.GetBlock(bx, by, bz)
-				name := block.ResourceLocation()
-				if name == "" || name == "minecraft:air" || name == "minecraft:bedrock" {
+				dirX := float64(x)/7.5 - 1.0
+				dirY := float64(y)/7.5 - 1.0
+				dirZ := float64(z)/7.5 - 1.0
+				length := math.Sqrt(dirX*dirX + dirY*dirY + dirZ*dirZ)
+				if length == 0 {
 					continue
 				}
-				// Probability: blocks at the edge have ~30% chance, centre ~100%.
-				breakChance := 1.0 - (dist / (radius * 1.3))
-				roll := float64((int64(bx*31+by*17+bz*7)+s.worldAge)%100) / 100.0
-				if roll > breakChance {
-					continue
+				dirX /= length
+				dirY /= length
+				dirZ /= length
+
+				posX, posY, posZ := cx, cy, cz
+				// Per-ray random power: power × (rand×0.6 + 0.7), matching vanilla.
+				h := radius * (rand.Float64()*0.6 + 0.7) //nolint:gosec
+
+				for h > 0 {
+					bx := int(math.Floor(posX))
+					by := int(math.Floor(posY))
+					bz := int(math.Floor(posZ))
+
+					block := s.world.GetBlock(bx, by, bz)
+					name := block.ResourceLocation()
+					if name != "" && name != "minecraft:air" {
+						resistance := explosionBlastResistance(name)
+						if resistance >= math.MaxFloat64 {
+							break // bedrock and similar — ray terminates
+						}
+						h -= (resistance + 0.3) * 0.3
+						if h > 0 {
+							destroyed[blockKey{bx, by, bz}] = true
+						}
+					}
+					posX += dirX * 0.3
+					posY += dirY * 0.3
+					posZ += dirZ * 0.3
+					h -= 0.225
 				}
-				// Chain TNT.
-				if name == "minecraft:tnt" {
-					s.activateTNT(bx, by, bz, &changes)
-					continue
-				}
-				s.world.SetBlock(bx, by, bz, coreworld.Air)
-				changes = append(changes, coreworld.BlockChange{X: bx, Y: by, Z: bz, Block: coreworld.Air})
 			}
 		}
+	}
+
+	var changes []coreworld.BlockChange
+	for key := range destroyed {
+		block := s.world.GetBlock(key.x, key.y, key.z)
+		name := block.ResourceLocation()
+		if name == "" || name == "minecraft:air" {
+			continue
+		}
+		if name == "minecraft:tnt" {
+			s.activateTNT(key.x, key.y, key.z, &changes)
+			continue
+		}
+		s.world.SetBlock(key.x, key.y, key.z, coreworld.Air)
+		changes = append(changes, coreworld.BlockChange{X: key.x, Y: key.y, Z: key.z, Block: coreworld.Air})
 	}
 
 	// Damage nearby entities.
