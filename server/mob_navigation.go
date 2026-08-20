@@ -308,6 +308,7 @@ func (s *Server) tickAquaticMobAI(e *corentity.Entity, ai *mobAI) {
 	distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
 	if distance < 0.5 {
 		ai.hasWanderGoal = false
+		e.VX, e.VY, e.VZ = 0, 0, 0
 		return
 	}
 	speed := pumpkinMovementSpeed(e.Type, 1.0)
