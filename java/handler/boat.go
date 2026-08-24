@@ -145,12 +145,13 @@ func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 // HandlePlayerCommandPacket parses a SB Player Command packet.
 //
 // Modern Java action IDs used here:
-//   0 = start sneaking
-//   1 = stop sneaking
-//   2 = leave bed
-//   3 = start sprinting
-//   4 = stop sprinting
-//   8 = start fall flying (elytra)
+//
+//	0 = start sneaking
+//	1 = stop sneaking
+//	2 = leave bed
+//	3 = start sprinting
+//	4 = stop sprinting
+//	8 = start fall flying (elytra)
 //
 // Previous GoCraft code incorrectly treated action 8 as LEAVE_VEHICLE. That
 // made an elytra start packet hit the vehicle path and left fall-flying state
@@ -203,7 +204,7 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 
 func MountPlayer(p *coreplayer.Player, boatEntityID int32, w *coreworld.World, mgr *session.Manager) bool {
 	boat, ok := w.Entities.Get(boatEntityID)
-	if !ok || !corentity.IsBoat(boat.Type) {
+	if !ok || (!corentity.IsBoat(boat.Type) && !corentity.IsMinecart(boat.Type)) {
 		return false
 	}
 	if !boat.AddPassenger(p.EntityID) {

@@ -1615,7 +1615,7 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 				}
 				return
 			}
-			if corentity.IsBoat(entity.Type) {
+			if corentity.IsBoat(entity.Type) || corentity.IsMinecart(entity.Type) {
 				s.mountPlayer(attacker, entity)
 			}
 		}

@@ -202,10 +202,10 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 	}
 
 	// Boat boarding: right-clicking a boat mounts the player.
-	if corentity.IsBoat(entity.Type) {
+	if corentity.IsBoat(entity.Type) || corentity.IsMinecart(entity.Type) {
 		if p.VehicleEntityID == 0 {
 			MountPlayer(p, entity.EntityID, w, mgr)
-			slog.Info("player boarded boat", "player", p.Username, "boatID", entity.EntityID)
+			slog.Info("player boarded vehicle", "player", p.Username, "vehicleID", entity.EntityID)
 		}
 		return nil
 	}

@@ -30,6 +30,16 @@ func newAnimalTestServer(t *testing.T) (*Server, *player.Player) {
 	}, p
 }
 
+func TestMinecartMountsThroughCanonicalInteraction(t *testing.T) {
+	s, p := newAnimalTestServer(t)
+	cart := corentity.New(90, [16]byte{90}, corentity.TypeMinecart, p.Position.X, p.Position.Y, p.Position.Z)
+	s.world.Entities.Add(cart)
+	s.applyEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: cart.EntityID})
+	if p.VehicleEntityID != cart.EntityID || cart.RiderEntityID != p.EntityID {
+		t.Fatalf("minecart mount player=%d rider=%d", p.VehicleEntityID, cart.RiderEntityID)
+	}
+}
+
 func putHeld(p *player.Player, item string, count int) {
 	p.HeldSlot = 0
 	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: item, Count: count}
