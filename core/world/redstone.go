@@ -263,6 +263,12 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		return 0
 
+	case "minecraft:powered_rail", "minecraft:activator_rail":
+		if re.railNetworkPowered(x, y, z, name) {
+			return 15
+		}
+		return 0
+
 	default:
 		// Loads and solid blocks accept both direct source power and power
 		// carried by dust/repeaters. Without the conductor branch, a lamp next
@@ -288,6 +294,44 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		return best
 	}
+}
+
+func (re *RedstoneEngine) railNetworkPowered(x, y, z int, railName string) bool {
+	type node struct{ x, y, z, distance int }
+	queue := []node{{x: x, y: y, z: z}}
+	visited := map[[3]int]struct{}{{x, y, z}: {}}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, neighbor := range neighbors6(current.x, current.y, current.z) {
+			block := re.world.GetBlock(neighbor[0], neighbor[1], neighbor[2])
+			if re.powerFromSourceToward(neighbor[0], neighbor[1], neighbor[2], block,
+				[3]int{current.x, current.y, current.z}) > 0 {
+				return true
+			}
+			if IsRedstoneConductor(block.ResourceLocation()) &&
+				re.powerFromConductorToward(neighbor[0], neighbor[1], neighbor[2], block,
+					[3]int{current.x, current.y, current.z}) > 0 {
+				return true
+			}
+		}
+		if current.distance >= 7 {
+			continue
+		}
+		for _, offset := range [4][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
+			for _, dy := range []int{0, 1, -1} {
+				next := node{x: current.x + offset[0], y: current.y + dy, z: current.z + offset[1], distance: current.distance + 1}
+				key := [3]int{next.x, next.y, next.z}
+				if _, seen := visited[key]; seen || re.world.GetBlock(next.x, next.y, next.z).ResourceLocation() != railName {
+					continue
+				}
+				visited[key] = struct{}{}
+				queue = append(queue, next)
+				break
+			}
+		}
+	}
+	return false
 }
 
 func (re *RedstoneEngine) repeaterLocked(x, y, z int, block Block) bool {

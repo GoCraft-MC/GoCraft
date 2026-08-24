@@ -192,3 +192,21 @@ func TestRepeaterSideSignalLocksCurrentState(t *testing.T) {
 		t.Fatalf("locked repeater powered = %q, want retained true", got)
 	}
 }
+
+func TestPoweredRailCarriesPowerForEightRails(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	for x := 0; x < 9; x++ {
+		w.SetBlock(x, 64, 0, Block{Namespace: "minecraft", Name: "powered_rail", Properties: map[string]string{
+			"shape": "east_west", "powered": "false",
+		}})
+	}
+	w.SetBlock(0, 65, 0, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(7, 64, 0).Properties["powered"]; got != "true" {
+		t.Fatalf("eighth rail powered = %q, want true", got)
+	}
+	if got := w.GetBlock(8, 64, 0).Properties["powered"]; got != "false" {
+		t.Fatalf("ninth rail powered = %q, want false", got)
+	}
+}
