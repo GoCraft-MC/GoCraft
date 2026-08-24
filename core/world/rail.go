@@ -77,6 +77,18 @@ func (w *World) railShapeAt(x, y, z int, rail Block) string {
 			return "north_east"
 		}
 	}
+	if east && eastY > 0 {
+		return "ascending_east"
+	}
+	if west && westY > 0 {
+		return "ascending_west"
+	}
+	if north && northY > 0 {
+		return "ascending_north"
+	}
+	if south && southY > 0 {
+		return "ascending_south"
+	}
 	if east || west {
 		return "east_west"
 	}
