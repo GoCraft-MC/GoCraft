@@ -234,7 +234,6 @@ func cmdList(ctx CommandContext) error {
 			if online != nil {
 				names = append(names, online.Username)
 			}
-		}
 		sort.Slice(names, func(i, j int) bool {
 			return strings.ToLower(names[i]) < strings.ToLower(names[j])
 		})
@@ -585,33 +584,46 @@ func cmdTp(ctx CommandContext) error {
 		}
 	}
 
-	// /tp <player> — teleport self to player.
+	// /tp <player> — teleport self to the player's exact dimension and position.
+	// Cross-edition visibility is dimension-scoped, so copying coordinates alone
+	// can leave a Java and Bedrock player standing at the same XYZ in different
+	// worlds and therefore invisible to one another.
 	targetName := ctx.Args[0]
 	if ctx.FindPlayer != nil {
 		if target := ctx.FindPlayer(targetName); target != nil {
-			pos := target.Position
-			if ctx.TeleportTo == nil {
-				return fmt.Errorf(`teleport service is unavailable`)
-			}
-			if err := ctx.TeleportTo(pos.X, pos.Y, pos.Z); err != nil {
-				return fmt.Errorf(`teleporting: %w`, err)
-			}
-			_ = sendCommandMessage(ctx, fmt.Sprintf(`Teleported to %s`, target.Username))
-			return nil
+			return teleportSelfToPlayer(ctx, target)
 		}
 	}
-	for _, s := range ctx.Manager.SnapshotAll() {
-		if strings.EqualFold(s.Player.Username, targetName) {
-			pos := s.Player.Position
-			if err := ctx.TeleportTo(pos.X, pos.Y, pos.Z); err != nil {
-				return fmt.Errorf("teleporting: %w", err)
+	if ctx.Manager != nil {
+		for _, s := range ctx.Manager.SnapshotAll() {
+			if s.Player != nil && strings.EqualFold(s.Player.Username, targetName) {
+				return teleportSelfToPlayer(ctx, s.Player)
 			}
-			_ = sendSystemMessage(ctx.Conn,
-				fmt.Sprintf("Teleported to %s", s.Player.Username))
-			return nil
 		}
 	}
 	return fmt.Errorf("player not found: %s", targetName)
+}
+
+func teleportSelfToPlayer(ctx CommandContext, target *player.Player) error {
+	if ctx.Player == nil || target == nil {
+		return fmt.Errorf("player state is unavailable")
+	}
+	if ctx.TeleportTo == nil {
+		return fmt.Errorf("teleport service is unavailable")
+	}
+	if ctx.Player.Dimension != target.Dimension {
+		if ctx.ChangeWorld == nil {
+			return fmt.Errorf("dimension changing is unavailable")
+		}
+		if err := ctx.ChangeWorld(target.Dimension); err != nil {
+			return fmt.Errorf("changing dimension: %w", err)
+		}
+	}
+	pos := target.Position
+	if err := ctx.TeleportTo(pos.X, pos.Y, pos.Z); err != nil {
+		return fmt.Errorf("teleporting: %w", err)
+	}
+	return sendCommandMessage(ctx, fmt.Sprintf("Teleported to %s", target.Username))
 }
 
 func tpPlayerToCoords(ctx CommandContext, targetName string, x, y, z float64) error {
