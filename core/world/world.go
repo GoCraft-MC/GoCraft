@@ -675,89 +675,6 @@ type BlockChange struct {
 	Block   Block
 }
 
-// TickCrops advances a bounded number of loaded crops without checking light.
-// Growth is intentionally light-independent: planted crops can mature indoors
-// or underground. The bounded scan avoids unbounded packet or disk work.
-func (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {
-	if maxChanges <= 0 {
-		return nil
-	}
-	w.mu.RLock()
-	chunks := make([]*Chunk, 0, len(w.chunks))
-	for _, chunk := range w.chunks {
-		chunks = append(chunks, chunk)
-	}
-	w.mu.RUnlock()
-
-	changes := make([]BlockChange, 0, maxChanges)
-	for _, chunk := range chunks {
-		for sectionIndex, section := range chunk.Sections {
-			if section == nil || section.NonAir == 0 {
-				continue
-			}
-			palette := section.BlockPalette()
-			hasGrowingCrop := false
-			for _, block := range palette {
-				if maxAge, ok := cropMaximumAge(block.ResourceLocation()); ok {
-					age, _ := strconv.Atoi(block.Properties["age"])
-					if age < maxAge {
-						hasGrowingCrop = true
-						break
-					}
-				}
-			}
-			if !hasGrowingCrop {
-				continue
-			}
-			data := section.BlockData()
-			for index, paletteIndex := range data {
-				if int(paletteIndex) >= len(palette) {
-					continue
-				}
-				block := palette[paletteIndex]
-				maxAge, ok := cropMaximumAge(block.ResourceLocation())
-				if !ok {
-					continue
-				}
-				age, err := strconv.Atoi(block.Properties["age"])
-				if err != nil || age >= maxAge {
-					continue
-				}
-				localX := index % SectionSize
-				localZ := (index / SectionSize) % SectionSize
-				localY := index / (SectionSize * SectionSize)
-				x := int(chunk.X)*SectionSize + localX
-				y := SectionMinY(sectionIndex) + localY
-				z := int(chunk.Z)*SectionSize + localZ
-				hash := uint64(int64(x)*0x9e3779b1) ^ uint64(int64(y)*0x85ebca77) ^ uint64(int64(z)*0xc2b2ae3d) ^ uint64((tick/20)*0x27d4eb2d)
-				if hash%5 != 0 {
-					continue
-				}
-				properties := make(map[string]string, len(block.Properties))
-				for key, value := range block.Properties {
-					properties[key] = value
-				}
-				properties["age"] = strconv.Itoa(age + 1)
-				block.Properties = properties
-				changes = append(changes, BlockChange{X: x, Y: y, Z: z, Block: block})
-				if len(changes) == maxChanges {
-					break
-				}
-			}
-			if len(changes) == maxChanges {
-				break
-			}
-		}
-		if len(changes) == maxChanges {
-			break
-		}
-	}
-	for _, change := range changes {
-		w.SetBlock(change.X, change.Y, change.Z, change.Block)
-	}
-	return changes
-}
-
 // TickFarmland applies vanilla hydration: water within four horizontal blocks
 // at the farmland level or one block above sets moisture to 7. Dry farmland
 // loses one moisture level per update and eventually returns to dirt when it
@@ -811,7 +728,10 @@ func (w *World) TickFarmland(tick int64, maxChanges int) []BlockChange {
 				}
 				moisture, _ := strconv.Atoi(block.Properties["moisture"])
 				var replacement Block
-				if w.hasFarmlandWater(x, y, z) {
+				above, aboveLoaded := w.blockIfLoaded(x, y+1, z)
+				if aboveLoaded && farmlandBlockedAbove(above) {
+					replacement = Block{Namespace: "minecraft", Name: "dirt"}
+				} else if w.hasFarmlandWater(x, y, z) {
 					if moisture >= 7 {
 						continue
 					}
@@ -842,6 +762,13 @@ func (w *World) TickFarmland(tick int64, maxChanges int) []BlockChange {
 		w.SetBlock(change.X, change.Y, change.Z, change.Block)
 	}
 	return changes
+}
+
+func farmlandBlockedAbove(block Block) bool {
+	if block.IsAir() || IsFluidBlock(block.ResourceLocation()) || isFarmlandCrop(block.ResourceLocation()) {
+		return false
+	}
+	return IsEntitySupportBlock(block.ResourceLocation())
 }
 
 func (w *World) hasFarmlandWater(x, y, z int) bool {
@@ -881,23 +808,6 @@ func copyWorldBlock(block Block) Block {
 	}
 	block.Properties = properties
 	return block
-}
-
-func cropMaximumAge(name string) (int, bool) {
-	switch name {
-	case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes":
-		return 7, true
-	case "minecraft:beetroots", "minecraft:nether_wart", "minecraft:sweet_berry_bush":
-		return 3, true
-	case "minecraft:cocoa":
-		return 2, true
-	case "minecraft:torchflower_crop":
-		return 1, true
-	case "minecraft:pitcher_crop":
-		return 4, true
-	default:
-		return 0, false
-	}
 }
 
 // ContainerItems returns a snapshot of the canonical items stored at a block position.
