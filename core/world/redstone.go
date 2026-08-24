@@ -206,6 +206,26 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		return 0
 
+	case "minecraft:comparator":
+		dx, dz := redstoneFacingOffset(block.Properties["facing"])
+		main := re.inputPowerAt(x-dx, y, z-dz, [3]int{x, y, z})
+		left := re.inputPowerAt(x-dz, y, z+dx, [3]int{x, y, z})
+		right := re.inputPowerAt(x+dz, y, z-dx, [3]int{x, y, z})
+		side := left
+		if right > side {
+			side = right
+		}
+		if block.Properties["mode"] == "subtract" {
+			if main > side {
+				return main - side
+			}
+			return 0
+		}
+		if main >= side {
+			return main
+		}
+		return 0
+
 	default:
 		// Loads and solid blocks accept both direct source power and power
 		// carried by dust/repeaters. Without the conductor branch, a lamp next
@@ -271,6 +291,17 @@ func (re *RedstoneEngine) powerReceivedExcluding(x, y, z int, excluded [3]int) i
 	return best
 }
 
+func (re *RedstoneEngine) inputPowerAt(x, y, z int, target [3]int) int {
+	block := re.world.GetBlock(x, y, z)
+	power := re.powerFromSourceToward(x, y, z, block, target)
+	if IsRedstoneConductor(block.ResourceLocation()) {
+		if conductor := re.powerFromConductorToward(x, y, z, block, target); conductor > power {
+			power = conductor
+		}
+	}
+	return power
+}
+
 // powerFromSource returns power emitted by block if it is a source, else 0.
 func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 	name := block.ResourceLocation()
@@ -287,6 +318,8 @@ func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 		if block.Properties["powered"] == "true" {
 			return 15
 		}
+	case "minecraft:comparator":
+		return re.PowerAt(x, y, z)
 	case "minecraft:sculk_sensor", "minecraft:calibrated_sculk_sensor":
 		if block.Properties["sculk_sensor_phase"] == "active" {
 			return atoi(block.Properties["power"])
@@ -423,6 +456,19 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 				"locked":  orDefault(block.Properties["locked"], "false"),
 				"powered": boolStr(powered),
 			},
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+
+	case "minecraft:comparator":
+		newBlock := block
+		newBlock.Properties = make(map[string]string, len(block.Properties)+1)
+		for key, value := range block.Properties {
+			newBlock.Properties[key] = value
+		}
+		newBlock.Properties["powered"] = boolStr(powered)
+		if block.Properties["powered"] == newBlock.Properties["powered"] {
+			return BlockChange{}, false
 		}
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true

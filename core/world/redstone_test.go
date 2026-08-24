@@ -86,3 +86,23 @@ func TestRepeaterReadsRearAndPowersOnlyItsFront(t *testing.T) {
 		t.Fatalf("side lamp lit = %q, want false", got)
 	}
 }
+
+func TestComparatorSubtractsSideSignal(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.SetBlock(3, 64, 0, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.SetBlock(2, 64, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
+	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "comparator", Properties: map[string]string{
+		"facing": "north", "mode": "subtract", "powered": "false",
+	}})
+
+	w.Redstone.FlushUpdates()
+	if got := w.Redstone.PowerAt(0, 64, 0); got != 1 {
+		t.Fatalf("comparator output = %d, want 1", got)
+	}
+	if got := w.GetBlock(0, 64, 0).Properties["powered"]; got != "true" {
+		t.Fatalf("comparator powered = %q, want true", got)
+	}
+}
