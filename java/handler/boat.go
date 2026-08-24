@@ -9,8 +9,8 @@ package handler
 // Relevant packets (Java 1.21.4 / protocol 769):
 //   CB  set_passengers  (0x65 = 101) — tells client who is riding what
 //   SB  move_vehicle    (0x1B = 27)  — client updates boat position while riding
-//   SB  player_input    (0x20 = 32)  — one-byte input flags; shift = dismount
-//   SB  player_command  (0x19 = 25)  — action 8 = leave vehicle
+//   SB  player_input    (0x20 = 32)  — input flags; shift = dismount
+//   SB  player_command  (0x19 = 25)  — action 8 = start fall flying (elytra)
 
 import (
 	"fmt"
@@ -54,13 +54,7 @@ func BroadcastSetPassengers(vehicleEntityID int32, passengerIDs []int32, mgr *se
 // ── Serverbound packet handlers ───────────────────────────────────────────────
 
 // HandleMoveVehiclePacket parses a SB Move Vehicle packet and updates the
-// boat's position in the world, then broadcasts it to all other players.
-//
-// Wire layout (1.21.4):
-//
-//	Double  x, y, z
-//	Float   yaw, pitch
-//	Bool    on_ground
+// vehicle position in the world, then broadcasts it to all other players.
 func HandleMoveVehiclePacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 
@@ -116,29 +110,22 @@ func HandleMoveVehiclePacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 		return nil
 	}
 
-	// Update boat position.
 	vehicle.Position.X = x
 	vehicle.Position.Y = y
 	vehicle.Position.Z = z
 	vehicle.Yaw = yaw
 	vehicle.OnGround = onGround
 
-	// Keep player's logical position in sync (chunk loading, /tp, etc.).
 	p.Position.X = x
 	p.Position.Y = y + 0.35
 	p.Position.Z = z
 
-	// Broadcast to all other clients.
 	broadcastBoatPositionExcept(vehicle, p.EntityID, mgr)
 	return nil
 }
 
 // HandlePlayerInputPacket parses a SB Player Input packet.
-// Shift flag (bit 5) = exit vehicle.
-//
-// Wire layout (1.21.4):
-//
-//	Unsigned Byte inputs (forward, backward, left, right, jump, shift, sprint)
+// Shift flag (bit 5) exits a vehicle.
 func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 	flags, err := protocol.ReadByte(r)
@@ -156,13 +143,19 @@ func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 }
 
 // HandlePlayerCommandPacket parses a SB Player Command packet.
-// Action 8 = leave vehicle.
 //
-// Wire layout (1.21.4):
+// Modern Java action IDs used here:
+//   0 = start sneaking
+//   1 = stop sneaking
+//   2 = leave bed
+//   3 = start sprinting
+//   4 = stop sprinting
+//   8 = start fall flying (elytra)
 //
-//	VarInt  entity_id
-//	VarInt  action  (8 = leave vehicle)
-//	VarInt  jump_boost
+// Previous GoCraft code incorrectly treated action 8 as LEAVE_VEHICLE. That
+// made an elytra start packet hit the vehicle path and left fall-flying state
+// effectively unsupported. Vehicle dismount remains handled by Player Input's
+// shift flag, which is the packet path used by modern clients.
 func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 	if _, err := protocol.ReadVarInt(r); err != nil {
@@ -172,6 +165,12 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 	if err != nil {
 		return fmt.Errorf("player_command: action: %w", err)
 	}
+	// jump_boost follows action on the wire. It is unused by these actions but
+	// consume it when present so malformed/truncated command packets are caught.
+	if _, err := protocol.ReadVarInt(r); err != nil {
+		return fmt.Errorf("player_command: jump_boost: %w", err)
+	}
+
 	switch action {
 	case 0: // START_SNEAKING
 		p.Sneaking = true
@@ -187,13 +186,13 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 		p.Sprinting = true
 	case 4: // STOP_SPRINTING
 		p.Sprinting = false
-	case 8: // LEAVE_VEHICLE
-		if p.VehicleEntityID != 0 {
-			if len(buses) > 0 && buses[0] != nil {
-				buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: 0, HotbarSlot: int32(p.HeldSlot)})
-				break
-			}
-			DismountPlayer(p, w, conn, mgr)
+	case 8: // START_FALL_FLYING
+		// The client may only begin gliding while airborne with an elytra in the
+		// chest slot. The actual movement remains client-driven like ordinary
+		// Java movement; reset accumulated fall distance so starting a valid
+		// glide cannot immediately apply the pre-glide fall as landing damage.
+		if p.VehicleEntityID == 0 && !p.OnGround && p.Inventory[6].ItemID == "minecraft:elytra" {
+			p.FallDistance = 0
 		}
 	}
 	return nil
@@ -201,8 +200,6 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 
 // ── Mount / dismount ──────────────────────────────────────────────────────────
 
-// MountPlayer seats the player onto boat and broadcasts Set Passengers.
-// Returns false if the boat is not found or already occupied.
 func MountPlayer(p *coreplayer.Player, boatEntityID int32, w *coreworld.World, mgr *session.Manager) bool {
 	boat, ok := w.Entities.Get(boatEntityID)
 	if !ok || !corentity.IsBoat(boat.Type) {
@@ -216,8 +213,6 @@ func MountPlayer(p *coreplayer.Player, boatEntityID int32, w *coreworld.World, m
 	return true
 }
 
-// DismountPlayer ejects the player from their vehicle and teleports them to a
-// safe position beside the boat.
 func DismountPlayer(p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager) {
 	boatID := p.VehicleEntityID
 	if boatID == 0 {
