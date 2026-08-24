@@ -70,18 +70,18 @@ func TestRedstoneTorchInvertsPowerConductedThroughSupport(t *testing.T) {
 func TestRepeaterReadsRearAndPowersOnlyItsFront(t *testing.T) {
 	w := New(&FlatGenerator{}, nil, false)
 	defer w.Close()
-	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.SetBlock(0, 64, -1, Block{Namespace: "minecraft", Name: "redstone_block"})
 	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "repeater", Properties: map[string]string{
 		"facing": "north", "delay": "1", "locked": "false", "powered": "false",
 	}})
-	w.SetBlock(0, 64, -1, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
+	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
 	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
 
 	w.Redstone.FlushUpdates()
 	if got := w.GetBlock(0, 64, 0).Properties["powered"]; got != "true" {
 		t.Fatalf("repeater powered = %q, want true", got)
 	}
-	if got := w.GetBlock(0, 64, -1).Properties["lit"]; got != "true" {
+	if got := w.GetBlock(0, 64, 1).Properties["lit"]; got != "true" {
 		t.Fatalf("front lamp lit = %q, want true", got)
 	}
 	if got := w.GetBlock(1, 64, 0).Properties["lit"]; got != "false" {
@@ -92,7 +92,7 @@ func TestRepeaterReadsRearAndPowersOnlyItsFront(t *testing.T) {
 func TestComparatorSubtractsSideSignal(t *testing.T) {
 	w := New(&FlatGenerator{}, nil, false)
 	defer w.Close()
-	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.SetBlock(0, 64, -1, Block{Namespace: "minecraft", Name: "redstone_block"})
 	w.SetBlock(3, 64, 0, Block{Namespace: "minecraft", Name: "redstone_block"})
 	w.SetBlock(2, 64, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
 	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
@@ -178,15 +178,15 @@ func TestRepeaterSideSignalLocksCurrentState(t *testing.T) {
 		}}
 	}
 	w.SetBlock(0, 64, 0, repeater("north"))
-	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.SetBlock(0, 64, -1, Block{Namespace: "minecraft", Name: "redstone_block"})
 	w.Redstone.FlushUpdates()
-	w.SetBlock(1, 64, 0, repeater("west"))
+	w.SetBlock(1, 64, 0, repeater("east"))
 	w.SetBlock(2, 64, 0, Block{Namespace: "minecraft", Name: "redstone_block"})
 	w.Redstone.FlushUpdates()
 	if got := w.GetBlock(0, 64, 0).Properties["locked"]; got != "true" {
 		t.Fatalf("locked = %q, want true", got)
 	}
-	w.SetBlock(0, 64, 1, Air)
+	w.SetBlock(0, 64, -1, Air)
 	w.Redstone.FlushUpdates()
 	if got := w.GetBlock(0, 64, 0).Properties["powered"]; got != "true" {
 		t.Fatalf("locked repeater powered = %q, want retained true", got)

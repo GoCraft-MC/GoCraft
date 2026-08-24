@@ -236,7 +236,7 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		// Check input direction.
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
-		ix, iy, iz := x-dx, y, z-dz
+		ix, iy, iz := x+dx, y, z+dz
 		input := re.world.GetBlock(ix, iy, iz)
 		if re.powerFromSourceToward(ix, iy, iz, input, [3]int{x, y, z}) > 0 || re.PowerAt(ix, iy, iz) > 0 {
 			return 15
@@ -245,7 +245,7 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 
 	case "minecraft:comparator":
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
-		main := re.inputPowerAt(x-dx, y, z-dz, [3]int{x, y, z})
+		main := re.inputPowerAt(x+dx, y, z+dz, [3]int{x, y, z})
 		left := re.inputPowerAt(x-dz, y, z+dx, [3]int{x, y, z})
 		right := re.inputPowerAt(x+dz, y, z-dx, [3]int{x, y, z})
 		side := left
@@ -451,7 +451,7 @@ func (re *RedstoneEngine) powerFromSourceToward(x, y, z int, block Block, target
 	name := block.ResourceLocation()
 	if name == "minecraft:repeater" || name == "minecraft:comparator" {
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
-		if target != [3]int{x + dx, y, z + dz} {
+		if target != [3]int{x - dx, y, z - dz} {
 			return 0
 		}
 	}
@@ -472,7 +472,7 @@ func (re *RedstoneEngine) powerFromConductorToward(x, y, z int, block Block, tar
 	name := block.ResourceLocation()
 	if name == "minecraft:repeater" || name == "minecraft:comparator" {
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
-		if target != [3]int{x + dx, y, z + dz} {
+		if target != [3]int{x - dx, y, z - dz} {
 			return 0
 		}
 	}
