@@ -613,19 +613,21 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if streamRespawn {
 			streamRespawn = false
 			keys := chunkKeysAround(newCX, newCZ, viewRadius)
-			nearCount := 1
+			// A single centre chunk is not enough for modern Java clients to leave
+			// Loading terrain promptly. Bootstrap a bounded 5x5 area so respawn is
+			// immediately playable without synchronously sending the entire view.
+			bootstrapRadius := min(viewRadius, int32(2))
+			nearCount := int((bootstrapRadius*2 + 1) * (bootstrapRadius*2 + 1))
 			if len(keys) < nearCount {
 				nearCount = len(keys)
 			}
 			if err := sendChunkKeys(conn, w, sender, sentChunks, keys[:nearCount]); err != nil {
 				return fmt.Errorf(`send nearby respawn chunks: %w`, err)
 			}
-			// Generate only the immediately surrounding ring in the background.
-			// Queuing the full configured radius before the centre chunk used to
-			// starve the synchronous chunk request and leave the client stuck on
-			// Loading terrain (or a black destination dimension).
+			// Warm the same bootstrap radius. The rest remains background work so
+			// large configured view distances do not stall the respawn handshake.
 			if preGenerateRadius > 0 {
-				w.QueuePregeneration(newCX, newCZ, 1)
+				w.QueuePregeneration(newCX, newCZ, bootstrapRadius)
 			}
 			pendingRespawnChunks = append(pendingRespawnChunks, keys[nearCount:]...)
 			broadcastGeneratedEntities(w, mgr)
@@ -709,7 +711,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		}
 		broadcastGeneratedEntities(w, mgr)
 		if len(pendingRespawnChunks) > 0 {
-			batchSize := 4
+			batchSize := 16
 			if len(pendingRespawnChunks) < batchSize {
 				batchSize = len(pendingRespawnChunks)
 			}
