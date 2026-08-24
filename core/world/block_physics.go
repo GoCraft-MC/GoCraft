@@ -19,6 +19,7 @@ const (
 	UpdateComposter                            // level-seven composter becomes ready
 	UpdatePressurePlate                        // pressure plate checks entities above it
 	UpdateSculkSensor                          // active sensor advances to cooldown/inactive
+	UpdateObserver                             // observer pulse turns off
 )
 
 // PendingBlockUpdate is one scheduled block-tick entry.
@@ -93,6 +94,10 @@ func (bp *BlockPhysics) SchedulePressurePlate(x, y, z int, worldAge, delayTicks 
 // ScheduleSculkSensor queues the next active/cooldown phase transition.
 func (bp *BlockPhysics) ScheduleSculkSensor(x, y, z int, worldAge, delayTicks int64) {
 	bp.schedule(x, y, z, UpdateSculkSensor, worldAge, delayTicks)
+}
+
+func (bp *BlockPhysics) ScheduleObserver(x, y, z int, worldAge, delayTicks int64) {
+	bp.schedule(x, y, z, UpdateObserver, worldAge, delayTicks)
 }
 
 // DrainDue removes and returns all updates whose DueTick <= worldAge.
@@ -358,7 +363,7 @@ func IsRedstoneSource(name string) bool {
 	switch name {
 	case "minecraft:lever", "minecraft:redstone_torch",
 		"minecraft:redstone_wall_torch", "minecraft:redstone_block",
-		"minecraft:daylight_detector":
+		"minecraft:daylight_detector", "minecraft:observer":
 		return true
 	}
 	return false

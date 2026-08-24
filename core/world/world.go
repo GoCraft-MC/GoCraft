@@ -1008,6 +1008,24 @@ func (w *World) SetBlock(x, y, z int, block Block) {
 	// worldAge 0 = "fire next tick" (drainDue uses <= comparison).
 	w.scheduleBlockNeighborUpdates(x, y, z, oldBlock, block)
 	w.notifyBlockObserver(x, y, z, block)
+	w.triggerObservers(x, y, z)
+}
+
+func (w *World) triggerObservers(x, y, z int) {
+	for _, pos := range neighbors6(x, y, z) {
+		observer := w.GetBlock(pos[0], pos[1], pos[2])
+		if observer.ResourceLocation() != "minecraft:observer" || observer.Properties["powered"] == "true" {
+			continue
+		}
+		dx, dy, dz := pistonOffset(observer.Properties["facing"])
+		if [3]int{pos[0] + dx, pos[1] + dy, pos[2] + dz} != [3]int{x, y, z} {
+			continue
+		}
+		updated := redstoneBlockWith(observer, "powered", "true")
+		w.setBlockNoPhysics(pos[0], pos[1], pos[2], updated)
+		w.Redstone.NotifyChange(pos[0], pos[1], pos[2])
+		w.BlockPhysics.ScheduleObserver(pos[0], pos[1], pos[2], w.WorldTime(), 2)
+	}
 }
 
 // setBlockNoPhysics writes a block directly without scheduling physics updates.

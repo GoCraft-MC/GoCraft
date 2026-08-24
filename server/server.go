@@ -4441,6 +4441,14 @@ func (s *Server) tickBlockPhysicsWorld() {
 			s.processPressurePlateUpdate(u.X, u.Y, u.Z, &blockChanges)
 		case coreworld.UpdateSculkSensor:
 			s.processSculkSensorUpdate(u.X, u.Y, u.Z, &blockChanges)
+		case coreworld.UpdateObserver:
+			observer := s.world.GetBlock(u.X, u.Y, u.Z)
+			if observer.ResourceLocation() == "minecraft:observer" && observer.Properties["powered"] == "true" {
+				observer = bedrockCopyBlock(observer)
+				observer.Properties["powered"] = "false"
+				s.world.SetBlock(u.X, u.Y, u.Z, observer)
+				blockChanges = append(blockChanges, coreworld.BlockChange{X: u.X, Y: u.Y, Z: u.Z, Block: observer})
+			}
 		}
 	}
 

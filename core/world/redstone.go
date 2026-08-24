@@ -325,6 +325,10 @@ func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 		}
 	case "minecraft:comparator":
 		return re.PowerAt(x, y, z)
+	case "minecraft:observer":
+		if block.Properties["powered"] == "true" {
+			return 15
+		}
 	case "minecraft:sculk_sensor", "minecraft:calibrated_sculk_sensor":
 		if block.Properties["sculk_sensor_phase"] == "active" {
 			return atoi(block.Properties["power"])
@@ -350,6 +354,12 @@ func (re *RedstoneEngine) powerFromSourceToward(x, y, z int, block Block, target
 	if name == "minecraft:repeater" || name == "minecraft:comparator" {
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
 		if target != [3]int{x + dx, y, z + dz} {
+			return 0
+		}
+	}
+	if name == "minecraft:observer" {
+		dx, dy, dz := pistonOffset(block.Properties["facing"])
+		if target != [3]int{x - dx, y - dy, z - dz} {
 			return 0
 		}
 	}
