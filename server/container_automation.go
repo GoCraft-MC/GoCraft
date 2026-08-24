@@ -26,6 +26,63 @@ func (s *Server) tickContainerAutomation() {
 	} {
 		if world != nil {
 			s.tickHoppers(world, dimension)
+			s.tickCampfires(world, dimension)
+		}
+	}
+}
+
+type campfireCookKey struct {
+	dimension int32
+	x, y, z   int
+	slot      int
+}
+
+func (s *Server) tickCampfires(world *coreworld.World, dimension int32) {
+	if s.campfireCooking == nil {
+		s.campfireCooking = make(map[campfireCookKey]int64)
+	}
+	active := make(map[campfireCookKey]struct{})
+	for _, blockEntity := range world.LoadedBlockEntities() {
+		block := world.GetBlock(blockEntity.X, blockEntity.Y, blockEntity.Z)
+		name := block.ResourceLocation()
+		if (name != "minecraft:campfire" && name != "minecraft:soul_campfire") || block.Properties["lit"] == "false" {
+			continue
+		}
+		items := world.ContainerItems(blockEntity.X, blockEntity.Y, blockEntity.Z)
+		changed := false
+		for index := range items {
+			item := items[index]
+			recipe, ok := handler.FindCookingRecipe("minecraft:campfire", item.ItemID)
+			if !ok {
+				continue
+			}
+			key := campfireCookKey{dimension: dimension, x: blockEntity.X, y: blockEntity.Y, z: blockEntity.Z, slot: item.Slot}
+			active[key] = struct{}{}
+			started, exists := s.campfireCooking[key]
+			if !exists {
+				s.campfireCooking[key] = s.worldAge
+				continue
+			}
+			if s.worldAge-started < int64(recipe.CookingTime) {
+				continue
+			}
+			delete(s.campfireCooking, key)
+			items[index].Count--
+			changed = true
+			position := spatial.Vec3{X: float64(blockEntity.X) + 0.5, Y: float64(blockEntity.Y) + 1.1, Z: float64(blockEntity.Z) + 0.5}
+			if dropped := s.newDroppedItemInWorld(world, recipe.Result, position, item.Slot); dropped != nil {
+				handler.BroadcastSpawnMob(dropped, s.javaSessionsForDimension(dimension))
+			}
+		}
+		if changed {
+			world.SetContainerItems(blockEntity.X, blockEntity.Y, blockEntity.Z, name, items)
+		}
+	}
+	for key := range s.campfireCooking {
+		if key.dimension == dimension {
+			if _, ok := active[key]; !ok {
+				delete(s.campfireCooking, key)
+			}
 		}
 	}
 }

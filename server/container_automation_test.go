@@ -6,6 +6,7 @@ import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/handler"
 	"GoCraft/java/session"
 )
 
@@ -205,4 +206,27 @@ func TestDispenserAppliesBoneMealToCrop(t *testing.T) {
 	if got := world.GetBlock(1, 64, 0).Properties["age"]; got == "" || got == "0" {
 		t.Fatalf("bone meal dispenser left wheat age at %q", got)
 	}
+}
+
+func TestCampfireCooksAndDropsFoodAfterRecipeDuration(t *testing.T) {
+	s, world := newAutomationTestServer(t)
+	world.SetBlock(0, 64, 0, bedrockBlock("campfire", map[string]string{"lit": "true"}))
+	world.SetContainerItems(0, 64, 0, "minecraft:campfire", []coreworld.ContainerItem{{Slot: 0, ItemID: "minecraft:beef", Count: 1}})
+	s.worldAge = 8
+	s.tickCampfires(world, dimensionOverworld)
+	recipe, ok := handler.FindCookingRecipe("minecraft:campfire", "minecraft:beef")
+	if !ok {
+		t.Fatal("missing embedded campfire beef recipe")
+	}
+	s.worldAge += int64(recipe.CookingTime)
+	s.tickCampfires(world, dimensionOverworld)
+	if got := world.ContainerItems(0, 64, 0); len(got) != 0 {
+		t.Fatalf("campfire still contains %+v", got)
+	}
+	for _, entity := range world.Entities.Snapshot() {
+		if entity.Type == corentity.TypeItem && entity.ItemID == "minecraft:cooked_beef" && entity.ItemCount == 1 {
+			return
+		}
+	}
+	t.Fatal("campfire produced no cooked beef drop")
 }

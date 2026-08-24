@@ -95,6 +95,8 @@ func TestCropStagesAndAttachedStemsResolveForBedrock(t *testing.T) {
 		{Namespace: "minecraft", Name: "attached_pumpkin_stem", Properties: map[string]string{"facing": "east"}},
 		{Namespace: "minecraft", Name: "attached_melon_stem", Properties: map[string]string{"facing": "west"}},
 		{Namespace: "minecraft", Name: "sweet_berry_bush", Properties: map[string]string{"age": "3"}},
+		{Namespace: "minecraft", Name: "bubble_column", Properties: map[string]string{"drag": "true"}},
+		{Namespace: "minecraft", Name: "bubble_column", Properties: map[string]string{"drag": "false"}},
 	}
 	for _, state := range states {
 		if got := encoder.BlockNetworkID(state); got == air {
@@ -103,6 +105,9 @@ func TestCropStagesAndAttachedStemsResolveForBedrock(t *testing.T) {
 	}
 	if young, mature := encoder.BlockNetworkID(states[0]), encoder.BlockNetworkID(states[1]); young == mature {
 		t.Fatalf("young and mature wheat resolved to the same Bedrock state %d", young)
+	}
+	if down, up := encoder.BlockNetworkID(states[len(states)-2]), encoder.BlockNetworkID(states[len(states)-1]); down == up {
+		t.Fatalf("upward and downward bubble columns resolved to the same Bedrock state %d", down)
 	}
 }
 

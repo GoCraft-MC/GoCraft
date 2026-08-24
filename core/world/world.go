@@ -642,7 +642,7 @@ func (w *World) CanEntityOccupy(x, y, z float64) bool {
 func entitySupportBlock(name string) bool {
 	switch name {
 	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
-		"minecraft:water", "minecraft:lava", "minecraft:nether_portal", "minecraft:end_portal", "minecraft:end_gateway", "minecraft:short_grass",
+		"minecraft:water", "minecraft:bubble_column", "minecraft:lava", "minecraft:nether_portal", "minecraft:end_portal", "minecraft:end_gateway", "minecraft:short_grass",
 		"minecraft:grass", "minecraft:tall_grass", "minecraft:fern",
 		"minecraft:large_fern", "minecraft:wheat", "minecraft:carrots",
 		"minecraft:potatoes", "minecraft:beetroots", "minecraft:dandelion",
@@ -870,7 +870,7 @@ func (w *World) TouchesWater(x, y, z float64) bool {
 	maxY := int(math.Floor(y + 1.799999))
 	for by := minY; by <= maxY; by++ {
 		block := w.GetBlock(bx, by, bz)
-		if block.ResourceLocation() == "minecraft:water" || block.Properties["waterlogged"] == "true" {
+		if block.ResourceLocation() == "minecraft:water" || block.ResourceLocation() == "minecraft:bubble_column" || block.Properties["waterlogged"] == "true" {
 			return true
 		}
 	}

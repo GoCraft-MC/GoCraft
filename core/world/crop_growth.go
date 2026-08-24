@@ -3,6 +3,7 @@ package world
 import (
 	"math"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -477,6 +478,17 @@ func (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {
 func (w *World) ApplyBoneMeal(x, y, z int, seed uint64) (changes []BlockChange, used bool) {
 	crop := w.GetBlock(x, y, z)
 	name := crop.ResourceLocation()
+	if (strings.HasSuffix(name, "_sapling") && name != "minecraft:bamboo_sapling") || name == "minecraft:mangrove_propagule" {
+		stage, _ := strconv.Atoi(crop.Properties["stage"])
+		if stage <= 0 {
+			replacement := copyWorldBlock(crop)
+			replacement.Properties["stage"] = "1"
+			w.SetBlock(x, y, z, replacement)
+			return []BlockChange{{X: x, Y: y, Z: z, Block: replacement}}, true
+		}
+		grown := w.growSaplingTree(x, y, z, name, seed)
+		return grown, len(grown) != 0
+	}
 	age := CropAge(crop)
 	maximum, supported := CropMaxAge(name)
 	if !supported || name == "minecraft:nether_wart" || name == "minecraft:cocoa" || name == "minecraft:pitcher_crop" || age >= maximum {

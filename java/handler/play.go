@@ -799,7 +799,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 			applyJavaMovementExhaustion(p, prevX, prevZ, conn)
 			applyPlayerFallDamage(sess, prevY, prevOnGround, w, mgr)
-			applyPlayerEnvironmentalDamage(sess, w, mgr)
+			applyPlayerEnvironmentalDamage(sess, w, mgr, prevX, prevZ)
 			broadcastPosition(mgr, p)
 		}
 
@@ -1268,7 +1268,7 @@ func applyPlayerFallDamage(sess *session.Session, previousY float64, previousOnG
 	}
 }
 
-func applyPlayerEnvironmentalDamage(sess *session.Session, w *coreworld.World, mgr *session.Manager) {
+func applyPlayerEnvironmentalDamage(sess *session.Session, w *coreworld.World, mgr *session.Manager, previousX, previousZ float64) {
 	if sess == nil || sess.Player == nil || w == nil {
 		return
 	}
@@ -1288,9 +1288,10 @@ func applyPlayerEnvironmentalDamage(sess *session.Session, w *coreworld.World, m
 	x := int(math.Floor(p.Position.X))
 	y := int(math.Floor(p.Position.Y))
 	z := int(math.Floor(p.Position.Z))
-	feet := w.GetBlock(x, y, z).ResourceLocation()
+	feetBlock := w.GetBlock(x, y, z)
+	feet := feetBlock.ResourceLocation()
 	head := w.GetBlock(x, int(math.Floor(p.Position.Y+1.62)), z).ResourceLocation()
-	if head == "minecraft:water" {
+	if head == "minecraft:water" || head == "minecraft:bubble_column" {
 		if p.UnderwaterSince.IsZero() {
 			p.UnderwaterSince = now
 		}
@@ -1312,9 +1313,15 @@ func applyPlayerEnvironmentalDamage(sess *session.Session, w *coreworld.World, m
 	case "minecraft:fire", "minecraft:soul_fire":
 		p.LastEnvironmentDamage = now
 		DamagePlayer(sess, 1, "went up in flames", mgr)
-	case "minecraft:cactus", "minecraft:sweet_berry_bush":
+	case "minecraft:cactus":
 		p.LastEnvironmentDamage = now
 		DamagePlayer(sess, 1, "was pricked to death", mgr)
+	case "minecraft:sweet_berry_bush":
+		if coreworld.CropAge(feetBlock) > 0 &&
+			(math.Abs(p.Position.X-previousX) >= 0.003 || math.Abs(p.Position.Z-previousZ) >= 0.003) {
+			p.LastEnvironmentDamage = now
+			DamagePlayer(sess, 1, "was pricked to death", mgr)
+		}
 	}
 }
 

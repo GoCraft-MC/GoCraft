@@ -1004,6 +1004,32 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 	if held.IsEmpty() {
 		return false
 	}
+	if (target.ResourceLocation() == "minecraft:campfire" || target.ResourceLocation() == "minecraft:soul_campfire") &&
+		target.Properties["lit"] != "false" {
+		if _, ok := FindCookingRecipe("minecraft:campfire", held.ItemID); ok {
+			items := w.ContainerItems(x, y, z)
+			usedSlots := make(map[int]bool, len(items))
+			for _, item := range items {
+				usedSlots[item.Slot] = true
+			}
+			for slot := 0; slot < 4; slot++ {
+				if usedSlots[slot] {
+					continue
+				}
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1, Damage: held.Damage})
+				w.SetContainerItems(x, y, z, target.ResourceLocation(), items)
+				if p.GameMode != player.GameModeCreative {
+					inventorySlot := player.HotbarStart + p.HeldSlot
+					p.Inventory[inventorySlot].Count--
+					normalizeStack(&p.Inventory[inventorySlot])
+				}
+				broadcastSoundAt(mgr, "minecraft:block.campfire.crackle", soundCategoryBlocks,
+					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+				return true
+			}
+			return true
+		}
+	}
 	if held.ItemID == "minecraft:bone_meal" {
 		if target.ResourceLocation() == "minecraft:grass_block" && w.GetBlock(x, y+1, z).IsAir() {
 			applyBlockChange(x, y+1, z, coreworld.Block{Namespace: "minecraft", Name: "short_grass"}, w, mgr)
@@ -1962,11 +1988,15 @@ func applyBlockChange(x, y, z int, block coreworld.Block, w *coreworld.World, mg
 	stateID := javaworld.StateID(block)
 	pkt := buildBlockUpdate(x, y, z, stateID)
 	stemChanges := w.UpdateAttachedStemsAround(x, y, z)
+	bubbleChanges := w.UpdateBubbleColumnsAround(x, y, z)
 	if mgr != nil {
 		for _, s := range mgr.SnapshotAll() {
 			_ = s.Conn.WritePacket(pkt)
 		}
 		for _, change := range stemChanges {
+			BroadcastBlockChange(change, mgr)
+		}
+		for _, change := range bubbleChanges {
 			BroadcastBlockChange(change, mgr)
 		}
 	}

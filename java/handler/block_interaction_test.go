@@ -663,3 +663,22 @@ func TestJavaHarvestsSweetBerryBush(t *testing.T) {
 		t.Fatalf("harvest berries = %d, want 2..3", berries)
 	}
 }
+
+func TestJavaPlacesFoodOnCampfire(t *testing.T) {
+	p := player.New([16]byte{92}, "camper", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:beef", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "campfire", Properties: map[string]string{"lit": "true"}})
+	if err := handleUseItemOn(useItemOnPacket(0, 64, 0, 1, 702), p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	items := w.ContainerItems(0, 64, 0)
+	if len(items) != 1 || items[0].ItemID != "minecraft:beef" || items[0].Count != 1 {
+		t.Fatalf("campfire items = %+v", items)
+	}
+	if got := p.HeldItem().Count; got != 1 {
+		t.Fatalf("held beef = %d, want 1", got)
+	}
+}

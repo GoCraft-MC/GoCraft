@@ -54,6 +54,7 @@ import (
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 	"GoCraft/java/world/anvil"
+	bedrockpacket "github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 // Server owns the game core and both Java and Bedrock network listeners.
@@ -112,6 +113,7 @@ type Server struct {
 	spawnRNG                *rand.Rand
 	creaturePopulatedChunks map[[2]int32]struct{}
 	furnaces                map[furnaceKey]*furnaceState
+	campfireCooking         map[campfireCookKey]int64
 
 	// sleepAllTick is the worldAge tick at which ALL online players were first
 	// detected sleeping.  0 means nobody is sleeping or the check hasn't fired.
@@ -137,9 +139,9 @@ type mobAI struct {
 	targetX        float64    // hostile AI: current target world X
 	targetZ        float64    // hostile AI: current target world Z
 	targetEntityID int32
-	attackCooldown int // ticks until next melee swing
-	bowDrawTicks   int // ticks remaining before a skeleton releases its arrow
-	fuseTick       int // creeper fuse progress (30 ticks to detonation)
+	attackCooldown int  // ticks until next melee swing
+	bowDrawTicks   int  // ticks remaining before a skeleton releases its arrow
+	fuseTick       int  // creeper fuse progress (30 ticks to detonation)
 	angered        bool // enderman: true once provoked (by staring), stays true until target lost
 	path           []spatial.Vec3
 	pathIndex      int
@@ -324,6 +326,7 @@ func New(cfg *config.Config) (*Server, error) {
 		creaturePopulatedChunks: make(map[[2]int32]struct{}),
 		worldAge:                initialWorldAge,
 		furnaces:                make(map[furnaceKey]*furnaceState),
+		campfireCooking:         make(map[campfireCookKey]int64),
 		timings:                 timings,
 		javaCrossKnown:          make(map[[16]byte]map[[16]byte]crossPlayerView),
 		playerStore:             playerStore,
@@ -988,7 +991,7 @@ func (s *Server) applyMove(m intent.MoveIntent) {
 	if dead {
 		return // death-camera movement must not move the canonical player entity
 	}
-	previousPosition, previousY, previousOnGround := p.Position, p.Position.Y, p.OnGround
+	previousPosition, previousOnGround := p.Position, p.OnGround
 	p.Position = m.Position
 	p.Rotation = m.Rotation
 	p.OnGround = m.OnGround
@@ -1013,7 +1016,7 @@ func (s *Server) applyMove(m intent.MoveIntent) {
 				p.AddExhaustion(float32(distance * 0.1))
 			}
 		}
-		s.applyBedrockMovementDamage(p, previousY, previousOnGround)
+		s.applyBedrockMovementDamage(p, previousPosition, previousOnGround)
 		s.tryBedrockPortalTravel(p)
 	}
 }
@@ -1271,7 +1274,7 @@ func (s *Server) sendPlayerVelocity(target *session.Session, x, y, z float64) {
 	}
 }
 
-func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64, previousOnGround bool) {
+func (s *Server) applyBedrockMovementDamage(p *player.Player, previousPosition spatial.Vec3, previousOnGround bool) {
 	if p == nil || p.Dead || p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator || p.Flying {
 		if p != nil {
 			p.FallDistance = 0
@@ -1283,7 +1286,7 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64,
 	if playerWorld != nil && playerWorld.TouchesWater(p.Position.X, p.Position.Y, p.Position.Z) {
 		p.FallDistance = 0
 	} else if !p.OnGround {
-		if drop := previousY - p.Position.Y; drop > 0 {
+		if drop := previousPosition.Y - p.Position.Y; drop > 0 {
 			p.FallDistance += drop
 		}
 	} else if !previousOnGround {
@@ -1302,9 +1305,10 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64,
 		return
 	}
 	x, y, z := int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z))
-	feet := playerWorld.GetBlock(x, y, z).ResourceLocation()
+	feetBlock := playerWorld.GetBlock(x, y, z)
+	feet := feetBlock.ResourceLocation()
 	head := playerWorld.GetBlock(x, int(math.Floor(p.Position.Y+1.62)), z).ResourceLocation()
-	if head == "minecraft:water" {
+	if head == "minecraft:water" || head == "minecraft:bubble_column" {
 		if p.UnderwaterSince.IsZero() {
 			p.UnderwaterSince = now
 		}
@@ -1325,9 +1329,15 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousY float64,
 	case "minecraft:fire", "minecraft:soul_fire":
 		p.LastEnvironmentDamage = now
 		handler.DamagePlayer(target, 1, "went up in flames", s.sessions)
-	case "minecraft:cactus", "minecraft:sweet_berry_bush":
+	case "minecraft:cactus":
 		p.LastEnvironmentDamage = now
 		handler.DamagePlayer(target, 1, "was pricked to death", s.sessions)
+	case "minecraft:sweet_berry_bush":
+		if coreworld.CropAge(feetBlock) > 0 &&
+			(math.Abs(p.Position.X-previousPosition.X) >= 0.003 || math.Abs(p.Position.Z-previousPosition.Z) >= 0.003) {
+			p.LastEnvironmentDamage = now
+			handler.DamagePlayer(target, 1, "was pricked to death", s.sessions)
+		}
 	}
 }
 
@@ -1748,6 +1758,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	type foodEffect struct {
 		nutrition  int32
 		saturation float32
+		itemID     string
 	}
 	foodEffects := make([]foodEffect, 0, 1)
 	_, simulatedFood, _, _ := p.HealthSnapshot()
@@ -1959,7 +1970,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			if !set(action.Source, source) {
 				return
 			}
-			foodEffects = append(foodEffects, foodEffect{nutrition: nutrition, saturation: saturation})
+			foodEffects = append(foodEffects, foodEffect{nutrition: nutrition, saturation: saturation, itemID: source.ItemID})
 			simulatedFood = min(20, simulatedFood+nutrition)
 
 		default:
@@ -1971,6 +1982,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		if !p.ConsumeFood(effect.nutrition, effect.saturation) {
 			return
 		}
+		s.applyBedrockFoodEffect(p, effect.itemID)
 	}
 	p.Inventory = inventory
 	p.CraftingGrid = craftingGrid
@@ -2013,6 +2025,74 @@ func canPlaceBedrockFurnaceSlot(slot int16, stack player.ItemStack) bool {
 		return false
 	default:
 		return false
+	}
+}
+
+func (s *Server) applyBedrockFoodEffect(p *player.Player, itemID string) {
+	if s.bedrockListener == nil || p == nil {
+		return
+	}
+	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff
+	send := func(effectType, amplifier, duration int32) {
+		s.bedrockListener.SendPlayerMobEffect(p, effectType, amplifier, duration)
+	}
+	switch itemID {
+	case "minecraft:rotten_flesh":
+		if roll%100 < 80 {
+			send(bedrockpacket.EffectHunger, 0, 600)
+		}
+	case "minecraft:chicken":
+		if roll%100 < 30 {
+			send(bedrockpacket.EffectHunger, 0, 600)
+		}
+	case "minecraft:spider_eye":
+		send(bedrockpacket.EffectPoison, 0, 100)
+	case "minecraft:poisonous_potato":
+		if roll%100 < 60 {
+			send(bedrockpacket.EffectPoison, 3, 100)
+		}
+	case "minecraft:pufferfish":
+		send(bedrockpacket.EffectPoison, 3, 1200)
+		send(bedrockpacket.EffectHunger, 2, 300)
+		send(bedrockpacket.EffectNausea, 1, 300)
+	case "minecraft:golden_apple":
+		send(bedrockpacket.EffectRegeneration, 1, 100)
+		send(bedrockpacket.EffectAbsorption, 0, 2400)
+	case "minecraft:enchanted_golden_apple":
+		send(bedrockpacket.EffectRegeneration, 4, 600)
+		send(bedrockpacket.EffectAbsorption, 3, 2400)
+		send(bedrockpacket.EffectResistance, 0, 6000)
+		send(bedrockpacket.EffectFireResistance, 0, 6000)
+	}
+}
+
+func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
+	if s == nil || s.game == nil {
+		return
+	}
+	for _, fish := range entities {
+		if fish == nil || fish.Dead || fish.Type != corentity.TypePufferfish {
+			continue
+		}
+		s.game.OnlinePlayers(func(p *player.Player) {
+			if p == nil || p.Dead || p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator ||
+				p.Dimension != s.simulationDimension {
+				return
+			}
+			dx, dy, dz := p.Position.X-fish.Position.X, p.Position.Y-fish.Position.Y, p.Position.Z-fish.Position.Z
+			if dx*dx+dy*dy+dz*dz > 2.25 || time.Since(p.LastEnvironmentDamage) < time.Second {
+				return
+			}
+			p.LastEnvironmentDamage = time.Now()
+			handler.DamagePlayer(&session.Session{Player: p}, 1, "was stung by a pufferfish", s.sessions)
+			if p.Edition == player.ClientEditionJava {
+				if target, ok := s.sessions.Get(p.UUID); ok {
+					handler.SendMobEffect(target.Conn, p, "minecraft:poison", 1, 100)
+				}
+			} else if s.bedrockListener != nil {
+				s.bedrockListener.SendPlayerMobEffect(p, bedrockpacket.EffectPoison, 1, 100)
+			}
+		})
 	}
 }
 
@@ -2280,6 +2360,9 @@ func (s *Server) tickEntities() {
 	s.despawnDistantNaturalMobs(simulationPlayers, &deadIDs)
 	allEntities := s.world.Entities.Snapshot()
 	s.tickAnimalLifecycle(allEntities)
+	if s.worldAge%20 == 0 {
+		s.tickPufferfishContact(allEntities)
+	}
 
 	// ── Parallel passive mob AI ───────────────────────────────────────────────
 	// Passive per-entity computation is dispatched through a bounded worker
@@ -4376,6 +4459,12 @@ func (s *Server) tickBlockPhysicsWorld() {
 	}
 
 	blockChanges = append(blockChanges, redstone.Changes...)
+	neighborChanges := append([]coreworld.BlockChange(nil), blockChanges...)
+	for _, change := range neighborChanges {
+		blockChanges = append(blockChanges, s.world.BreakUnsupportedCropsAbove(change.X, change.Y, change.Z)...)
+		blockChanges = append(blockChanges, s.world.UpdateAttachedStemsAround(change.X, change.Y, change.Z)...)
+		blockChanges = append(blockChanges, s.world.UpdateBubbleColumnsAround(change.X, change.Y, change.Z)...)
+	}
 
 	// Broadcast all block changes to clients in one go.
 	for _, bc := range blockChanges {
@@ -4565,6 +4654,13 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 	if level < 0 {
 		return
 	}
+	changeStart := len(*changes)
+	defer func() {
+		fluidChanges := append([]coreworld.BlockChange(nil), (*changes)[changeStart:]...)
+		for _, change := range fluidChanges {
+			*changes = append(*changes, s.world.UpdateBubbleColumnsAround(change.X, change.Y, change.Z)...)
+		}
+	}()
 
 	isLava := name == "minecraft:lava"
 	// Lava spreads at most 3 blocks, water at most 7.

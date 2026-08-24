@@ -24,6 +24,25 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 	x, y, z := int(i.Position.X), int(i.Position.Y), int(i.Position.Z)
 	name, item := target.ResourceLocation(), held.ItemID
+	if (name == "minecraft:campfire" || name == "minecraft:soul_campfire") && target.Properties["lit"] != "false" {
+		if _, ok := handler.FindCookingRecipe("minecraft:campfire", item); ok {
+			items := s.bedrockWorld().ContainerItems(x, y, z)
+			usedSlots := make(map[int]bool, len(items))
+			for _, stored := range items {
+				usedSlots[stored.Slot] = true
+			}
+			for slot := 0; slot < 4; slot++ {
+				if usedSlots[slot] {
+					continue
+				}
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: item, Count: 1, Damage: held.Damage})
+				s.bedrockWorld().SetContainerItems(x, y, z, name, items)
+				s.consumeBedrockHeldItem(p, 1)
+				return true
+			}
+			return true
+		}
+	}
 
 	if item == "minecraft:ender_eye" && name == "minecraft:end_portal_frame" && target.Properties["eye"] != "true" {
 		replacement := bedrockCopyBlock(target)
@@ -176,6 +195,11 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if item == "minecraft:bone_meal" {
+		if name == "minecraft:grass_block" && s.bedrockWorld().GetBlock(x, y+1, z).IsAir() {
+			s.setBedrockActionBlock(x, y+1, z, bedrockBlock("short_grass", nil))
+			s.consumeBedrockHeldItem(p, 1)
+			return true
+		}
 		seed := uint64(s.worldAge) + uint64(coreworld.CropAge(target)+1)*0x9e3779b97f4a7c15
 		if changes, used := s.bedrockWorld().ApplyBoneMeal(x, y, z, seed); used {
 			s.broadcastCanonicalCropChanges(changes)
@@ -732,6 +756,7 @@ func (s *Server) setBedrockActionBlock(x, y, z int, block coreworld.Block) {
 		handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block}, s.sessions)
 	}
 	s.broadcastCanonicalCropChanges(s.bedrockWorld().UpdateAttachedStemsAround(x, y, z))
+	s.broadcastCanonicalCropChanges(s.bedrockWorld().UpdateBubbleColumnsAround(x, y, z))
 	s.refreshBedrockConnectedBlocks(x, y, z)
 }
 

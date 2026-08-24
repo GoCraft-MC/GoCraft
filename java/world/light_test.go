@@ -38,6 +38,9 @@ func TestVillageBlocksDoNotOccludeSkyLight(t *testing.T) {
 		"minecraft:oak_stairs",
 		"minecraft:red_bed",
 		"minecraft:wheat",
+		"minecraft:redstone_wire",
+		"minecraft:lever",
+		"minecraft:repeater",
 	} {
 		if !isSkyTransparent(block) {
 			t.Errorf("isSkyTransparent(%q) = false, want true", block)

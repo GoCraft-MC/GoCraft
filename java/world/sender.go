@@ -308,7 +308,9 @@ func isSkyTransparent(resourceLocation string) bool {
 		"minecraft:vine", "minecraft:moss_carpet",
 		"minecraft:torch", "minecraft:wall_torch",
 		"minecraft:ladder", "minecraft:rail",
-		"minecraft:powered_rail", "minecraft:detector_rail", "minecraft:activator_rail":
+		"minecraft:powered_rail", "minecraft:detector_rail", "minecraft:activator_rail",
+		"minecraft:redstone_wire", "minecraft:repeater", "minecraft:comparator",
+		"minecraft:lever", "minecraft:cake", "minecraft:candle":
 		return true
 	}
 	// These families do not fill their block cube, so daylight can propagate

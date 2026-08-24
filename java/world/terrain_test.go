@@ -204,6 +204,8 @@ func TestCropStatesExistInProtocol769Registry(t *testing.T) {
 		{Namespace: "minecraft", Name: "attached_pumpkin_stem", Properties: map[string]string{"facing": "east"}},
 		{Namespace: "minecraft", Name: "attached_melon_stem", Properties: map[string]string{"facing": "west"}},
 		{Namespace: "minecraft", Name: "sweet_berry_bush", Properties: map[string]string{"age": "3"}},
+		{Namespace: "minecraft", Name: "bubble_column", Properties: map[string]string{"drag": "true"}},
+		{Namespace: "minecraft", Name: "bubble_column", Properties: map[string]string{"drag": "false"}},
 	}
 	for _, state := range states {
 		if !HasExactState(state) || StateID(state) == 0 {

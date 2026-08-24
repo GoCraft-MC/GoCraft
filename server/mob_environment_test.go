@@ -153,6 +153,26 @@ func TestHostileAIIgnoresPlayersInOtherDimensions(t *testing.T) {
 	}
 }
 
+func TestPufferfishContactDamagesNearbyPlayer(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	g := game.New()
+	p := player.New([16]byte{44}, "swimmer", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Position = spatial.Vec3{X: 1, Y: 64, Z: 0}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	fish := corentity.New(g.NextEntityID(), [16]byte{45}, corentity.TypePufferfish, 0, 64, 0)
+	s := &Server{game: g, world: world, sessions: session.NewManager(), simulationDimension: dimensionOverworld}
+	before, _, _, _ := p.HealthSnapshot()
+	s.tickPufferfishContact([]*corentity.Entity{fish})
+	after, _, _, _ := p.HealthSnapshot()
+	if after >= before {
+		t.Fatalf("pufferfish contact health = %.1f, want less than %.1f", after, before)
+	}
+}
+
 func TestRangedHostileFamiliesSpawnTheirProjectile(t *testing.T) {
 	tests := []struct {
 		name       string

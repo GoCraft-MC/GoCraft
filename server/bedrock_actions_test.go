@@ -140,6 +140,33 @@ func TestBedrockCropBoneMealMatchesCoreAndRejectsNetherWart(t *testing.T) {
 	})
 }
 
+func TestBedrockBoneMealWorksOnGrassAndSaplings(t *testing.T) {
+	t.Run("grass", func(t *testing.T) {
+		s, p := newBedrockActionTestServer(t)
+		s.world.SetBlock(8, 64, 8, bedrockBlock("grass_block", nil))
+		p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bone_meal", Count: 1}
+		if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 8, Y: 64, Z: 8}}, s.world.GetBlock(8, 64, 8)) {
+			t.Fatal("grass rejected bone meal")
+		}
+		if got := s.world.GetBlock(8, 65, 8).ResourceLocation(); got != "minecraft:short_grass" {
+			t.Fatalf("grass bonemeal placed %q", got)
+		}
+	})
+
+	t.Run("sapling", func(t *testing.T) {
+		s, p := newBedrockActionTestServer(t)
+		s.world.SetBlock(8, 63, 8, bedrockBlock("dirt", nil))
+		s.world.SetBlock(8, 64, 8, bedrockBlock("oak_sapling", map[string]string{"stage": "1"}))
+		p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bone_meal", Count: 1}
+		if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 8, Y: 64, Z: 8}}, s.world.GetBlock(8, 64, 8)) {
+			t.Fatal("sapling rejected bone meal")
+		}
+		if got := s.world.GetBlock(8, 64, 8).ResourceLocation(); got != "minecraft:oak_log" {
+			t.Fatalf("sapling became %q, want oak log", got)
+		}
+	})
+}
+
 func TestBedrockHarvestsSweetBerryBush(t *testing.T) {
 	s, p := newBedrockActionTestServer(t)
 	s.world.SetBlock(1, 64, 0, bedrockBlock("dirt", nil))
@@ -158,6 +185,22 @@ func TestBedrockHarvestsSweetBerryBush(t *testing.T) {
 	}
 	if berries < 2 || berries > 3 {
 		t.Fatalf("harvest berries = %d, want 2..3", berries)
+	}
+}
+
+func TestBedrockPlacesFoodOnCampfire(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("soul_campfire", map[string]string{"lit": "true"}))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:chicken", Count: 2}
+	if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}}, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("campfire food placement was not handled")
+	}
+	items := s.world.ContainerItems(1, 64, 0)
+	if len(items) != 1 || items[0].ItemID != "minecraft:chicken" || items[0].Count != 1 {
+		t.Fatalf("campfire items = %+v", items)
+	}
+	if got := p.HeldItem().Count; got != 1 {
+		t.Fatalf("held chicken = %d, want 1", got)
 	}
 }
 

@@ -329,24 +329,30 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 
 // applyFoodEffect sends any status-effect side effects for eating a food item.
 // Vanilla data source: Pumpkin-master living.rs and vanilla food component data.
+func SendMobEffect(conn *network.ClientConn, p *player.Player, name string, amplifier, durationTicks int32) {
+	if conn == nil || p == nil {
+		return
+	}
+	effectID := javaworld.MobEffectID(name)
+	if effectID < 0 {
+		return
+	}
+	pkt := protocol.NewBuilder(packetIDUpdateMobEffect).
+		VarInt(p.EntityID).
+		VarInt(effectID).
+		VarInt(amplifier).
+		VarInt(durationTicks).
+		Byte(0x06).
+		Build()
+	_ = conn.WritePacket(pkt)
+}
+
 func applyFoodEffect(conn *network.ClientConn, p *player.Player, itemID string) {
 	if conn == nil {
 		return
 	}
-	effectID := func(name string) int32 { return javaworld.MobEffectID(name) }
 	sendEffect := func(name string, amplifier, durationTicks int32) {
-		id := effectID(name)
-		if id < 0 {
-			return
-		}
-		pkt := protocol.NewBuilder(packetIDUpdateMobEffect).
-			VarInt(p.EntityID).
-			VarInt(id).
-			VarInt(amplifier).
-			VarInt(durationTicks).
-			Byte(0x06).
-			Build()
-		_ = conn.WritePacket(pkt)
+		SendMobEffect(conn, p, name, amplifier, durationTicks)
 	}
 	// Probability gate using entity ID as a simple deterministic seed.
 	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff

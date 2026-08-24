@@ -383,6 +383,8 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 			out["covered_bit"] = boolByte(raw == "true")
 		case "persistent":
 			out["persistent_bit"] = boolByte(raw == "true")
+		case "drag":
+			out["drag_down"] = boolByte(raw == "true")
 		}
 	}
 	if block.ResourceLocation() == "minecraft:lever" {

@@ -9,6 +9,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 
@@ -1499,6 +1500,28 @@ func (l *Listener) ChangeDimension(p *player.Player, dimension int32, position s
 // the Nether or End into the Overworld.
 func (l *Listener) ChangeDimensionForRespawn(p *player.Player, dimension int32, position spatial.Vec3) {
 	l.changeDimension(p, dimension, position, true)
+}
+
+// SendPlayerMobEffect applies a client-visible effect to one Bedrock player.
+func (l *Listener) SendPlayerMobEffect(p *player.Player, effectType, amplifier, duration int32) {
+	if l == nil || p == nil {
+		return
+	}
+	l.sessionsMu.RLock()
+	session := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if session == nil {
+		return
+	}
+	_ = session.conn.WritePacket(&packet.MobEffect{
+		EntityRuntimeID: bedrockSelfRuntimeID,
+		Operation:       packet.MobEffectAdd,
+		EffectType:      effectType,
+		Amplifier:       amplifier,
+		Particles:       true,
+		Duration:        duration,
+		Tick:            uint64(time.Now().UnixMilli() / 50),
+	})
 }
 
 func (l *Listener) changeDimension(p *player.Player, dimension int32, position spatial.Vec3, respawn bool) {

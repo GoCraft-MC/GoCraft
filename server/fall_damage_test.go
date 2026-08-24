@@ -18,7 +18,7 @@ func TestBedrockEnteringWaterCancelsAccumulatedFallDamage(t *testing.T) {
 	p.FallDistance = 20
 	s := &Server{world: w}
 
-	s.applyBedrockMovementDamage(p, 73, false)
+	s.applyBedrockMovementDamage(p, spatial.Vec3{X: p.Position.X, Y: 73, Z: p.Position.Z}, false)
 	if p.FallDistance != 0 || p.Health != p.MaxHealth {
 		t.Fatalf("water landing state: fall=%.1f health=%.1f", p.FallDistance, p.Health)
 	}
