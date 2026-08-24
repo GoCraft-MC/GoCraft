@@ -601,6 +601,18 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 		}
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 	}
+	if strings.HasSuffix(name, "_copper_bulb") {
+		lit := block.Properties["lit"] == "true"
+		if powered && block.Properties["powered"] != "true" {
+			lit = !lit
+		}
+		newBlock := redstoneBlockWith(block, "powered", boolStr(powered), "lit", boolStr(lit))
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+	}
 	switch name {
 	case "minecraft:redstone_lamp":
 		var newName string
@@ -691,6 +703,22 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 
 	case "minecraft:hopper":
 		newBlock := redstoneBlockWith(block, "enabled", boolStr(!powered))
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+
+	case "minecraft:note_block":
+		newBlock := redstoneBlockWith(block, "powered", boolStr(powered))
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+
+	case "minecraft:dispenser", "minecraft:dropper", "minecraft:crafter":
+		newBlock := redstoneBlockWith(block, "triggered", boolStr(powered))
 		if block.Equal(newBlock) {
 			return BlockChange{}, false
 		}

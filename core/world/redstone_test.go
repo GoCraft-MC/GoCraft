@@ -250,3 +250,22 @@ func TestComparatorReadsContainerFullness(t *testing.T) {
 		t.Fatalf("one full chest slot output = %d, want 1", got)
 	}
 }
+
+func TestCopperBulbTogglesOnlyOnRisingEdge(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	bulb := Block{Namespace: "minecraft", Name: "waxed_oxidized_copper_bulb", Properties: map[string]string{
+		"lit": "false", "powered": "false",
+	}}
+	w.SetBlock(1, 64, 0, bulb)
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(1, 64, 0); got.Properties["lit"] != "true" || got.Properties["powered"] != "true" {
+		t.Fatalf("powered bulb = %s", got.Key())
+	}
+	w.SetBlock(0, 64, 0, Air)
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(1, 64, 0); got.Properties["lit"] != "true" || got.Properties["powered"] != "false" {
+		t.Fatalf("unpowered bulb = %s", got.Key())
+	}
+}
