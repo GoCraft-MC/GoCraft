@@ -2426,6 +2426,7 @@ func (s *Server) tickEntities() {
 		// ── Boat physics ─────────────────────────────────────────────────────
 		if corentity.IsMinecart(e.Type) {
 			s.tickMinecartPhysics(e)
+			tickMinecartCollisions(e, allEntities)
 			if s.tickTNTMinecartFuse(e) {
 				s.world.Entities.Remove(e.EntityID)
 				deadIDs = append(deadIDs, e.EntityID)

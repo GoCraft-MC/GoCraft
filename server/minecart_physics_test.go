@@ -14,6 +14,7 @@ func TestPoweredRailStartsAndAcceleratesMinecart(t *testing.T) {
 	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "powered_rail", Properties: map[string]string{
 		"shape": "east_west", "powered": "true",
 	}})
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "powered_rail", Properties: map[string]string{"shape": "east_west", "powered": "true"}})
 	cart := corentity.New(1, [16]byte{}, corentity.TypeMinecart, 0.5, 64.0625, 0.5)
 	cart.Yaw = -90
 	s.tickMinecartPhysics(cart)
@@ -34,6 +35,7 @@ func TestUnpoweredPoweredRailBrakesMinecart(t *testing.T) {
 	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "powered_rail", Properties: map[string]string{
 		"shape": "east_west", "powered": "false",
 	}})
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "powered_rail", Properties: map[string]string{"shape": "east_west", "powered": "false"}})
 	cart := corentity.New(1, [16]byte{}, corentity.TypeMinecart, 0.5, 64.0625, 0.5)
 	cart.VX = 0.2
 	s.tickMinecartPhysics(cart)
@@ -70,5 +72,15 @@ func TestTNTMinecartFuseCountsDown(t *testing.T) {
 	s := &Server{}
 	if s.tickTNTMinecartFuse(cart) || cart.FuseTicks != 79 {
 		t.Fatalf("first fuse tick exploded=%v fuse=%d", false, cart.FuseTicks)
+	}
+}
+
+func TestMinecartsExchangeVelocityOnCollision(t *testing.T) {
+	left := corentity.New(1, [16]byte{}, corentity.TypeMinecart, 0, 64, 0)
+	right := corentity.New(2, [16]byte{}, corentity.TypeMinecart, 0.7, 64, 0)
+	left.VX, right.VX = 0.2, -0.1
+	tickMinecartCollisions(left, []*corentity.Entity{left, right})
+	if left.VX >= 0.2 || right.VX <= -0.1 {
+		t.Fatalf("collision velocities left=%v right=%v", left.VX, right.VX)
 	}
 }

@@ -147,3 +147,35 @@ func (s *Server) tickTNTMinecartFuse(e *corentity.Entity) bool {
 	s.explodeTNT(e.Position.X, e.Position.Y, e.Position.Z)
 	return true
 }
+
+func tickMinecartCollisions(cart *corentity.Entity, entities []*corentity.Entity) {
+	for _, other := range entities {
+		if other == nil || other == cart || other.Dead || other.EntityID < cart.EntityID ||
+			other.EntityID == cart.RiderEntityID {
+			continue
+		}
+		dx, dz := other.Position.X-cart.Position.X, other.Position.Z-cart.Position.Z
+		distanceSquared := dx*dx + dz*dz
+		if distanceSquared < 1.0e-4 || distanceSquared >= 1 {
+			continue
+		}
+		distance := math.Sqrt(distanceSquared)
+		forceX, forceZ := dx/distance*0.05, dz/distance*0.05
+		if corentity.IsMinecart(other.Type) {
+			averageX, averageZ := (cart.VX+other.VX)/2, (cart.VZ+other.VZ)/2
+			if cart.Type == corentity.TypeFurnaceMinecart && other.Type != corentity.TypeFurnaceMinecart {
+				other.VX, other.VZ = other.VX*0.2+cart.VX-forceX, other.VZ*0.2+cart.VZ-forceZ
+				cart.VX, cart.VZ = cart.VX*0.95, cart.VZ*0.95
+			} else if other.Type == corentity.TypeFurnaceMinecart && cart.Type != corentity.TypeFurnaceMinecart {
+				cart.VX, cart.VZ = cart.VX*0.2+other.VX+forceX, cart.VZ*0.2+other.VZ+forceZ
+				other.VX, other.VZ = other.VX*0.95, other.VZ*0.95
+			} else {
+				cart.VX, cart.VZ = cart.VX*0.2+averageX-forceX, cart.VZ*0.2+averageZ-forceZ
+				other.VX, other.VZ = other.VX*0.2+averageX+forceX, other.VZ*0.2+averageZ+forceZ
+			}
+			continue
+		}
+		cart.VX, cart.VZ = cart.VX-forceX, cart.VZ-forceZ
+		other.VX, other.VZ = other.VX+forceX, other.VZ+forceZ
+	}
+}
