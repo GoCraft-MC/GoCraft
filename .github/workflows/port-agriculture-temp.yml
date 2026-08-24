@@ -1,8 +1,8 @@
-name: Port Pumpkin crop parity
+name: Apply Pumpkin crop parity
 
 on:
   push:
-    branches: [fix/gameplay-interactions-2026-08-24]
+    branches: [feature/pumpkin-crop-parity]
     paths:
       - '.github/workflows/port-agriculture-temp.yml'
 
@@ -15,11 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fix/gameplay-interactions-2026-08-24
+          ref: feature/pumpkin-crop-parity
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
-      - name: Apply Pumpkin crop parity port
+      - name: Apply crop parity port
         shell: bash
         run: |
           python3 <<'PY'
@@ -29,10 +29,22 @@ jobs:
           world = Path('core/world/world.go')
           text = world.read_text()
           pattern = re.compile(r'// TickCrops advances.*?\nfunc \(w \*World\) TickCrops\(tick int64, maxChanges int\) \[\]BlockChange \{.*?\n\}\n\n(?=// TickFarmland applies)', re.S)
-          replacement = '''// TickCrops advances loaded crops using Pumpkin/vanilla-style crop rules.\n// The detailed implementation lives in crop_growth.go so Java and Bedrock\n// share one canonical growth simulation.\nfunc (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {\n\treturn w.tickCropsPumpkin(tick, maxChanges)\n}\n\n'''
-          text, n = pattern.subn(replacement, text, count=1)
-          if n != 1:
-              raise SystemExit(f'failed to replace TickCrops: {n}')
+          replacement = '''// TickCrops advances loaded crops using Pumpkin's current crop rules.\n// The canonical simulation is shared by Java and Bedrock through SetBlock.\nfunc (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {\n\treturn w.tickCropsPumpkin(tick, maxChanges)\n}\n\n'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'failed to replace TickCrops: {count}')
+
+          marker = '''\t\t\t\tx := int(chunk.X)*SectionSize + localX\n\t\t\t\ty := SectionMinY(sectionIndex) + localY\n\t\t\t\tz := int(chunk.Z)*SectionSize + localZ\n\t\t\t\thash := uint64(int64(x)*0x9e3779b1)'''
+          replacement_marker = '''\t\t\t\tx := int(chunk.X)*SectionSize + localX\n\t\t\t\ty := SectionMinY(sectionIndex) + localY\n\t\t\t\tz := int(chunk.Z)*SectionSize + localZ\n\t\t\t\t// Pumpkin farmland cannot remain below a solid block. Its Rust\n\t\t\t\t// implementation schedules the dirt conversion from the neighbour\n\t\t\t\t// update; this bounded farmland pass performs the same canonical change.\n\t\t\t\tif IsSolidLandingSurface(w.GetBlock(x, y+1, z).ResourceLocation()) {\n\t\t\t\t\tchanges = append(changes, BlockChange{X: x, Y: y, Z: z, Block: Block{Namespace: "minecraft", Name: "dirt"}})\n\t\t\t\t\tif len(changes) >= maxChanges {\n\t\t\t\t\t\tbreak\n\t\t\t\t\t}\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\thash := uint64(int64(x)*0x9e3779b1)'''
+          if marker not in text:
+              raise SystemExit('failed to locate farmland coordinate marker')
+          text = text.replace(marker, replacement_marker, 1)
+
+          marker = '''\tw.notifyBlockObserver(x, y, z, block)\n}\n\n// setBlockNoPhysics'''
+          replacement_marker = '''\tw.notifyBlockObserver(x, y, z, block)\n\tw.updateAttachedStemNeighbors(x, y, z)\n}\n\n// setBlockNoPhysics'''
+          if marker not in text:
+              raise SystemExit('failed to locate SetBlock observer marker')
+          text = text.replace(marker, replacement_marker, 1)
           world.write_text(text)
 
           Path('core/world/crop_growth.go').write_text(r'''package world
@@ -42,11 +54,11 @@ import (
     "strconv"
 )
 
-// tickCropsPumpkin ports Pumpkin's shared CropBlockBase growth model into the
-// canonical GoCraft world. SetBlock drives the protocol-neutral block observer,
-// so every stage and generated gourd is mirrored to Java and Bedrock clients.
+// tickCropsPumpkin translates Pumpkin's current CropBlockBase behaviour into
+// GoCraft's canonical world model. Pumpkin currently has a TODO for crop light
+// level checks too, so this intentionally does not invent a light requirement.
 func (w *World) tickCropsPumpkin(tick int64, maxChanges int) []BlockChange {
-    if maxChanges <= 0 {
+    if w == nil || maxChanges <= 0 {
         return nil
     }
     w.mu.RLock()
@@ -65,7 +77,7 @@ func (w *World) tickCropsPumpkin(tick int64, maxChanges int) []BlockChange {
             palette := section.BlockPalette()
             hasCrop := false
             for _, block := range palette {
-                if _, ok := pumpkinCropMaximumAge(block.ResourceLocation()); ok {
+                if isPumpkinTickCrop(block.ResourceLocation()) {
                     hasCrop = true
                     break
                 }
@@ -73,14 +85,14 @@ func (w *World) tickCropsPumpkin(tick int64, maxChanges int) []BlockChange {
             if !hasCrop {
                 continue
             }
-            for index, paletteIndex := range section.BlockData() {
+            data := section.BlockData()
+            for index, paletteIndex := range data {
                 if int(paletteIndex) >= len(palette) {
                     continue
                 }
                 block := palette[paletteIndex]
                 name := block.ResourceLocation()
-                maxAge, ok := pumpkinCropMaximumAge(name)
-                if !ok {
+                if !isPumpkinTickCrop(name) {
                     continue
                 }
                 age, err := strconv.Atoi(block.Properties["age"])
@@ -93,60 +105,78 @@ func (w *World) tickCropsPumpkin(tick int64, maxChanges int) []BlockChange {
                 x := int(chunk.X)*SectionSize + localX
                 y := SectionMinY(sectionIndex) + localY
                 z := int(chunk.Z)*SectionSize + localZ
-                roll := cropGrowthHash(x, y, z, tick)
+                roll := CropInteractionRoll(x, y, z, tick)
 
                 switch name {
                 case "minecraft:nether_wart":
-                    // Pumpkin: one growth attempt in ten random ticks.
-                    if age >= maxAge || roll%10 != 0 {
-                        continue
+                    // Pumpkin nether_wart.rs: age 0..3 and one growth chance in ten.
+                    if age < 3 && roll%10 == 0 {
+                        changes = append(changes, cropAgeChange(x, y, z, block, age+1))
                     }
-                    changes = append(changes, cropAgeChange(x, y, z, block, age+1))
 
                 case "minecraft:sweet_berry_bush":
-                    // Pumpkin gives berry bushes an outer 1/5 gate, then grows
-                    // exactly one stage if the block above does not obstruct it.
-                    if age >= maxAge || roll%5 != 0 || IsSolidLandingSurface(w.GetBlock(x, y+1, z).ResourceLocation()) {
-                        continue
-                    }
-                    changes = append(changes, cropAgeChange(x, y, z, block, age+1))
-
-                case "minecraft:cocoa":
-                    // Cocoa is not CropBlockBase in Pumpkin; retain GoCraft's
-                    // existing bounded cadence while preserving its 0..2 stages.
-                    if age >= maxAge || roll%5 != 0 {
-                        continue
-                    }
-                    changes = append(changes, cropAgeChange(x, y, z, block, age+1))
-
-                default:
-                    // Beetroot only delegates one out of three random ticks to
-                    // CropBlockBase in Pumpkin.
-                    if name == "minecraft:beetroots" {
-                        if roll%3 != 0 {
-                            continue
-                        }
-                        roll = mixCropHash(roll)
-                    }
-                    moisture := w.cropAvailableMoisture(x, y, z, name)
-                    denominator := uint64(math.Floor(25.0/float64(moisture))) + 1
-                    if denominator == 0 || roll%denominator != 0 {
-                        continue
-                    }
-                    if age < maxAge {
+                    // Pumpkin sweet_berry_bush.rs: an outer 1/5 random gate,
+                    // one stage at a time, and no growth into a solid block above.
+                    if age < 3 && roll%5 == 0 && !cropGrowthObstructed(w.GetBlock(x, y+1, z)) {
                         changes = append(changes, cropAgeChange(x, y, z, block, age+1))
+                    }
+
+                case "minecraft:torchflower_crop":
+                    // Pumpkin torch_flower.rs: 50% outer gate, then the shared
+                    // moisture roll. Age 1 grows into the final torchflower block.
+                    if age >= 2 || roll%2 == 0 {
                         break
                     }
-                    if name == "minecraft:pumpkin_stem" || name == "minecraft:melon_stem" {
-                        // A mature stem consumes two mutations atomically: the
-                        // fruit and the attached stem. Do not emit half a pair.
-                        if len(changes)+2 > maxChanges {
-                            continue
+                    roll = mixCropHash(roll)
+                    if !cropMoistureGrowthSucceeds(w, x, y, z, name, roll) {
+                        break
+                    }
+                    if age == 0 {
+                        changes = append(changes, cropAgeChange(x, y, z, block, 1))
+                    } else {
+                        changes = append(changes, BlockChange{X: x, Y: y, Z: z, Block: Block{Namespace: "minecraft", Name: "torchflower"}})
+                    }
+
+                case "minecraft:beetroots":
+                    // Pumpkin beetroot.rs only delegates one in three random ticks
+                    // to CropBlockBase and caps at age 3.
+                    if age < 3 && roll%3 == 0 {
+                        roll = mixCropHash(roll)
+                        if cropMoistureGrowthSucceeds(w, x, y, z, name, roll) {
+                            changes = append(changes, cropAgeChange(x, y, z, block, age+1))
                         }
-                        fruitChanges := w.growGourd(x, y, z, block, roll)
-                        changes = append(changes, fruitChanges...)
+                    }
+
+                case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes":
+                    if age < 7 && cropMoistureGrowthSucceeds(w, x, y, z, name, roll) {
+                        changes = append(changes, cropAgeChange(x, y, z, block, age+1))
+                    }
+
+                case "minecraft:pumpkin_stem", "minecraft:melon_stem":
+                    if !cropMoistureGrowthSucceeds(w, x, y, z, name, roll) {
+                        break
+                    }
+                    if age < 7 {
+                        changes = append(changes, cropAgeChange(x, y, z, block, age+1))
+                    } else if len(changes)+2 <= maxChanges {
+                        changes = append(changes, w.growGourd(x, y, z, block, mixCropHash(roll))...)
+                    }
+
+                case "minecraft:cocoa":
+                    // Cocoa is outside Pumpkin's CropBlockBase. Preserve GoCraft's
+                    // previous bounded stage progression instead of regressing it.
+                    if age < 2 && roll%5 == 0 {
+                        changes = append(changes, cropAgeChange(x, y, z, block, age+1))
+                    }
+
+                case "minecraft:pitcher_crop":
+                    // Pumpkin does not currently expose a pitcher-crop behaviour
+                    // implementation to port. Keep GoCraft's existing 0..4 fallback.
+                    if age < 4 && roll%5 == 0 {
+                        changes = append(changes, cropAgeChange(x, y, z, block, age+1))
                     }
                 }
+
                 if len(changes) >= maxChanges {
                     break
                 }
@@ -159,6 +189,7 @@ func (w *World) tickCropsPumpkin(tick int64, maxChanges int) []BlockChange {
             break
         }
     }
+
     if len(changes) > maxChanges {
         changes = changes[:maxChanges]
     }
@@ -168,21 +199,15 @@ func (w *World) tickCropsPumpkin(tick int64, maxChanges int) []BlockChange {
     return changes
 }
 
-func pumpkinCropMaximumAge(name string) (int, bool) {
+func isPumpkinTickCrop(name string) bool {
     switch name {
     case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes",
-        "minecraft:melon_stem", "minecraft:pumpkin_stem":
-        return 7, true
-    case "minecraft:beetroots", "minecraft:nether_wart", "minecraft:sweet_berry_bush":
-        return 3, true
-    case "minecraft:cocoa":
-        return 2, true
-    case "minecraft:torchflower_crop":
-        return 1, true
-    case "minecraft:pitcher_crop":
-        return 4, true
+        "minecraft:beetroots", "minecraft:nether_wart", "minecraft:sweet_berry_bush",
+        "minecraft:torchflower_crop", "minecraft:pumpkin_stem", "minecraft:melon_stem",
+        "minecraft:cocoa", "minecraft:pitcher_crop":
+        return true
     default:
-        return 0, false
+        return false
     }
 }
 
@@ -192,10 +217,20 @@ func cropAgeChange(x, y, z int, block Block, age int) BlockChange {
     return BlockChange{X: x, Y: y, Z: z, Block: replacement}
 }
 
-// cropAvailableMoisture is a direct Go translation of Pumpkin's
-// get_available_moisture: center farmland counts fully, neighbouring farmland
-// counts at one quarter strength, hydrated farmland is worth 3 instead of 1,
-// and crowded/diagonal plant layouts halve the final growth factor.
+func cropMoistureGrowthSucceeds(w *World, x, y, z int, cropName string, roll uint64) bool {
+    moisture := w.cropAvailableMoisture(x, y, z, cropName)
+    if moisture <= 0 {
+        moisture = 1
+    }
+    // Rust random_range(0..=floor(25/f)) has floor(25/f)+1 outcomes.
+    outcomes := uint64(math.Floor(25.0/float64(moisture))) + 1
+    return outcomes > 0 && roll%outcomes == 0
+}
+
+// cropAvailableMoisture is a direct translation of Pumpkin's
+// get_available_moisture. The center farmland contributes 1 when dry or 3 when
+// hydrated; the eight neighbours contribute one quarter of that value.
+// Diagonal/crowded planting halves the resulting growth factor.
 func (w *World) cropAvailableMoisture(x, y, z int, cropName string) float32 {
     moisture := float32(1)
     for dx := -1; dx <= 1; dx++ {
@@ -227,6 +262,105 @@ func (w *World) cropAvailableMoisture(x, y, z int, cropName string) float32 {
     return moisture
 }
 
+func cropGrowthObstructed(block Block) bool {
+    return IsSolidLandingSurface(block.ResourceLocation())
+}
+
+// ApplyCropBoneMeal applies the crop-specific bonemeal rule shared by both
+// protocol editions. Nether wart intentionally returns false: Pumpkin's Rust
+// NetherWartBlock does not implement bonemeal behaviour.
+func ApplyCropBoneMeal(target Block, roll uint64) (Block, bool) {
+    name := target.ResourceLocation()
+    age, err := strconv.Atoi(target.Properties["age"])
+    if err != nil {
+        return Block{}, false
+    }
+    replacement := copyWorldBlock(target)
+
+    switch name {
+    case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes",
+        "minecraft:pumpkin_stem", "minecraft:melon_stem":
+        if age >= 7 {
+            return Block{}, false
+        }
+        increase := 2 + int(roll%4)
+        replacement.Properties["age"] = strconv.Itoa(minInt(7, age+increase))
+        return replacement, true
+
+    case "minecraft:beetroots":
+        if age >= 3 {
+            return Block{}, false
+        }
+        // Pumpkin: random_range(2..=5) / 3, using integer division.
+        increase := (2 + int(roll%4)) / 3
+        replacement.Properties["age"] = strconv.Itoa(minInt(3, age+increase))
+        return replacement, true
+
+    case "minecraft:sweet_berry_bush":
+        if age >= 3 {
+            return Block{}, false
+        }
+        replacement.Properties["age"] = strconv.Itoa(age + 1)
+        return replacement, true
+
+    case "minecraft:torchflower_crop":
+        if age <= 0 {
+            replacement.Properties["age"] = "1"
+            return replacement, true
+        }
+        if age == 1 {
+            return Block{Namespace: "minecraft", Name: "torchflower"}, true
+        }
+        return Block{}, false
+
+    case "minecraft:cocoa":
+        if age >= 2 {
+            return Block{}, false
+        }
+        replacement.Properties["age"] = strconv.Itoa(minInt(2, age+1))
+        return replacement, true
+
+    case "minecraft:pitcher_crop":
+        // Preserve the previous GoCraft fallback until Pumpkin has a behaviour
+        // implementation that can be translated exactly.
+        if age >= 4 {
+            return Block{}, false
+        }
+        replacement.Properties["age"] = strconv.Itoa(minInt(4, age+1))
+        return replacement, true
+    }
+    return Block{}, false
+}
+
+// HarvestSweetBerries translates Pumpkin's normal_use implementation. Ages 2
+// and 3 reset to age 1 and yield age-1..age berries respectively.
+func HarvestSweetBerries(target Block, roll uint64) (Block, int, bool) {
+    if target.ResourceLocation() != "minecraft:sweet_berry_bush" {
+        return Block{}, 0, false
+    }
+    age, err := strconv.Atoi(target.Properties["age"])
+    if err != nil || (age != 2 && age != 3) {
+        return Block{}, 0, false
+    }
+    replacement := copyWorldBlock(target)
+    replacement.Properties["age"] = "1"
+    count := age - 1 + int(roll%2)
+    return replacement, count, true
+}
+
+// SupportsVegetation approximates Minecraft's supports_vegetation tag for the
+// crop interactions ported here. It is intentionally conservative.
+func SupportsVegetation(name string) bool {
+    switch name {
+    case "minecraft:grass_block", "minecraft:dirt", "minecraft:coarse_dirt",
+        "minecraft:podzol", "minecraft:farmland", "minecraft:rooted_dirt",
+        "minecraft:moss_block", "minecraft:mud", "minecraft:mycelium":
+        return true
+    default:
+        return false
+    }
+}
+
 func (w *World) growGourd(x, y, z int, stem Block, roll uint64) []BlockChange {
     dirs := [...]struct {
         dx, dz int
@@ -237,11 +371,12 @@ func (w *World) growGourd(x, y, z int, stem Block, roll uint64) []BlockChange {
         {-1, 0, "west"},
         {1, 0, "east"},
     }
-    dir := dirs[int(mixCropHash(roll)%uint64(len(dirs)))]
-    fx, fz := x+dir.dx, z+dir.dz
-    if !w.GetBlock(fx, y, fz).IsAir() || !supportsGourdFruit(w.GetBlock(fx, y-1, fz).ResourceLocation()) {
+    dir := dirs[int(roll%uint64(len(dirs)))]
+    fruitX, fruitZ := x+dir.dx, z+dir.dz
+    if !w.GetBlock(fruitX, y, fruitZ).IsAir() || !supportsGourdFruit(w.GetBlock(fruitX, y-1, fruitZ).ResourceLocation()) {
         return nil
     }
+
     fruit := "melon"
     attached := "attached_melon_stem"
     if stem.ResourceLocation() == "minecraft:pumpkin_stem" {
@@ -249,7 +384,7 @@ func (w *World) growGourd(x, y, z int, stem Block, roll uint64) []BlockChange {
         attached = "attached_pumpkin_stem"
     }
     return []BlockChange{
-        {X: fx, Y: y, Z: fz, Block: Block{Namespace: "minecraft", Name: fruit}},
+        {X: fruitX, Y: y, Z: fruitZ, Block: Block{Namespace: "minecraft", Name: fruit}},
         {X: x, Y: y, Z: z, Block: Block{Namespace: "minecraft", Name: attached, Properties: map[string]string{"facing": dir.facing}}},
     }
 }
@@ -265,9 +400,46 @@ func supportsGourdFruit(name string) bool {
     }
 }
 
-func cropGrowthHash(x, y, z int, tick int64) uint64 {
+// updateAttachedStemNeighbors mirrors Pumpkin's attached_stem.rs neighbour
+// update: removing the fruit in front of an attached stem turns it back into a
+// mature normal stem (age 7).
+func (w *World) updateAttachedStemNeighbors(changedX, changedY, changedZ int) {
+    if w == nil {
+        return
+    }
+    neighbors := [...]struct {
+        x, z int
+        facing string
+    }{
+        {changedX, changedZ + 1, "north"},
+        {changedX, changedZ - 1, "south"},
+        {changedX + 1, changedZ, "west"},
+        {changedX - 1, changedZ, "east"},
+    }
+    for _, pos := range neighbors {
+        stem := w.GetBlock(pos.x, changedY, pos.z)
+        stemName := stem.ResourceLocation()
+        if (stemName != "minecraft:attached_pumpkin_stem" && stemName != "minecraft:attached_melon_stem") || stem.Properties["facing"] != pos.facing {
+            continue
+        }
+        expectedFruit := "minecraft:melon"
+        normalStem := "melon_stem"
+        if stemName == "minecraft:attached_pumpkin_stem" {
+            expectedFruit = "minecraft:pumpkin"
+            normalStem = "pumpkin_stem"
+        }
+        if w.GetBlock(changedX, changedY, changedZ).ResourceLocation() == expectedFruit {
+            continue
+        }
+        w.SetBlock(pos.x, changedY, pos.z, Block{Namespace: "minecraft", Name: normalStem, Properties: map[string]string{"age": "7"}})
+    }
+}
+
+// CropInteractionRoll gives adapters a stable seed for interaction behaviour
+// without duplicating hashing logic.
+func CropInteractionRoll(x, y, z int, tick int64) uint64 {
     h := uint64(int64(x))*0x9e3779b185ebca87 ^ uint64(int64(y))*0xc2b2ae3d27d4eb4f ^
-        uint64(int64(z))*0x165667b19e3779f9 ^ uint64(tick/20+1)*0x27d4eb2f165667c5
+        uint64(int64(z))*0x165667b19e3779f9 ^ uint64(tick+1)*0x27d4eb2f165667c5
     return mixCropHash(h)
 }
 
@@ -279,65 +451,124 @@ func mixCropHash(h uint64) uint64 {
     h ^= h >> 33
     return h
 }
+
+func minInt(a, b int) int {
+    if a < b {
+        return a
+    }
+    return b
+}
 ''')
 
           java = Path('java/handler/block.go')
           text = java.read_text()
+          old = 'if replacement, ok := javaBoneMealGrowth(target); ok {'
+          new = 'if replacement, ok := coreworld.ApplyCropBoneMeal(target, rand.Uint64()); ok {'
+          if old not in text:
+              raise SystemExit('java bonemeal call marker not found')
+          text = text.replace(old, new, 1)
+
+          text, count = re.subn(r'\nfunc javaBoneMealGrowth\(target coreworld\.Block\) \(coreworld\.Block, bool\) \{.*?\n\}\n\n(?=func javaButtonPlacementState)', '\n', text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'failed to remove javaBoneMealGrowth: {count}')
+
           old = '''\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:beetroot_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "beetroots", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:soul_sand" && held.ItemID == "minecraft:nether_wart":'''
-          new = '''\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:beetroot_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "beetroots", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:melon_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "melon_stem", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:pumpkin_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "pumpkin_stem", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:torchflower_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "torchflower_crop", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:soul_sand" && held.ItemID == "minecraft:nether_wart":'''
+          new = '''\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:beetroot_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "beetroots", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:melon_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "melon_stem", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:pumpkin_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "pumpkin_stem", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:torchflower_seeds":\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "torchflower_crop", Properties: map[string]string{"age": "0"}}\n\tcase held.ItemID == "minecraft:sweet_berries" && coreworld.SupportsVegetation(target.ResourceLocation()):\n\t\tcrop = coreworld.Block{Namespace: "minecraft", Name: "sweet_berry_bush", Properties: map[string]string{"age": "0"}}\n\tcase target.ResourceLocation() == "minecraft:soul_sand" && held.ItemID == "minecraft:nether_wart":'''
           if old not in text:
               raise SystemExit('java planting marker not found')
           text = text.replace(old, new, 1)
-          text = text.replace('''\tcase "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes":\n\t\tmaxAge = 7\n\tcase "minecraft:beetroots", "minecraft:nether_wart", "minecraft:sweet_berry_bush":''', '''\tcase "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes", "minecraft:melon_stem", "minecraft:pumpkin_stem":\n\t\tmaxAge = 7\n\tcase "minecraft:beetroots", "minecraft:sweet_berry_bush":''', 1)
-          old_inc = '''\t\tincrease := 2 + rand.Intn(4) //nolint:gosec\n\t\tnewAge := age + increase'''
-          new_inc = '''\t\tincrease := 2 + rand.Intn(4) //nolint:gosec\n\t\tif target.ResourceLocation() == "minecraft:beetroots" {\n\t\t\t// Pumpkin's beetroot override divides the normal 2..5 increase by 3.\n\t\t\tincrease /= 3\n\t\t}\n\t\tnewAge := age + increase'''
-          if old_inc not in text:
-              raise SystemExit('java bone meal marker not found')
-          text = text.replace(old_inc, new_inc, 1)
+
+          marker = '''\t// Cake right-click: consume a slice (based on PumpkinMC cake.rs).\n\tif !bypassActivation && targetBlock.ResourceLocation() == "minecraft:cake" {'''
+          berry = '''\t// Pumpkin sweet_berry_bush.rs: right-click ages 2/3 to harvest and reset to age 1.\n\tif !bypassActivation && targetBlock.ResourceLocation() == "minecraft:sweet_berry_bush" {\n\t\tif replacement, count, ok := coreworld.HarvestSweetBerries(targetBlock, rand.Uint64()); ok {\n\t\t\tapplyBlockChange(int(bx), int(by), int(bz), replacement, w, mgr)\n\t\t\tif count > 0 && p.GameMode != player.GameModeCreative {\n\t\t\t\tp.GiveItem(player.ItemStack{ItemID: "minecraft:sweet_berries", Count: count})\n\t\t\t\tp.ContainerStateID++\n\t\t\t\tif sess, exists := mgr.Get(p.UUID); exists {\n\t\t\t\t\t_ = sendSetContainerContent(sess.Conn, p, p.ContainerStateID)\n\t\t\t\t}\n\t\t\t}\n\t\t\tbroadcastSoundAt(mgr, "minecraft:block.sweet_berry_bush.pick_berries", soundCategoryBlocks,\n\t\t\t\tfloat64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)\n\t\t\tsendAcknowledgeBlockChange(mgr, p, seq)\n\t\t\treturn nil\n\t\t}\n\t}\n\n'''
+          if marker not in text:
+              raise SystemExit('java sweet berry activation marker not found')
+          text = text.replace(marker, berry + marker, 1)
           java.write_text(text)
 
           bedrock = Path('server/bedrock_actions.go')
           text = bedrock.read_text()
-          old_bm = '''\tif item == "minecraft:bone_meal" {\n\t\tif maxAge, ok := bedrockCropMaxAge(name); ok {\n\t\t\tage, _ := strconv.Atoi(target.Properties["age"])\n\t\t\tif age < maxAge {\n\t\t\t\treplacement := bedrockCopyBlock(target)\n\t\t\t\treplacement.Properties["age"] = strconv.Itoa(maxAge)\n\t\t\t\ts.setBedrockActionBlock(x, y, z, replacement)\n\t\t\t\ts.consumeBedrockHeldItem(p, 1)\n\t\t\t\treturn true\n\t\t\t}\n\t\t}\n\t}'''
-          new_bm = '''\tif item == "minecraft:bone_meal" {\n\t\tif maxAge, ok := bedrockCropMaxAge(name); ok {\n\t\t\tage, _ := strconv.Atoi(target.Properties["age"])\n\t\t\tif age < maxAge {\n\t\t\t\tincrease := bedrockBoneMealIncrease(name, x, y, z, s.worldAge)\n\t\t\t\tnewAge := min(maxAge, age+increase)\n\t\t\t\tif newAge != age {\n\t\t\t\t\treplacement := bedrockCopyBlock(target)\n\t\t\t\t\treplacement.Properties["age"] = strconv.Itoa(newAge)\n\t\t\t\t\ts.setBedrockActionBlock(x, y, z, replacement)\n\t\t\t\t}\n\t\t\t\t// Pumpkin consumes the bone meal even when beetroot's divided\n\t\t\t\t// increase happens to round down to zero.\n\t\t\t\ts.consumeBedrockHeldItem(p, 1)\n\t\t\t\treturn true\n\t\t\t}\n\t\t}\n\t}'''
-          if old_bm not in text:
-              raise SystemExit('bedrock bone meal marker not found')
-          text = text.replace(old_bm, new_bm, 1)
-          helper_marker = '''func bedrockCropMaxAge(name string) (int, bool) {'''
-          helper = '''func bedrockBoneMealIncrease(name string, x, y, z int, worldAge int64) int {\n\th := uint64(int64(x))*0x9e3779b185ebca87 ^ uint64(int64(y))*0xc2b2ae3d27d4eb4f ^\n\t\tuint64(int64(z))*0x165667b19e3779f9 ^ uint64(worldAge+1)*0x27d4eb2f165667c5\n\th ^= h >> 33\n\th *= 0xff51afd7ed558ccd\n\th ^= h >> 33\n\tincrease := 2 + int(h%4)\n\tif name == "minecraft:beetroots" {\n\t\tincrease /= 3\n\t}\n\treturn increase\n}\n\n'''
-          if helper_marker not in text:
-              raise SystemExit('bedrock crop max marker not found')
-          text = text.replace(helper_marker, helper + helper_marker, 1)
+          pattern = re.compile(r'\tif item == "minecraft:bone_meal" \{\n\t\tif maxAge, ok := bedrockCropMaxAge\(name\); ok \{.*?\n\t\}\n', re.S)
+          replacement = '''\tif item == "minecraft:bone_meal" {\n\t\tif replacement, ok := coreworld.ApplyCropBoneMeal(target, coreworld.CropInteractionRoll(x, y, z, s.worldAge)); ok {\n\t\t\ts.setBedrockActionBlock(x, y, z, replacement)\n\t\t\ts.consumeBedrockHeldItem(p, 1)\n\t\t\treturn true\n\t\t}\n\t}\n'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'failed to replace bedrock bonemeal: {count}')
+
+          old = '''\tif target == "minecraft:soul_sand" && item == "minecraft:nether_wart" {\n\t\treturn bedrockBlock("nether_wart", map[string]string{"age": "0"}), true\n\t}\n\treturn coreworld.Block{}, false\n}'''
+          new = '''\tif item == "minecraft:sweet_berries" && coreworld.SupportsVegetation(target) {\n\t\treturn bedrockBlock("sweet_berry_bush", map[string]string{"age": "0"}), true\n\t}\n\tif target == "minecraft:soul_sand" && item == "minecraft:nether_wart" {\n\t\treturn bedrockBlock("nether_wart", map[string]string{"age": "0"}), true\n\t}\n\treturn coreworld.Block{}, false\n}'''
+          if old not in text:
+              raise SystemExit('bedrock planting marker not found')
+          text = text.replace(old, new, 1)
+
+          text, count = re.subn(r'\nfunc bedrockCropMaxAge\(name string\) \(int, bool\) \{.*?\n\}\n', '\n', text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'failed to remove bedrockCropMaxAge: {count}')
+
+          marker = '''func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.BlockPos, block coreworld.Block) bool {\n\tx, y, z := int(pos.X), int(pos.Y), int(pos.Z)\n\tname := block.ResourceLocation()'''
+          replacement = '''func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.BlockPos, block coreworld.Block) bool {\n\tx, y, z := int(pos.X), int(pos.Y), int(pos.Z)\n\tname := block.ResourceLocation()\n\tif name == "minecraft:sweet_berry_bush" {\n\t\tif replacement, count, ok := coreworld.HarvestSweetBerries(block, coreworld.CropInteractionRoll(x, y, z, s.worldAge)); ok {\n\t\t\ts.setBedrockActionBlock(x, y, z, replacement)\n\t\t\tif count > 0 && p.GameMode != player.GameModeCreative {\n\t\t\t\ts.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:sweet_berries", Count: count})\n\t\t\t}\n\t\t\treturn true\n\t\t}\n\t}'''
+          if marker not in text:
+              raise SystemExit('bedrock berry activation marker not found')
+          text = text.replace(marker, replacement, 1)
           bedrock.write_text(text)
 
           Path('core/world/crop_pumpkin_test.go').write_text(r'''package world
 
 import "testing"
 
-func TestPumpkinCropMoistureAndCrowding(t *testing.T) {
+func TestPumpkinCropMoistureFactor(t *testing.T) {
     w := New(&FlatGenerator{}, nil, false)
     defer w.Close()
     w.SetBlock(0, 40, 0, Block{Namespace: "minecraft", Name: "farmland", Properties: map[string]string{"moisture": "7"}})
     w.SetBlock(0, 41, 0, Block{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "0"}})
     if got := w.cropAvailableMoisture(0, 41, 0, "minecraft:wheat"); got != 4 {
-        t.Fatalf("single hydrated farmland moisture = %v, want 4", got)
+        t.Fatalf("hydrated center farmland moisture factor = %v, want 4", got)
     }
-    for dx := -1; dx <= 1; dx++ {
-        for dz := -1; dz <= 1; dz++ {
-            w.SetBlock(dx, 40, dz, Block{Namespace: "minecraft", Name: "farmland", Properties: map[string]string{"moisture": "7"}})
-        }
-    }
-    if got := w.cropAvailableMoisture(0, 41, 0, "minecraft:wheat"); got != 10 {
-        t.Fatalf("3x3 hydrated farmland moisture = %v, want 10", got)
-    }
-    w.SetBlock(1, 41, 0, Block{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "0"}})
-    w.SetBlock(0, 41, 1, Block{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "0"}})
-    if got := w.cropAvailableMoisture(0, 41, 0, "minecraft:wheat"); got != 5 {
-        t.Fatalf("crowded crop moisture = %v, want 5", got)
+    w.SetBlock(1, 40, 1, Block{Namespace: "minecraft", Name: "farmland", Properties: map[string]string{"moisture": "7"}})
+    w.SetBlock(1, 41, 1, Block{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "0"}})
+    if got := w.cropAvailableMoisture(0, 41, 0, "minecraft:wheat"); got != 2.375 {
+        t.Fatalf("diagonal crop moisture factor = %v, want 2.375", got)
     }
 }
 
-func TestMaturePumpkinStemCreatesFruitAndAttaches(t *testing.T) {
+func TestPumpkinBoneMealRules(t *testing.T) {
+    nether := Block{Namespace: "minecraft", Name: "nether_wart", Properties: map[string]string{"age": "0"}}
+    if _, ok := ApplyCropBoneMeal(nether, 3); ok {
+        t.Fatal("nether wart accepted bone meal, but Pumpkin does not implement nether-wart bonemeal")
+    }
+
+    beet := Block{Namespace: "minecraft", Name: "beetroots", Properties: map[string]string{"age": "0"}}
+    grown, ok := ApplyCropBoneMeal(beet, 3) // (2 + 3) / 3 = 1
+    if !ok || grown.Properties["age"] != "1" {
+        t.Fatalf("beetroot bone meal = %#v, ok=%v; want age 1", grown, ok)
+    }
+
+    wheat := Block{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "0"}}
+    grown, ok = ApplyCropBoneMeal(wheat, 0)
+    if !ok || grown.Properties["age"] != "2" {
+        t.Fatalf("wheat bone meal = %#v, ok=%v; want age 2", grown, ok)
+    }
+
+    berry := Block{Namespace: "minecraft", Name: "sweet_berry_bush", Properties: map[string]string{"age": "1"}}
+    grown, ok = ApplyCropBoneMeal(berry, 0)
+    if !ok || grown.Properties["age"] != "2" {
+        t.Fatalf("berry bone meal = %#v, ok=%v; want age 2", grown, ok)
+    }
+
+    torch := Block{Namespace: "minecraft", Name: "torchflower_crop", Properties: map[string]string{"age": "1"}}
+    grown, ok = ApplyCropBoneMeal(torch, 0)
+    if !ok || grown.ResourceLocation() != "minecraft:torchflower" {
+        t.Fatalf("torchflower final bone meal = %#v, ok=%v; want torchflower", grown, ok)
+    }
+}
+
+func TestPumpkinSweetBerryHarvest(t *testing.T) {
+    bush := Block{Namespace: "minecraft", Name: "sweet_berry_bush", Properties: map[string]string{"age": "3"}}
+    replacement, count, ok := HarvestSweetBerries(bush, 0)
+    if !ok || replacement.Properties["age"] != "1" || count != 2 {
+        t.Fatalf("harvest = %#v count=%d ok=%v; want age 1 and 2 berries", replacement, count, ok)
+    }
+}
+
+func TestPumpkinStemGrowsFruitAndAttaches(t *testing.T) {
     w := New(&FlatGenerator{}, nil, false)
     defer w.Close()
     w.SetBlock(0, 40, 0, Block{Namespace: "minecraft", Name: "farmland", Properties: map[string]string{"moisture": "7"}})
@@ -346,62 +577,52 @@ func TestMaturePumpkinStemCreatesFruitAndAttaches(t *testing.T) {
         w.SetBlock(p[0], 40, p[1], Block{Namespace: "minecraft", Name: "dirt"})
         w.SetBlock(p[0], 41, p[1], Air)
     }
-    for tick := int64(20); tick <= 4000; tick += 20 {
+
+    for tick := int64(20); tick <= 20000; tick += 20 {
         w.TickCrops(tick, 16)
         stem := w.GetBlock(0, 41, 0)
-        if stem.ResourceLocation() != "minecraft:attached_pumpkin_stem" {
-            continue
-        }
-        fruit := 0
-        for _, p := range [][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
-            if w.GetBlock(p[0], 41, p[1]).ResourceLocation() == "minecraft:pumpkin" {
-                fruit++
+        if stem.ResourceLocation() == "minecraft:attached_pumpkin_stem" {
+            facing := stem.Properties["facing"]
+            dx, dz := 0, 0
+            switch facing {
+            case "north": dz = -1
+            case "south": dz = 1
+            case "west": dx = -1
+            case "east": dx = 1
+            default: t.Fatalf("invalid attached stem facing %q", facing)
             }
+            if got := w.GetBlock(dx, 41, dz).ResourceLocation(); got != "minecraft:pumpkin" {
+                t.Fatalf("attached stem points to %s, want pumpkin", got)
+            }
+            return
         }
-        if fruit != 1 {
-            t.Fatalf("attached stem generated %d pumpkins, want 1", fruit)
-        }
-        return
     }
     t.Fatal("mature pumpkin stem never generated fruit")
 }
 
-func TestNetherWartUsesDedicatedStages(t *testing.T) {
-    if maxAge, ok := pumpkinCropMaximumAge("minecraft:nether_wart"); !ok || maxAge != 3 {
-        t.Fatalf("nether wart max age = %d, ok=%v; want 3,true", maxAge, ok)
-    }
-    if maxAge, ok := pumpkinCropMaximumAge("minecraft:pumpkin_stem"); !ok || maxAge != 7 {
-        t.Fatalf("pumpkin stem max age = %d, ok=%v; want 7,true", maxAge, ok)
-    }
-}
-''')
-
-          Path('server/crop_bonemeal_test.go').write_text(r'''package server
-
-import "testing"
-
-func TestBedrockBoneMealUsesPumpkinStageIncrease(t *testing.T) {
-    for rollAge := int64(0); rollAge < 32; rollAge++ {
-        got := bedrockBoneMealIncrease("minecraft:wheat", 3, 64, -7, rollAge)
-        if got < 2 || got > 5 {
-            t.Fatalf("wheat bone meal increase = %d, want 2..5", got)
-        }
-        beetroot := bedrockBoneMealIncrease("minecraft:beetroots", 3, 64, -7, rollAge)
-        if beetroot < 0 || beetroot > 1 {
-            t.Fatalf("beetroot bone meal increase = %d, want 0..1", beetroot)
-        }
+func TestAttachedStemRevertsWhenFruitRemoved(t *testing.T) {
+    w := New(&FlatGenerator{}, nil, false)
+    defer w.Close()
+    w.SetBlock(0, 40, 0, Block{Namespace: "minecraft", Name: "farmland", Properties: map[string]string{"moisture": "7"}})
+    w.SetBlock(0, 41, 0, Block{Namespace: "minecraft", Name: "attached_pumpkin_stem", Properties: map[string]string{"facing": "east"}})
+    w.SetBlock(1, 41, 0, Block{Namespace: "minecraft", Name: "pumpkin"})
+    w.SetBlock(1, 41, 0, Air)
+    stem := w.GetBlock(0, 41, 0)
+    if stem.ResourceLocation() != "minecraft:pumpkin_stem" || stem.Properties["age"] != "7" {
+        t.Fatalf("stem after pumpkin removal = %#v; want mature pumpkin_stem", stem)
     }
 }
 ''')
           PY
-          gofmt -w core/world/world.go core/world/crop_growth.go core/world/crop_pumpkin_test.go java/handler/block.go server/bedrock_actions.go server/crop_bonemeal_test.go
+
+          gofmt -w core/world/world.go core/world/crop_growth.go core/world/crop_pumpkin_test.go java/handler/block.go server/bedrock_actions.go
           go test ./...
-      - name: Commit port
-        shell: bash
-        run: |
-          rm .github/workflows/port-agriculture-temp.yml
+          go vet ./...
+          go build ./...
+
+          git rm --ignore-unmatch .github/workflows/port-agriculture-temp.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add core/world/world.go core/world/crop_growth.go core/world/crop_pumpkin_test.go java/handler/block.go server/bedrock_actions.go
           git commit -m 'feat: port Pumpkin crop growth parity'
-          git push origin HEAD:fix/gameplay-interactions-2026-08-24
+          git push origin HEAD:feature/pumpkin-crop-parity
