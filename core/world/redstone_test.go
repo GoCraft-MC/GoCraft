@@ -210,3 +210,17 @@ func TestPoweredRailCarriesPowerForEightRails(t *testing.T) {
 		t.Fatalf("ninth rail powered = %q, want false", got)
 	}
 }
+
+func TestComparatorReadsContainerFullness(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, -1, Block{Namespace: "minecraft", Name: "chest"})
+	w.SetContainerItems(0, 64, -1, "minecraft:chest", []ContainerItem{{Slot: 0, ItemID: "minecraft:stone", Count: 64}})
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "comparator", Properties: map[string]string{
+		"facing": "north", "mode": "compare", "powered": "false",
+	}})
+	w.Redstone.FlushUpdates()
+	if got := w.Redstone.PowerAt(0, 64, 0); got != 1 {
+		t.Fatalf("one full chest slot output = %d, want 1", got)
+	}
+}

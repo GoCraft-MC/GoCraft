@@ -245,7 +245,16 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 
 	case "minecraft:comparator":
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
-		main := re.inputPowerAt(x+dx, y, z+dz, [3]int{x, y, z})
+		inputX, inputZ := x+dx, z+dz
+		main := re.inputPowerAt(inputX, y, inputZ, [3]int{x, y, z})
+		if analog := re.analogOutputAt(inputX, y, inputZ); analog > main {
+			main = analog
+		}
+		if main < 15 && isRedstoneSolidBlock(re.world.GetBlock(inputX, y, inputZ)) {
+			if analog := re.analogOutputAt(inputX+dx, y, inputZ+dz); analog > main {
+				main = analog
+			}
+		}
 		left := re.inputPowerAt(x-dz, y, z+dx, [3]int{x, y, z})
 		right := re.inputPowerAt(x+dz, y, z-dx, [3]int{x, y, z})
 		side := left
@@ -293,6 +302,55 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 			}
 		}
 		return best
+	}
+}
+
+func (re *RedstoneEngine) analogOutputAt(x, y, z int) int {
+	block := re.world.GetBlock(x, y, z)
+	switch block.ResourceLocation() {
+	case "minecraft:composter":
+		return atoi(block.Properties["level"])
+	case "minecraft:cake":
+		return 14 - min(atoi(block.Properties["bites"]), 6)*2
+	case "minecraft:respawn_anchor":
+		charges := atoi(block.Properties["charges"])
+		if charges > 0 {
+			return charges*4 - 1
+		}
+		return 0
+	}
+	slots := redstoneContainerSlots(block.ResourceLocation())
+	if slots == 0 {
+		return 0
+	}
+	fullness, occupied := 0.0, 0
+	for _, item := range re.world.ContainerItems(x, y, z) {
+		if item.Count <= 0 {
+			continue
+		}
+		occupied++
+		fullness += float64(min(item.Count, 64)) / 64
+	}
+	if occupied == 0 {
+		return 0
+	}
+	return int(fullness/float64(slots)*14) + 1
+}
+
+func redstoneContainerSlots(name string) int {
+	switch {
+	case name == "minecraft:hopper", name == "minecraft:brewing_stand":
+		return 5
+	case name == "minecraft:dispenser", name == "minecraft:dropper", name == "minecraft:crafter":
+		return 9
+	case name == "minecraft:furnace" || name == "minecraft:smoker" || name == "minecraft:blast_furnace":
+		return 3
+	case name == "minecraft:decorated_pot":
+		return 1
+	case name == "minecraft:chest" || name == "minecraft:trapped_chest" || name == "minecraft:barrel" || strings.HasSuffix(name, "_shulker_box"):
+		return 27
+	default:
+		return 0
 	}
 }
 
