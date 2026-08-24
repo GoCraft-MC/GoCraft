@@ -3,6 +3,7 @@ package blockloot
 import (
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,6 +111,37 @@ func TestStateDrivenCropDrops(t *testing.T) {
 	if count(mature, "minecraft:wheat") != 1 || count(mature, "minecraft:wheat_seeds") < 1 {
 		t.Fatalf("mature wheat drops = %+v", mature)
 	}
+}
+
+func TestMatureCropLootTablesRemainAgeAware(t *testing.T) {
+	tests := []struct {
+		block, item string
+		age         int
+		minimum     int
+	}{
+		{"carrots", "minecraft:carrot", 7, 2},
+		{"potatoes", "minecraft:potato", 7, 2},
+		{"beetroots", "minecraft:beetroot", 3, 1},
+		{"nether_wart", "minecraft:nether_wart", 3, 2},
+		{"pumpkin_stem", "minecraft:pumpkin_seeds", 7, 1},
+		{"melon_stem", "minecraft:melon_seeds", 7, 1},
+	}
+	for _, test := range tests {
+		t.Run(test.block, func(t *testing.T) {
+			total := 0
+			for seed := int64(0); seed < 32; seed++ {
+				got := Drops(Context{
+					Block:  block(test.block, map[string]string{"age": strconv.Itoa(test.age)}),
+					Random: rand.New(rand.NewSource(seed)),
+				})
+				total += count(got, test.item)
+			}
+			if total < test.minimum {
+				t.Fatalf("32 mature harvests gave %d %s, want at least %d", total, test.item, test.minimum)
+			}
+		})
+	}
+	wantDrop(t, drops("torchflower_crop", "", map[string]string{"age": "1"}), "minecraft:torchflower_seeds", 1)
 }
 
 func TestShearsAndSilkTouchConditions(t *testing.T) {
