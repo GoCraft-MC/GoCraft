@@ -590,6 +590,24 @@ func TestJavaActivatesRedstoneControls(t *testing.T) {
 	}
 }
 
+func TestJavaPlacesLitRedstoneWallTorch(t *testing.T) {
+	p := player.New([16]byte{}, "engineer", player.ClientEditionJava)
+	p.GameMode = player.GameModeCreative
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:redstone_torch", Count: 64}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(30, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+
+	if err := handleUseItemOn(useItemOnPacket(30, 64, 0, 5, 540), p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	torch := w.GetBlock(31, 64, 0)
+	if torch.ResourceLocation() != "minecraft:redstone_wall_torch" ||
+		torch.Properties["facing"] != "east" || torch.Properties["lit"] != "true" {
+		t.Fatalf("wall torch state = %s", torch.Key())
+	}
+}
+
 func TestJavaBoneMealGrowsCropAndConsumesItem(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival

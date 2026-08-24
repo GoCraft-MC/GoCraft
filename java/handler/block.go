@@ -814,6 +814,35 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		}
 		placed.Properties["powered"] = "false"
 		applyBlockChange(px, py, pz, placed, w, mgr)
+	case block.ResourceLocation() == "minecraft:torch" || block.ResourceLocation() == "minecraft:soul_torch" ||
+		block.ResourceLocation() == "minecraft:redstone_torch":
+		if face == 1 && coreworld.IsSolidLandingSurface(w.GetBlock(px, py-1, pz).ResourceLocation()) {
+			if block.ResourceLocation() == "minecraft:redstone_torch" {
+				block.Properties = map[string]string{"lit": "true"}
+			} else {
+				block.Properties = nil
+			}
+			applyBlockChange(px, py, pz, block, w, mgr)
+		} else if face >= 2 && face <= 5 {
+			offset := faceOffset[face]
+			support := w.GetBlock(px-int(offset[0]), py-int(offset[1]), pz-int(offset[2]))
+			if !coreworld.IsSolidLandingSurface(support.ResourceLocation()) {
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+			block.Name = strings.Replace(block.Name, "_torch", "_wall_torch", 1)
+			if block.Name == "torch" {
+				block.Name = "wall_torch"
+			}
+			block.Properties = map[string]string{"facing": javaFacingForFace(face)}
+			if strings.Contains(block.Name, "redstone") {
+				block.Properties["lit"] = "true"
+			}
+			applyBlockChange(px, py, pz, block, w, mgr)
+		} else {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
 	case block.ResourceLocation() == "minecraft:chain" ||
 		block.ResourceLocation() == "minecraft:end_rod" ||
 		strings.HasSuffix(block.ResourceLocation(), "_log") ||
@@ -901,6 +930,19 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	}
 	sendAcknowledgeBlockChange(mgr, p, seq)
 	return nil
+}
+
+func javaFacingForFace(face int32) string {
+	switch face {
+	case 2:
+		return "north"
+	case 3:
+		return "south"
+	case 4:
+		return "west"
+	default:
+		return "east"
+	}
 }
 
 func javaHopperFacing(clickedFace int32) string {
