@@ -147,3 +147,22 @@ func TestObserverPulsesAwayFromObservedFace(t *testing.T) {
 		t.Fatalf("lamp behind observer lit = %q, want true", got)
 	}
 }
+
+func TestRedstonePowerTravelsUpAndDownSteps(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "lever", Properties: map[string]string{"powered": "true"}})
+	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
+	w.SetBlock(2, 64, 0, Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(2, 65, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
+	w.SetBlock(3, 64, 0, Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(3, 65, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
+	w.SetBlock(4, 65, 0, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(2, 65, 0).Properties["power"]; got != "14" {
+		t.Fatalf("upper step power = %q, want 14", got)
+	}
+	if got := w.GetBlock(4, 65, 0).Properties["lit"]; got != "true" {
+		t.Fatalf("lamp after step lit = %q, want true", got)
+	}
+}

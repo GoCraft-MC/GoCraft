@@ -195,6 +195,27 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 				}
 			}
 		}
+		// Dust also follows one-block steps. It may climb a solid neighbor when
+		// the space above the current dust is clear, or descend beside a
+		// non-solid neighbor, matching Pumpkin's calculate_power scan.
+		for _, offset := range [4][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
+			nx, nz := x+offset[0], z+offset[1]
+			neighbor := re.world.GetBlock(nx, y, nz)
+			wireY := y - 1
+			if isRedstoneSolidBlock(neighbor) {
+				if !isRedstoneSolidBlock(re.world.GetBlock(x, y+1, z)) {
+					wireY = y + 1
+				} else {
+					continue
+				}
+			}
+			wire := re.world.GetBlock(nx, wireY, nz)
+			if wire.ResourceLocation() == "minecraft:redstone_wire" {
+				if power := re.PowerAt(nx, wireY, nz) - 1; power > best {
+					best = power
+				}
+			}
+		}
 		return best
 
 	case "minecraft:repeater":
@@ -256,6 +277,13 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		return best
 	}
+}
+
+func isRedstoneSolidBlock(block Block) bool {
+	name := block.ResourceLocation()
+	return !block.IsAir() && !IsFluidBlock(name) && name != "minecraft:redstone_wire" &&
+		!strings.Contains(name, "torch") && !strings.Contains(name, "rail") &&
+		!strings.HasSuffix(name, "_button") && !strings.HasSuffix(name, "_pressure_plate")
 }
 
 func redstoneTorchAttachment(x, y, z int, block Block) [3]int {
