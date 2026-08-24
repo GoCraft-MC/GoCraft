@@ -106,3 +106,27 @@ func TestComparatorSubtractsSideSignal(t *testing.T) {
 		t.Fatalf("comparator powered = %q, want true", got)
 	}
 }
+
+func TestRedstoneUpdatesMechanismStates(t *testing.T) {
+	tests := []struct {
+		name, property, want string
+		properties           map[string]string
+	}{
+		{"powered_rail", "powered", "true", map[string]string{"shape": "east_west", "powered": "false"}},
+		{"activator_rail", "powered", "true", map[string]string{"shape": "east_west", "powered": "false"}},
+		{"hopper", "enabled", "false", map[string]string{"facing": "down", "enabled": "true"}},
+		{"oak_fence_gate", "open", "true", map[string]string{"facing": "north", "open": "false", "powered": "false"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			w := New(&FlatGenerator{}, nil, false)
+			defer w.Close()
+			w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "redstone_block"})
+			w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: test.name, Properties: test.properties})
+			w.Redstone.FlushUpdates()
+			if got := w.GetBlock(1, 64, 0).Properties[test.property]; got != test.want {
+				t.Fatalf("%s = %q, want %q", test.property, got, test.want)
+			}
+		})
+	}
+}

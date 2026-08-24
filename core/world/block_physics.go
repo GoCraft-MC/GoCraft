@@ -366,7 +366,8 @@ func IsRedstoneSource(name string) bool {
 
 // IsRedstoneLoad reports whether this block reacts to redstone power.
 func IsRedstoneLoad(name string) bool {
-	if name == "minecraft:trapdoor" || strings.HasSuffix(name, "_trapdoor") {
+	if name == "minecraft:trapdoor" || strings.HasSuffix(name, "_trapdoor") ||
+		strings.HasSuffix(name, "_door") || strings.HasSuffix(name, "_fence_gate") {
 		return true
 	}
 	switch name {
@@ -375,7 +376,8 @@ func IsRedstoneLoad(name string) bool {
 		"minecraft:crafter",
 		"minecraft:note_block", "minecraft:redstone_lamp",
 		"minecraft:tnt",
-		"minecraft:iron_door":
+		"minecraft:powered_rail", "minecraft:activator_rail",
+		"minecraft:hopper", "minecraft:copper_bulb":
 		return true
 	}
 	return false

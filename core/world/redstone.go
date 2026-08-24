@@ -396,6 +396,25 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 	}
+	if strings.HasSuffix(name, "_door") || strings.HasSuffix(name, "_fence_gate") {
+		newBlock := redstoneBlockWith(block, "powered", boolStr(powered), "open", boolStr(powered))
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		if strings.HasSuffix(name, "_door") {
+			otherY := y + 1
+			if block.Properties["half"] == "upper" {
+				otherY = y - 1
+			}
+			other := re.world.GetBlock(x, otherY, z)
+			if other.ResourceLocation() == name {
+				re.world.setBlockNoPhysics(x, otherY, z,
+					redstoneBlockWith(other, "powered", boolStr(powered), "open", boolStr(powered)))
+			}
+		}
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+	}
 	switch name {
 	case "minecraft:redstone_lamp":
 		var newName string
@@ -472,8 +491,36 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 		}
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+
+	case "minecraft:powered_rail", "minecraft:activator_rail":
+		newBlock := redstoneBlockWith(block, "powered", boolStr(powered))
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+
+	case "minecraft:hopper":
+		newBlock := redstoneBlockWith(block, "enabled", boolStr(!powered))
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 	}
 	return BlockChange{}, false
+}
+
+func redstoneBlockWith(block Block, properties ...string) Block {
+	updated := block
+	updated.Properties = make(map[string]string, len(block.Properties)+len(properties)/2)
+	for key, value := range block.Properties {
+		updated.Properties[key] = value
+	}
+	for index := 0; index+1 < len(properties); index += 2 {
+		updated.Properties[properties[index]] = properties[index+1]
+	}
+	return updated
 }
 
 // neighbors6 returns the 6 face-adjacent positions of (x,y,z).
