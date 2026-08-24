@@ -579,7 +579,10 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 
 	if name == "minecraft:torch" || name == "minecraft:soul_torch" || name == "minecraft:redstone_torch" {
 		if i.Face == 1 && bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
-			block.Properties = map[string]string{"facing": "up"}
+			block.Properties = map[string]string{}
+			if name == "minecraft:redstone_torch" {
+				block.Properties["lit"] = "true"
+			}
 			return block, true
 		}
 		if i.Face >= 2 && i.Face <= 5 {
@@ -592,6 +595,9 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 					block.Name = "wall_torch"
 				}
 				block.Properties = map[string]string{"facing": bedrockFacingForFace(i.Face)}
+				if name == "minecraft:redstone_torch" {
+					block.Properties["lit"] = "true"
+				}
 				return block, true
 			}
 		}

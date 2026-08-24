@@ -281,6 +281,20 @@ func TestBedrockDirectionalAndRedstonePlacementParity(t *testing.T) {
 	})
 }
 
+func TestBedrockPlacesLitRedstoneTorch(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	p.GameMode = player.GameModeCreative
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:redstone_torch", Count: 1}
+	s.world.SetBlock(0, 63, 0, bedrockBlock("stone", nil))
+	s.placeBedrockHeldBlock(p, intent.BlockInteractIntent{
+		Position: spatial.BlockPos{X: 0, Y: 63, Z: 0}, Face: 1,
+	}, s.world.GetBlock(0, 63, 0))
+	torch := s.world.GetBlock(0, 64, 0)
+	if torch.ResourceLocation() != "minecraft:redstone_torch" || torch.Properties["lit"] != "true" {
+		t.Fatalf("torch state = %s", torch.Key())
+	}
+}
+
 func TestBedrockMechanismsToggleAndButtonReleases(t *testing.T) {
 	s, p := newBedrockActionTestServer(t)
 	s.world.SetBlock(1, 64, 0, bedrockBlock("lever", map[string]string{"face": "wall", "facing": "north", "powered": "false"}))
