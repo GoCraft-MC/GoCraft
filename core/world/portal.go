@@ -1,52 +1,93 @@
 package world
 
-// NetherPortalInterior returns the six portal-block changes needed to fill a
-// standard 4x5 obsidian frame containing the clicked obsidian block. Frames in
-// either horizontal axis are accepted and their four corner blocks are
-// optional, matching vanilla portal construction.
+const (
+	minNetherPortalInteriorWidth  = 2
+	maxNetherPortalInteriorWidth  = 21
+	minNetherPortalInteriorHeight = 3
+	maxNetherPortalInteriorHeight = 21
+)
+
+// NetherPortalInterior finds a valid vanilla-sized Nether portal frame that
+// contains the clicked obsidian block and returns all interior portal blocks.
+// Vanilla portals may have an interior from 2x3 up to 21x21 blocks, and their
+// four corner blocks are optional. Both X- and Z-oriented frames are accepted.
 func NetherPortalInterior(w *World, clickedX, clickedY, clickedZ int) ([]BlockChange, bool) {
 	if w == nil || w.GetBlock(clickedX, clickedY, clickedZ).ResourceLocation() != "minecraft:obsidian" {
 		return nil, false
 	}
+
 	for _, axis := range []string{"x", "z"} {
-		for horizontalOffset := -3; horizontalOffset <= 0; horizontalOffset++ {
-			for verticalOffset := -4; verticalOffset <= 0; verticalOffset++ {
-				baseX, bottom, baseZ := clickedX, clickedY+verticalOffset, clickedZ
-				if axis == "x" {
-					baseX += horizontalOffset
-				} else {
-					baseZ += horizontalOffset
-				}
-				if !isNetherPortalFrame(w, baseX, bottom, baseZ, axis) {
-					continue
-				}
-				changes := make([]BlockChange, 0, 6)
-				for horizontal := 1; horizontal <= 2; horizontal++ {
-					for vertical := 1; vertical <= 3; vertical++ {
-						x, z := baseX, baseZ
+		for interiorWidth := minNetherPortalInteriorWidth; interiorWidth <= maxNetherPortalInteriorWidth; interiorWidth++ {
+			outerWidth := interiorWidth + 2
+			for interiorHeight := minNetherPortalInteriorHeight; interiorHeight <= maxNetherPortalInteriorHeight; interiorHeight++ {
+				outerHeight := interiorHeight + 2
+
+				// The clicked obsidian may be anywhere on a required edge. Try every
+				// possible frame origin that could contain that clicked edge block.
+				for horizontalOffset := -(outerWidth - 1); horizontalOffset <= 0; horizontalOffset++ {
+					for verticalOffset := -(outerHeight - 1); verticalOffset <= 0; verticalOffset++ {
+						baseX, bottom, baseZ := clickedX, clickedY+verticalOffset, clickedZ
 						if axis == "x" {
-							x += horizontal
+							baseX += horizontalOffset
 						} else {
-							z += horizontal
+							baseZ += horizontalOffset
 						}
-						changes = append(changes, BlockChange{X: x, Y: bottom + vertical, Z: z, Block: Block{
-							Namespace: "minecraft", Name: "nether_portal", Properties: map[string]string{"axis": axis},
-						}})
+
+						clickedHorizontal := -horizontalOffset
+						clickedVertical := -verticalOffset
+						if !netherPortalRequiredEdge(clickedHorizontal, clickedVertical, outerWidth, outerHeight) {
+							continue
+						}
+						if !isNetherPortalFrame(w, baseX, bottom, baseZ, axis, outerWidth, outerHeight) {
+							continue
+						}
+
+						changes := make([]BlockChange, 0, interiorWidth*interiorHeight)
+						for horizontal := 1; horizontal < outerWidth-1; horizontal++ {
+							for vertical := 1; vertical < outerHeight-1; vertical++ {
+								x, z := baseX, baseZ
+								if axis == "x" {
+									x += horizontal
+								} else {
+									z += horizontal
+								}
+								changes = append(changes, BlockChange{
+									X: x, Y: bottom + vertical, Z: z,
+									Block: Block{Namespace: "minecraft", Name: "nether_portal", Properties: map[string]string{"axis": axis}},
+								})
+							}
+						}
+						return changes, true
 					}
 				}
-				return changes, true
 			}
 		}
 	}
 	return nil, false
 }
 
-func isNetherPortalFrame(w *World, baseX, bottom, baseZ int, axis string) bool {
-	for horizontal := 0; horizontal < 4; horizontal++ {
-		for vertical := 0; vertical < 5; vertical++ {
-			border := ((horizontal == 0 || horizontal == 3) && vertical >= 1 && vertical <= 3) ||
-				((vertical == 0 || vertical == 4) && horizontal >= 1 && horizontal <= 2)
-			interior := horizontal >= 1 && horizontal <= 2 && vertical >= 1 && vertical <= 3
+// netherPortalRequiredEdge reports whether a location in an outer frame is a
+// mandatory obsidian block. Corners deliberately return false: vanilla permits
+// all four corners to be omitted.
+func netherPortalRequiredEdge(horizontal, vertical, outerWidth, outerHeight int) bool {
+	if horizontal < 0 || horizontal >= outerWidth || vertical < 0 || vertical >= outerHeight {
+		return false
+	}
+	if (horizontal == 0 || horizontal == outerWidth-1) && vertical >= 1 && vertical <= outerHeight-2 {
+		return true
+	}
+	return (vertical == 0 || vertical == outerHeight-1) && horizontal >= 1 && horizontal <= outerWidth-2
+}
+
+func isNetherPortalFrame(w *World, baseX, bottom, baseZ int, axis string, outerWidth, outerHeight int) bool {
+	for horizontal := 0; horizontal < outerWidth; horizontal++ {
+		for vertical := 0; vertical < outerHeight; vertical++ {
+			requiredBorder := netherPortalRequiredEdge(horizontal, vertical, outerWidth, outerHeight)
+			interior := horizontal >= 1 && horizontal <= outerWidth-2 && vertical >= 1 && vertical <= outerHeight-2
+			if !requiredBorder && !interior {
+				continue // optional corner
+			}
+
 			x, z := baseX, baseZ
 			if axis == "x" {
 				x += horizontal
@@ -54,7 +95,7 @@ func isNetherPortalFrame(w *World, baseX, bottom, baseZ int, axis string) bool {
 				z += horizontal
 			}
 			block := w.GetBlock(x, bottom+vertical, z)
-			if border && block.ResourceLocation() != "minecraft:obsidian" {
+			if requiredBorder && block.ResourceLocation() != "minecraft:obsidian" {
 				return false
 			}
 			if interior && !netherPortalReplaceable(block.ResourceLocation()) {
@@ -68,7 +109,7 @@ func isNetherPortalFrame(w *World, baseX, bottom, baseZ int, axis string) bool {
 func netherPortalReplaceable(name string) bool {
 	switch name {
 	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air", "minecraft:fire",
-		"minecraft:short_grass", "minecraft:grass", "minecraft:fern", "minecraft:tall_grass",
+		"minecraft:nether_portal", "minecraft:short_grass", "minecraft:grass", "minecraft:fern", "minecraft:tall_grass",
 		"minecraft:large_fern", "minecraft:dead_bush", "minecraft:snow", "minecraft:vine",
 		"minecraft:water", "minecraft:lava", "minecraft:dandelion", "minecraft:poppy",
 		"minecraft:blue_orchid", "minecraft:allium", "minecraft:azure_bluet",
