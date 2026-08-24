@@ -282,6 +282,29 @@ func TestCropBoneMealBehaviour(t *testing.T) {
 			t.Fatalf("nether wart bonemeal = used %v, changes %v", used, changes)
 		}
 	})
+
+	t.Run("mature stem immediately attempts fruit", func(t *testing.T) {
+		world := New(&FlatGenerator{}, nil, false)
+		defer world.Close()
+		for dx := -1; dx <= 1; dx++ {
+			for dz := -1; dz <= 1; dz++ {
+				world.SetBlock(dx, 40, dz, testFarmland(7))
+			}
+		}
+		world.SetBlock(0, 41, 0, testCrop("pumpkin_stem", 6))
+		stem := world.GetBlock(0, 41, 0)
+		denominator := CropGrowthDenominator(world.CropAvailableMoisture(0, 41, 0, stem))
+		seed := uint64(0)
+		for cropRandom(seed, 0, 41, 0, cropGrowthSalt, denominator) != 0 {
+			seed++
+		}
+		if _, used := world.ApplyBoneMeal(0, 41, 0, seed); !used {
+			t.Fatal("stem rejected bonemeal")
+		}
+		if got := world.GetBlock(0, 41, 0).ResourceLocation(); got != "minecraft:attached_pumpkin_stem" {
+			t.Fatalf("bonemealed mature stem = %q, want attached stem", got)
+		}
+	})
 }
 
 func TestCropSupportRemovalAndSweetBerryHarvest(t *testing.T) {
