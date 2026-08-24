@@ -64,3 +64,25 @@ func TestRedstoneTorchInvertsPowerConductedThroughSupport(t *testing.T) {
 		t.Fatalf("torch did not activate lamp = %q", got)
 	}
 }
+
+func TestRepeaterReadsRearAndPowersOnlyItsFront(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "repeater", Properties: map[string]string{
+		"facing": "north", "delay": "1", "locked": "false", "powered": "false",
+	}})
+	w.SetBlock(0, 64, -1, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
+	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
+
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(0, 64, 0).Properties["powered"]; got != "true" {
+		t.Fatalf("repeater powered = %q, want true", got)
+	}
+	if got := w.GetBlock(0, 64, -1).Properties["lit"]; got != "true" {
+		t.Fatalf("front lamp lit = %q, want true", got)
+	}
+	if got := w.GetBlock(1, 64, 0).Properties["lit"]; got != "false" {
+		t.Fatalf("side lamp lit = %q, want false", got)
+	}
+}

@@ -179,7 +179,12 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 					best = p - 1
 				}
 			} else if IsRedstoneSource(nbName) || nbName == "minecraft:redstone_block" {
-				p := re.powerFromSource(nb[0], nb[1], nb[2], nbBlock)
+				p := re.powerFromSourceToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z})
+				if p > best {
+					best = p
+				}
+			} else if IsRedstoneConductor(nbName) {
+				p := re.powerFromConductorToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z})
 				if p > best {
 					best = p
 				}
@@ -193,17 +198,10 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 			return 15
 		}
 		// Check input direction.
-		facing := block.Properties["facing"]
-		ix, iy, iz := x, y, z+1 // default facing south, input from south
-		switch facing {
-		case "north":
-			ix, iy, iz = x, y, z-1
-		case "east":
-			ix, iy, iz = x+1, y, z
-		case "west":
-			ix, iy, iz = x-1, y, z
-		}
-		if re.strongPowerOf(ix, iy, iz) > 0 || re.PowerAt(ix, iy, iz) > 0 {
+		dx, dz := redstoneFacingOffset(block.Properties["facing"])
+		ix, iy, iz := x-dx, y, z-dz
+		input := re.world.GetBlock(ix, iy, iz)
+		if re.powerFromSourceToward(ix, iy, iz, input, [3]int{x, y, z}) > 0 || re.PowerAt(ix, iy, iz) > 0 {
 			return 15
 		}
 		return 0
@@ -221,12 +219,12 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 					redstoneTorchAttachment(nb[0], nb[1], nb[2], nbBlock) == [3]int{x, y, z} {
 					continue
 				}
-				p := re.powerFromSource(nb[0], nb[1], nb[2], nbBlock)
+				p := re.powerFromSourceToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z})
 				if p > best {
 					best = p
 				}
 			} else if IsRedstoneConductor(nbName) {
-				if p := re.PowerAt(nb[0], nb[1], nb[2]); p > best {
+				if p := re.powerFromConductorToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z}); p > best {
 					best = p
 				}
 			}
@@ -252,13 +250,6 @@ func redstoneTorchAttachment(x, y, z int, block Block) [3]int {
 	default:
 		return attachment
 	}
-}
-
-// strongPowerOf returns the strong power level emitted by (x,y,z).
-// Strong power is power emitted directly by a source, not forwarded by dust.
-func (re *RedstoneEngine) strongPowerOf(x, y, z int) int {
-	block := re.world.GetBlock(x, y, z)
-	return re.powerFromSource(x, y, z, block)
 }
 
 func (re *RedstoneEngine) powerReceivedExcluding(x, y, z int, excluded [3]int) int {
@@ -314,6 +305,45 @@ func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 		}
 	}
 	return 0
+}
+
+func (re *RedstoneEngine) powerFromSourceToward(x, y, z int, block Block, target [3]int) int {
+	name := block.ResourceLocation()
+	if name == "minecraft:repeater" || name == "minecraft:comparator" {
+		dx, dz := redstoneFacingOffset(block.Properties["facing"])
+		if target != [3]int{x + dx, y, z + dz} {
+			return 0
+		}
+	}
+	if (name == "minecraft:redstone_torch" || name == "minecraft:redstone_wall_torch") &&
+		redstoneTorchAttachment(x, y, z, block) == target {
+		return 0
+	}
+	return re.powerFromSource(x, y, z, block)
+}
+
+func (re *RedstoneEngine) powerFromConductorToward(x, y, z int, block Block, target [3]int) int {
+	name := block.ResourceLocation()
+	if name == "minecraft:repeater" || name == "minecraft:comparator" {
+		dx, dz := redstoneFacingOffset(block.Properties["facing"])
+		if target != [3]int{x + dx, y, z + dz} {
+			return 0
+		}
+	}
+	return re.PowerAt(x, y, z)
+}
+
+func redstoneFacingOffset(facing string) (int, int) {
+	switch facing {
+	case "south":
+		return 0, 1
+	case "east":
+		return 1, 0
+	case "west":
+		return -1, 0
+	default:
+		return 0, -1
+	}
 }
 
 // applyPowerState updates the visual/functional block state when power changes.
