@@ -302,6 +302,34 @@ func TestCropSupportRemovalAndSweetBerryHarvest(t *testing.T) {
 	}
 }
 
+func TestEveryCropSupportRule(t *testing.T) {
+	tests := []struct {
+		crop, support string
+	}{
+		{"wheat", "farmland"}, {"carrots", "farmland"}, {"potatoes", "farmland"},
+		{"beetroots", "farmland"}, {"pumpkin_stem", "farmland"}, {"melon_stem", "farmland"},
+		{"attached_pumpkin_stem", "farmland"}, {"attached_melon_stem", "farmland"},
+		{"torchflower_crop", "farmland"}, {"nether_wart", "soul_sand"},
+		{"sweet_berry_bush", "dirt"},
+	}
+	for _, test := range tests {
+		t.Run(test.crop, func(t *testing.T) {
+			w := New(&FlatGenerator{}, nil, false)
+			defer w.Close()
+			w.SetBlock(0, 40, 0, Block{Namespace: "minecraft", Name: test.support})
+			crop := testCrop(test.crop, 0)
+			w.SetBlock(0, 41, 0, crop)
+			if !CanCropSurvive(crop, w.GetBlock(0, 40, 0)) {
+				t.Fatalf("%s rejected %s support", test.crop, test.support)
+			}
+			w.SetBlock(0, 40, 0, Block{Namespace: "minecraft", Name: "glass"})
+			if changes := w.BreakUnsupportedCropsAbove(0, 40, 0); len(changes) != 1 || !w.GetBlock(0, 41, 0).IsAir() {
+				t.Fatalf("unsupported crop remained: changes=%v block=%s", changes, w.GetBlock(0, 41, 0).Key())
+			}
+		})
+	}
+}
+
 func TestCoveredCropUsesCurrentPumpkinLightTODOBehaviour(t *testing.T) {
 	world := New(&FlatGenerator{}, nil, false)
 	defer world.Close()
