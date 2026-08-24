@@ -24,12 +24,12 @@ jobs:
         run: |
           python3 <<'RUNNER'
           from pathlib import Path
-          import textwrap
 
           workflow = Path('.github/workflows/port-agriculture-temp.yml').read_text()
           start = workflow.index("          python3 <<'PY'\n") + len("          python3 <<'PY'\n")
           end = workflow.index("\n          PY", start)
-          script = textwrap.dedent(workflow[start:end])
+          raw = workflow[start:end]
+          script = "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
           exec(compile(script, 'crop-port.py', 'exec'), {'__name__': '__main__'})
           RUNNER
 
