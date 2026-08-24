@@ -1009,6 +1009,9 @@ func (w *World) SetBlock(x, y, z int, block Block) {
 	w.scheduleBlockNeighborUpdates(x, y, z, oldBlock, block)
 	w.notifyBlockObserver(x, y, z, block)
 	w.triggerObservers(x, y, z)
+	if IsRailBlock(oldBlock.ResourceLocation()) || IsRailBlock(block.ResourceLocation()) {
+		w.UpdateRailShapesAround(x, y, z)
+	}
 }
 
 func (w *World) triggerObservers(x, y, z int) {
