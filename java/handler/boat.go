@@ -179,6 +179,7 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 	case 2: // LEAVE_BED
 		if p.Sleeping {
 			p.Sleeping = false
+			prepareJavaBedWake(p, w, mgr)
 			BroadcastPlayerWaking(p.EntityID, mgr)
 			_ = sendSystemMessage(conn, "You left your bed.")
 		}

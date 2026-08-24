@@ -220,7 +220,7 @@ func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.Worl
 func breakUnsupportedBlocksAbove(x, y, z int, w *coreworld.World, mgr *session.Manager) {
 	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {
 		plant := w.GetBlock(x, plantY, z)
-		if !coreworld.RequiresGroundSupport(plant) || !w.GetBlock(x, plantY-1, z).IsAir() {
+		if !coreworld.RequiresGroundSupport(plant) || javaGroundSupportedBlockCanSurvive(plant, w.GetBlock(x, plantY-1, z)) {
 			return
 		}
 		partnerY, partnerHalf, hasPartner := coreworld.DoublePlantPartnerY(plant, plantY)
@@ -706,7 +706,7 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		block.Properties = map[string]string{"type": slabType, "waterlogged": "false"}
 	}
 	if block.ResourceLocation() == "minecraft:redstone_wire" {
-		if !coreworld.IsSolidLandingSurface(w.GetBlock(px, py-1, pz).ResourceLocation()) {
+		if !javaSupportsRedstoneComponent(w.GetBlock(px, py-1, pz)) {
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
@@ -758,6 +758,11 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		applyBlockChange(px, py, pz, placed, w, mgr)
 	case block.ResourceLocation() == "minecraft:chain" ||
 		block.ResourceLocation() == "minecraft:end_rod" ||
+		strings.HasSuffix(block.ResourceLocation(), "_log") ||
+		strings.HasSuffix(block.ResourceLocation(), "_wood") ||
+		strings.HasSuffix(block.ResourceLocation(), "_stem") ||
+		strings.HasSuffix(block.ResourceLocation(), "_hyphae") ||
+		block.ResourceLocation() == "minecraft:bamboo_block" ||
 		strings.HasSuffix(block.ResourceLocation(), "_pillar") ||
 		block.ResourceLocation() == "minecraft:basalt" ||
 		block.ResourceLocation() == "minecraft:polished_basalt" ||
@@ -774,6 +779,28 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			axis = "x"
 		}
 		block.Properties = map[string]string{"axis": axis}
+		applyBlockChange(px, py, pz, block, w, mgr)
+	case block.ResourceLocation() == "minecraft:repeater":
+		if !javaSupportsRedstoneComponent(w.GetBlock(px, py-1, pz)) {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		// A diode's facing points toward its input (the placing player); its
+		// output is on the opposite side.
+		block.Properties = map[string]string{
+			"delay": "1", "facing": chestFacingFromYaw(p.Rotation.Yaw),
+			"locked": "false", "powered": "false",
+		}
+		applyBlockChange(px, py, pz, block, w, mgr)
+	case block.ResourceLocation() == "minecraft:comparator":
+		if !javaSupportsRedstoneComponent(w.GetBlock(px, py-1, pz)) {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		block.Properties = map[string]string{
+			"facing": chestFacingFromYaw(p.Rotation.Yaw),
+			"mode":   "compare", "powered": "false",
+		}
 		applyBlockChange(px, py, pz, block, w, mgr)
 	case isJavaStorageContainer(block.ResourceLocation()):
 		switch block.ResourceLocation() {
@@ -870,6 +897,62 @@ func placementReplaceable(blockName string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// javaSupportsRedstoneComponent reports whether a block has a rigid upper
+// face that can support dust, repeaters, and comparators. Using the old
+// IsSolidLandingSurface check treated thin components (including another
+// redstone wire) as solid, which allowed dust towers to be built in mid-air.
+func javaSupportsRedstoneComponent(block coreworld.Block) bool {
+	name := block.ResourceLocation()
+	if name == "minecraft:hopper" {
+		// Vanilla explicitly permits redstone components on hoppers despite the
+		// hopper's non-cube collision shape.
+		return true
+	}
+	if placementReplaceable(name) || coreworld.IsFluidBlock(name) || name == "" {
+		return false
+	}
+	if strings.HasSuffix(name, "_slab") {
+		return block.Properties["type"] == "top" || block.Properties["type"] == "double"
+	}
+	if strings.HasSuffix(name, "_stairs") {
+		return block.Properties["half"] == "top"
+	}
+	if javaIsFence(name) || javaIsPane(name) || javaIsWall(name) ||
+		strings.HasSuffix(name, "_fence_gate") || strings.HasSuffix(name, "_door") ||
+		isTrapdoorBlock(name) || strings.HasSuffix(name, "_button") ||
+		strings.HasSuffix(name, "_pressure_plate") || strings.HasSuffix(name, "_carpet") ||
+		strings.HasSuffix(name, "_sign") || strings.HasSuffix(name, "_wall_sign") ||
+		strings.HasSuffix(name, "_banner") || strings.HasSuffix(name, "_wall_banner") ||
+		strings.Contains(name, "torch") || strings.Contains(name, "rail") ||
+		strings.Contains(name, "glass") || strings.HasSuffix(name, "_leaves") {
+		return false
+	}
+	switch name {
+	case "minecraft:redstone_wire", "minecraft:repeater", "minecraft:comparator",
+		"minecraft:lever", "minecraft:ladder", "minecraft:chain",
+		"minecraft:lantern", "minecraft:soul_lantern", "minecraft:snow",
+		"minecraft:cake", "minecraft:brewing_stand", "minecraft:flower_pot":
+		return false
+	}
+	return true
+}
+
+func javaGroundSupportedBlockCanSurvive(block, support coreworld.Block) bool {
+	name := block.ResourceLocation()
+	switch name {
+	case "minecraft:redstone_wire", "minecraft:repeater", "minecraft:comparator":
+		return javaSupportsRedstoneComponent(support)
+	case "minecraft:nether_wart":
+		return support.ResourceLocation() == "minecraft:soul_sand"
+	case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes", "minecraft:beetroots",
+		"minecraft:pumpkin_stem", "minecraft:melon_stem", "minecraft:attached_pumpkin_stem",
+		"minecraft:attached_melon_stem", "minecraft:torchflower_crop", "minecraft:pitcher_crop":
+		return support.ResourceLocation() == "minecraft:farmland"
+	default:
+		return !support.IsAir() && !coreworld.IsFluidBlock(support.ResourceLocation())
 	}
 }
 
@@ -1539,6 +1622,49 @@ func bedHeadOffset(facing string) (int, int) {
 	}
 }
 
+func bedFacingYaw(facing string) float32 {
+	switch facing {
+	case "west":
+		return 90
+	case "north":
+		return 180
+	case "east":
+		return -90
+	default: // south
+		return 0
+	}
+}
+
+// prepareJavaBedWake moves a waking player to a safe position beside the bed
+// and aligns their view with the bed's actual facing. Keeping the pre-sleep
+// position and yaw made the client correct the player in the opposite
+// direction as soon as it sent its first post-sleep movement packet.
+func prepareJavaBedWake(p *player.Player, w *coreworld.World, mgr *session.Manager) bool {
+	if p == nil || w == nil || !p.HasSpawnPoint {
+		return false
+	}
+	bed := w.GetBlock(int(p.SpawnPoint.X), int(p.SpawnPoint.Y), int(p.SpawnPoint.Z))
+	if !isBedBlock(bed.ResourceLocation()) {
+		return false
+	}
+	wakePosition, ok := resolveBedRespawn(p, w)
+	if !ok {
+		return false
+	}
+	p.Position = wakePosition
+	p.Rotation.Yaw = bedFacingYaw(bed.Properties["facing"])
+	p.Rotation.Pitch = 0
+	p.FallDistance = 0
+	p.OnGround = false
+	if mgr != nil {
+		if current, found := mgr.Get(p.UUID); found && current.TeleportTo != nil {
+			_ = current.TeleportTo(wakePosition.X, wakePosition.Y, wakePosition.Z)
+		}
+		broadcastPosition(mgr, p)
+	}
+	return true
+}
+
 // placeBedBlock places both halves of a bed at (fx, fy, fz) facing the player.
 func placeBedBlock(p *player.Player, fx, fy, fz int, kind string, w *coreworld.World, mgr *session.Manager) bool {
 	facing := bedFacingFromYaw(p.Rotation.Yaw)
@@ -1664,6 +1790,7 @@ func SkipNightAndWake(w *coreworld.World, mgr *session.Manager) {
 			continue
 		}
 		s.Player.Sleeping = false
+		prepareJavaBedWake(s.Player, w, mgr)
 		// Broadcast the STANDING pose so all clients see the wake animation.
 		BroadcastPlayerWaking(s.Player.EntityID, mgr)
 		_ = sendSystemMessage(s.Conn, "Good morning! The night has passed.")
@@ -2029,22 +2156,17 @@ func redstoneWireConnections(x, y, z int, w *coreworld.World) map[string]string 
 		dir    string
 	}
 	neighbors := []offset{{0, -1, "north"}, {1, 0, "east"}, {0, 1, "south"}, {-1, 0, "west"}}
-	isRedstoneConnectable := func(rl string) bool {
-		return rl == "minecraft:redstone_wire" || rl == "minecraft:lever" ||
-			rl == "minecraft:redstone_torch" || rl == "minecraft:redstone_wall_torch" ||
-			rl == "minecraft:redstone_block" || rl == "minecraft:target" ||
-			strings.HasSuffix(rl, "_button") || strings.HasSuffix(rl, "_pressure_plate") ||
-			rl == "minecraft:observer" || rl == "minecraft:repeater" || rl == "minecraft:comparator"
-	}
 	for _, n := range neighbors {
 		nx, nz := x+n.dx, z+n.dz
 		same := w.GetBlock(nx, y, nz)
-		if isRedstoneConnectable(same.ResourceLocation()) {
+		if javaRedstoneConnectsFrom(n.dir, same) {
 			props[n.dir] = "side"
 			continue
 		}
-		// Check one block up (wire on top of solid block next to us).
-		if coreworld.IsEntitySupportBlock(same.ResourceLocation()) {
+		// A wire may climb a rigid neighboring block only when the space above
+		// this wire is clear. The previous entity-collision approximation also
+		// classified dust itself as a solid step.
+		if javaSupportsRedstoneComponent(same) && placementReplaceable(w.GetBlock(x, y+1, z).ResourceLocation()) {
 			up := w.GetBlock(nx, y+1, nz)
 			if up.ResourceLocation() == "minecraft:redstone_wire" {
 				props[n.dir] = "up"
@@ -2053,10 +2175,25 @@ func redstoneWireConnections(x, y, z int, w *coreworld.World) map[string]string 
 		}
 		// Check one block down (wire on the ground on the other side of a step).
 		below := w.GetBlock(nx, y-1, nz)
-		if below.ResourceLocation() == "minecraft:redstone_wire" &&
-			!coreworld.IsEntitySupportBlock(w.GetBlock(nx, y, nz).ResourceLocation()) {
+		if below.ResourceLocation() == "minecraft:redstone_wire" && !javaSupportsRedstoneComponent(same) {
 			props[n.dir] = "side"
 		}
 	}
 	return props
+}
+
+func javaRedstoneConnectsFrom(direction string, block coreworld.Block) bool {
+	name := block.ResourceLocation()
+	if name == "minecraft:repeater" || name == "minecraft:comparator" {
+		facing := block.Properties["facing"]
+		if direction == "north" || direction == "south" {
+			return facing == "north" || facing == "south"
+		}
+		return facing == "east" || facing == "west"
+	}
+	return name == "minecraft:redstone_wire" || name == "minecraft:lever" ||
+		name == "minecraft:redstone_torch" || name == "minecraft:redstone_wall_torch" ||
+		name == "minecraft:redstone_block" || name == "minecraft:target" ||
+		strings.HasSuffix(name, "_button") || strings.HasSuffix(name, "_pressure_plate") ||
+		name == "minecraft:observer" || coreworld.IsRedstoneLoad(name)
 }

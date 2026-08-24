@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	"GoCraft/core/player"
+	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
+	javaworld "GoCraft/java/world"
 )
 
 func TestCreativeInventoryUsesProtocol769ItemIDs(t *testing.T) {
@@ -381,6 +384,113 @@ func TestJavaPlacesRedstoneWireFromDustItem(t *testing.T) {
 	wire := w.GetBlock(16, 64, 0)
 	if wire.ResourceLocation() != "minecraft:redstone_wire" || wire.Properties["power"] != "0" {
 		t.Fatalf("placed wire = %s", wire.Key())
+	}
+}
+
+func TestJavaRedstoneWireCannotStackOrFloat(t *testing.T) {
+	p := player.New([16]byte{}, "engineer", player.ClientEditionJava)
+	p.GameMode = player.GameModeCreative
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:redstone", Count: 64}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(30, 70, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+
+	if err := handleUseItemOn(useItemOnPacket(30, 70, 0, 1, 510), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleUseItemOn(useItemOnPacket(30, 71, 0, 1, 511), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(30, 72, 0); !got.IsAir() {
+		t.Fatalf("wire placed on wire = %s, want air", got.Key())
+	}
+}
+
+func TestJavaRedstoneWireRefreshesBothSidesAndSteps(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(1, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "redstone_wire", Properties: redstoneWireConnections(0, 64, 0, w)})
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "redstone_wire", Properties: redstoneWireConnections(1, 64, 0, w)})
+	refreshJavaConnectedBlocks(1, 64, 0, w, nil)
+	if left, right := w.GetBlock(0, 64, 0), w.GetBlock(1, 64, 0); left.Properties["east"] != "side" || right.Properties["west"] != "side" {
+		t.Fatalf("horizontal wire states left=%v right=%v", left.Properties, right.Properties)
+	}
+
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(1, 65, 0, coreworld.Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
+	refreshJavaConnectedBlocks(1, 64, 0, w, nil)
+	if lower, upper := w.GetBlock(0, 64, 0), w.GetBlock(1, 65, 0); lower.Properties["east"] != "up" || upper.Properties["west"] != "side" {
+		t.Fatalf("stepped wire states lower=%v upper=%v", lower.Properties, upper.Properties)
+	}
+}
+
+func TestJavaRepeaterAndWoodPlacementStates(t *testing.T) {
+	p := player.New([16]byte{}, "builder", player.ClientEditionJava)
+	p.GameMode = player.GameModeCreative
+	p.Rotation.Yaw = 0 // looking south; repeater input faces back north
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(40, 70, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:repeater", Count: 64}
+	if err := handleUseItemOn(useItemOnPacket(40, 70, 0, 1, 512), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	repeater := w.GetBlock(40, 71, 0)
+	if repeater.Properties["facing"] != "north" || javaworld.StateID(repeater) == 0 {
+		t.Fatalf("repeater state = %s (id=%d)", repeater.Key(), javaworld.StateID(repeater))
+	}
+
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:oak_log", Count: 64}
+	if err := handleUseItemOn(useItemOnPacket(40, 70, 0, 5, 513), p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	log := w.GetBlock(41, 70, 0)
+	if log.Properties["axis"] != "x" || javaworld.StateID(log) == 0 {
+		t.Fatalf("side-placed log state = %s (id=%d)", log.Key(), javaworld.StateID(log))
+	}
+}
+
+func TestJavaPlacementUsesExactAdjacentBlockForEveryFace(t *testing.T) {
+	for face, offset := range faceOffset {
+		t.Run(strconv.Itoa(face), func(t *testing.T) {
+			p := player.New([16]byte{}, "builder", player.ClientEditionJava)
+			p.GameMode = player.GameModeCreative
+			p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:oak_log", Count: 64}
+			w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer w.Close()
+			w.SetBlock(50, 70, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+			if err := handleUseItemOn(useItemOnPacket(50, 70, 0, int32(face), int32(520+face)), p, w, session.NewManager(), nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			x, y, z := 50+int(offset[0]), 70+int(offset[1]), int(offset[2])
+			if got := w.GetBlock(x, y, z); got.ResourceLocation() != "minecraft:oak_log" {
+				t.Fatalf("face %d placed %q at (%d,%d,%d)", face, got.ResourceLocation(), x, y, z)
+			}
+		})
+	}
+}
+
+func TestJavaBedWakeUsesBedPositionAndFacing(t *testing.T) {
+	p := player.New([16]byte{}, "sleeper", player.ClientEditionJava)
+	p.Position = spatial.Vec3{X: 20, Y: 80, Z: 20}
+	p.Rotation.Yaw = 180
+	p.SpawnPoint = spatial.BlockPos{X: 0, Y: 64, Z: 0}
+	p.HasSpawnPoint = true
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{"part": "foot", "facing": "south"}})
+	w.SetBlock(0, 64, 1, coreworld.Block{Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{"part": "head", "facing": "south"}})
+	w.SetBlock(-1, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+
+	if !prepareJavaBedWake(p, w, nil) {
+		t.Fatal("bed wake state was not resolved")
+	}
+	if p.Position != (spatial.Vec3{X: -0.5, Y: 64, Z: 0.5}) || p.Rotation.Yaw != 0 || p.Rotation.Pitch != 0 {
+		t.Fatalf("wake state position=%+v rotation=%+v", p.Position, p.Rotation)
 	}
 }
 

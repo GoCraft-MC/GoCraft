@@ -182,14 +182,14 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		// Check input direction.
 		facing := block.Properties["facing"]
-		ix, iy, iz := x, y, z+1 // default facing south, input from north
+		ix, iy, iz := x, y, z+1 // default facing south, input from south
 		switch facing {
 		case "north":
 			ix, iy, iz = x, y, z-1
 		case "east":
-			ix, iy, iz = x-1, y, z
-		case "west":
 			ix, iy, iz = x+1, y, z
+		case "west":
+			ix, iy, iz = x-1, y, z
 		}
 		if re.strongPowerOf(ix, iy, iz) > 0 || re.PowerAt(ix, iy, iz) > 0 {
 			return 15

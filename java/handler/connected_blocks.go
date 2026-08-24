@@ -18,7 +18,12 @@ func refreshJavaConnectedBlocks(x, y, z int, w *coreworld.World, mgr *session.Ma
 		return
 	}
 	positions := [][3]int{
-		{x, y, z}, {x - 1, y, z}, {x + 1, y, z}, {x, y, z - 1}, {x, y, z + 1}, {x, y - 1, z},
+		{x, y, z}, {x, y - 1, z}, {x, y + 1, z},
+	}
+	for _, direction := range javaHorizontalDirections {
+		for dy := -1; dy <= 1; dy++ {
+			positions = append(positions, [3]int{x + direction.dx, y + dy, z + direction.dz})
+		}
 	}
 	for _, position := range positions {
 		px, py, pz := position[0], position[1], position[2]
@@ -37,6 +42,12 @@ func refreshJavaConnectedBlocks(x, y, z int, w *coreworld.World, mgr *session.Ma
 		case strings.HasSuffix(name, "_fence_gate"):
 			updated = copyBlockProperties(block)
 			updated.Properties["in_wall"] = strconv.FormatBool(javaGateInWall(px, py, pz, block, w))
+		case name == "minecraft:redstone_wire":
+			updated = copyBlockProperties(block)
+			updated.Properties = redstoneWireConnections(px, py, pz, w)
+			if power := block.Properties["power"]; power != "" {
+				updated.Properties["power"] = power
+			}
 		default:
 			continue
 		}
