@@ -921,6 +921,7 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 	w.touchChunkLocked(key)
 	w.dirty[key] = struct{}{}
 	w.mu.Unlock()
+	w.Redstone.NotifyChange(x, y, z)
 }
 
 // SetBlockEntity stores or replaces the non-container block entity at a world
