@@ -303,7 +303,7 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 				Pitch:           p.Rotation.Pitch,
 				Yaw:             p.Rotation.Yaw,
 				HeadYaw:         p.Rotation.Yaw,
-				Mode:            packet.MoveModeNormal,
+				Mode:            bedrockRemotePlayerMoveMode(previous.position, p.Position),
 				OnGround:        p.OnGround,
 				Tick:            tick,
 			})
@@ -356,6 +356,20 @@ func bedrockPlayerInView(viewer, target *player.Player) bool {
 	dz := chunkCoordinate(target.Position.Z) - chunkCoordinate(viewer.Position.Z)
 	return dx >= -bedrockChunkRadius && dx <= bedrockChunkRadius &&
 		dz >= -bedrockChunkRadius && dz <= bedrockChunkRadius
+}
+
+// bedrockRemotePlayerMoveMode keeps ordinary walking/sprinting smooth, but
+// marks teleport-sized canonical jumps explicitly. Bedrock clients may discard
+// a huge MoveModeNormal delta for a remote actor, leaving a Java player stale or
+// invisible after /tp until that actor is respawned.
+func bedrockRemotePlayerMoveMode(previous, current spatial.Vec3) byte {
+	const maxNormalDelta = 8.0
+	if math.Abs(current.X-previous.X) > maxNormalDelta ||
+		math.Abs(current.Y-previous.Y) > maxNormalDelta ||
+		math.Abs(current.Z-previous.Z) > maxNormalDelta {
+		return byte(packet.MoveModeTeleport)
+	}
+	return byte(packet.MoveModeNormal)
 }
 
 func entityInView(viewer *player.Player, entity *corentity.Entity) bool {
