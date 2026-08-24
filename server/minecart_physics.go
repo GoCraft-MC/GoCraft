@@ -46,6 +46,7 @@ func railTangent(shape string, vx, vz, yaw float64) (float64, float64) {
 
 func (s *Server) tickMinecartPhysics(e *corentity.Entity) {
 	rail, railX, railY, railZ, onRail := s.minecartRailAt(e)
+	s.tickMinecartRailEffects(e, rail, railX, railY, railZ, onRail)
 	if !onRail {
 		e.VY -= 0.04
 		e.Position.X += e.VX
@@ -97,4 +98,40 @@ func (s *Server) tickMinecartPhysics(e *corentity.Entity) {
 		friction = 0.99
 	}
 	e.VX, e.VZ = e.VX*friction, e.VZ*friction
+}
+
+func (s *Server) tickMinecartRailEffects(e *corentity.Entity, rail coreworld.Block, x, y, z int, onRail bool) {
+	isDetector := onRail && rail.ResourceLocation() == "minecraft:detector_rail"
+	if e.MinecartOnDetector && (!isDetector || x != e.MinecartDetectorX || y != e.MinecartDetectorY || z != e.MinecartDetectorZ) {
+		previous := s.world.GetBlock(e.MinecartDetectorX, e.MinecartDetectorY, e.MinecartDetectorZ)
+		if previous.ResourceLocation() == "minecraft:detector_rail" {
+			previous.Properties = copyStringMap(previous.Properties)
+			previous.Properties["powered"] = "false"
+			s.world.SetBlock(e.MinecartDetectorX, e.MinecartDetectorY, e.MinecartDetectorZ, previous)
+		}
+		e.MinecartOnDetector = false
+	}
+	if isDetector {
+		if rail.Properties["powered"] != "true" {
+			rail.Properties = copyStringMap(rail.Properties)
+			rail.Properties["powered"] = "true"
+			s.world.SetBlock(x, y, z, rail)
+		}
+		e.MinecartDetectorX, e.MinecartDetectorY, e.MinecartDetectorZ = x, y, z
+		e.MinecartOnDetector = true
+	}
+	if onRail && rail.ResourceLocation() == "minecraft:activator_rail" && rail.Properties["powered"] == "true" {
+		s.dismountEntityPassengers(e)
+		if e.Type == corentity.TypeTNTMinecart && e.FuseTicks < 0 {
+			e.FuseTicks = 80
+		}
+	}
+}
+
+func copyStringMap(source map[string]string) map[string]string {
+	copy := make(map[string]string, len(source))
+	for key, value := range source {
+		copy[key] = value
+	}
+	return copy
 }

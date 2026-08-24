@@ -234,7 +234,9 @@ type Entity struct {
 
 	// PrimedTNT fields — only used when Type == TypePrimedTNT.
 	// FuseTicks counts down from 80 to 0; at 0 the entity explodes.
-	FuseTicks int32
+	FuseTicks                                               int32
+	MinecartDetectorX, MinecartDetectorY, MinecartDetectorZ int
+	MinecartOnDetector                                      bool
 
 	// Vehicle fields. RiderEntityID is the controlling/front passenger and
 	// SecondRiderEntityID is the rear passenger used by boats and camels.
@@ -332,6 +334,9 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	}
 	if t == TypeSkeletonHorse || t == TypeZombieHorse {
 		e.Tamed = true
+	}
+	if t == TypeTNTMinecart {
+		e.FuseTicks = -1
 	}
 	switch t {
 	case TypeSkeleton, TypeStray, TypeBogged:

@@ -41,3 +41,25 @@ func TestUnpoweredPoweredRailBrakesMinecart(t *testing.T) {
 		t.Fatalf("braked velocity = %v, want between zero and 0.2", cart.VX)
 	}
 }
+
+func TestDetectorAndActivatorRailsReactToMinecart(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	s := &Server{world: w}
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "detector_rail", Properties: map[string]string{
+		"shape": "east_west", "powered": "false",
+	}})
+	cart := corentity.New(1, [16]byte{}, corentity.TypeTNTMinecart, 0.5, 64.0625, 0.5)
+	s.tickMinecartPhysics(cart)
+	if w.GetBlock(0, 64, 0).Properties["powered"] != "true" || !cart.MinecartOnDetector {
+		t.Fatal("detector rail did not activate")
+	}
+	w.SetBlock(1, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "activator_rail", Properties: map[string]string{
+		"shape": "east_west", "powered": "true",
+	}})
+	cart.Position.X = 1.5
+	s.tickMinecartPhysics(cart)
+	if w.GetBlock(0, 64, 0).Properties["powered"] != "false" || cart.FuseTicks != 80 {
+		t.Fatalf("detector/fuse states = %s/%d", w.GetBlock(0, 64, 0).Properties["powered"], cart.FuseTicks)
+	}
+}
