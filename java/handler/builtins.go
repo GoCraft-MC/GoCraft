@@ -234,6 +234,7 @@ func cmdList(ctx CommandContext) error {
 			if online != nil {
 				names = append(names, online.Username)
 			}
+		}
 		sort.Slice(names, func(i, j int) bool {
 			return strings.ToLower(names[i]) < strings.ToLower(names[j])
 		})
