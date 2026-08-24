@@ -135,3 +135,15 @@ func copyStringMap(source map[string]string) map[string]string {
 	}
 	return copy
 }
+
+func (s *Server) tickTNTMinecartFuse(e *corentity.Entity) bool {
+	if e.Type != corentity.TypeTNTMinecart || e.FuseTicks <= 0 {
+		return false
+	}
+	e.FuseTicks--
+	if e.FuseTicks != 0 {
+		return false
+	}
+	s.explodeTNT(e.Position.X, e.Position.Y, e.Position.Z)
+	return true
+}

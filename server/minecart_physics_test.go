@@ -63,3 +63,12 @@ func TestDetectorAndActivatorRailsReactToMinecart(t *testing.T) {
 		t.Fatalf("detector/fuse states = %s/%d", w.GetBlock(0, 64, 0).Properties["powered"], cart.FuseTicks)
 	}
 }
+
+func TestTNTMinecartFuseCountsDown(t *testing.T) {
+	cart := corentity.New(1, [16]byte{}, corentity.TypeTNTMinecart, 0, 64, 0)
+	cart.FuseTicks = 80
+	s := &Server{}
+	if s.tickTNTMinecartFuse(cart) || cart.FuseTicks != 79 {
+		t.Fatalf("first fuse tick exploded=%v fuse=%d", false, cart.FuseTicks)
+	}
+}
