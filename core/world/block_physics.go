@@ -363,7 +363,9 @@ func IsRedstoneSource(name string) bool {
 	switch name {
 	case "minecraft:lever", "minecraft:redstone_torch",
 		"minecraft:redstone_wall_torch", "minecraft:redstone_block",
-		"minecraft:daylight_detector", "minecraft:observer":
+		"minecraft:daylight_detector", "minecraft:inverted_daylight_detector", "minecraft:observer",
+		"minecraft:detector_rail", "minecraft:target", "minecraft:lightning_rod",
+		"minecraft:tripwire_hook", "minecraft:lectern":
 		return true
 	}
 	return false

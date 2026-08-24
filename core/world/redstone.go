@@ -180,6 +180,11 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		return 0
 
+	case "minecraft:daylight_detector", "minecraft:inverted_daylight_detector", "minecraft:target",
+		"minecraft:detector_rail", "minecraft:lightning_rod", "minecraft:tripwire_hook", "minecraft:lectern",
+		"minecraft:observer":
+		return re.powerFromSource(x, y, z, block)
+
 	case "minecraft:redstone_wire":
 		// Dust gets max(neighbor_power - 1) from all 6 faces.
 		best := 0
@@ -483,6 +488,16 @@ func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 		return re.PowerAt(x, y, z)
 	case "minecraft:observer":
 		if block.Properties["powered"] == "true" {
+			return 15
+		}
+	case "minecraft:daylight_detector", "minecraft:inverted_daylight_detector", "minecraft:target":
+		return atoi(block.Properties["power"])
+	case "minecraft:detector_rail", "minecraft:lightning_rod", "minecraft:lectern":
+		if block.Properties["powered"] == "true" {
+			return 15
+		}
+	case "minecraft:tripwire_hook":
+		if block.Properties["attached"] == "true" && block.Properties["powered"] == "true" {
 			return 15
 		}
 	case "minecraft:sculk_sensor", "minecraft:calibrated_sculk_sensor":

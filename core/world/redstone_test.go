@@ -38,6 +38,28 @@ func TestEveryButtonAndPressurePlateIsRecognisedAsSource(t *testing.T) {
 	}
 }
 
+func TestAnalogAndTriggeredSourcesEmitTheirState(t *testing.T) {
+	tests := []struct {
+		name  string
+		props map[string]string
+		want  int
+	}{
+		{"daylight_detector", map[string]string{"power": "9"}, 9},
+		{"target", map[string]string{"power": "12"}, 12},
+		{"detector_rail", map[string]string{"powered": "true"}, 15},
+		{"tripwire_hook", map[string]string{"attached": "true", "powered": "true"}, 15},
+	}
+	for _, test := range tests {
+		w := New(&FlatGenerator{}, nil, false)
+		w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: test.name, Properties: test.props})
+		w.Redstone.FlushUpdates()
+		if got := w.Redstone.PowerAt(0, 64, 0); got != test.want {
+			t.Errorf("%s power = %d, want %d", test.name, got, test.want)
+		}
+		w.Close()
+	}
+}
+
 func TestRedstoneTorchInvertsPowerConductedThroughSupport(t *testing.T) {
 	w := New(&FlatGenerator{}, nil, false)
 	defer w.Close()
