@@ -3,6 +3,7 @@ package server
 import (
 	"testing"
 
+	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
@@ -292,6 +293,22 @@ func TestBedrockPlacesLitRedstoneTorch(t *testing.T) {
 	torch := s.world.GetBlock(0, 64, 0)
 	if torch.ResourceLocation() != "minecraft:redstone_torch" || torch.Properties["lit"] != "true" {
 		t.Fatalf("torch state = %s", torch.Key())
+	}
+}
+
+func TestBedrockPlacesMinecartOnRail(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(0, 64, 0, bedrockBlock("rail", map[string]string{"shape": "east_west"}))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:minecart", Count: 1}
+	if !s.placeBedrockHeldBlock(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 0, Y: 64, Z: 0}}, s.world.GetBlock(0, 64, 0)) {
+		t.Fatal("minecart placement was not handled")
+	}
+	entities := s.world.Entities.Snapshot()
+	if len(entities) != 1 || entities[0].Type != corentity.TypeMinecart {
+		t.Fatalf("minecart entities = %+v", entities)
+	}
+	if !p.HeldItem().IsEmpty() {
+		t.Fatalf("held after placement = %+v", p.HeldItem())
 	}
 }
 

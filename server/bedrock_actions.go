@@ -469,6 +469,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		return false
 	}
 	held := p.HeldItem()
+	if _, minecart := canonicalMinecartType(held.ItemID); minecart {
+		return s.placeBedrockMinecart(p, i.Position)
+	}
 	block, ok := placementBlockForItem(held.ItemID)
 	if !ok {
 		return false
