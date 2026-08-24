@@ -84,3 +84,13 @@ func TestMinecartsExchangeVelocityOnCollision(t *testing.T) {
 		t.Fatalf("collision velocities left=%v right=%v", left.VX, right.VX)
 	}
 }
+
+func TestMinecartMovementUpdatesCanonicalPassenger(t *testing.T) {
+	s, passenger := newAnimalTestServer(t)
+	cart := corentity.New(3, [16]byte{}, corentity.TypeMinecart, 4, 65, 6)
+	cart.AddPassenger(passenger.EntityID)
+	s.syncMinecartPassengers(cart)
+	if passenger.Position.X != 4 || passenger.Position.Z != 6 || passenger.Position.Y <= 65 {
+		t.Fatalf("passenger position = %+v", passenger.Position)
+	}
+}

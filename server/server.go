@@ -2427,6 +2427,7 @@ func (s *Server) tickEntities() {
 		if corentity.IsMinecart(e.Type) {
 			s.tickMinecartPhysics(e)
 			tickMinecartCollisions(e, allEntities)
+			s.syncMinecartPassengers(e)
 			if s.tickTNTMinecartFuse(e) {
 				s.world.Entities.Remove(e.EntityID)
 				deadIDs = append(deadIDs, e.EntityID)

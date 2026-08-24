@@ -4,6 +4,7 @@ import (
 	"math"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 )
 
@@ -177,5 +178,20 @@ func tickMinecartCollisions(cart *corentity.Entity, entities []*corentity.Entity
 		}
 		cart.VX, cart.VZ = cart.VX-forceX, cart.VZ-forceZ
 		other.VX, other.VZ = other.VX+forceX, other.VZ+forceZ
+	}
+}
+
+func (s *Server) syncMinecartPassengers(cart *corentity.Entity) {
+	if s.game == nil || cart == nil {
+		return
+	}
+	for _, passengerID := range cart.PassengerIDs() {
+		s.game.OnlinePlayers(func(passenger *player.Player) {
+			if passenger.EntityID == passengerID {
+				passenger.Position.X = cart.Position.X
+				passenger.Position.Y = cart.Position.Y + 0.35
+				passenger.Position.Z = cart.Position.Z
+			}
+		})
 	}
 }
