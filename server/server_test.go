@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 
@@ -80,7 +81,7 @@ func TestVillagerSnapsToBedAndWakesBesideIt(t *testing.T) {
 	if !server.tickPassiveMobAI(villager) || villager.Sleeping {
 		t.Fatal("villager did not wake in daytime")
 	}
-	if int(villager.Position.X) == 0 && int(villager.Position.Z) == 0 {
+	if int(math.Floor(villager.Position.X)) == 0 && int(math.Floor(villager.Position.Z)) == 0 {
 		t.Fatalf("villager woke inside bed at %+v", villager.Position)
 	}
 	if ok, loaded := w.CanEntityOccupyIfLoaded(villager.Position.X, villager.Position.Y, villager.Position.Z); !loaded || !ok {
