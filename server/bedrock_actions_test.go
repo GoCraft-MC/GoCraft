@@ -78,6 +78,89 @@ func TestBedrockRootedDirtHoeDropsRoots(t *testing.T) {
 	t.Fatal("hanging roots were not awarded")
 }
 
+func TestBedrockPlantsEverySupportedCrop(t *testing.T) {
+	tests := []struct {
+		item, support, crop string
+	}{
+		{item: "minecraft:wheat_seeds", support: "farmland", crop: "minecraft:wheat"},
+		{item: "minecraft:carrot", support: "farmland", crop: "minecraft:carrots"},
+		{item: "minecraft:potato", support: "farmland", crop: "minecraft:potatoes"},
+		{item: "minecraft:beetroot_seeds", support: "farmland", crop: "minecraft:beetroots"},
+		{item: "minecraft:melon_seeds", support: "farmland", crop: "minecraft:melon_stem"},
+		{item: "minecraft:pumpkin_seeds", support: "farmland", crop: "minecraft:pumpkin_stem"},
+		{item: "minecraft:torchflower_seeds", support: "farmland", crop: "minecraft:torchflower_crop"},
+		{item: "minecraft:nether_wart", support: "soul_sand", crop: "minecraft:nether_wart"},
+	}
+	for _, test := range tests {
+		t.Run(test.item, func(t *testing.T) {
+			s, p := newBedrockActionTestServer(t)
+			s.world.SetBlock(1, 64, 0, bedrockBlock(test.support, map[string]string{"moisture": "0"}))
+			p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: test.item, Count: 1}
+			if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{
+				Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}, Face: 1,
+			}, s.world.GetBlock(1, 64, 0)) {
+				t.Fatal("planting action was not handled")
+			}
+			placed := s.world.GetBlock(1, 65, 0)
+			if placed.ResourceLocation() != test.crop || coreworld.CropAge(placed) != 0 {
+				t.Fatalf("placed crop = %+v, want %s age 0", placed, test.crop)
+			}
+		})
+	}
+}
+
+func TestBedrockCropBoneMealMatchesCoreAndRejectsNetherWart(t *testing.T) {
+	t.Run("wheat advances instead of instantly maturing", func(t *testing.T) {
+		s, p := newBedrockActionTestServer(t)
+		s.world.SetBlock(1, 64, 0, bedrockBlock("farmland", map[string]string{"moisture": "7"}))
+		s.world.SetBlock(1, 65, 0, bedrockBlock("wheat", map[string]string{"age": "0"}))
+		p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bone_meal", Count: 2}
+		if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 65, Z: 0}}, s.world.GetBlock(1, 65, 0)) {
+			t.Fatal("bone meal action was not handled")
+		}
+		if got := coreworld.CropAge(s.world.GetBlock(1, 65, 0)); got < 2 || got > 5 {
+			t.Fatalf("wheat age = %d, want 2..5", got)
+		}
+		if got := p.HeldItem().Count; got != 1 {
+			t.Fatalf("bone meal count = %d, want 1", got)
+		}
+	})
+
+	t.Run("nether wart rejects", func(t *testing.T) {
+		s, p := newBedrockActionTestServer(t)
+		s.world.SetBlock(1, 64, 0, bedrockBlock("soul_sand", nil))
+		s.world.SetBlock(1, 65, 0, bedrockBlock("nether_wart", map[string]string{"age": "0"}))
+		p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bone_meal", Count: 2}
+		if s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 65, Z: 0}}, s.world.GetBlock(1, 65, 0)) {
+			t.Fatal("nether wart accepted bone meal")
+		}
+		if got := p.HeldItem().Count; got != 2 {
+			t.Fatalf("bone meal count = %d, want 2", got)
+		}
+	})
+}
+
+func TestBedrockHarvestsSweetBerryBush(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("dirt", nil))
+	s.world.SetBlock(1, 65, 0, bedrockBlock("sweet_berry_bush", map[string]string{"age": "3"}))
+	if !s.applyBedrockBlockActivation(p, spatial.BlockPos{X: 1, Y: 65, Z: 0}, s.world.GetBlock(1, 65, 0)) {
+		t.Fatal("sweet berry harvest was not handled")
+	}
+	if got := coreworld.CropAge(s.world.GetBlock(1, 65, 0)); got != 1 {
+		t.Fatalf("harvested bush age = %d, want 1", got)
+	}
+	berries := 0
+	for _, stack := range p.Inventory {
+		if stack.ItemID == "minecraft:sweet_berries" {
+			berries += stack.Count
+		}
+	}
+	if berries < 2 || berries > 3 {
+		t.Fatalf("harvest berries = %d, want 2..3", berries)
+	}
+}
+
 func TestBedrockTorchChoosesFloorAndWallStates(t *testing.T) {
 	t.Run("floor", func(t *testing.T) {
 		s, p := newBedrockActionTestServer(t)
@@ -106,6 +189,51 @@ func TestBedrockTorchChoosesFloorAndWallStates(t *testing.T) {
 		placed := s.world.GetBlock(1, 64, -1)
 		if placed.ResourceLocation() != "minecraft:wall_torch" || placed.Properties["facing"] != "north" {
 			t.Fatalf("wall torch = %+v, want north-facing wall torch", placed)
+		}
+	})
+}
+
+func TestBedrockDirectionalAndRedstonePlacementParity(t *testing.T) {
+	t.Run("repeater faces placing player", func(t *testing.T) {
+		s, p := newBedrockActionTestServer(t)
+		p.Rotation.Yaw = 0
+		s.world.SetBlock(1, 63, 0, bedrockBlock("stone", nil))
+		p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:repeater", Count: 1}
+		s.placeBedrockHeldBlock(p, intent.BlockInteractIntent{
+			Position: spatial.BlockPos{X: 1, Y: 63, Z: 0}, Face: 1,
+		}, s.world.GetBlock(1, 63, 0))
+		if got := s.world.GetBlock(1, 64, 0).Properties["facing"]; got != "north" {
+			t.Fatalf("repeater facing = %q, want north while player looks south", got)
+		}
+	})
+
+	t.Run("wood follows clicked axis", func(t *testing.T) {
+		for face, wantAxis := range map[int32]string{1: "y", 2: "z", 5: "x"} {
+			s, p := newBedrockActionTestServer(t)
+			s.world.SetBlock(1, 64, 0, bedrockBlock("stone", nil))
+			p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:stripped_oak_wood", Count: 1}
+			s.placeBedrockHeldBlock(p, intent.BlockInteractIntent{
+				Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}, Face: face,
+			}, s.world.GetBlock(1, 64, 0))
+			dx, dy, dz := bedrockFaceOffset(face)
+			if got := s.world.GetBlock(1+dx, 64+dy, dz).Properties["axis"]; got != wantAxis {
+				t.Fatalf("face %d wood axis = %q, want %q", face, got, wantAxis)
+			}
+		}
+	})
+
+	t.Run("wire cannot stack on wire", func(t *testing.T) {
+		s, p := newBedrockActionTestServer(t)
+		s.world.SetBlock(1, 63, 0, bedrockBlock("stone", nil))
+		p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:redstone", Count: 2}
+		s.placeBedrockHeldBlock(p, intent.BlockInteractIntent{
+			Position: spatial.BlockPos{X: 1, Y: 63, Z: 0}, Face: 1,
+		}, s.world.GetBlock(1, 63, 0))
+		s.placeBedrockHeldBlock(p, intent.BlockInteractIntent{
+			Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}, Face: 1,
+		}, s.world.GetBlock(1, 64, 0))
+		if got := s.world.GetBlock(1, 65, 0); !got.IsAir() {
+			t.Fatalf("wire stacked into air as %+v", got)
 		}
 	})
 }

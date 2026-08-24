@@ -583,3 +583,83 @@ func TestJavaBoneMealGrowsCropAndConsumesItem(t *testing.T) {
 		t.Fatalf("bone meal count = %d, want 1", got)
 	}
 }
+
+func TestJavaPlantsEverySupportedCrop(t *testing.T) {
+	tests := []struct {
+		item, support, crop string
+	}{
+		{item: "minecraft:wheat_seeds", support: "farmland", crop: "minecraft:wheat"},
+		{item: "minecraft:carrot", support: "farmland", crop: "minecraft:carrots"},
+		{item: "minecraft:potato", support: "farmland", crop: "minecraft:potatoes"},
+		{item: "minecraft:beetroot_seeds", support: "farmland", crop: "minecraft:beetroots"},
+		{item: "minecraft:melon_seeds", support: "farmland", crop: "minecraft:melon_stem"},
+		{item: "minecraft:pumpkin_seeds", support: "farmland", crop: "minecraft:pumpkin_stem"},
+		{item: "minecraft:torchflower_seeds", support: "farmland", crop: "minecraft:torchflower_crop"},
+		{item: "minecraft:nether_wart", support: "soul_sand", crop: "minecraft:nether_wart"},
+	}
+	for index, test := range tests {
+		t.Run(test.item, func(t *testing.T) {
+			p := player.New([16]byte{byte(index + 1)}, "farmer", player.ClientEditionJava)
+			p.GameMode = player.GameModeSurvival
+			p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: test.item, Count: 1}
+			w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer w.Close()
+			mgr := session.NewManager()
+			w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: test.support, Properties: map[string]string{"moisture": "0"}})
+
+			if err := handleUseItemOn(useItemOnPacket(0, 64, 0, 1, int32(600+index)), p, w, mgr, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			placed := w.GetBlock(0, 65, 0)
+			if placed.ResourceLocation() != test.crop || coreworld.CropAge(placed) != 0 {
+				t.Fatalf("placed crop = %+v, want %s age 0", placed, test.crop)
+			}
+			if !p.HeldItem().IsEmpty() {
+				t.Fatalf("seed was not consumed: %+v", p.HeldItem())
+			}
+		})
+	}
+}
+
+func TestJavaNetherWartRejectsBoneMeal(t *testing.T) {
+	p := player.New([16]byte{90}, "wart-farmer", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bone_meal", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "soul_sand"})
+	w.SetBlock(0, 65, 0, coreworld.Block{Namespace: "minecraft", Name: "nether_wart", Properties: map[string]string{"age": "0"}})
+	if err := handleUseItemOn(useItemOnPacket(0, 65, 0, 1, 700), p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := coreworld.CropAge(w.GetBlock(0, 65, 0)); got != 0 {
+		t.Fatalf("nether wart age = %d, want 0", got)
+	}
+	if got := p.HeldItem().Count; got != 2 {
+		t.Fatalf("bone meal count = %d, want 2", got)
+	}
+}
+
+func TestJavaHarvestsSweetBerryBush(t *testing.T) {
+	p := player.New([16]byte{91}, "berry-picker", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "dirt"})
+	w.SetBlock(0, 65, 0, coreworld.Block{Namespace: "minecraft", Name: "sweet_berry_bush", Properties: map[string]string{"age": "3"}})
+	if err := handleUseItemOn(useItemOnPacket(0, 65, 0, 1, 701), p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := coreworld.CropAge(w.GetBlock(0, 65, 0)); got != 1 {
+		t.Fatalf("harvested bush age = %d, want 1", got)
+	}
+	berries := 0
+	for _, stack := range p.Inventory {
+		if stack.ItemID == "minecraft:sweet_berries" {
+			berries += stack.Count
+		}
+	}
+	if berries < 2 || berries > 3 {
+		t.Fatalf("harvest berries = %d, want 2..3", berries)
+	}
+}

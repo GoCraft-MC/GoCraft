@@ -218,6 +218,11 @@ func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.Worl
 }
 
 func breakUnsupportedBlocksAbove(x, y, z int, w *coreworld.World, mgr *session.Manager) {
+	for _, change := range w.BreakUnsupportedCropsAbove(x, y, z) {
+		if mgr != nil {
+			BroadcastBlockChange(change, mgr)
+		}
+	}
 	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {
 		plant := w.GetBlock(x, plantY, z)
 		if !coreworld.RequiresGroundSupport(plant) || javaGroundSupportedBlockCanSurvive(plant, w.GetBlock(x, plantY-1, z)) {
@@ -476,6 +481,23 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	// Tool and seed interactions run before generic block/container handling.
 	targetBlock := w.GetBlock(int(bx), int(by), int(bz))
 	held := p.HeldItem()
+	if targetBlock.ResourceLocation() == "minecraft:sweet_berry_bush" &&
+		(held.ItemID != "minecraft:bone_meal" || coreworld.CropAge(targetBlock) >= 3) {
+		if count, changes, harvested := w.HarvestSweetBerryBush(int(bx), int(by), int(bz), rand.Uint64()); harvested {
+			for _, change := range changes {
+				if mgr != nil {
+					BroadcastBlockChange(change, mgr)
+				}
+			}
+			p.GiveItem(player.ItemStack{ItemID: "minecraft:sweet_berries", Count: count})
+			p.ContainerStateID++
+			if sess, ok := mgr.Get(p.UUID); ok {
+				_ = sendSetContainerContent(sess.Conn, p, p.ContainerStateID)
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 	heldBefore := held.ItemID
 	usedDamageableTool := isBlockUseTool(heldBefore)
 	if hand == 0 && useToolOrPlant(int(bx), int(by), int(bz), face, targetBlock, p, w, mgr, conn) {
@@ -994,6 +1016,21 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
 			return true
 		}
+		if changes, used := w.ApplyBoneMeal(x, y, z, rand.Uint64()); used {
+			for _, change := range changes {
+				if mgr != nil {
+					BroadcastBlockChange(change, mgr)
+				}
+			}
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			broadcastSoundAt(mgr, "minecraft:item.bone_meal.use", soundCategoryBlocks,
+				float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+			return true
+		}
 		if replacement, ok := javaBoneMealGrowth(target); ok {
 			applyBlockChange(x, y, z, replacement, w, mgr)
 			if p.GameMode != player.GameModeCreative {
@@ -1234,6 +1271,12 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		crop = coreworld.Block{Namespace: "minecraft", Name: "potatoes", Properties: map[string]string{"age": "0"}}
 	case target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:beetroot_seeds":
 		crop = coreworld.Block{Namespace: "minecraft", Name: "beetroots", Properties: map[string]string{"age": "0"}}
+	case target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:melon_seeds":
+		crop = coreworld.Block{Namespace: "minecraft", Name: "melon_stem", Properties: map[string]string{"age": "0"}}
+	case target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:pumpkin_seeds":
+		crop = coreworld.Block{Namespace: "minecraft", Name: "pumpkin_stem", Properties: map[string]string{"age": "0"}}
+	case target.ResourceLocation() == "minecraft:farmland" && held.ItemID == "minecraft:torchflower_seeds":
+		crop = coreworld.Block{Namespace: "minecraft", Name: "torchflower_crop", Properties: map[string]string{"age": "0"}}
 	case target.ResourceLocation() == "minecraft:soul_sand" && held.ItemID == "minecraft:nether_wart":
 		crop = coreworld.Block{Namespace: "minecraft", Name: "nether_wart", Properties: map[string]string{"age": "0"}}
 	default:
@@ -1254,14 +1297,8 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 func javaBoneMealGrowth(target coreworld.Block) (coreworld.Block, bool) {
 	maxAge := -1
 	switch target.ResourceLocation() {
-	case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes":
-		maxAge = 7
-	case "minecraft:beetroots", "minecraft:nether_wart", "minecraft:sweet_berry_bush":
-		maxAge = 3
 	case "minecraft:cocoa":
 		maxAge = 2
-	case "minecraft:torchflower_crop":
-		maxAge = 1
 	case "minecraft:pitcher_crop":
 		maxAge = 4
 	}
@@ -1924,9 +1961,13 @@ func applyBlockChange(x, y, z int, block coreworld.Block, w *coreworld.World, mg
 	}
 	stateID := javaworld.StateID(block)
 	pkt := buildBlockUpdate(x, y, z, stateID)
+	stemChanges := w.UpdateAttachedStemsAround(x, y, z)
 	if mgr != nil {
 		for _, s := range mgr.SnapshotAll() {
 			_ = s.Conn.WritePacket(pkt)
+		}
+		for _, change := range stemChanges {
+			BroadcastBlockChange(change, mgr)
 		}
 	}
 	refreshJavaConnectedBlocks(x, y, z, w, mgr)

@@ -3,7 +3,6 @@ package server
 import (
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 
 	corentity "GoCraft/core/entity"
@@ -482,19 +481,12 @@ func (s *Server) dispenseSpecialItem(world *coreworld.World, dimension int32, ta
 		*changes = append(*changes, coreworld.BlockChange{X: target[0], Y: target[1], Z: target[2], Block: coreworld.Air})
 		return true, player.ItemStack{ItemID: "minecraft:" + filled, Count: 1}
 	case "minecraft:bone_meal":
-		current := world.GetBlock(target[0], target[1], target[2])
-		maximum, crop := bedrockCropMaxAge(current.ResourceLocation())
-		if !crop {
+		seed := uint64(s.worldAge) + uint64(target[0]*31+target[1]*17+target[2]*13)
+		grown, used := world.ApplyBoneMeal(target[0], target[1], target[2], seed)
+		if !used {
 			return false, player.ItemStack{}
 		}
-		age, _ := strconv.Atoi(current.Properties["age"])
-		if age >= maximum {
-			return false, player.ItemStack{}
-		}
-		grown := bedrockCopyBlock(current)
-		grown.Properties["age"] = strconv.Itoa(min(maximum, age+2+int(s.worldAge%3)))
-		world.SetBlock(target[0], target[1], target[2], grown)
-		*changes = append(*changes, coreworld.BlockChange{X: target[0], Y: target[1], Z: target[2], Block: grown})
+		*changes = append(*changes, grown...)
 		return true, player.ItemStack{}
 	case "minecraft:flint_and_steel":
 		current := world.GetBlock(target[0], target[1], target[2])

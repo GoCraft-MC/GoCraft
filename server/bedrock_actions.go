@@ -176,15 +176,11 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if item == "minecraft:bone_meal" {
-		if maxAge, ok := bedrockCropMaxAge(name); ok {
-			age, _ := strconv.Atoi(target.Properties["age"])
-			if age < maxAge {
-				replacement := bedrockCopyBlock(target)
-				replacement.Properties["age"] = strconv.Itoa(maxAge)
-				s.setBedrockActionBlock(x, y, z, replacement)
-				s.consumeBedrockHeldItem(p, 1)
-				return true
-			}
+		seed := uint64(s.worldAge) + uint64(coreworld.CropAge(target)+1)*0x9e3779b97f4a7c15
+		if changes, used := s.bedrockWorld().ApplyBoneMeal(x, y, z, seed); used {
+			s.broadcastCanonicalCropChanges(changes)
+			s.consumeBedrockHeldItem(p, 1)
+			return true
 		}
 	}
 
@@ -298,6 +294,14 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.BlockPos, block coreworld.Block) bool {
 	x, y, z := int(pos.X), int(pos.Y), int(pos.Z)
 	name := block.ResourceLocation()
+	if name == "minecraft:sweet_berry_bush" {
+		seed := uint64(s.worldAge) + uint64(coreworld.CropAge(block)+1)*0x9e3779b97f4a7c15
+		if count, changes, harvested := s.bedrockWorld().HarvestSweetBerryBush(x, y, z, seed); harvested {
+			s.broadcastCanonicalCropChanges(changes)
+			s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:sweet_berries", Count: count})
+			return true
+		}
+	}
 	if name == "minecraft:decorated_pot" {
 		held := p.HeldItem()
 		if held.IsEmpty() {
@@ -597,17 +601,17 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		}
 		props = map[string]string{"face": face, "facing": facing, "powered": "false"}
 	case name == "minecraft:repeater":
-		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
+		if !bedrockSupportsRedstoneComponent(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
-		props = map[string]string{"delay": "1", "facing": playerFacing, "locked": "false", "powered": "false"}
+		props = map[string]string{"delay": "1", "facing": frontFacing, "locked": "false", "powered": "false"}
 	case name == "minecraft:comparator":
-		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
+		if !bedrockSupportsRedstoneComponent(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
-		props = map[string]string{"facing": playerFacing, "mode": "compare", "powered": "false"}
+		props = map[string]string{"facing": frontFacing, "mode": "compare", "powered": "false"}
 	case name == "minecraft:redstone_wire":
-		if !bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
+		if !bedrockSupportsRedstoneComponent(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			return coreworld.Block{}, false
 		}
 		props = s.bedrockRedstoneWireProperties(x, y, z)
@@ -727,7 +731,17 @@ func (s *Server) setBedrockActionBlock(x, y, z int, block coreworld.Block) {
 	if s.sessions != nil {
 		handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block}, s.sessions)
 	}
+	s.broadcastCanonicalCropChanges(s.bedrockWorld().UpdateAttachedStemsAround(x, y, z))
 	s.refreshBedrockConnectedBlocks(x, y, z)
+}
+
+func (s *Server) broadcastCanonicalCropChanges(changes []coreworld.BlockChange) {
+	if s.sessions == nil {
+		return
+	}
+	for _, change := range changes {
+		handler.BroadcastBlockChange(change, s.sessions)
+	}
 }
 
 func bedrockBedBlockEntityData(kind string) []byte {
@@ -924,6 +938,7 @@ func (s *Server) breakBedrockUnsupportedAbove(x, y, z int) {
 	if world == nil {
 		return
 	}
+	s.broadcastCanonicalCropChanges(world.BreakUnsupportedCropsAbove(x, y, z))
 	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {
 		plant := world.GetBlock(x, plantY, z)
 		if !coreworld.RequiresGroundSupport(plant) || !world.GetBlock(x, plantY-1, z).IsAir() {
@@ -1008,17 +1023,7 @@ func bedrockCropForItem(item, target string) (coreworld.Block, bool) {
 }
 
 func bedrockCropMaxAge(name string) (int, bool) {
-	switch name {
-	case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes", "minecraft:melon_stem", "minecraft:pumpkin_stem":
-		return 7, true
-	case "minecraft:beetroots", "minecraft:sweet_berry_bush":
-		return 3, true
-	case "minecraft:torchflower_crop":
-		return 1, true
-	case "minecraft:pitcher_crop":
-		return 4, true
-	}
-	return 0, false
+	return coreworld.CropMaxAge(name)
 }
 
 func bedrockIsCandleItem(item string) bool {
@@ -1176,6 +1181,37 @@ func bedrockSolidSupport(block coreworld.Block) bool {
 	return !bedrockPlacementReplaceable(name) && !coreworld.IsFluidBlock(name)
 }
 
+func bedrockSupportsRedstoneComponent(block coreworld.Block) bool {
+	name := block.ResourceLocation()
+	if name == "minecraft:hopper" {
+		return true
+	}
+	if bedrockPlacementReplaceable(name) || coreworld.IsFluidBlock(name) || name == "" {
+		return false
+	}
+	if strings.HasSuffix(name, "_slab") {
+		return block.Properties["type"] == "top" || block.Properties["type"] == "double"
+	}
+	if strings.HasSuffix(name, "_stairs") {
+		return block.Properties["half"] == "top"
+	}
+	if bedrockIsFence(name) || bedrockIsWall(name) || strings.HasSuffix(name, "_fence_gate") ||
+		strings.HasSuffix(name, "_door") || bedrockIsTrapdoor(name) || strings.HasSuffix(name, "_button") ||
+		strings.HasSuffix(name, "_pressure_plate") || strings.HasSuffix(name, "_carpet") ||
+		strings.Contains(name, "torch") || strings.Contains(name, "rail") || strings.Contains(name, "glass") ||
+		strings.HasSuffix(name, "_leaves") {
+		return false
+	}
+	switch name {
+	case "minecraft:redstone_wire", "minecraft:repeater", "minecraft:comparator", "minecraft:lever",
+		"minecraft:ladder", "minecraft:chain", "minecraft:lantern", "minecraft:soul_lantern",
+		"minecraft:snow", "minecraft:cake", "minecraft:brewing_stand", "minecraft:flower_pot":
+		return false
+	default:
+		return true
+	}
+}
+
 func bedrockPlacementHasFaceSupport(world *coreworld.World, x, y, z int, face int32) bool {
 	dx, dy, dz := bedrockFaceOffset(face)
 	return bedrockSolidSupport(world.GetBlock(x-dx, y-dy, z-dz))
@@ -1224,7 +1260,12 @@ func bedrockRedstoneConnectable(name string) bool {
 }
 
 func (s *Server) refreshBedrockWireConnections(x, y, z int) {
-	positions := [][3]int{{x, y, z}, {x - 1, y, z}, {x + 1, y, z}, {x, y, z - 1}, {x, y, z + 1}}
+	positions := [][3]int{{x, y, z}}
+	for _, offset := range [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} {
+		for dy := -1; dy <= 1; dy++ {
+			positions = append(positions, [3]int{x + offset[0], y + dy, z + offset[1]})
+		}
+	}
 	for _, pos := range positions {
 		wire := s.bedrockWorld().GetBlock(pos[0], pos[1], pos[2])
 		if wire.ResourceLocation() != "minecraft:redstone_wire" {

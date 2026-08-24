@@ -230,6 +230,17 @@ func bedrockVisualBlock(block coreworld.Block) coreworld.Block {
 		if block.Properties["lit"] == "false" {
 			block.Name = "unlit_redstone_torch"
 		}
+	case "minecraft:beetroots":
+		// Bedrock uses the singular identifier for the same canonical crop.
+		block.Name = "beetroot"
+	case "minecraft:attached_pumpkin_stem":
+		// Bedrock represents attachment through a mature stem next to its fruit,
+		// rather than exposing Java's separate attached-stem block identifier.
+		block.Name = "pumpkin_stem"
+		block.Properties = map[string]string{"age": "7"}
+	case "minecraft:attached_melon_stem":
+		block.Name = "melon_stem"
+		block.Properties = map[string]string{"age": "7"}
 	}
 	return block
 }

@@ -189,3 +189,25 @@ func TestModernWorldgenBlocksAndBiomesExistInProtocol769Registry(t *testing.T) {
 		}
 	}
 }
+
+func TestCropStatesExistInProtocol769Registry(t *testing.T) {
+	states := []coreworld.Block{
+		{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "0"}},
+		{Namespace: "minecraft", Name: "wheat", Properties: map[string]string{"age": "7"}},
+		{Namespace: "minecraft", Name: "carrots", Properties: map[string]string{"age": "7"}},
+		{Namespace: "minecraft", Name: "potatoes", Properties: map[string]string{"age": "7"}},
+		{Namespace: "minecraft", Name: "beetroots", Properties: map[string]string{"age": "3"}},
+		{Namespace: "minecraft", Name: "nether_wart", Properties: map[string]string{"age": "3"}},
+		{Namespace: "minecraft", Name: "torchflower_crop", Properties: map[string]string{"age": "1"}},
+		{Namespace: "minecraft", Name: "pumpkin_stem", Properties: map[string]string{"age": "7"}},
+		{Namespace: "minecraft", Name: "melon_stem", Properties: map[string]string{"age": "7"}},
+		{Namespace: "minecraft", Name: "attached_pumpkin_stem", Properties: map[string]string{"facing": "east"}},
+		{Namespace: "minecraft", Name: "attached_melon_stem", Properties: map[string]string{"facing": "west"}},
+		{Namespace: "minecraft", Name: "sweet_berry_bush", Properties: map[string]string{"age": "3"}},
+	}
+	for _, state := range states {
+		if !HasExactState(state) || StateID(state) == 0 {
+			t.Errorf("missing exact Java crop state %s", state.Key())
+		}
+	}
+}
