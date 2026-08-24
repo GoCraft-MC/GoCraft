@@ -130,6 +130,14 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 				block.Properties["lit"] != boolStr(newPower > 0) {
 				if change, ok := re.applyPowerState(x, y, z, name, block, newPower > 0); ok {
 					result.Changes = append(result.Changes, change)
+					for _, nb := range neighbors6(x, y, z) {
+						queue = append(queue, nb)
+					}
+				}
+			}
+			if name == "minecraft:repeater" && block.Properties["locked"] != boolStr(re.repeaterLocked(x, y, z, block)) {
+				if change, ok := re.applyPowerState(x, y, z, name, block, newPower > 0); ok {
+					result.Changes = append(result.Changes, change)
 				}
 			}
 		}
@@ -220,8 +228,11 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 
 	case "minecraft:repeater":
 		// Repeater outputs 15 if its input side has power > 0.
-		if block.Properties["powered"] == "true" {
+		if re.repeaterLocked(x, y, z, block) && block.Properties["powered"] == "true" {
 			return 15
+		}
+		if re.repeaterLocked(x, y, z, block) {
+			return 0
 		}
 		// Check input direction.
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
@@ -277,6 +288,21 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		}
 		return best
 	}
+}
+
+func (re *RedstoneEngine) repeaterLocked(x, y, z int, block Block) bool {
+	dx, dz := redstoneFacingOffset(block.Properties["facing"])
+	for _, side := range [2][2]int{{-dz, dx}, {dz, -dx}} {
+		sx, sz := x+side[0], z+side[1]
+		source := re.world.GetBlock(sx, y, sz)
+		if source.ResourceLocation() != "minecraft:repeater" && source.ResourceLocation() != "minecraft:comparator" {
+			continue
+		}
+		if re.powerFromConductorToward(sx, y, sz, source, [3]int{x, y, z}) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func isRedstoneSolidBlock(block Block) bool {
@@ -515,9 +541,12 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 			Properties: map[string]string{
 				"delay":   orDefault(block.Properties["delay"], "1"),
 				"facing":  orDefault(block.Properties["facing"], "north"),
-				"locked":  orDefault(block.Properties["locked"], "false"),
+				"locked":  boolStr(re.repeaterLocked(x, y, z, block)),
 				"powered": boolStr(powered),
 			},
+		}
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
 		}
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true

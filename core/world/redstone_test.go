@@ -52,7 +52,9 @@ func TestRedstoneTorchInvertsPowerConductedThroughSupport(t *testing.T) {
 		t.Fatalf("powered support left torch lit = %q", got)
 	}
 	if got := w.GetBlock(3, 65, 0).Properties["lit"]; got != "false" {
-		t.Fatalf("inverted torch powered lamp = %q", got)
+		t.Fatalf("inverted torch powered lamp = %q (wire=%d support=%d torch=%d lamp=%d)", got,
+			w.Redstone.PowerAt(1, 64, 0), w.Redstone.PowerAt(2, 64, 0),
+			w.Redstone.PowerAt(2, 65, 0), w.Redstone.PowerAt(3, 65, 0))
 	}
 
 	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "lever", Properties: map[string]string{"powered": "false"}})
@@ -164,5 +166,29 @@ func TestRedstonePowerTravelsUpAndDownSteps(t *testing.T) {
 	}
 	if got := w.GetBlock(4, 65, 0).Properties["lit"]; got != "true" {
 		t.Fatalf("lamp after step lit = %q, want true", got)
+	}
+}
+
+func TestRepeaterSideSignalLocksCurrentState(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	repeater := func(facing string) Block {
+		return Block{Namespace: "minecraft", Name: "repeater", Properties: map[string]string{
+			"facing": facing, "delay": "1", "locked": "false", "powered": "false",
+		}}
+	}
+	w.SetBlock(0, 64, 0, repeater("north"))
+	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.Redstone.FlushUpdates()
+	w.SetBlock(1, 64, 0, repeater("west"))
+	w.SetBlock(2, 64, 0, Block{Namespace: "minecraft", Name: "redstone_block"})
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(0, 64, 0).Properties["locked"]; got != "true" {
+		t.Fatalf("locked = %q, want true", got)
+	}
+	w.SetBlock(0, 64, 1, Air)
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(0, 64, 0).Properties["powered"]; got != "true" {
+		t.Fatalf("locked repeater powered = %q, want retained true", got)
 	}
 }
