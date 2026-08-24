@@ -234,7 +234,6 @@ func cmdList(ctx CommandContext) error {
 			if online != nil {
 				names = append(names, online.Username)
 			}
-		}
 		sort.Slice(names, func(i, j int) bool {
 			return strings.ToLower(names[i]) < strings.ToLower(names[j])
 		})
@@ -400,7 +399,7 @@ func cmdSummon(ctx CommandContext) error {
 
 	mobName := strings.ToLower(strings.TrimPrefix(ctx.Args[0], "minecraft:"))
 	if !containsName(summonableMobNames, mobName) {
-		return fmt.Errorf("unknown mob %q; use tab completion", mobName)
+		return fmt.Errorf("unknown mob %q; use tab completion", ctx.Args[0])
 	}
 
 	// Parse optional coordinates: /summon <mob> <x> <y> <z>
