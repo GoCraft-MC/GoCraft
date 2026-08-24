@@ -70,13 +70,16 @@ func IsAnimalVehicle(t EntityType) bool {
 	}
 }
 
-func IsRideableVehicle(t EntityType) bool { return IsBoat(t) || IsAnimalVehicle(t) }
+func IsRideableVehicle(t EntityType) bool { return IsBoat(t) || IsMinecart(t) || IsAnimalVehicle(t) }
 
 func VehicleCapacity(t EntityType) int {
 	if IsBoat(t) || t == TypeCamel {
 		return 2
 	}
 	if IsAnimalVehicle(t) {
+		return 1
+	}
+	if IsMinecart(t) {
 		return 1
 	}
 	return 0

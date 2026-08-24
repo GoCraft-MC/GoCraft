@@ -57,4 +57,7 @@ func TestBreedingCompatibilityAndVehicleSeats(t *testing.T) {
 	if !removed || len(got) != 1 || got[0] != 11 {
 		t.Fatalf("passengers after front dismount = %v, want [11]", got)
 	}
+	if !IsMinecart(TypeMinecart) || !IsRideableVehicle(TypeMinecart) || VehicleCapacity(TypeMinecart) != 1 {
+		t.Fatal("minecart must expose one rideable seat")
+	}
 }

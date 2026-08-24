@@ -117,6 +117,13 @@ const (
 	TypeCherryChestBoat   EntityType = "minecraft:cherry_chest_boat"
 	TypeBambooChestRaft   EntityType = "minecraft:bamboo_chest_raft"
 	TypeZombieHorse       EntityType = "minecraft:zombie_horse"
+	TypeMinecart          EntityType = "minecraft:minecart"
+	TypeChestMinecart     EntityType = "minecraft:chest_minecart"
+	TypeFurnaceMinecart   EntityType = "minecraft:furnace_minecart"
+	TypeTNTMinecart       EntityType = "minecraft:tnt_minecart"
+	TypeHopperMinecart    EntityType = "minecraft:hopper_minecart"
+	TypeSpawnerMinecart   EntityType = "minecraft:spawner_minecart"
+	TypeCommandMinecart   EntityType = "minecraft:command_block_minecart"
 
 	// ── Neutral / tameable mobs ───────────────────────────────────────────────
 	TypeBee             EntityType = "minecraft:bee"
@@ -462,7 +469,9 @@ func defaultMaxHealth(t EntityType) float32 {
 		TypeAcaciaBoat, TypeDarkOakBoat, TypeMangroveBoat, TypeCherryBoat,
 		TypeBambooRaft, TypeOakChestBoat, TypeSpruceChestBoat, TypeBirchChestBoat,
 		TypeJungleChestBoat, TypeAcaciaChestBoat, TypeDarkOakChestBoat,
-		TypeMangroveChestBoat, TypeCherryChestBoat, TypeBambooChestRaft:
+		TypeMangroveChestBoat, TypeCherryChestBoat, TypeBambooChestRaft,
+		TypeMinecart, TypeChestMinecart, TypeFurnaceMinecart, TypeTNTMinecart,
+		TypeHopperMinecart, TypeSpawnerMinecart, TypeCommandMinecart:
 		return 40
 
 	default:
@@ -507,6 +516,15 @@ func IsBoat(t EntityType) bool {
 		TypeBambooRaft, TypeOakChestBoat, TypeSpruceChestBoat, TypeBirchChestBoat,
 		TypeJungleChestBoat, TypeAcaciaChestBoat, TypeDarkOakChestBoat,
 		TypeMangroveChestBoat, TypeCherryChestBoat, TypeBambooChestRaft:
+		return true
+	}
+	return false
+}
+
+func IsMinecart(t EntityType) bool {
+	switch t {
+	case TypeMinecart, TypeChestMinecart, TypeFurnaceMinecart, TypeTNTMinecart,
+		TypeHopperMinecart, TypeSpawnerMinecart, TypeCommandMinecart:
 		return true
 	}
 	return false
