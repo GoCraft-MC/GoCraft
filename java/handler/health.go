@@ -255,6 +255,16 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 		BroadcastHurtAnimation(p.EntityID, p.Rotation.Yaw, mgr)
 	}
 	if died {
+		// Sleeping is a tracked client pose, not just a canonical bool. Clear it
+		// immediately when death wins so Java does not carry the bed pose through
+		// Respawn, and Bedrock's next sync observes the same standing state.
+		if p.Sleeping {
+			p.Sleeping = false
+			if mgr != nil {
+				BroadcastPlayerWaking(p.EntityID, mgr)
+			}
+		}
+
 		// Totem of undying: if the player holds one, prevent death.
 		if tryConsumeTotem(target) {
 			return true
