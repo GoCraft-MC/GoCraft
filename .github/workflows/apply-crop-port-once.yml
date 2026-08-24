@@ -1,0 +1,45 @@
+name: Apply crop port once
+
+on:
+  push:
+    branches: [feature/pumpkin-crop-parity]
+    paths:
+      - '.github/workflows/apply-crop-port-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pumpkin-crop-parity
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Apply existing port script
+        shell: bash
+        run: |
+          python3 <<'RUNNER'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/port-agriculture-temp.yml').read_text()
+          start = workflow.index("          python3 <<'PY'\n") + len("          python3 <<'PY'\n")
+          end = workflow.index("\n          PY", start)
+          script = textwrap.dedent(workflow[start:end])
+          exec(compile(script, 'crop-port.py', 'exec'), {'__name__': '__main__'})
+          RUNNER
+
+          gofmt -w core/world/world.go core/world/crop_growth.go core/world/crop_pumpkin_test.go java/handler/block.go server/bedrock_actions.go
+          go test ./...
+          go vet ./...
+          go build ./...
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core/world/world.go core/world/crop_growth.go core/world/crop_pumpkin_test.go java/handler/block.go server/bedrock_actions.go
+          git commit -m 'feat: port Pumpkin crop growth parity'
+          git push origin HEAD:feature/pumpkin-crop-parity
