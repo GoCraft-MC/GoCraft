@@ -4417,7 +4417,7 @@ func (s *Server) tickBlockPhysicsWorld() {
 	// Flush redstone — may produce visual changes and newly-powered loads.
 	redstone := s.world.Redstone.FlushUpdates()
 
-	if len(due) == 0 && len(redstone.Changes) == 0 && len(redstone.PoweredLoads) == 0 && len(blockChanges) == 0 {
+	if len(due) == 0 && len(redstone.Changes) == 0 && len(redstone.PoweredLoads) == 0 && len(redstone.UnpoweredLoads) == 0 && len(blockChanges) == 0 {
 		return
 	}
 
@@ -4454,8 +4454,16 @@ func (s *Server) tickBlockPhysicsWorld() {
 			s.activateDropperOrDispenser(s.world, s.simulationDimension, pos[0], pos[1], pos[2], block.ResourceLocation(), &blockChanges)
 		case "minecraft:crafter":
 			s.activateCrafter(s.world, s.simulationDimension, pos[0], pos[1], pos[2])
+		case "minecraft:piston", "minecraft:sticky_piston":
+			blockChanges = append(blockChanges, s.world.ApplyPistonPower(pos[0], pos[1], pos[2], true)...)
 		}
 		// Pistons are handled by their dedicated movement system.
+	}
+	for _, pos := range redstone.UnpoweredLoads {
+		block := s.world.GetBlock(pos[0], pos[1], pos[2])
+		if block.ResourceLocation() == "minecraft:piston" || block.ResourceLocation() == "minecraft:sticky_piston" {
+			blockChanges = append(blockChanges, s.world.ApplyPistonPower(pos[0], pos[1], pos[2], false)...)
+		}
 	}
 
 	blockChanges = append(blockChanges, redstone.Changes...)

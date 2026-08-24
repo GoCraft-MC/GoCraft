@@ -56,8 +56,9 @@ func (re *RedstoneEngine) PowerAt(x, y, z int) int {
 
 // RedstoneResult holds the output of FlushUpdates.
 type RedstoneResult struct {
-	Changes      []BlockChange // visual block state changes to broadcast
-	PoweredLoads [][3]int      // positions of loads that just became powered (TNT, pistons)
+	Changes        []BlockChange // visual block state changes to broadcast
+	PoweredLoads   [][3]int      // positions of loads that just became powered (TNT, pistons)
+	UnpoweredLoads [][3]int      // positions of loads whose input just fell to zero
 }
 
 // FlushUpdates drains the dirty set, propagates power changes, and returns a
@@ -97,6 +98,7 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 		oldPower := re.power[pos]
 		if newPower != oldPower {
 			wasUnpowered := oldPower == 0
+			wasPowered := oldPower > 0
 			if newPower == 0 {
 				delete(re.power, pos)
 			} else {
@@ -112,6 +114,9 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 			// Track loads that just became powered (0 → >0).
 			if wasUnpowered && newPower > 0 && IsRedstoneLoad(name) {
 				result.PoweredLoads = append(result.PoweredLoads, pos)
+			}
+			if wasPowered && newPower == 0 && IsRedstoneLoad(name) {
+				result.UnpoweredLoads = append(result.UnpoweredLoads, pos)
 			}
 			for _, nb := range neighbors6(x, y, z) {
 				queue = append(queue, nb)
