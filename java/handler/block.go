@@ -896,6 +896,19 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			"mode":   "compare", "powered": "false",
 		}
 		applyBlockChange(px, py, pz, block, w, mgr)
+	case strings.HasSuffix(block.ResourceLocation(), "_pressure_plate"):
+		if !javaSupportsRedstoneComponent(w.GetBlock(px, py-1, pz)) {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		if block.ResourceLocation() == "minecraft:light_weighted_pressure_plate" ||
+			block.ResourceLocation() == "minecraft:heavy_weighted_pressure_plate" {
+			block.Properties = map[string]string{"power": "0"}
+		} else {
+			block.Properties = map[string]string{"powered": "false"}
+		}
+		applyBlockChange(px, py, pz, block, w, mgr)
+		w.BlockPhysics.SchedulePressurePlate(px, py, pz, w.WorldTime(), 1)
 	case isJavaStorageContainer(block.ResourceLocation()):
 		switch block.ResourceLocation() {
 		case "minecraft:hopper":

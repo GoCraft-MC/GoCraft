@@ -628,6 +628,22 @@ func TestJavaPlacesMinecartOnRail(t *testing.T) {
 	}
 }
 
+func TestJavaPlacesWeightedPressurePlateState(t *testing.T) {
+	p := player.New([16]byte{}, "engineer", player.ClientEditionJava)
+	p.GameMode = player.GameModeCreative
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:heavy_weighted_pressure_plate", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(34, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	if err := handleUseItemOn(useItemOnPacket(34, 63, 0, 1, 542), p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	plate := w.GetBlock(34, 64, 0)
+	if plate.ResourceLocation() != "minecraft:heavy_weighted_pressure_plate" || plate.Properties["power"] != "0" {
+		t.Fatalf("pressure plate state = %s", plate.Key())
+	}
+}
+
 func TestJavaBoneMealGrowsCropAndConsumesItem(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
