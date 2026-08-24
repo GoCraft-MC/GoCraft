@@ -560,6 +560,42 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		return nil
 	}
+	if !bypassActivation && strings.HasSuffix(targetBlock.ResourceLocation(), "_button") {
+		if targetBlock.Properties["powered"] != "true" {
+			pressed := copyBlockProperties(targetBlock)
+			pressed.Properties["powered"] = "true"
+			applyBlockChange(int(bx), int(by), int(bz), pressed, w, mgr)
+			delay := int64(30)
+			if targetBlock.ResourceLocation() == "minecraft:stone_button" ||
+				targetBlock.ResourceLocation() == "minecraft:polished_blackstone_button" {
+				delay = 20
+			}
+			w.BlockPhysics.ScheduleButton(int(bx), int(by), int(bz), w.WorldTime(), delay)
+		}
+		broadcastSoundAt(mgr, "minecraft:block.stone_button.click_on", soundCategoryBlocks,
+			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 0.3, 0.6)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:repeater" {
+		updated := copyBlockProperties(targetBlock)
+		delay, _ := strconv.Atoi(updated.Properties["delay"])
+		updated.Properties["delay"] = strconv.Itoa(delay%4 + 1)
+		applyBlockChange(int(bx), int(by), int(bz), updated, w, mgr)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:comparator" {
+		updated := copyBlockProperties(targetBlock)
+		if updated.Properties["mode"] == "subtract" {
+			updated.Properties["mode"] = "compare"
+		} else {
+			updated.Properties["mode"] = "subtract"
+		}
+		applyBlockChange(int(bx), int(by), int(bz), updated, w, mgr)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
 
 	// Cake right-click: consume a slice (based on PumpkinMC cake.rs).
 	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:cake" {

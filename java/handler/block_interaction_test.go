@@ -560,6 +560,36 @@ func TestJavaButtonUsesClickedFaceAndStaysAttached(t *testing.T) {
 	}
 }
 
+func TestJavaActivatesRedstoneControls(t *testing.T) {
+	p := player.New([16]byte{}, "switcher", player.ClientEditionJava)
+	p.GameMode = player.GameModeCreative
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	mgr := session.NewManager()
+	w.SetBlock(25, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "stone_button", Properties: map[string]string{"powered": "false"}})
+	w.SetBlock(26, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "repeater", Properties: map[string]string{
+		"delay": "1", "facing": "north", "locked": "false", "powered": "false",
+	}})
+	w.SetBlock(27, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "comparator", Properties: map[string]string{
+		"facing": "north", "mode": "compare", "powered": "false",
+	}})
+
+	for index, x := range []int{25, 26, 27} {
+		if err := handleUseItemOn(useItemOnPacket(x, 64, 0, 1, int32(530+index)), p, w, mgr, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := w.GetBlock(25, 64, 0).Properties["powered"]; got != "true" {
+		t.Fatalf("button powered = %q", got)
+	}
+	if got := w.GetBlock(26, 64, 0).Properties["delay"]; got != "2" {
+		t.Fatalf("repeater delay = %q", got)
+	}
+	if got := w.GetBlock(27, 64, 0).Properties["mode"]; got != "subtract" {
+		t.Fatalf("comparator mode = %q", got)
+	}
+}
+
 func TestJavaBoneMealGrowsCropAndConsumesItem(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
