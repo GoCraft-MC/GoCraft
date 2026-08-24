@@ -2424,6 +2424,14 @@ func (s *Server) tickEntities() {
 		}
 
 		// ── Boat physics ─────────────────────────────────────────────────────
+		if corentity.IsMinecart(e.Type) {
+			s.tickMinecartPhysics(e)
+			if e.VX != 0 || e.VY != 0 || e.VZ != 0 {
+				moved = append(moved, e)
+			}
+			continue
+		}
+
 		if corentity.IsBoat(e.Type) {
 			s.tickBoatPhysics(e)
 			// If a rider is controlling the boat, the client sends move_vehicle
