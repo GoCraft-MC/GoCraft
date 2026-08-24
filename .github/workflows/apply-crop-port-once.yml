@@ -31,6 +31,9 @@ jobs:
           raw = workflow[start:end]
           script = "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
           exec(compile(script, 'crop-port.py', 'exec'), {'__name__': '__main__'})
+
+          crop = Path('core/world/crop_growth.go')
+          crop.write_text(crop.read_text().replace('minInt(', 'cropMinInt('))
           RUNNER
 
           gofmt -w core/world/world.go core/world/crop_growth.go core/world/crop_pumpkin_test.go java/handler/block.go server/bedrock_actions.go
