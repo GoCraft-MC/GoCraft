@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -605,6 +606,25 @@ func TestJavaPlacesLitRedstoneWallTorch(t *testing.T) {
 	if torch.ResourceLocation() != "minecraft:redstone_wall_torch" ||
 		torch.Properties["facing"] != "east" || torch.Properties["lit"] != "true" {
 		t.Fatalf("wall torch state = %s", torch.Key())
+	}
+}
+
+func TestJavaPlacesMinecartOnRail(t *testing.T) {
+	p := player.New([16]byte{}, "driver", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:minecart", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(32, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "rail", Properties: map[string]string{"shape": "east_west"}})
+	if err := handleUseItemOn(useItemOnPacket(32, 64, 0, 1, 541), p, w, session.NewManager(), nil, func() int32 { return 77 }); err != nil {
+		t.Fatal(err)
+	}
+	entity, ok := w.Entities.Get(77)
+	if !ok || entity.Type != corentity.TypeMinecart || entity.Position.X != 32.5 {
+		t.Fatalf("placed minecart = %+v, exists=%v", entity, ok)
+	}
+	if !p.HeldItem().IsEmpty() {
+		t.Fatalf("held item after placement = %+v", p.HeldItem())
 	}
 }
 

@@ -675,6 +675,13 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		}
 		return nil
 	}
+	if !held.IsEmpty() {
+		if _, minecart := javaMinecartType(held.ItemID); minecart {
+			placeJavaMinecart(p, conn, mgr, w, int(bx), int(by), int(bz), nextEntityID)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 
 	// Resolve the held block before choosing whether a replaceable target is
 	// overwritten or the adjacent face receives the placement.
