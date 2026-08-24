@@ -368,6 +368,27 @@ func TestCoveredCropUsesCurrentPumpkinLightTODOBehaviour(t *testing.T) {
 	}
 }
 
+func TestSweetBerryGrowthStopsUnderSolidBlock(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 40, 0, Block{Namespace: "minecraft", Name: "dirt"})
+	w.SetBlock(0, 41, 0, testCrop("sweet_berry_bush", 1))
+	w.SetBlock(0, 42, 0, Block{Namespace: "minecraft", Name: "stone"})
+	seed := uint64(0)
+	for cropRandom(seed, 0, 41, 0, cropGateSalt, 5) != 0 {
+		seed++
+	}
+	w.TickCrops(int64(seed*20), 1)
+	if got := CropAge(w.GetBlock(0, 41, 0)); got != 1 {
+		t.Fatalf("obstructed berry age = %d, want 1", got)
+	}
+	w.SetBlock(0, 42, 0, Air)
+	w.TickCrops(int64(seed*20), 1)
+	if got := CropAge(w.GetBlock(0, 41, 0)); got != 2 {
+		t.Fatalf("unobstructed berry age = %d, want 2", got)
+	}
+}
+
 func TestCropGrowthDenominator(t *testing.T) {
 	if got := CropGrowthDenominator(2); got != 13 {
 		t.Fatalf("dry denominator = %d, want 13", got)
