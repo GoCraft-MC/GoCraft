@@ -1097,6 +1097,7 @@ func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
 
 	// 7. Notify redstone engine of any change near redstone components.
 	if IsRedstoneConductor(placedName) || IsRedstoneSource(placedName) || IsRedstoneLoad(placedName) ||
+		IsRedstoneConductor(oldName) || IsRedstoneSource(oldName) || IsRedstoneLoad(oldName) ||
 		placed.IsAir() {
 		w.Redstone.NotifyChange(x, y, z)
 	}

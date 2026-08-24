@@ -37,3 +37,30 @@ func TestEveryButtonAndPressurePlateIsRecognisedAsSource(t *testing.T) {
 		}
 	}
 }
+
+func TestRedstoneTorchInvertsPowerConductedThroughSupport(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "lever", Properties: map[string]string{"powered": "true"}})
+	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{"power": "0"}})
+	w.SetBlock(2, 64, 0, Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(2, 65, 0, Block{Namespace: "minecraft", Name: "redstone_torch", Properties: map[string]string{"lit": "true"}})
+	w.SetBlock(3, 65, 0, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
+
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(2, 65, 0).Properties["lit"]; got != "false" {
+		t.Fatalf("powered support left torch lit = %q", got)
+	}
+	if got := w.GetBlock(3, 65, 0).Properties["lit"]; got != "false" {
+		t.Fatalf("inverted torch powered lamp = %q", got)
+	}
+
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "lever", Properties: map[string]string{"powered": "false"}})
+	w.Redstone.FlushUpdates()
+	if got := w.GetBlock(2, 65, 0).Properties["lit"]; got != "true" {
+		t.Fatalf("unpowered support left torch unlit = %q", got)
+	}
+	if got := w.GetBlock(3, 65, 0).Properties["lit"]; got != "true" {
+		t.Fatalf("torch did not activate lamp = %q", got)
+	}
+}

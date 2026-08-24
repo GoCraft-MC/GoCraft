@@ -118,6 +118,15 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 			}
 		} else {
 			re.mu.Unlock()
+			// Freshly loaded blocks may have a visual state that does not match
+			// the engine's zero-value power cache. Reconcile state even when the
+			// numeric signal itself did not transition.
+			if (name == "minecraft:redstone_torch" || name == "minecraft:redstone_wall_torch") &&
+				block.Properties["lit"] != boolStr(newPower > 0) {
+				if change, ok := re.applyPowerState(x, y, z, name, block, newPower > 0); ok {
+					result.Changes = append(result.Changes, change)
+				}
+			}
 		}
 	}
 	return result
@@ -144,7 +153,10 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		case "west":
 			ax, ay, az = x+1, y, z
 		}
-		if re.strongPowerOf(ax, ay, az) > 0 {
+		// A torch observes power delivered to its attachment block, including
+		// power conducted into that block by dust. Exclude the torch itself so
+		// its output cannot feed back through its own support.
+		if re.powerReceivedExcluding(ax, ay, az, [3]int{x, y, z}) > 0 {
 			return 0 // inverted
 		}
 		return 15
@@ -205,6 +217,10 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 			nbBlock := re.world.GetBlock(nb[0], nb[1], nb[2])
 			nbName := nbBlock.ResourceLocation()
 			if IsRedstoneSource(nbName) {
+				if (nbName == "minecraft:redstone_torch" || nbName == "minecraft:redstone_wall_torch") &&
+					redstoneTorchAttachment(nb[0], nb[1], nb[2], nbBlock) == [3]int{x, y, z} {
+					continue
+				}
 				p := re.powerFromSource(nb[0], nb[1], nb[2], nbBlock)
 				if p > best {
 					best = p
@@ -219,11 +235,49 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 	}
 }
 
+func redstoneTorchAttachment(x, y, z int, block Block) [3]int {
+	attachment := [3]int{x, y - 1, z}
+	if block.ResourceLocation() != "minecraft:redstone_wall_torch" {
+		return attachment
+	}
+	switch block.Properties["facing"] {
+	case "north":
+		return [3]int{x, y, z + 1}
+	case "south":
+		return [3]int{x, y, z - 1}
+	case "east":
+		return [3]int{x - 1, y, z}
+	case "west":
+		return [3]int{x + 1, y, z}
+	default:
+		return attachment
+	}
+}
+
 // strongPowerOf returns the strong power level emitted by (x,y,z).
 // Strong power is power emitted directly by a source, not forwarded by dust.
 func (re *RedstoneEngine) strongPowerOf(x, y, z int) int {
 	block := re.world.GetBlock(x, y, z)
 	return re.powerFromSource(x, y, z, block)
+}
+
+func (re *RedstoneEngine) powerReceivedExcluding(x, y, z int, excluded [3]int) int {
+	best := 0
+	for _, nb := range neighbors6(x, y, z) {
+		if nb == excluded {
+			continue
+		}
+		block := re.world.GetBlock(nb[0], nb[1], nb[2])
+		if power := re.powerFromSource(nb[0], nb[1], nb[2], block); power > best {
+			best = power
+		}
+		if IsRedstoneConductor(block.ResourceLocation()) {
+			if power := re.PowerAt(nb[0], nb[1], nb[2]); power > best {
+				best = power
+			}
+		}
+	}
+	return best
 }
 
 // powerFromSource returns power emitted by block if it is a source, else 0.
@@ -317,15 +371,17 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 
 	case "minecraft:redstone_torch", "minecraft:redstone_wall_torch":
-		// Torch lit/unlit visual.
-		newBlock := block
-		if powered { // powered = torch IS emitting (not inverted)
-			newBlock.Name = strings.TrimPrefix(name, "minecraft:")
-		} else {
-			// unlit variant: not in vanilla as a separate block, skip visual change
+		if block.Properties["lit"] == boolStr(powered) {
 			return BlockChange{}, false
 		}
-		return BlockChange{}, false
+		newBlock := block
+		newBlock.Properties = make(map[string]string, len(block.Properties)+1)
+		for key, value := range block.Properties {
+			newBlock.Properties[key] = value
+		}
+		newBlock.Properties["lit"] = boolStr(powered)
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 
 	case "minecraft:repeater":
 		newBlock := Block{
