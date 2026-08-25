@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/game"
 	"GoCraft/core/spatial"
 	"GoCraft/java/session"
 )
@@ -37,7 +38,7 @@ func TestPufferfishInflatesAndDeflatesInThreeStages(t *testing.T) {
 func TestPufferfishIgnoresCalmTagAndInflatesForHostiles(t *testing.T) {
 	fish := corentity.New(2, [16]byte{}, corentity.TypePufferfish, 0, 64, 0)
 	cod := corentity.New(3, [16]byte{}, corentity.TypeCod, 1, 64, 0)
-	s := &Server{sessions: session.NewManager(), simulationDimension: dimensionOverworld}
+	s := &Server{game: game.New(), sessions: session.NewManager(), simulationDimension: dimensionOverworld}
 	if s.pufferfishThreatNearby(fish, []*corentity.Entity{fish, cod}) {
 		t.Fatal("cod from not_scary_for_pufferfish triggered inflation")
 	}
