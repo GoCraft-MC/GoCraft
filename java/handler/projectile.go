@@ -142,6 +142,7 @@ func UseEnderEye(p *player.Player, w *coreworld.World, mgr *session.Manager, nex
 		eye.EyeTarget = spatial.Vec3{X: float64(targetX), Z: float64(targetZ)}
 	}
 	eye.HasEyeTarget = true
+	eye.EyeSurvives = uint32(id)*1103515245%5 != 0
 	eye.VX = -math.Sin(yaw) * cosPitch * speed
 	eye.VY = -math.Sin(pitch)*speed + 0.15 // slight upward arc like vanilla
 	eye.VZ = math.Cos(yaw) * cosPitch * speed

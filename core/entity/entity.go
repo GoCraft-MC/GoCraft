@@ -249,6 +249,7 @@ type Entity struct {
 	ProjectileDamage float32
 	EyeTarget        spatial.Vec3
 	HasEyeTarget     bool
+	EyeSurvives      bool
 
 	// Dropped-item fields. These are used only when Type == TypeItem and are
 	// encoded as the ItemEntity's tracked ItemStack at metadata index 8.

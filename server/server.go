@@ -4017,7 +4017,11 @@ func hostileAttackDamage(t corentity.EntityType) float32 {
 
 func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 	if projectile.Type == corentity.TypeEyeOfEnder {
-		return tickEyeOfEnder(projectile)
+		expired := tickEyeOfEnder(projectile)
+		if expired {
+			s.expireEyeOfEnder(projectile)
+		}
+		return expired
 	}
 	if projectile.AgeTicks > 1200 {
 		return true
@@ -4145,6 +4149,21 @@ func tickEyeOfEnder(eye *corentity.Entity) bool {
 	eye.Yaw = float32(math.Atan2(-eye.VX, eye.VZ) * 180 / math.Pi)
 	eye.Pitch = float32(math.Atan2(-eye.VY, horizontalSpeed) * 180 / math.Pi)
 	return eye.AgeTicks > 80
+}
+
+func (s *Server) expireEyeOfEnder(eye *corentity.Entity) {
+	if s == nil || eye == nil {
+		return
+	}
+	handler.BroadcastSoundAt(s.sessions, "minecraft:entity.ender_eye.death", handler.SoundCategoryNeutral,
+		eye.Position.X, eye.Position.Y, eye.Position.Z, 1, 1)
+	if !eye.EyeSurvives || s.game == nil || s.world == nil {
+		return
+	}
+	dropped := s.newDroppedItemInWorld(s.world, player.ItemStack{ItemID: "minecraft:ender_eye", Count: 1}, eye.Position, 0)
+	if dropped != nil {
+		handler.BroadcastSpawnMob(dropped, s.sessions)
+	}
 }
 
 func projectileDamageAgainst(projectile, target *corentity.Entity) float32 {
