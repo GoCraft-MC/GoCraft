@@ -53,3 +53,22 @@ func TestStrongholdPortalRoomCarvesUndergroundShell(t *testing.T) {
 		t.Fatalf("generated portal frames = %d, want 12", frames)
 	}
 }
+
+func TestNearestStrongholdChunkContainsUsablePortalFrames(t *testing.T) {
+	generator := NewOverworldGenerator(0)
+	x, z, _ := generator.NearestStronghold(0, 0, 100)
+	cx, cz := ChunkCoordsFor(x, z)
+	chunk := generator.Generate(cx, cz)
+	frameY := max(WorldMinY+10, generator.SurfaceHeight(x, z)-30) + 1
+	frames := 0
+	for localX := 0; localX < SectionSize; localX++ {
+		for localZ := 0; localZ < SectionSize; localZ++ {
+			if chunkBlock(chunk, localX, frameY, localZ).ResourceLocation() == "minecraft:end_portal_frame" {
+				frames++
+			}
+		}
+	}
+	if frames != 12 {
+		t.Fatalf("nearest generated stronghold frames = %d, want 12", frames)
+	}
+}
