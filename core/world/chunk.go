@@ -30,6 +30,11 @@ type Chunk struct {
 	// such as chests, furnaces, signs, and spawners. Edition adapters may ignore
 	// payloads they do not understand while preserving them on disk.
 	BlockEntities []BlockEntity
+
+	// StorageData carries backend-specific metadata for as long as this chunk is
+	// cached. Keeping it on the chunk lets cache eviction release that metadata
+	// too, instead of storage backends retaining data for every chunk ever seen.
+	StorageData any
 }
 
 // BlockEntity is a canonical positioned block entity. Data contains an

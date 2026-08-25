@@ -71,6 +71,9 @@ func TestStorageRegionRoundTrip(t *testing.T) {
 	if loaded == nil {
 		t.Fatal("LoadChunk returned nil")
 	}
+	if _, ok := loaded.StorageData.(map[string]Tag); !ok {
+		t.Fatal("loaded chunk does not own its Anvil preservation metadata")
+	}
 	loadedSection := loaded.Sections[sectionIndex]
 	if got := loadedSection.At(1, 0, 1); !got.Equal(log) {
 		t.Fatalf("property block=%s, want %s", got.Key(), log.Key())

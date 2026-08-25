@@ -22,8 +22,7 @@ type Storage struct {
 	mu       sync.Mutex
 	// pending maps chunk coords to ready-to-write compressed bytes.
 	// Key: [cx, cz]; Value: [compression=2, zlib-data…].
-	pending  map[[2]int32][]byte
-	original map[[2]int32]map[string]Tag
+	pending map[[2]int32][]byte
 }
 
 // NewStorage returns a Storage rooted at worldDir.
@@ -40,7 +39,6 @@ func NewStorage(worldDir string) (*Storage, error) {
 	return &Storage{
 		worldDir: worldDir,
 		pending:  make(map[[2]int32][]byte),
-		original: make(map[[2]int32]map[string]Tag),
 	}, nil
 }
 
@@ -59,9 +57,7 @@ func (s *Storage) LoadChunk(x, z int32) (*coreworld.Chunk, error) {
 		return nil, fmt.Errorf("anvil storage: decoding chunk (%d,%d): %w", x, z, err)
 	}
 	if c != nil {
-		s.mu.Lock()
-		s.original[[2]int32{x, z}] = cloneCompound(root)
-		s.mu.Unlock()
+		c.StorageData = root
 	}
 	return c, nil
 }
@@ -71,9 +67,7 @@ func (s *Storage) LoadChunk(x, z int32) (*coreworld.Chunk, error) {
 // the earlier buffered version.
 func (s *Storage) SaveChunk(c *coreworld.Chunk) error {
 	key := [2]int32{c.X, c.Z}
-	s.mu.Lock()
-	base := s.original[key]
-	s.mu.Unlock()
+	base, _ := c.StorageData.(map[string]Tag)
 	nbt := encodeChunkNBT(c)
 	if base != nil {
 		nbt = encodeChunkNBTWithBase(c, base)
