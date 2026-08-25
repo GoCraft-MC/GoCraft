@@ -38,6 +38,18 @@ func (g *OverworldGenerator) placeStrongholdPortalRoom(chunk *Chunk, centerX, fl
 			}
 		}
 	}
+	frame := func(x, z int, facing string) {
+		setStrongholdBlock(chunk, x, floorY+1, z, Block{
+			Namespace: "minecraft", Name: "end_portal_frame",
+			Properties: map[string]string{"eye": "false", "facing": facing},
+		})
+	}
+	for offset := -1; offset <= 1; offset++ {
+		frame(centerX+offset, centerZ-2, "south")
+		frame(centerX+offset, centerZ+2, "north")
+		frame(centerX-2, centerZ+offset, "east")
+		frame(centerX+2, centerZ+offset, "west")
+	}
 }
 
 func setStrongholdBlock(chunk *Chunk, worldX, y, worldZ int, block Block) {

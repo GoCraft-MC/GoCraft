@@ -36,4 +36,20 @@ func TestStrongholdPortalRoomCarvesUndergroundShell(t *testing.T) {
 	if got := chunkBlock(chunk, 14, 35, 8).ResourceLocation(); got == "minecraft:air" {
 		t.Fatal("portal-room outer wall was not generated")
 	}
+	frames := 0
+	for x := 6; x <= 10; x++ {
+		for z := 6; z <= 10; z++ {
+			block := chunkBlock(chunk, x, 33, z)
+			if block.ResourceLocation() != "minecraft:end_portal_frame" {
+				continue
+			}
+			frames++
+			if block.Properties["eye"] != "false" || block.Properties["facing"] == "" {
+				t.Fatalf("generated portal frame state = %s", block.Key())
+			}
+		}
+	}
+	if frames != 12 {
+		t.Fatalf("generated portal frames = %d, want 12", frames)
+	}
 }
