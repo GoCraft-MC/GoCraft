@@ -247,6 +247,8 @@ type Entity struct {
 	// Projectile fields.
 	OwnerEntityID    int32
 	ProjectileDamage float32
+	EyeTarget        spatial.Vec3
+	HasEyeTarget     bool
 
 	// Dropped-item fields. These are used only when Type == TypeItem and are
 	// encoded as the ItemEntity's tracked ItemStack at metadata index 8.
@@ -539,7 +541,7 @@ func IsProjectile(t EntityType) bool {
 	switch t {
 	case TypeArrow, TypeSpectralArrow, TypeTrident, TypeWindCharge,
 		TypeSnowball, TypeEgg, TypeEnderPearl, TypeExperienceBottle,
-		TypePotion, TypeSmallFireball, TypeFireball:
+		TypePotion, TypeSmallFireball, TypeFireball, TypeEyeOfEnder:
 		return true
 	}
 	return false
