@@ -35,7 +35,7 @@ func TestAcaciaAndCherryTreesUseDistinctShapes(t *testing.T) {
 			}
 			minX, maxX := 100, -100
 			logColumns := make(map[[2]int]struct{})
-			foundLog, foundLeaves := false, false
+			foundLog, foundLeaves, foundSidewaysLog := false, false, false
 			for x := 0; x < 16; x++ {
 				for y := 64; y < 80; y++ {
 					for z := 0; z < 16; z++ {
@@ -43,6 +43,8 @@ func TestAcaciaAndCherryTreesUseDistinctShapes(t *testing.T) {
 						if name == test.log {
 							foundLog = true
 							logColumns[[2]int{x, z}] = struct{}{}
+							axis := world.GetBlock(x, y, z).Properties["axis"]
+							foundSidewaysLog = foundSidewaysLog || axis == "x" || axis == "z"
 						}
 						if name == test.leaves {
 							foundLeaves = true
@@ -56,6 +58,9 @@ func TestAcaciaAndCherryTreesUseDistinctShapes(t *testing.T) {
 			}
 			if len(logColumns) < test.minimumLogColumns {
 				t.Fatalf("log columns = %d, want at least %d", len(logColumns), test.minimumLogColumns)
+			}
+			if test.sapling == "cherry_sapling" && !foundSidewaysLog {
+				t.Fatal("cherry branches contain no horizontal-axis logs")
 			}
 		})
 	}

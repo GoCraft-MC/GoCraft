@@ -80,19 +80,31 @@ func (w *World) growSaplingTree(x, y, z int, sapling string, seed uint64) []Bloc
 			placeAcaciaFoliage(place, branchX, branchTop+1, branchZ, 0, leaves)
 		}
 	case "cherry":
-		for _, branch := range horizontalCropDirections {
-			place(x+branch.dx, topY-1, z+branch.dz, log, true)
-			place(x+branch.dx*2, topY, z+branch.dz*2, log, true)
-		}
-		for dy := -2; dy <= 2; dy++ {
-			radius := 4 - abs(dy)
-			for dx := -radius; dx <= radius; dx++ {
-				for dz := -radius; dz <= radius; dz++ {
-					if abs(dx)+abs(dz) <= radius+1 {
-						place(x+dx, topY+dy, z+dz, leaves, false)
-					}
-				}
+		direction := horizontalCropDirections[cropRandom(seed, x, y, z, 0xc11, 4)]
+		branchCount := 2 + cropRandom(seed, x, y, z, 0xc12, 2)
+		for branch := 0; branch < 2; branch++ {
+			if branch == 1 {
+				direction.dx, direction.dz = -direction.dx, -direction.dz
 			}
+			axis := "z"
+			if direction.dx != 0 {
+				axis = "x"
+			}
+			branchLog := Block{Namespace: "minecraft", Name: wood + "_log", Properties: map[string]string{"axis": axis}}
+			branchY := topY - 1 - branch
+			endX, endZ := x, z
+			for step := 1; step <= 2; step++ {
+				endX, endZ = x+direction.dx*step, z+direction.dz*step
+				place(endX, branchY, endZ, branchLog, true)
+			}
+			endY := branchY + cropRandom(seed, endX, branchY, endZ, 0xc13, 2)
+			if endY > branchY {
+				place(endX, endY, endZ, log, true)
+			}
+			placeCherryFoliage(place, endX, endY+1, endZ, seed, leaves)
+		}
+		if branchCount == 3 {
+			placeCherryFoliage(place, x, topY+1, z, seed^0xc14, leaves)
 		}
 	default:
 		for dy := -2; dy <= 1; dy++ {
@@ -137,6 +149,28 @@ func placeAcaciaFoliage(place func(int, int, int, Block, bool), x, y, z, nodeRad
 				}
 				if !invalid {
 					place(x+dx, y+dy, z+dz, leaves, false)
+				}
+			}
+		}
+	}
+}
+
+func placeCherryFoliage(place func(int, int, int, Block, bool), x, y, z int, seed uint64, leaves Block) {
+	layers := [...]struct{ dy, radius int }{{2, 1}, {1, 2}, {0, 3}, {-1, 3}, {-2, 2}}
+	for _, layer := range layers {
+		for dx := -layer.radius; dx <= layer.radius; dx++ {
+			for dz := -layer.radius; dz <= layer.radius; dz++ {
+				corner := abs(dx) == layer.radius && abs(dz) == layer.radius
+				if corner || layer.dy == -1 && cropRandom(seed, x+dx, y+layer.dy, z+dz, 0xc15, 5) == 0 {
+					continue
+				}
+				place(x+dx, y+layer.dy, z+dz, leaves, false)
+				perimeter := abs(dx) == layer.radius || abs(dz) == layer.radius
+				if layer.dy == -1 && perimeter && cropRandom(seed, x+dx, y, z+dz, 0xc16, 4) == 0 {
+					place(x+dx, y-2, z+dz, leaves, false)
+					if cropRandom(seed, x+dx, y, z+dz, 0xc17, 3) == 0 {
+						place(x+dx, y-3, z+dz, leaves, false)
+					}
 				}
 			}
 		}
