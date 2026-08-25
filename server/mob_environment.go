@@ -32,6 +32,17 @@ func (s *Server) tickEndermanWater(entity *corentity.Entity, hurtEntities *[]*co
 	if s.entityInWater(entity) {
 		entity.Damage(1)
 		*hurtEntities = append(*hurtEntities, entity)
+		roll := uint64(entity.EntityID)*0x9e3779b97f4a7c15 ^ uint64(s.worldAge)*0xbf58476d1ce4e5b9
+		if roll%10 != 0 {
+			oldPosition := entity.Position
+			if s.tryEndermanTeleport(entity) {
+				handler.BroadcastEntityPosition(entity, s.sessions)
+				handler.BroadcastSoundAt(s.sessions, "minecraft:entity.enderman.teleport", handler.SoundCategoryHostile,
+					oldPosition.X, oldPosition.Y, oldPosition.Z, 1, 1)
+				handler.BroadcastSoundAt(s.sessions, "minecraft:entity.enderman.teleport", handler.SoundCategoryHostile,
+					entity.Position.X, entity.Position.Y, entity.Position.Z, 1, 1)
+			}
+		}
 	}
 }
 
