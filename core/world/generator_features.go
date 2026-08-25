@@ -325,23 +325,30 @@ func (g *OverworldGenerator) placeTree(c *Chunk, worldX, groundY, worldZ, height
 		}
 
 	case "acacia":
-		// Short forked trunk
-		trunkY := groundY + height - 1
-		for y := groundY + 1; y <= trunkY; y++ {
-			setFeatureBlock(c, worldX, y, worldZ, log, true)
-		}
-		for _, branch := range [][2]int{{1, 0}, {-1, 1}} {
-			bx, bz := worldX+branch[0], worldZ+branch[1]
-			setFeatureBlock(c, bx, trunkY+1, bz, log, true)
-			for dx := -2; dx <= 2; dx++ {
-				for dz := -2; dz <= 2; dz++ {
-					if absInt(dx) == 2 && absInt(dz) == 2 {
-						continue
-					}
-					setFeatureBlock(c, bx+dx, trunkY+1, bz+dz, leaves, false)
-					setFeatureBlock(c, bx+dx, trunkY+2, bz+dz, leaves, false)
-				}
+		roll := generatedHash(g.seed, worldX, groundY, worldZ)
+		lean := horizontalCropDirections[int(roll&3)]
+		leanHeight := height - int(roll>>2&3) - 1
+		leanSteps := 3 - int(roll>>4%3)
+		trunkX, trunkZ := worldX, worldZ
+		for dy := 0; dy < height; dy++ {
+			if dy >= leanHeight && leanSteps > 0 {
+				trunkX, trunkZ = trunkX+lean.dx, trunkZ+lean.dz
+				leanSteps--
 			}
+			setFeatureBlock(c, trunkX, groundY+1+dy, trunkZ, log, true)
+		}
+		g.placeAcaciaFeatureFoliage(c, trunkX, groundY+height+1, trunkZ, 1, leaves)
+		branch := horizontalCropDirections[int(roll>>8&3)]
+		if branch != lean {
+			branchY := max(1, leanHeight-int(roll>>10&1)-1)
+			branchX, branchZ, branchTop := worldX, worldZ, groundY+1+branchY
+			steps := 1 + int(roll>>12%3)
+			for step := 0; step < steps && branchY+step < height; step++ {
+				branchX, branchZ = branchX+branch.dx, branchZ+branch.dz
+				branchTop = groundY + 1 + branchY + step
+				setFeatureBlock(c, branchX, branchTop, branchZ, log, true)
+			}
+			g.placeAcaciaFeatureFoliage(c, branchX, branchTop+1, branchZ, 0, leaves)
 		}
 
 	case "largejungle":
@@ -483,6 +490,23 @@ func (g *OverworldGenerator) placeTree(c *Chunk, worldX, groundY, worldZ, height
 						continue
 					}
 					setFeatureBlock(c, worldX+dx, topY+dy, worldZ+dz, leaves, false)
+				}
+			}
+		}
+	}
+}
+
+func (g *OverworldGenerator) placeAcaciaFeatureFoliage(c *Chunk, x, y, z, nodeRadius int, leaves Block) {
+	for dy, radius := range map[int]int{-2: 1, -1: 2 + nodeRadius, 0: 1 + nodeRadius} {
+		for dx := -radius; dx <= radius; dx++ {
+			for dz := -radius; dz <= radius; dz++ {
+				ax, az := absInt(dx), absInt(dz)
+				invalid := ax == radius && az == radius && radius > 0
+				if dy == 0 {
+					invalid = (ax > 1 || az > 1) && ax != 0 && az != 0
+				}
+				if !invalid {
+					setFeatureBlock(c, x+dx, y+dy, z+dz, leaves, false)
 				}
 			}
 		}
