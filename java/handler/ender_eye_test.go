@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"math"
 	"testing"
 
 	corentity "GoCraft/core/entity"
@@ -22,7 +23,9 @@ func TestUseEnderEyeTargetsNearestStronghold(t *testing.T) {
 		t.Fatalf("spawned eye = %+v", entities)
 	}
 	eye := entities[0]
-	if !eye.HasEyeTarget || eye.EyeTarget.X != -184 || eye.EyeTarget.Z != -1784 {
+	dx, dz := eye.EyeTarget.X-eye.Position.X, eye.EyeTarget.Z-eye.Position.Z
+	if !eye.HasEyeTarget || math.Abs(math.Hypot(dx, dz)-12) > 1e-9 ||
+		math.Abs(eye.EyeTarget.Y-(eye.Position.Y+8)) > 1e-9 {
 		t.Fatalf("eye target = %+v, present=%v", eye.EyeTarget, eye.HasEyeTarget)
 	}
 	if got := p.Inventory[player.HotbarStart].Count; got != 1 {

@@ -3987,6 +3987,9 @@ func hostileAttackDamage(t corentity.EntityType) float32 {
 }
 
 func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
+	if projectile.Type == corentity.TypeEyeOfEnder {
+		return tickEyeOfEnder(projectile)
+	}
 	if projectile.AgeTicks > 1200 {
 		return true
 	}
@@ -4080,6 +4083,39 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 		}
 	}
 	return false
+}
+
+// tickEyeOfEnder mirrors Pumpkin's no-gravity movement and homing blend.
+func tickEyeOfEnder(eye *corentity.Entity) bool {
+	oldVX, oldVY, oldVZ := eye.VX, eye.VY, eye.VZ
+	eye.Position.X += oldVX
+	eye.Position.Y += oldVY
+	eye.Position.Z += oldVZ
+	if eye.HasEyeTarget {
+		dx := eye.EyeTarget.X - eye.Position.X
+		dz := eye.EyeTarget.Z - eye.Position.Z
+		horizontalDistance := math.Hypot(dx, dz)
+		if horizontalDistance > 0 {
+			oldSpeed := math.Hypot(oldVX, oldVZ)
+			wantedSpeed := oldSpeed + 0.0025*(horizontalDistance-oldSpeed)
+			moveY := oldVY
+			if horizontalDistance < 1 {
+				wantedSpeed *= 0.8
+				moveY *= 0.8
+			}
+			wantedY := -1.0
+			if eye.Position.Y-oldVY < eye.EyeTarget.Y {
+				wantedY = 1
+			}
+			eye.VX = dx / horizontalDistance * wantedSpeed
+			eye.VY = moveY + (wantedY-moveY)*0.015
+			eye.VZ = dz / horizontalDistance * wantedSpeed
+		}
+	}
+	horizontalSpeed := math.Hypot(eye.VX, eye.VZ)
+	eye.Yaw = float32(math.Atan2(-eye.VX, eye.VZ) * 180 / math.Pi)
+	eye.Pitch = float32(math.Atan2(-eye.VY, horizontalSpeed) * 180 / math.Pi)
+	return eye.AgeTicks > 80
 }
 
 func projectileDamageAgainst(projectile, target *corentity.Entity) float32 {

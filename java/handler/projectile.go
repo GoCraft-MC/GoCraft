@@ -130,7 +130,17 @@ func UseEnderEye(p *player.Player, w *coreworld.World, mgr *session.Manager, nex
 	const speed = 0.9
 	eye := corentity.New(id, uuid, corentity.TypeEyeOfEnder, p.Position.X, p.Position.Y+1.62, p.Position.Z)
 	eye.OwnerEntityID = p.EntityID
-	eye.EyeTarget = spatial.Vec3{X: float64(targetX), Z: float64(targetZ)}
+	dx, dz := float64(targetX)-eye.Position.X, float64(targetZ)-eye.Position.Z
+	distance := math.Hypot(dx, dz)
+	if distance > 12 {
+		eye.EyeTarget = spatial.Vec3{
+			X: eye.Position.X + dx/distance*12,
+			Y: eye.Position.Y + 8,
+			Z: eye.Position.Z + dz/distance*12,
+		}
+	} else {
+		eye.EyeTarget = spatial.Vec3{X: float64(targetX), Z: float64(targetZ)}
+	}
 	eye.HasEyeTarget = true
 	eye.VX = -math.Sin(yaw) * cosPitch * speed
 	eye.VY = -math.Sin(pitch)*speed + 0.15 // slight upward arc like vanilla
