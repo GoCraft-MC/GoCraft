@@ -193,6 +193,19 @@ func TestJavaAnimalMetadataSynchronizesBabyTameOwnerAndSaddle(t *testing.T) {
 	assertMetadataTerminator(t, horseR)
 }
 
+func TestJavaPufferfishMetadataCarriesInflationState(t *testing.T) {
+	fish := corentity.New(91, [16]byte{}, corentity.TypePufferfish, 0, 64, 0)
+	fish.PufferState = 2
+	r := buildMobMetadata(fish).Reader()
+	assertMetadataVarInt(t, r, "pufferfish entity ID", fish.EntityID)
+	index, _ := protocol.ReadByte(r)
+	if index != 17 {
+		t.Fatalf("puff state index = %d, want 17", index)
+	}
+	assertMetadataVarInt(t, r, "puff state serializer", 1)
+	assertMetadataVarInt(t, r, "puff state", 2)
+}
+
 // TestJavaAbstractHorseMetadataHasNoOwnerUUIDAtIndex18 is a protocol-level
 // regression test for the bug introduced in commit 7c3ec145: writing serializer
 // type 13 (Optional UUID) at metadata index 18 for every AbstractHorse entity.

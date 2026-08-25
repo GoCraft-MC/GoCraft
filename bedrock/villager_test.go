@@ -139,3 +139,12 @@ func TestBedrockAnimalMetadataCarriesCanonicalInteractionState(t *testing.T) {
 		t.Fatal("saddled flag missing from horse metadata")
 	}
 }
+
+func TestBedrockPufferfishMetadataCarriesInflationState(t *testing.T) {
+	fish := corentity.New(22, [16]byte{}, corentity.TypePufferfish, 0, 64, 0)
+	fish.PufferState = 2
+	metadata := (&Listener{}).bedrockEntityMetadata(nil, fish)
+	if got := metadata[protocol.EntityDataKeyPuffedState]; got != int32(2) {
+		t.Fatalf("puffed state = %#v, want 2", got)
+	}
+}

@@ -159,6 +159,10 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		b = b.Byte(19).VarInt(8).Bool(e.Saddled)
 		hasMetadata = true
 	}
+	if e.Type == corentity.TypePufferfish {
+		b = b.Byte(17).VarInt(1).VarInt(e.PufferState)
+		hasMetadata = true
+	}
 	if e.Type != corentity.TypeVillager {
 		if !hasMetadata {
 			return nil

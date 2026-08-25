@@ -61,6 +61,7 @@ type bedrockEntityView struct {
 	ownerEntityID      int32
 	onFire             bool
 	usingItem          bool
+	pufferState        int32
 }
 
 func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
@@ -73,8 +74,9 @@ func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
 		tamed: entity.Tamed, sitting: entity.Sitting, saddled: entity.Saddled,
 		trusting: entity.Trusting, ownerUUID: entity.TameOwnerUUID,
 		hasOwner: entity.HasTameOwner, ownerEntityID: entity.TameOwnerEntityID,
-		onFire:    entity.FireTicks > 0,
-		usingItem: entity.UsingItem,
+		onFire:      entity.FireTicks > 0,
+		usingItem:   entity.UsingItem,
+		pufferState: entity.PufferState,
 	}
 }
 
@@ -598,6 +600,7 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 			previous.ownerUUID != entity.TameOwnerUUID || previous.hasOwner != entity.HasTameOwner ||
 			previous.onFire != (entity.FireTicks > 0) ||
 			previous.usingItem != entity.UsingItem ||
+			previous.pufferState != entity.PufferState ||
 			entity.Type == corentity.TypeVillager &&
 				(previous.villagerVariant != entity.VillagerVariant || previous.villagerProfession != entity.VillagerProfession ||
 					previous.villagerLevel != entity.VillagerLevel) {
@@ -747,6 +750,9 @@ func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corenti
 		if entity.IsBaby {
 			metadata[protocol.EntityDataKeyScale] = float32(0.5)
 		}
+	}
+	if entity.Type == corentity.TypePufferfish {
+		metadata[protocol.EntityDataKeyPuffedState] = entity.PufferState
 	}
 	if entity.Type == corentity.TypeFallingBlock && entity.FallingBlockName != "" && l != nil && l.encoder != nil {
 		block := splitBlockName(entity.FallingBlockName)

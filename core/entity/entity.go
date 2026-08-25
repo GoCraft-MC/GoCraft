@@ -278,6 +278,10 @@ type Entity struct {
 	Saddled           bool
 	Temper            int32
 	PoisonTicks       int32
+	// Pufferfish state is 0 (small), 1 (half-puffed), or 2 (fully puffed).
+	PufferState        int32
+	PufferInflateTicks int
+	PufferDeflateTicks int
 	// MainHandItemID is the canonical item visibly equipped by a mob. Player
 	// equipment remains in player.Player.Inventory.
 	MainHandItemID string
