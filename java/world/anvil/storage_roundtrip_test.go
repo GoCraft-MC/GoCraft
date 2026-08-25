@@ -71,8 +71,14 @@ func TestStorageRegionRoundTrip(t *testing.T) {
 	if loaded == nil {
 		t.Fatal("LoadChunk returned nil")
 	}
-	if _, ok := loaded.StorageData.(map[string]Tag); !ok {
+	metadata, ok := loaded.StorageData.(map[string]Tag)
+	if !ok {
 		t.Fatal("loaded chunk does not own its Anvil preservation metadata")
+	}
+	for _, section := range metadata["sections"].List() {
+		if section.Get("block_states").typ != tagEnd || section.Get("biomes").typ != tagEnd {
+			t.Fatal("cached storage metadata duplicates canonical section data")
+		}
 	}
 	loadedSection := loaded.Sections[sectionIndex]
 	if got := loadedSection.At(1, 0, 1); !got.Equal(log) {

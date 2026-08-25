@@ -50,19 +50,15 @@ func encodeChunkNBTWithBase(c *coreworld.Chunk, base map[string]Tag) []byte {
 	}
 	root["sections"] = Tag{typ: tagList, listElem: tagCompound, listV: sections}
 
-	// Preserve exact Java heightmaps when block contents did not change. After a
-	// block edit, update the two maps GoCraft consumes and retain every other map.
-	originalChunk, decodeErr := chunkFromNBT(base, c.X, c.Z)
-	if decodeErr != nil || originalChunk == nil || !chunksHaveSameBlocks(c, originalChunk) {
-		heightmaps := root["Heightmaps"]
-		if heightmaps.typ != tagCompound {
-			heightmaps = Tag{typ: tagCompound, compound: make(map[string]Tag)}
-		}
-		packed := packChunkHeightmap(c)
-		heightmaps.compound["WORLD_SURFACE"] = Tag{typ: tagLongArr, longsV: packed}
-		heightmaps.compound["MOTION_BLOCKING"] = Tag{typ: tagLongArr, longsV: append([]int64(nil), packed...)}
-		root["Heightmaps"] = heightmaps
+	// Refresh the maps GoCraft owns and retain every other heightmap variant.
+	heightmaps := root["Heightmaps"]
+	if heightmaps.typ != tagCompound {
+		heightmaps = Tag{typ: tagCompound, compound: make(map[string]Tag)}
 	}
+	packed := packChunkHeightmap(c)
+	heightmaps.compound["WORLD_SURFACE"] = Tag{typ: tagLongArr, longsV: packed}
+	heightmaps.compound["MOTION_BLOCKING"] = Tag{typ: tagLongArr, longsV: append([]int64(nil), packed...)}
+	root["Heightmaps"] = heightmaps
 
 	// Block entities are reconstructed from their canonical position, type, and
 	// opaque payload so edits and removals are reflected without losing NBT.
@@ -142,16 +138,6 @@ func packChunkHeightmap(c *coreworld.Chunk) []int64 {
 	return longs
 }
 
-func chunkBlockAt(c *coreworld.Chunk, x, y, z int) coreworld.Block {
-	if y < coreworld.WorldMinY || y > coreworld.WorldMaxY {
-		return coreworld.Air
-	}
-	section := c.Sections[(y-coreworld.WorldMinY)/16]
-	if section == nil {
-		return coreworld.Air
-	}
-	return section.At(x, (y-coreworld.WorldMinY)%16, z)
-}
 func blockEntitiesTag(entities []coreworld.BlockEntity) Tag {
 	entries := make([]Tag, 0, len(entities))
 	for _, entity := range entities {
@@ -194,27 +180,4 @@ func containerItemsTag(items []coreworld.ContainerItem) Tag {
 		entries = append(entries, Tag{typ: tagCompound, compound: compound})
 	}
 	return Tag{typ: tagList, listElem: tagCompound, listV: entries}
-}
-
-func chunksHaveSameBlocks(first, second *coreworld.Chunk) bool {
-	for sectionIndex := 0; sectionIndex < coreworld.SectionCount; sectionIndex++ {
-		firstSection, secondSection := first.Sections[sectionIndex], second.Sections[sectionIndex]
-		for y := 0; y < coreworld.SectionSize; y++ {
-			for z := 0; z < coreworld.SectionSize; z++ {
-				for x := 0; x < coreworld.SectionSize; x++ {
-					firstBlock, secondBlock := coreworld.Air, coreworld.Air
-					if firstSection != nil {
-						firstBlock = firstSection.At(x, y, z)
-					}
-					if secondSection != nil {
-						secondBlock = secondSection.At(x, y, z)
-					}
-					if !firstBlock.Equal(secondBlock) {
-						return false
-					}
-				}
-			}
-		}
-	}
-	return true
 }

@@ -57,9 +57,22 @@ func (s *Storage) LoadChunk(x, z int32) (*coreworld.Chunk, error) {
 		return nil, fmt.Errorf("anvil storage: decoding chunk (%d,%d): %w", x, z, err)
 	}
 	if c != nil {
-		c.StorageData = root
+		c.StorageData = compactStorageData(root)
 	}
 	return c, nil
+}
+
+func compactStorageData(root map[string]Tag) map[string]Tag {
+	delete(root, "block_entities")
+	sections := root["sections"]
+	for i := range sections.listV {
+		if sections.listV[i].typ == tagCompound {
+			delete(sections.listV[i].compound, "block_states")
+			delete(sections.listV[i].compound, "biomes")
+		}
+	}
+	root["sections"] = sections
+	return root
 }
 
 // SaveChunk encodes c as Anvil NBT, compresses it with zlib, and buffers it
