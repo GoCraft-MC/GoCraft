@@ -422,36 +422,32 @@ func (g *OverworldGenerator) placeTree(c *Chunk, worldX, groundY, worldZ, height
 		}
 
 	case "cherry":
-		// Cherry blossom tree: 4-5 block trunk, wide round canopy of pink leaves
 		for y := groundY + 1; y <= topY; y++ {
 			setFeatureBlock(c, worldX, y, worldZ, log, true)
 		}
-		for dy := -2; dy <= 2; dy++ {
-			var radius int
-			switch dy {
-			case 2:
-				radius = 1
-			case 1:
-				radius = 3
-			case 0:
-				radius = 4
-			case -1:
-				radius = 3
-			case -2:
-				radius = 2
+		roll := generatedHash(g.seed, worldX, groundY, worldZ)
+		direction := horizontalCropDirections[int(roll&3)]
+		for branch := 0; branch < 2; branch++ {
+			if branch == 1 {
+				direction.dx, direction.dz = -direction.dx, -direction.dz
 			}
-			for dx := -radius; dx <= radius; dx++ {
-				for dz := -radius; dz <= radius; dz++ {
-					dist := absInt(dx) + absInt(dz)
-					if dist > radius+1 {
-						continue
-					}
-					if dy == 2 && absInt(dx) == 1 && absInt(dz) == 1 {
-						continue
-					}
-					setFeatureBlock(c, worldX+dx, topY+dy, worldZ+dz, leaves, false)
-				}
+			axis := "z"
+			if direction.dx != 0 {
+				axis = "x"
 			}
+			branchLog := Block{Namespace: log.Namespace, Name: log.Name, Properties: map[string]string{"axis": axis}}
+			branchY := topY - 1 - branch
+			endX, endZ := worldX, worldZ
+			for step := 1; step <= 2; step++ {
+				endX, endZ = worldX+direction.dx*step, worldZ+direction.dz*step
+				setFeatureBlock(c, endX, branchY, endZ, branchLog, true)
+			}
+			endY := branchY + int(roll>>uint(4+branch)&1)
+			setFeatureBlock(c, endX, endY, endZ, log, true)
+			g.placeCherryFeatureFoliage(c, endX, endY+1, endZ, leaves)
+		}
+		if roll>>8&1 == 1 {
+			g.placeCherryFeatureFoliage(c, worldX, topY+1, worldZ, leaves)
 		}
 
 	case "tallbirch":
@@ -507,6 +503,29 @@ func (g *OverworldGenerator) placeAcaciaFeatureFoliage(c *Chunk, x, y, z, nodeRa
 				}
 				if !invalid {
 					setFeatureBlock(c, x+dx, y+dy, z+dz, leaves, false)
+				}
+			}
+		}
+	}
+}
+
+func (g *OverworldGenerator) placeCherryFeatureFoliage(c *Chunk, x, y, z int, leaves Block) {
+	layers := [...]struct{ dy, radius int }{{2, 1}, {1, 2}, {0, 3}, {-1, 3}, {-2, 2}}
+	for _, layer := range layers {
+		for dx := -layer.radius; dx <= layer.radius; dx++ {
+			for dz := -layer.radius; dz <= layer.radius; dz++ {
+				corner := absInt(dx) == layer.radius && absInt(dz) == layer.radius
+				hash := generatedHash(g.seed, x+dx, y+layer.dy, z+dz)
+				if corner || layer.dy == -1 && hash%5 == 0 {
+					continue
+				}
+				setFeatureBlock(c, x+dx, y+layer.dy, z+dz, leaves, false)
+				perimeter := absInt(dx) == layer.radius || absInt(dz) == layer.radius
+				if layer.dy == -1 && perimeter && hash>>8%4 == 0 {
+					setFeatureBlock(c, x+dx, y-2, z+dz, leaves, false)
+					if hash>>12%3 == 0 {
+						setFeatureBlock(c, x+dx, y-3, z+dz, leaves, false)
+					}
 				}
 			}
 		}
