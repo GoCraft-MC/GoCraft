@@ -31,11 +31,18 @@ func (w *World) growSaplingTree(x, y, z int, sapling string, seed uint64) []Bloc
 	}
 
 	trunkX, trunkZ := x, z
+	leanHeight, leanSteps := height, 0
+	leanDirection := horizontalCropDirections[0]
+	if wood == "acacia" {
+		leanDirection = horizontalCropDirections[cropRandom(seed, x, y, z, 0xa11, 4)]
+		leanHeight = height - cropRandom(seed, x, y, z, 0xa12, 4) - 1
+		leanSteps = 3 - cropRandom(seed, x, y, z, 0xa13, 3)
+	}
 	for dy := 0; dy < height; dy++ {
-		if wood == "acacia" && dy >= height-2 {
-			direction := horizontalCropDirections[cropRandom(seed, x, y, z, cropDirectionSalt, 4)]
-			trunkX += direction.dx
-			trunkZ += direction.dz
+		if wood == "acacia" && dy >= leanHeight && leanSteps > 0 {
+			trunkX += leanDirection.dx
+			trunkZ += leanDirection.dz
+			leanSteps--
 		}
 		place(trunkX, y+dy, trunkZ, log, true)
 	}
@@ -57,15 +64,20 @@ func (w *World) growSaplingTree(x, y, z int, sapling string, seed uint64) []Bloc
 			}
 		}
 	case "acacia":
-		for dx := -3; dx <= 3; dx++ {
-			for dz := -3; dz <= 3; dz++ {
-				if abs(dx)+abs(dz) <= 4 {
-					place(trunkX+dx, topY, trunkZ+dz, leaves, false)
-					if abs(dx)+abs(dz) <= 2 {
-						place(trunkX+dx, topY+1, trunkZ+dz, leaves, false)
-					}
-				}
+		placeAcaciaFoliage(place, trunkX, topY+1, trunkZ, 1, leaves)
+		branchDirection := horizontalCropDirections[cropRandom(seed, x, y, z, 0xa14, 4)]
+		if branchDirection != leanDirection {
+			branchY := max(1, leanHeight-cropRandom(seed, x, y, z, 0xa15, 2)-1)
+			branchX, branchZ := x, z
+			branchTop := y + branchY
+			steps := 1 + cropRandom(seed, x, y, z, 0xa16, 3)
+			for step := 0; step < steps && branchY+step < height; step++ {
+				branchX += branchDirection.dx
+				branchZ += branchDirection.dz
+				branchTop = y + branchY + step
+				place(branchX, branchTop, branchZ, log, true)
 			}
+			placeAcaciaFoliage(place, branchX, branchTop+1, branchZ, 0, leaves)
 		}
 	case "cherry":
 		for _, branch := range horizontalCropDirections {
@@ -112,4 +124,21 @@ func (w *World) growSaplingTree(x, y, z int, sapling string, seed uint64) []Bloc
 		changes = append(changes, BlockChange{X: position[0], Y: position[1], Z: position[2], Block: block})
 	}
 	return changes
+}
+
+func placeAcaciaFoliage(place func(int, int, int, Block, bool), x, y, z, nodeRadius int, leaves Block) {
+	for dy, radius := range map[int]int{-2: 1, -1: 2 + nodeRadius, 0: 1 + nodeRadius} {
+		for dx := -radius; dx <= radius; dx++ {
+			for dz := -radius; dz <= radius; dz++ {
+				ax, az := abs(dx), abs(dz)
+				invalid := ax == radius && az == radius && radius > 0
+				if dy == 0 {
+					invalid = (ax > 1 || az > 1) && ax != 0 && az != 0
+				}
+				if !invalid {
+					place(x+dx, y+dy, z+dz, leaves, false)
+				}
+			}
+		}
+	}
 }

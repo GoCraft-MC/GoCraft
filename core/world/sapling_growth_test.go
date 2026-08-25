@@ -20,9 +20,10 @@ func TestAcaciaAndCherryTreesUseDistinctShapes(t *testing.T) {
 	for _, test := range []struct {
 		sapling, log, leaves string
 		minimumWidth         int
+		minimumLogColumns    int
 	}{
-		{sapling: "acacia_sapling", log: "minecraft:acacia_log", leaves: "minecraft:acacia_leaves", minimumWidth: 5},
-		{sapling: "cherry_sapling", log: "minecraft:cherry_log", leaves: "minecraft:cherry_leaves", minimumWidth: 7},
+		{sapling: "acacia_sapling", log: "minecraft:acacia_log", leaves: "minecraft:acacia_leaves", minimumWidth: 5, minimumLogColumns: 2},
+		{sapling: "cherry_sapling", log: "minecraft:cherry_log", leaves: "minecraft:cherry_leaves", minimumWidth: 7, minimumLogColumns: 5},
 	} {
 		t.Run(test.sapling, func(t *testing.T) {
 			world := New(&FlatGenerator{}, nil, false)
@@ -33,6 +34,7 @@ func TestAcaciaAndCherryTreesUseDistinctShapes(t *testing.T) {
 				t.Fatalf("tree growth used=%v changes=%d", used, len(changes))
 			}
 			minX, maxX := 100, -100
+			logColumns := make(map[[2]int]struct{})
 			foundLog, foundLeaves := false, false
 			for x := 0; x < 16; x++ {
 				for y := 64; y < 80; y++ {
@@ -40,6 +42,7 @@ func TestAcaciaAndCherryTreesUseDistinctShapes(t *testing.T) {
 						name := world.GetBlock(x, y, z).ResourceLocation()
 						if name == test.log {
 							foundLog = true
+							logColumns[[2]int{x, z}] = struct{}{}
 						}
 						if name == test.leaves {
 							foundLeaves = true
@@ -50,6 +53,9 @@ func TestAcaciaAndCherryTreesUseDistinctShapes(t *testing.T) {
 			}
 			if !foundLog || !foundLeaves || maxX-minX+1 < test.minimumWidth {
 				t.Fatalf("shape log=%v leaves=%v width=%d, want width >= %d", foundLog, foundLeaves, maxX-minX+1, test.minimumWidth)
+			}
+			if len(logColumns) < test.minimumLogColumns {
+				t.Fatalf("log columns = %d, want at least %d", len(logColumns), test.minimumLogColumns)
 			}
 		})
 	}
