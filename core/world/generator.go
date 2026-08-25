@@ -274,6 +274,7 @@ func (g *OverworldGenerator) Generate(chunkX, chunkZ int32) *Chunk {
 	g.decorateCaves(c, heights)
 	g.addBiomeLandmarks(c)
 	g.addVillageStructures(c)
+	g.addStrongholdStructures(c)
 	g.addVegetation(c)
 	g.addGroundCover(c, heights)
 	g.populateBiomes(c)

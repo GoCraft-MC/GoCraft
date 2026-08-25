@@ -21,3 +21,19 @@ func TestStrongholdBiomeTag(t *testing.T) {
 		t.Fatal("stronghold biome membership does not match the generated Pumpkin tag")
 	}
 }
+
+func TestStrongholdPortalRoomCarvesUndergroundShell(t *testing.T) {
+	generator := NewOverworldGenerator(0)
+	chunk := &Chunk{X: 0, Z: 0}
+	generator.placeStrongholdPortalRoom(chunk, 8, 32, 8)
+	if got := chunkBlock(chunk, 8, 32, 8).ResourceLocation(); got != "minecraft:stone_bricks" &&
+		got != "minecraft:cracked_stone_bricks" && got != "minecraft:mossy_stone_bricks" {
+		t.Fatalf("portal-room floor = %q", got)
+	}
+	if got := chunkBlock(chunk, 8, 33, 8).ResourceLocation(); got != "minecraft:air" {
+		t.Fatalf("portal-room interior = %q, want air", got)
+	}
+	if got := chunkBlock(chunk, 14, 35, 8).ResourceLocation(); got == "minecraft:air" {
+		t.Fatal("portal-room outer wall was not generated")
+	}
+}
