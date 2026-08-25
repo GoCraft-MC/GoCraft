@@ -525,6 +525,15 @@ func (w *World) NearestVillage(x, z, maxDistance int) (VillageCenter, bool) {
 	return generator.NearestVillage(x, z, maxDistance)
 }
 
+// NearestStronghold locates the closest Pumpkin concentric-ring position.
+func (w *World) NearestStronghold(x, z, maxChunks int) (int, int, bool) {
+	generator, ok := w.generator.(*OverworldGenerator)
+	if !ok {
+		return 0, 0, false
+	}
+	return generator.NearestStronghold(x, z, maxChunks)
+}
+
 // NearestBiome locates a nearby sample of a GoCraft-generated biome. Worlds
 // backed by another generator report no result.
 func (w *World) NearestBiome(x, z int, target string, maxDistance int) (int, int, bool) {

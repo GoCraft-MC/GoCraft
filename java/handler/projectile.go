@@ -7,6 +7,7 @@ import (
 
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
+	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
 	"GoCraft/java/session"
@@ -110,13 +111,13 @@ func UseWindCharge(p *player.Player, w *coreworld.World, mgr *session.Manager, c
 	return true
 }
 
-// UseEnderEye spawns an eye-of-ender projectile that flies upward and forward
-// in the player's look direction. In vanilla the projectile homes toward the
-// nearest stronghold; GoCraft spawns the entity so it is at least visible
-// and broadcast to all nearby players. The entity is removed after ~80 ticks
-// by the simulation tick (same lifecycle as throwables).
+// UseEnderEye launches an eye toward the closest Pumpkin stronghold ring.
 func UseEnderEye(p *player.Player, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32) {
 	if p == nil || w == nil || mgr == nil || nextEntityID == nil || p.Dead || p.GameMode == player.GameModeSpectator {
+		return
+	}
+	targetX, targetZ, ok := w.NearestStronghold(int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Z)), 100)
+	if !ok {
 		return
 	}
 	id := nextEntityID()
@@ -129,6 +130,8 @@ func UseEnderEye(p *player.Player, w *coreworld.World, mgr *session.Manager, nex
 	const speed = 0.9
 	eye := corentity.New(id, uuid, corentity.TypeEyeOfEnder, p.Position.X, p.Position.Y+1.62, p.Position.Z)
 	eye.OwnerEntityID = p.EntityID
+	eye.EyeTarget = spatial.Vec3{X: float64(targetX), Z: float64(targetZ)}
+	eye.HasEyeTarget = true
 	eye.VX = -math.Sin(yaw) * cosPitch * speed
 	eye.VY = -math.Sin(pitch)*speed + 0.15 // slight upward arc like vanilla
 	eye.VZ = math.Cos(yaw) * cosPitch * speed
