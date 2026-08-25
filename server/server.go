@@ -2067,7 +2067,7 @@ func (s *Server) applyBedrockFoodEffect(p *player.Player, itemID string) {
 }
 
 func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
-	if s == nil || s.game == nil {
+	if s == nil || s.game == nil || s.world == nil {
 		return
 	}
 	for _, fish := range entities {
@@ -2087,6 +2087,7 @@ func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
 		if fish.PufferState == 0 || s.worldAge%20 != 0 {
 			continue
 		}
+		stung := false
 		s.game.OnlinePlayers(func(p *player.Player) {
 			if p == nil || p.Dead || p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator ||
 				p.Dimension != s.simulationDimension {
@@ -2098,6 +2099,7 @@ func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
 			}
 			p.LastEnvironmentDamage = time.Now()
 			handler.DamagePlayer(&session.Session{Player: p}, float32(1+fish.PufferState), "was stung by a pufferfish", s.sessions)
+			stung = true
 			if p.Edition == player.ClientEditionJava {
 				if target, ok := s.sessions.Get(p.UUID); ok {
 					handler.SendMobEffect(target.Conn, p, "minecraft:poison", 0, fish.PufferState*60)
@@ -2106,6 +2108,22 @@ func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
 				s.bedrockListener.SendPlayerMobEffect(p, bedrockpacket.EffectPoison, 0, fish.PufferState*60)
 			}
 		})
+		for _, target := range entities {
+			if target == nil || target == fish || target.Dead || target.Type == corentity.TypePufferfish {
+				continue
+			}
+			if _, living := pumpkinEntitySpawnSettingsByType[string(target.Type)]; !living ||
+				!nearPufferfish(fish, target.Position.X, target.Position.Y, target.Position.Z, 1.5) {
+				continue
+			}
+			s.world.QueueEntityDamage(target.EntityID, float32(1+fish.PufferState))
+			target.PoisonTicks = max(target.PoisonTicks, fish.PufferState*60)
+			stung = true
+		}
+		if stung {
+			handler.BroadcastSoundAt(s.sessions, "minecraft:entity.puffer_fish.sting", handler.SoundCategoryNeutral,
+				fish.Position.X, fish.Position.Y, fish.Position.Z, 1, 1)
+		}
 	}
 }
 

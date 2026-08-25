@@ -173,6 +173,26 @@ func TestPufferfishContactDamagesNearbyPlayer(t *testing.T) {
 	}
 }
 
+func TestPufferfishStingsNearbyNonPlayerEntity(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	g := game.New()
+	fish := corentity.New(g.NextEntityID(), [16]byte{46}, corentity.TypePufferfish, 0, 64, 0)
+	fish.PufferState = 2
+	cow := corentity.New(g.NextEntityID(), [16]byte{47}, corentity.TypeCow, 1, 64, 0)
+	world.Entities.Add(fish)
+	world.Entities.Add(cow)
+	s := &Server{game: g, world: world, sessions: session.NewManager(), simulationDimension: dimensionOverworld}
+	s.tickPufferfishContact([]*corentity.Entity{fish, cow})
+	event, ok := world.DrainEntityDamage()[cow.EntityID]
+	if !ok || event.Amount != 3 {
+		t.Fatalf("queued sting = %+v, present=%v; want 3 damage", event, ok)
+	}
+	if cow.PoisonTicks != 120 {
+		t.Fatalf("poison ticks = %d, want 120", cow.PoisonTicks)
+	}
+}
+
 func TestRangedHostileFamiliesSpawnTheirProjectile(t *testing.T) {
 	tests := []struct {
 		name       string
