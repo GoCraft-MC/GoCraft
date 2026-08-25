@@ -2074,6 +2074,19 @@ func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
 		if fish == nil || fish.Dead || fish.Type != corentity.TypePufferfish {
 			continue
 		}
+		before := fish.PufferState
+		if updatePufferState(fish, s.pufferfishThreatNearby(fish, entities)) {
+			handler.BroadcastMobMetadata(fish, s.sessions)
+			sound := "minecraft:entity.puffer_fish.blow_out"
+			if fish.PufferState > before {
+				sound = "minecraft:entity.puffer_fish.blow_up"
+			}
+			handler.BroadcastSoundAt(s.sessions, sound, handler.SoundCategoryNeutral,
+				fish.Position.X, fish.Position.Y, fish.Position.Z, 1, 1)
+		}
+		if fish.PufferState == 0 || s.worldAge%20 != 0 {
+			continue
+		}
 		s.game.OnlinePlayers(func(p *player.Player) {
 			if p == nil || p.Dead || p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator ||
 				p.Dimension != s.simulationDimension {
@@ -2084,13 +2097,13 @@ func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
 				return
 			}
 			p.LastEnvironmentDamage = time.Now()
-			handler.DamagePlayer(&session.Session{Player: p}, 1, "was stung by a pufferfish", s.sessions)
+			handler.DamagePlayer(&session.Session{Player: p}, float32(1+fish.PufferState), "was stung by a pufferfish", s.sessions)
 			if p.Edition == player.ClientEditionJava {
 				if target, ok := s.sessions.Get(p.UUID); ok {
-					handler.SendMobEffect(target.Conn, p, "minecraft:poison", 1, 100)
+					handler.SendMobEffect(target.Conn, p, "minecraft:poison", 0, fish.PufferState*60)
 				}
 			} else if s.bedrockListener != nil {
-				s.bedrockListener.SendPlayerMobEffect(p, bedrockpacket.EffectPoison, 1, 100)
+				s.bedrockListener.SendPlayerMobEffect(p, bedrockpacket.EffectPoison, 0, fish.PufferState*60)
 			}
 		})
 	}
@@ -2360,9 +2373,7 @@ func (s *Server) tickEntities() {
 	s.despawnDistantNaturalMobs(simulationPlayers, &deadIDs)
 	allEntities := s.world.Entities.Snapshot()
 	s.tickAnimalLifecycle(allEntities)
-	if s.worldAge%20 == 0 {
-		s.tickPufferfishContact(allEntities)
-	}
+	s.tickPufferfishContact(allEntities)
 
 	// ── Parallel passive mob AI ───────────────────────────────────────────────
 	// Passive per-entity computation is dispatched through a bounded worker
