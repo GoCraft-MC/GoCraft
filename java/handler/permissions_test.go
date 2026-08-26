@@ -68,6 +68,19 @@ func TestDispatcherChecksPermissionNodePerCommand(t *testing.T) {
 	}
 }
 
+func TestHelpListsOnlyPermittedCommands(t *testing.T) {
+	dispatcher := NewDispatcher()
+	RegisterBuiltins(dispatcher)
+	var reply string
+	dispatcher.Dispatch("/help", CommandContext{
+		Player: player.New([16]byte{7}, "viewer", player.ClientEditionBedrock),
+		Reply:  func(message string) error { reply = message; return nil },
+	})
+	if !strings.Contains(reply, "/help") || strings.Contains(reply, "/gamemode") {
+		t.Fatalf("permission-filtered help = %q", reply)
+	}
+}
+
 func TestGodModeBlocksNormalDamageButKillOverridesIt(t *testing.T) {
 	p := player.New([16]byte{1}, `invincible`, player.ClientEditionJava)
 	p.GodMode = true

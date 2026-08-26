@@ -57,8 +57,9 @@ type CommandContext struct {
 
 	// ListPlayers returns all online players from the edition-neutral game
 	// registry. MaxPlayers is the configured server capacity.
-	ListPlayers func() []*player.Player
-	MaxPlayers  int
+	ListPlayers       func() []*player.Player
+	MaxPlayers        int
+	AvailableCommands []string
 
 	// Reply sends command feedback to the issuing edition. SyncAbilities asks
 	// that edition adapter to publish changed flight/permission state.
@@ -223,6 +224,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	ctx.ListPlayers = listPlayers
 	ctx.TeleportPlayer = teleportPlayer
 	ctx.MaxPlayers = maxPlayers
+	ctx.AvailableCommands = d.VisibleCommands(ctx.Player)
 
 	if !ok {
 		if ctx.Reply != nil {

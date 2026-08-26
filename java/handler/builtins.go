@@ -169,9 +169,11 @@ func registerBuiltinsWithoutPermissions(d *Dispatcher) {
 // ── /help ─────────────────────────────────────────────────────────────────────
 
 func cmdHelp(ctx CommandContext) error {
-	_ = sendSystemMessage(ctx.Conn,
-		"Commands: /gocraft peditor /spawn /setspawn /gamemode /tp /tphere /xyz /locate /summon /give /get /kill /fly /potioneffect /walkspeed /flyspeed /kick /whitelist /list /version /seed /spawnboat /time /tps /mspt /timings /help")
-	return nil
+	commands := ctx.AvailableCommands
+	if len(commands) == 0 {
+		commands = []string{"help", "list", "version", "xyz"}
+	}
+	return sendCommandMessage(ctx, "Commands: /"+strings.Join(commands, " /"))
 }
 
 // ── /seed ─────────────────────────────────────────────────────────────────────

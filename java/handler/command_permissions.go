@@ -1,6 +1,10 @@
 package handler
 
-import "sort"
+import (
+	"sort"
+
+	"GoCraft/core/player"
+)
 
 type CommandPermission struct {
 	Command        string `json:"command"`
@@ -25,4 +29,21 @@ func (d *Dispatcher) CommandPermissions() []CommandPermission {
 		return permissions[i].Command < permissions[j].Command
 	})
 	return permissions
+}
+
+func (d *Dispatcher) VisibleCommands(player *player.Player) []string {
+	d.mu.RLock()
+	names := make([]string, 0, len(d.cmds))
+	for name := range d.cmds {
+		names = append(names, name)
+	}
+	d.mu.RUnlock()
+	visible := names[:0]
+	for _, name := range names {
+		if d.CanUse(player, name) {
+			visible = append(visible, name)
+		}
+	}
+	sort.Strings(visible)
+	return visible
 }
