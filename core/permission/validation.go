@@ -5,6 +5,14 @@ import (
 	"fmt"
 )
 
+func Validate(document Document) error {
+	return validateDocument(document)
+}
+
+func Clone(document Document) Document {
+	return cloneDocument(document)
+}
+
 func cloneDocument(document Document) Document {
 	data, _ := json.Marshal(document)
 	var clone Document
