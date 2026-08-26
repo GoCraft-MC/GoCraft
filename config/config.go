@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -77,6 +79,13 @@ type ClearLagConfig struct {
 type WhitelistConfig struct {
 	Enabled bool     `yaml:"enabled"`
 	Players []string `yaml:"players"`
+}
+
+type PermissionEditorConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Address        string `yaml:"address"`
+	PublicURL      string `yaml:"public_url"`
+	SessionMinutes int    `yaml:"session_minutes"`
 }
 
 // DebugConfig controls verbose diagnostic log categories. All switches default
@@ -162,9 +171,10 @@ type Config struct {
 
 	// Operators bootstraps named operators. Runtime /op changes are persisted
 	// separately in ops.json, matching the vanilla server convention.
-	Operators []string
-	Whitelist WhitelistConfig `yaml:"whitelist"`
-	Debug     DebugConfig     `yaml:"debug"`
+	Operators        []string
+	Whitelist        WhitelistConfig        `yaml:"whitelist"`
+	PermissionEditor PermissionEditorConfig `yaml:"permission_editor"`
+	Debug            DebugConfig            `yaml:"debug"`
 
 	// Combat timing and knockback settings.
 	Combat CombatConfig `yaml:"combat"`
@@ -206,6 +216,10 @@ func defaults() *Config {
 			WaterAmbient:              20,
 		},
 		Whitelist: WhitelistConfig{Enabled: false, Players: []string{}},
+		PermissionEditor: PermissionEditorConfig{
+			Enabled: true, Address: "127.0.0.1:8080",
+			PublicURL: "http://127.0.0.1:8080", SessionMinutes: 15,
+		},
 		Combat: CombatConfig{
 			AttackCooldown:      false,
 			KnockbackHorizontal: 0.4,
@@ -347,6 +361,18 @@ func (c *Config) validate() error {
 	}
 	if c.Bedrock.Enabled && c.Bedrock.Address == "" {
 		return errors.New("bedrock.address must not be empty when bedrock is enabled")
+	}
+	if c.PermissionEditor.Enabled {
+		if _, _, err := net.SplitHostPort(c.PermissionEditor.Address); err != nil {
+			return fmt.Errorf("permission_editor.address: %w", err)
+		}
+		parsed, err := url.ParseRequestURI(c.PermissionEditor.PublicURL)
+		if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return errors.New("permission_editor.public_url must be an absolute HTTP(S) URL")
+		}
+		if c.PermissionEditor.SessionMinutes < 1 || c.PermissionEditor.SessionMinutes > 1440 {
+			return errors.New("permission_editor.session_minutes must be between 1 and 1440")
+		}
 	}
 	return nil
 }
