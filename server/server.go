@@ -703,6 +703,7 @@ func (s *Server) safeTick() {
 	s.tickContainerAutomation()
 	s.tickEntities()
 	s.tickAuxiliaryDimensionItems()
+	s.tickStationaryLavaDamage()
 	s.tickPlayerHunger()
 	if s.bedrockListener != nil {
 		s.bedrockListener.Sync(uint64(s.worldAge))
@@ -717,6 +718,34 @@ func (s *Server) safeTick() {
 		s.saveWorldAge()
 		s.saveAllPlayerData()
 	}
+}
+
+// tickStationaryLavaDamage keeps fluid collision authoritative even when a
+// client sends no movement packet while standing in lava.
+func (s *Server) tickStationaryLavaDamage() {
+	if s.game == nil {
+		return
+	}
+	now := time.Now()
+	s.game.OnlinePlayers(func(p *player.Player) {
+		if p.Dead || p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator ||
+			now.Sub(p.LastEnvironmentDamage) < 500*time.Millisecond {
+			return
+		}
+		world := s.worldForPlayer(p)
+		x, y, z := int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z))
+		if world == nil || world.GetBlock(x, y, z).ResourceLocation() != "minecraft:lava" {
+			return
+		}
+		p.LastEnvironmentDamage = now
+		target := &session.Session{Player: p}
+		if p.Edition == player.ClientEditionJava {
+			if current, ok := s.sessions.Get(p.UUID); ok {
+				target = current
+			}
+		}
+		handler.DamagePlayer(target, 4, "tried to swim in lava", s.sessions)
+	})
 }
 
 // tickPlayerHunger applies natural regeneration and starvation to both
