@@ -5,6 +5,7 @@ import (
 	"math"
 	"sync"
 
+	"GoCraft/config"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	"GoCraft/java/handler"
@@ -37,13 +38,19 @@ func (s *Server) currentWorldSpawn() spatial.Vec3 {
 	return spatial.Vec3{X: float64(s.spawnX) + 0.5, Y: float64(s.safeSpawnY(s.spawnX, s.spawnZ)), Z: float64(s.spawnZ) + 0.5}
 }
 
-func (s *Server) setWorldSpawn(position spatial.Vec3) {
+func (s *Server) setWorldSpawn(position spatial.Vec3) error {
+	if s.cfg != nil && s.cfg.WorldStorage == config.WorldStorageDisk {
+		if err := saveWorldSpawn(s.cfg.WorldDir, position); err != nil {
+			return fmt.Errorf("saving world spawn: %w", err)
+		}
+	}
 	if s.spawnState == nil {
 		s.spawnState = newWorldSpawnState(position)
 	} else {
 		s.spawnState.set(position)
 	}
 	s.game.OnlinePlayers(func(online *player.Player) { online.WorldSpawn = position })
+	return nil
 }
 
 func (s *Server) registerSpawnCommands() {
@@ -77,7 +84,9 @@ func (s *Server) registerSpawnCommands() {
 			return fmt.Errorf("usage: /setspawn")
 		}
 		position := spatial.Vec3{X: math.Floor(ctx.Player.Position.X) + 0.5, Y: math.Floor(ctx.Player.Position.Y), Z: math.Floor(ctx.Player.Position.Z) + 0.5}
-		s.setWorldSpawn(position)
+		if err := s.setWorldSpawn(position); err != nil {
+			return err
+		}
 		return commandReply(ctx, fmt.Sprintf("World spawn set to %.1f %.0f %.1f", position.X, position.Y, position.Z))
 	})
 }

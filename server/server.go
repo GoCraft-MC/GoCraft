@@ -339,6 +339,11 @@ func New(cfg *config.Config) (*Server, error) {
 		Y: float64(s.safeSpawnY(spawnX, spawnZ)),
 		Z: float64(spawnZ) + 0.5,
 	})
+	if cfg.WorldStorage == config.WorldStorageDisk {
+		if savedSpawn, ok := loadSavedWorldSpawn(cfg.WorldDir); ok {
+			s.spawnState.set(savedSpawn)
+		}
+	}
 	s.registerSpawnCommands()
 
 	// Register server-state commands as closures after s is initialised.
