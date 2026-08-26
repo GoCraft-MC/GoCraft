@@ -4799,6 +4799,16 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 	}()
 
 	maxLevel, spreadDelay := fluidSpreadRules(name, s.simulationDimension)
+	if name == "minecraft:lava" {
+		for _, offset := range [5][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}} {
+			if s.world.GetBlock(x+offset[0], y+offset[1], z+offset[2]).ResourceLocation() == "minecraft:water" {
+				result := hardenedLava(level)
+				s.world.SetBlock(x, y, z, result)
+				*changes = append(*changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: result})
+				return
+			}
+		}
+	}
 
 	// Try to fall down first — falling fluid keeps the same level.
 	below := s.world.GetBlock(x, y-1, z)
@@ -4806,7 +4816,10 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 
 	// Water+lava collision below.
 	if opposite := fluidOpposite(name); belowName == opposite {
-		result := fluidCollisionResult(name, below)
+		result := coreworld.Block{Namespace: "minecraft", Name: "stone"}
+		if name == "minecraft:water" {
+			result = hardenedLava(coreworld.FluidLevel(below))
+		}
 		s.world.SetBlock(x, y-1, z, result)
 		*changes = append(*changes, coreworld.BlockChange{X: x, Y: y - 1, Z: z, Block: result})
 	} else if belowName == "minecraft:air" || belowName == "minecraft:cave_air" ||
@@ -4842,7 +4855,10 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 
 			// Water+lava collision horizontal.
 			if opposite := fluidOpposite(name); nbName == opposite {
-				result := fluidCollisionResult(name, nb)
+				if name == "minecraft:lava" {
+					continue
+				}
+				result := hardenedLava(coreworld.FluidLevel(nb))
 				s.world.SetBlock(nx, y, nz, result)
 				*changes = append(*changes, coreworld.BlockChange{X: nx, Y: y, Z: nz, Block: result})
 				continue
@@ -4897,19 +4913,9 @@ func fluidOpposite(name string) string {
 	return ""
 }
 
-// fluidCollisionResult returns the block produced when fluid meets its opposite.
-// Vanilla rules:
-//   - Lava source (level 0) + water → obsidian
-//   - Flowing lava (level > 0) + water → cobblestone
-//   - Water + lava source → obsidian (lava wins)
-func fluidCollisionResult(fluid string, oppositeBlock coreworld.Block) coreworld.Block {
-	var lavaLevel int
-	if fluid == "minecraft:lava" {
-		lavaLevel = 0 // the spreading fluid is lava source
-	} else {
-		lavaLevel = coreworld.FluidLevel(oppositeBlock)
-	}
-	if lavaLevel == 0 {
+// hardenedLava returns obsidian for a source and cobblestone for flowing lava.
+func hardenedLava(level int) coreworld.Block {
+	if level == 0 {
 		return coreworld.Block{Namespace: "minecraft", Name: "obsidian", Properties: map[string]string{}}
 	}
 	return coreworld.Block{Namespace: "minecraft", Name: "cobblestone", Properties: map[string]string{}}
