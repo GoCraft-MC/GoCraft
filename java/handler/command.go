@@ -74,7 +74,11 @@ type CommandFunc func(ctx CommandContext) error
 type registeredCommand struct {
 	fn           CommandFunc
 	operatorOnly bool
+	permission   string
+	defaultAllow bool
 }
+
+type PermissionChecker func(player *player.Player, node string, defaultAllowed bool) bool
 
 // Dispatcher maps command names (lower-case) to their implementations.
 // All methods are safe for concurrent use.
@@ -85,6 +89,7 @@ type Dispatcher struct {
 	findPlayer     func(string) *player.Player
 	listPlayers    func() []*player.Player
 	teleportPlayer func(*player.Player, float64, float64, float64) error
+	permission     PermissionChecker
 	maxPlayers     int
 }
 
@@ -97,14 +102,16 @@ func NewDispatcher() *Dispatcher {
 // and matched case-insensitively at dispatch time.
 func (d *Dispatcher) Register(name string, fn CommandFunc) {
 	d.mu.Lock()
-	d.cmds[strings.ToLower(name)] = registeredCommand{fn: fn}
+	name = strings.ToLower(name)
+	d.cmds[name] = registeredCommand{fn: fn, permission: commandPermissionNode(name), defaultAllow: true}
 	d.mu.Unlock()
 }
 
 // RegisterOperator adds a command that may only be used by server operators.
 func (d *Dispatcher) RegisterOperator(name string, fn CommandFunc) {
 	d.mu.Lock()
-	d.cmds[strings.ToLower(name)] = registeredCommand{fn: fn, operatorOnly: true}
+	name = strings.ToLower(name)
+	d.cmds[name] = registeredCommand{fn: fn, operatorOnly: true, permission: commandPermissionNode(name)}
 	d.mu.Unlock()
 }
 
@@ -116,9 +123,20 @@ func (d *Dispatcher) RequireOperator(names ...string) {
 		command, ok := d.cmds[key]
 		if ok {
 			command.operatorOnly = true
+			command.defaultAllow = false
 			d.cmds[key] = command
 		}
 	}
+	d.mu.Unlock()
+}
+
+func commandPermissionNode(name string) string {
+	return "gocraft.command." + strings.ToLower(strings.TrimSpace(name))
+}
+
+func (d *Dispatcher) SetPermissionChecker(check PermissionChecker) {
+	d.mu.Lock()
+	d.permission = check
 	d.mu.Unlock()
 }
 
@@ -184,6 +202,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	listPlayers := d.listPlayers
 	teleportPlayer := d.teleportPlayer
 	maxPlayers := d.maxPlayers
+	checkPermission := d.permission
 	d.mu.RUnlock()
 	ctx.NextEntityID = allocateEntityID
 	ctx.FindPlayer = findPlayer
@@ -199,7 +218,11 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 		_ = sendSystemMessage(ctx.Conn, fmt.Sprintf("Unknown command: /%s", name))
 		return
 	}
-	if command.operatorOnly && (ctx.Player == nil || !ctx.Player.Operator) {
+	allowed := !command.operatorOnly && command.defaultAllow || ctx.Player != nil && ctx.Player.Operator
+	if checkPermission != nil {
+		allowed = checkPermission(ctx.Player, command.permission, command.defaultAllow)
+	}
+	if !allowed {
 		_ = sendCommandMessage(ctx, `You do not have permission to use this command`)
 		return
 	}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
 	"GoCraft/core/player"
@@ -29,6 +30,41 @@ func TestAdministrativeCommandsRequireOperator(t *testing.T) {
 		if command.operatorOnly {
 			t.Errorf(`bootstrap/public command %q unexpectedly requires operator`, name)
 		}
+	}
+}
+
+func TestDispatcherChecksPermissionNodePerCommand(t *testing.T) {
+	dispatcher := NewDispatcher()
+	dispatcher.RegisterOperator("restricted", func(ctx CommandContext) error {
+		return sendCommandMessage(ctx, "executed")
+	})
+	var checkedNode string
+	dispatcher.SetPermissionChecker(func(_ *player.Player, node string, defaultAllowed bool) bool {
+		checkedNode = node
+		if defaultAllowed {
+			t.Error("operator command unexpectedly defaults to allowed")
+		}
+		return true
+	})
+	var reply string
+	dispatcher.Dispatch("/restricted", CommandContext{
+		Player: player.New([16]byte{9}, "builder", player.ClientEditionBedrock),
+		Reply: func(message string) error {
+			reply = message
+			return nil
+		},
+	})
+	if checkedNode != "gocraft.command.restricted" || reply != "executed" {
+		t.Fatalf("node/reply = %q/%q", checkedNode, reply)
+	}
+
+	dispatcher.SetPermissionChecker(func(_ *player.Player, _ string, _ bool) bool { return false })
+	dispatcher.Dispatch("/restricted", CommandContext{
+		Player: player.New([16]byte{8}, "denied", player.ClientEditionJava),
+		Reply:  func(message string) error { reply = message; return nil },
+	})
+	if !strings.Contains(reply, "permission") {
+		t.Fatalf("denial reply = %q", reply)
 	}
 }
 
