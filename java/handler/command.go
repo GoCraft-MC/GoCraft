@@ -140,6 +140,20 @@ func (d *Dispatcher) SetPermissionChecker(check PermissionChecker) {
 	d.mu.Unlock()
 }
 
+func (d *Dispatcher) CanUse(player *player.Player, name string) bool {
+	d.mu.RLock()
+	command, ok := d.cmds[strings.ToLower(name)]
+	check := d.permission
+	d.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	if check != nil {
+		return check(player, command.permission, command.defaultAllow)
+	}
+	return !command.operatorOnly && command.defaultAllow || player != nil && player.Operator
+}
+
 // SetEntityIDAllocator installs the game-wide allocator used by entity-spawning
 // commands. The allocator may be configured once during server startup.
 func (d *Dispatcher) SetEntityIDAllocator(allocate func() int32) {

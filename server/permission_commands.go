@@ -36,6 +36,11 @@ func (s *Server) executePermissionCommand(arguments []string) (string, error) {
 		if err := s.permissionEditor.apply(arguments[1]); err != nil {
 			return "", fmt.Errorf("applying permission edits: %w", err)
 		}
+		if s.sessions != nil {
+			for _, online := range s.sessions.SnapshotAll() {
+				_ = handler.SyncCommandPermissions(online.Conn, online.Player, s.cmds)
+			}
+		}
 		return "Permission edits applied and saved to permissions.json", nil
 	}
 	return "", fmt.Errorf("usage: /gocraft <peditor|applyedits <link-or-code>>")

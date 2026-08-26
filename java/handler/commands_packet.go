@@ -32,7 +32,7 @@ type commandGraphNode struct {
 	parserData func(*protocol.Builder)
 }
 
-func buildCommandsPacket() *protocol.Packet {
+func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
 	nodes := []commandGraphNode{{flags: commandNodeRoot}}
 	addLiteral := func(name string, executable bool, children ...int32) int32 {
 		flags := commandNodeLiteral
@@ -175,6 +175,15 @@ func buildCommandsPacket() *protocol.Packet {
 		addLiteral("remove", false, whitelistRemoveName),
 	))
 
+	if len(filters) != 0 && filters[0] != nil {
+		visible := rootChildren[:0]
+		for _, index := range rootChildren {
+			if filters[0](nodes[index].name) {
+				visible = append(visible, index)
+			}
+		}
+		rootChildren = visible
+	}
 	nodes[0].children = rootChildren
 
 	b := protocol.NewBuilder(packetIDCommands).VarInt(int32(len(nodes)))
