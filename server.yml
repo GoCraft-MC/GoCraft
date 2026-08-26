@@ -23,6 +23,11 @@ operators: []
 whitelist:
     enabled: false
     players: []
+permission_editor:
+    enabled: true
+    address: 127.0.0.1:8080
+    public_url: http://127.0.0.1:8080
+    session_minutes: 15
 # Verbose diagnostics. Enable only the category you are investigating.
 debug:
     startup_registry: false

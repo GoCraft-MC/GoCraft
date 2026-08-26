@@ -289,6 +289,11 @@ world_seed: 0
 view_distance: 8
 pregenerate_radius: 12
 max_cached_chunks: 768
+permission_editor:
+  enabled: true
+  address: 127.0.0.1:8080
+  public_url: http://127.0.0.1:8080
+  session_minutes: 15
 bedrock:
   enabled: false
   address: 0.0.0.0:19106
@@ -317,6 +322,7 @@ bedrock:
 | `pregenerate_radius` | Larger background cache radius (`view_distance`-`64`) |
 | `max_cached_chunks` | Maximum clean chunks retained in RAM (`128`-`65536`); default `768` |
 | `whitelist.*` | Shared Java/Bedrock whitelist; runtime `/whitelist` changes persist in `whitelist.json` |
+| `permission_editor.*` | Tokenized browser group editor; configure an externally reachable HTTPS `public_url` for remote players |
 | `bedrock.*` | Enables/configures the Bedrock UDP listener, Xbox authentication, and shared-world Java/Bedrock play; `address` may use any available UDP port, including `19106` |
 
 Disk mode creates `world_dir/region`, `world_dir_nether/region`, and `world_dir_end/region` for the Overworld, Nether, and End. Older `world_dir/DIM-1` and `world_dir/DIM1` data is copied non-destructively into the visible sibling folders on first startup. It keeps bounded hot-chunk caches in RAM, commits generated and modified chunks every 30 seconds, and flushes again on clean shutdown. Memory mode performs no disk reads or writes, so its world changes are lost on restart. Go may retain freed heap pages for reuse, so panel-reported RAM does not always fall immediately even when cached chunks are evicted.
