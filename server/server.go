@@ -3008,6 +3008,9 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				}
 				previous := entity.Position
 				if isPassiveMob(entity.Type) {
+					if entity.Type == corentity.TypeVillager {
+						simulation.tickVillagerBedClaim(entity, simulation.mobAIFor(entity))
+					}
 					if simulation.tickPassiveMobAI(entity) && entity.Type == corentity.TypeVillager {
 						handler.BroadcastVillagerSleepState(entity, simulation.sessions)
 					}
@@ -3411,20 +3414,12 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 		}
 	}
 	wasAsleep := ai.sleepingWas
-	// Run bed-claiming / bed-validation once per second for villagers.
-	if e.Type == corentity.TypeVillager {
-		if ai.bedClaimTick <= 0 {
-			s.claimVillagerBed(e)
-			ai.bedClaimTick = 20
-		} else {
-			ai.bedClaimTick--
-		}
-	}
 	validBed := s.validVillagerBed(e)
 	if e.Type == corentity.TypeVillager && e.Sleeping && !validBed {
 		e.Sleeping = false
 	}
 	if wasAsleep && !e.Sleeping && e.Type == corentity.TypeVillager && validBed {
+		s.setVillagerBedOccupied(e, false)
 		s.wakeVillagerBesideBed(e)
 	}
 
@@ -3476,25 +3471,30 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 	// morning. The canonical Sleeping flag is adapter-independent state.
 	if e.Type == corentity.TypeVillager && e.HasVillageHome && validBed {
 		dayTime := s.worldAge % 24000
-		if dayTime >= 12542 && dayTime < 23460 {
+		if dayTime >= 12000 && dayTime <= 23000 {
 			targetX := float64(e.VillageBed.X) + 0.5
+			targetY := float64(e.VillageBed.Y)
 			targetZ := float64(e.VillageBed.Z) + 0.5
-			dx, dz := targetX-e.Position.X, targetZ-e.Position.Z
-			distance := math.Hypot(dx, dz)
-			if distance <= 0.6 {
-				e.Position.X = targetX
-				e.Position.Y = float64(e.VillageBed.Y) + 0.6875
-				e.Position.Z = targetZ
+			dx, dy, dz := targetX-e.Position.X, targetY-e.Position.Y, targetZ-e.Position.Z
+			distanceSquared := dx*dx + dy*dy + dz*dz
+			bed := s.world.GetBlock(int(e.VillageBed.X), int(e.VillageBed.Y), int(e.VillageBed.Z))
+			if distanceSquared <= 4 && (e.Sleeping || bed.Properties["occupied"] != "true") {
+				if !e.Sleeping {
+					s.setVillagerBedOccupied(e, true)
+				}
 				e.VX, e.VY, e.VZ = 0, 0, 0
-				e.OnGround = true
 				e.Sleeping = true
+				clearMobNavigation(e, ai)
 				changed := !wasAsleep
 				ai.sleepingWas = true
 				return changed
 			}
 			e.Sleeping = false
-			if !s.navigateMob(e, ai, spatial.Vec3{X: targetX, Y: float64(e.VillageBed.Y), Z: targetZ}, pumpkinMovementSpeed(e.Type, 1.0)) {
-				e.VX, e.VZ = dx/distance*0.1, dz/distance*0.1
+			if distanceSquared > 4 && !s.navigateMob(e, ai, spatial.Vec3{X: targetX, Y: targetY, Z: targetZ}, pumpkinMovementSpeed(e.Type, 1.0)) {
+				distance := math.Hypot(dx, dz)
+				if distance > 0 {
+					e.VX, e.VZ = dx/distance*0.1, dz/distance*0.1
+				}
 				e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
 			}
 			changed := wasAsleep
@@ -3503,6 +3503,7 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 		}
 		e.Sleeping = false
 		if wasAsleep {
+			s.setVillagerBedOccupied(e, false)
 			s.wakeVillagerBesideBed(e)
 			ai.sleepingWas = false
 			return true
@@ -3521,6 +3522,26 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 	ai.sleepingWas = e.Sleeping
 	return wasAsleep != e.Sleeping
 
+}
+
+func (s *Server) tickVillagerBedClaim(e *corentity.Entity, ai *mobAI) {
+	if ai.bedClaimTick <= 0 {
+		s.claimVillagerBed(e)
+		ai.bedClaimTick = 20
+		return
+	}
+	ai.bedClaimTick--
+}
+
+func (s *Server) setVillagerBedOccupied(e *corentity.Entity, occupied bool) {
+	bed := s.world.GetBlock(int(e.VillageBed.X), int(e.VillageBed.Y), int(e.VillageBed.Z))
+	want := strconv.FormatBool(occupied)
+	if !strings.HasSuffix(bed.ResourceLocation(), "_bed") || bed.Properties["occupied"] == want {
+		return
+	}
+	bed.Properties = copyStringMap(bed.Properties)
+	bed.Properties["occupied"] = want
+	s.world.SetBlock(int(e.VillageBed.X), int(e.VillageBed.Y), int(e.VillageBed.Z), bed)
 }
 
 // validVillagerBed prevents a POI coordinate (or the zero value) from being

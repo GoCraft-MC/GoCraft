@@ -295,21 +295,21 @@ func BroadcastEntityStatus(entityID int32, status byte, mgr *session.Manager) {
 	}
 }
 
-// BroadcastVillagerSleepState sends position before pose metadata so the
-// sleeping renderer anchors the villager to the assigned bed rather than the
-// last point reached by pathfinding.
+// BroadcastVillagerSleepState updates the tracked pose and bed position in
+// packet order. Sleeping entities stay at their canonical navigation position;
+// the Java renderer anchors the sleeping pose to the tracked bed position.
 func BroadcastVillagerSleepState(e *corentity.Entity, mgr *session.Manager) {
-	teleport := buildTeleportMob(e)
 	metadata := buildMobMetadata(e)
 	if metadata == nil {
 		return
 	}
-	go func() {
-		for _, s := range mgr.SnapshotAll() {
+	for _, s := range mgr.SnapshotAll() {
+		if !e.Sleeping {
+			teleport := buildTeleportMob(e)
 			_ = s.Conn.WritePacket(teleport)
-			_ = s.Conn.WritePacket(metadata)
 		}
-	}()
+		_ = s.Conn.WritePacket(metadata)
+	}
 }
 
 func villagerVariantProtocolID(variant corentity.VillagerVariant) int32 {

@@ -20,7 +20,10 @@ func (s *Server) tickPassiveAIParallel(entities []*corentity.Entity, players []n
 		if entity.Dead || !isPassiveMob(entity.Type) || !entityWithinSimulationRange(entity, players, 128) {
 			continue
 		}
-		_ = s.mobAIFor(entity)
+		ai := s.mobAIFor(entity)
+		if entity.Type == corentity.TypeVillager {
+			s.tickVillagerBedClaim(entity, ai)
+		}
 		candidates = append(candidates, entity)
 	}
 	workerCount := passiveAIWorkerCount(len(candidates), runtime.GOMAXPROCS(0))

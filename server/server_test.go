@@ -53,7 +53,7 @@ func TestPassiveMobPanicHasFallbackDirectionAtAttackerPosition(t *testing.T) {
 	}
 }
 
-func TestVillagerSnapsToBedAndWakesBesideIt(t *testing.T) {
+func TestVillagerSleepsNearBedAndWakesBesideIt(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer w.Close()
 	bed := spatial.BlockPos{X: 0, Y: 64, Z: 0}
@@ -65,7 +65,7 @@ func TestVillagerSnapsToBedAndWakesBesideIt(t *testing.T) {
 		},
 	})
 	server := &Server{world: w, worldAge: 13000, mobAIs: make(map[int32]*mobAI)}
-	villager := corentity.New(9, [16]byte{}, corentity.TypeVillager, 0.5, 64, 0.4)
+	villager := corentity.New(9, [16]byte{}, corentity.TypeVillager, 2.4, 64, 0.5)
 	villager.HasVillageHome = true
 	villager.VillageBed = bed
 	villager.OnGround = true
@@ -73,8 +73,14 @@ func TestVillagerSnapsToBedAndWakesBesideIt(t *testing.T) {
 	if !server.tickPassiveMobAI(villager) || !villager.Sleeping {
 		t.Fatal("villager did not enter sleeping state")
 	}
-	if villager.Position.X != 0.5 || villager.Position.Y != 64.6875 || villager.Position.Z != 0.5 {
-		t.Fatalf("sleep position = %+v, want bed centre", villager.Position)
+	if villager.Position.X != 2.4 || villager.Position.Y != 64 || villager.Position.Z != 0.5 {
+		t.Fatalf("sleep changed canonical navigation position: %+v", villager.Position)
+	}
+	if got := w.GetBlock(0, 64, 0).Properties["occupied"]; got != "true" {
+		t.Fatalf("sleeping bed occupied = %q, want true", got)
+	}
+	if server.tickPassiveMobAI(villager) || !villager.Sleeping {
+		t.Fatal("villager did not remain asleep in its occupied bed")
 	}
 
 	server.worldAge = 6000
@@ -86,6 +92,9 @@ func TestVillagerSnapsToBedAndWakesBesideIt(t *testing.T) {
 	}
 	if ok, loaded := w.CanEntityOccupyIfLoaded(villager.Position.X, villager.Position.Y, villager.Position.Z); !loaded || !ok {
 		t.Fatalf("wake position is not occupiable: %+v", villager.Position)
+	}
+	if got := w.GetBlock(0, 64, 0).Properties["occupied"]; got != "false" {
+		t.Fatalf("woken bed occupied = %q, want false", got)
 	}
 }
 
