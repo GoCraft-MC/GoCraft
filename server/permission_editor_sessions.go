@@ -13,6 +13,7 @@ import (
 )
 
 type permissionEditSession struct {
+	baseline corepermission.Document
 	document corepermission.Document
 	commands []handler.CommandPermission
 	expires  time.Time
@@ -47,8 +48,9 @@ func (e *permissionEditor) create(commands []handler.CommandPermission) (string,
 			delete(e.sessions, key)
 		}
 	}
+	baseline := e.manager.Snapshot()
 	e.sessions[token] = &permissionEditSession{
-		document: e.manager.Snapshot(), commands: append([]handler.CommandPermission(nil), commands...),
+		baseline: baseline, document: corepermission.Clone(baseline), commands: append([]handler.CommandPermission(nil), commands...),
 		expires: now.Add(e.lifetime),
 	}
 	e.mu.Unlock()
