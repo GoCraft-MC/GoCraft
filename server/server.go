@@ -4798,17 +4798,7 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 		}
 	}()
 
-	isLava := name == "minecraft:lava"
-	// Lava spreads at most 3 blocks, water at most 7.
-	maxLevel := 7
-	if isLava {
-		maxLevel = 3
-	}
-	// Delay between spreads: water=5 ticks, lava=30 ticks.
-	spreadDelay := int64(5)
-	if isLava {
-		spreadDelay = 30
-	}
+	maxLevel, spreadDelay := fluidSpreadRules(name, s.simulationDimension)
 
 	// Try to fall down first — falling fluid keeps the same level.
 	below := s.world.GetBlock(x, y-1, z)
@@ -4883,6 +4873,17 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 			}
 		}
 	}
+}
+
+// fluidSpreadRules mirrors Pumpkin's ultrawarm lava timing and reach.
+func fluidSpreadRules(name string, dimension int32) (maxLevel int, delay int64) {
+	if name != "minecraft:lava" {
+		return 7, 5
+	}
+	if dimension == dimensionNether {
+		return 7, 10
+	}
+	return 3, 30
 }
 
 // fluidOpposite returns the opposing fluid name for water/lava collision.
