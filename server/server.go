@@ -85,6 +85,7 @@ type Server struct {
 	bedrockActionWorld *coreworld.World
 	spawnX             int
 	spawnZ             int
+	spawnState         *worldSpawnState
 	regProvider        registry.Provider
 	chunkSender        *javaworld.Sender
 	sessions           *session.Manager
@@ -333,6 +334,12 @@ func New(cfg *config.Config) (*Server, error) {
 		playerStore:             playerStore,
 		bedrockBlockUse:         make(map[[16]byte]bedrockRecentBlockUse),
 	}
+	s.spawnState = newWorldSpawnState(spatial.Vec3{
+		X: float64(spawnX) + 0.5,
+		Y: float64(s.safeSpawnY(spawnX, spawnZ)),
+		Z: float64(spawnZ) + 0.5,
+	})
+	s.registerSpawnCommands()
 
 	// Register server-state commands as closures after s is initialised.
 	cmds.Register("timings", func(ctx handler.CommandContext) error {
@@ -917,11 +924,7 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical
 	p.OnDeath = s.dropPlayerInventory
-	p.Position = spatial.Vec3{
-		X: float64(s.spawnX) + 0.5,
-		Y: float64(s.safeSpawnY(s.spawnX, s.spawnZ)),
-		Z: float64(s.spawnZ) + 0.5,
-	}
+	p.Position = s.currentWorldSpawn()
 	p.WorldSpawn = p.Position
 	s.loadPlayerData(p)
 	s.ensurePlayerPositionClear(p)
@@ -1253,6 +1256,7 @@ func (s *Server) dimensionSimulation(dimension int32, dimensionWorld *coreworld.
 		simulationDimension: dimension,
 		spawnX:              s.spawnX,
 		spawnZ:              s.spawnZ,
+		spawnState:          s.spawnState,
 		regProvider:         s.regProvider,
 		chunkSender:         s.chunkSender,
 		sessions:            s.javaSessionsForDimension(dimension),
@@ -4461,10 +4465,7 @@ func (s *Server) registerPlayer(result *handler.LoginResult) *player.Player {
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical
 	p.OnDeath = s.dropPlayerInventory
-	// Spawn on the highest generated or loaded block at the world origin.
-	p.Position.X = float64(s.spawnX) + 0.5
-	p.Position.Y = float64(s.world.SurfaceY(s.spawnX, s.spawnZ) + 1)
-	p.Position.Z = float64(s.spawnZ) + 0.5
+	p.Position = s.currentWorldSpawn()
 	p.WorldSpawn = p.Position
 	s.loadPlayerData(p)
 
