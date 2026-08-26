@@ -75,7 +75,8 @@ type World struct {
 
 	// worldTime is the current time-of-day (0–23999) published by the server
 	// tick goroutine once per second so handler code can read it atomically.
-	worldTime atomic.Int64
+	worldTime   atomic.Int64
+	physicsTime atomic.Int64
 
 	// requestTimeSkip is set by the bed-sleep handler and drained by the
 	// server tick goroutine which then advances worldAge to the next morning.
@@ -1037,7 +1038,7 @@ func (w *World) triggerObservers(x, y, z int) {
 		updated := redstoneBlockWith(observer, "powered", "true")
 		w.setBlockNoPhysics(pos[0], pos[1], pos[2], updated)
 		w.Redstone.NotifyChange(pos[0], pos[1], pos[2])
-		w.BlockPhysics.ScheduleObserver(pos[0], pos[1], pos[2], w.WorldTime(), 2)
+		w.BlockPhysics.ScheduleObserver(pos[0], pos[1], pos[2], w.PhysicsTime(), 2)
 	}
 }
 
@@ -1073,7 +1074,7 @@ func (w *World) setBlockNoPhysics(x, y, z int, block Block) {
 // or removed.  worldAge is unknown here so we schedule at due=0 (fires on the
 // very next drain regardless of current age).
 func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
-	age := w.WorldTime() // close enough — physics fires within a few ticks
+	age := w.PhysicsTime()
 	oldName := old.ResourceLocation()
 	placedName := placed.ResourceLocation()
 
@@ -1265,6 +1266,12 @@ func (w *World) SetWorldTime(t int64) { w.worldTime.Store(t) }
 
 // WorldTime returns the last published time-of-day tick (0–23999).
 func (w *World) WorldTime() int64 { return w.worldTime.Load() }
+
+// SetPhysicsTime publishes the monotonic server tick used by block physics.
+func (w *World) SetPhysicsTime(t int64) { w.physicsTime.Store(t) }
+
+// PhysicsTime returns the last published monotonic server tick.
+func (w *World) PhysicsTime() int64 { return w.physicsTime.Load() }
 
 // RequestTimeSkip is called by the sleep handler to ask the tick goroutine
 // to advance worldAge to the next morning (time-of-day 0).

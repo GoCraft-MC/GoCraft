@@ -570,7 +570,7 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 				targetBlock.ResourceLocation() == "minecraft:polished_blackstone_button" {
 				delay = 20
 			}
-			w.BlockPhysics.ScheduleButton(int(bx), int(by), int(bz), w.WorldTime(), delay)
+			w.BlockPhysics.ScheduleButton(int(bx), int(by), int(bz), w.PhysicsTime(), delay)
 		}
 		broadcastSoundAt(mgr, "minecraft:block.stone_button.click_on", soundCategoryBlocks,
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 0.3, 0.6)
@@ -908,7 +908,7 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 			block.Properties = map[string]string{"powered": "false"}
 		}
 		applyBlockChange(px, py, pz, block, w, mgr)
-		w.BlockPhysics.SchedulePressurePlate(px, py, pz, w.WorldTime(), 1)
+		w.BlockPhysics.SchedulePressurePlate(px, py, pz, w.PhysicsTime(), 1)
 	case isJavaStorageContainer(block.ResourceLocation()):
 		switch block.ResourceLocation() {
 		case "minecraft:hopper":

@@ -2645,6 +2645,11 @@ func (s *Server) tickEntities() {
 	// Publish time-of-day for handler code (e.g. bed sleep check).
 	endTime := s.timings.measure(sectionTime)
 	s.world.SetWorldTime(s.worldAge % 24000)
+	for _, dimensionWorld := range []*coreworld.World{s.world, s.netherWorld, s.endWorld} {
+		if dimensionWorld != nil {
+			dimensionWorld.SetPhysicsTime(s.worldAge)
+		}
+	}
 	// Drain a player-requested time skip (sleeping in a bed at night).
 	if s.world.DrainTimeSkip() {
 		tod := s.worldAge % 24000
