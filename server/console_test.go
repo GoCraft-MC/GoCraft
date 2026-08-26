@@ -71,4 +71,8 @@ func TestConsoleListAndTimingsIncludeCrossEditionServerStats(t *testing.T) {
 	if strings.ContainsRune(report, '§') {
 		t.Fatalf(`console timings contains Minecraft formatting: %q`, report)
 	}
+	mspt := s.executeConsoleCommand(`mspt`)
+	if !strings.Contains(mspt, `avg/min/max`) || strings.ContainsRune(mspt, '§') {
+		t.Fatalf(`console MSPT report = %q`, mspt)
+	}
 }

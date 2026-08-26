@@ -369,6 +369,9 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 		return handler.SendSystemMessage(ctx.Conn, message)
 	})
+	cmds.Register("mspt", func(ctx handler.CommandContext) error {
+		return commandReply(ctx, timings.MSPT())
+	})
 	cmds.Register("time", func(ctx handler.CommandContext) error {
 		if len(ctx.Args) == 0 {
 			tod := s.worldAge % 24000
@@ -413,7 +416,7 @@ func New(cfg *config.Config) (*Server, error) {
 		return handler.SendSystemMessage(ctx.Conn,
 			fmt.Sprintf("Time set to %d", s.worldAge%24000))
 	})
-	cmds.RequireOperator(`timings`, `tps`, `time`)
+	cmds.RequireOperator(`timings`, `tps`, `mspt`, `time`)
 	// Warm spawn immediately; login-time streaming will reuse this cache.
 	s.world.QueuePregeneration(int32(math.Floor(float64(spawnX)/16)), int32(math.Floor(float64(spawnZ)/16)), int32(cfg.PreGenerateRadius))
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
@@ -621,6 +624,11 @@ func (s *Server) executeConsoleCommand(input string) string {
 		}
 		tps, avgMs := s.timings.TPS()
 		return fmt.Sprintf(`TPS: %.1f  Avg tick: %.2fms`, tps, avgMs)
+	case `mspt`:
+		if s.timings == nil {
+			return `Timing collector is unavailable`
+		}
+		return stripMinecraftFormatting(s.timings.MSPT())
 	case `op`:
 		if len(fields) != 2 {
 			return `Usage: op <player>`

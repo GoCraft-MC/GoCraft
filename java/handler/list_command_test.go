@@ -31,13 +31,13 @@ func TestListCommandIncludesJavaAndBedrockPlayers(t *testing.T) {
 	}
 }
 
-func TestTimingsAndTPSAreTabCompletable(t *testing.T) {
+func TestServerCommandsAreTabCompletable(t *testing.T) {
 	nodes, root, err := parseCommandTestGraph(buildCommandsPacket().Data)
 	if err != nil {
 		t.Fatalf(`parse Commands packet: %v`, err)
 	}
 	top := commandTestChildrenByName(t, nodes, nodes[root])
-	for _, name := range []string{`timings`, `tps`} {
+	for _, name := range []string{`timings`, `tps`, `mspt`, `spawn`, `setspawn`} {
 		node, ok := top[name]
 		if !ok {
 			t.Errorf(`top-level command %q is missing`, name)

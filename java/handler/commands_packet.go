@@ -157,6 +157,9 @@ func buildCommandsPacket() *protocol.Packet {
 	rootChildren = append(rootChildren,
 		addLiteral(`timings`, true),
 		addLiteral(`tps`, true),
+		addLiteral(`mspt`, true),
+		addLiteral(`spawn`, true),
+		addLiteral(`setspawn`, true),
 	)
 
 	whitelistAddName := addArgument("player", parserString, true, stringParser(0))
