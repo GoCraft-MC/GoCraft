@@ -13,11 +13,11 @@ func TestFluidSpreadRulesMatchDimension(t *testing.T) {
 		level     int
 		delay     int64
 	}{
-		{"minecraft:water", dimensionOverworld, 7, 5},
-		{"minecraft:water", dimensionNether, 7, 5},
-		{"minecraft:lava", dimensionOverworld, 3, 30},
-		{"minecraft:lava", dimensionEnd, 3, 30},
-		{"minecraft:lava", dimensionNether, 7, 10},
+		{"minecraft:water", dimensionOverworld, 1, 5},
+		{"minecraft:water", dimensionNether, 1, 5},
+		{"minecraft:lava", dimensionOverworld, 2, 30},
+		{"minecraft:lava", dimensionEnd, 2, 30},
+		{"minecraft:lava", dimensionNether, 1, 10},
 	}
 	for _, test := range tests {
 		level, delay := fluidSpreadRules(test.name, test.dimension)
@@ -75,5 +75,31 @@ func TestWaterHardensExistingLava(t *testing.T) {
 			t.Errorf("lava level %d became %s, want %s", level, got, want)
 		}
 		w.Close()
+	}
+}
+
+func TestFluidFlowsDownBeforeSpreadingSideways(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 65, 0, coreworld.MakeFluid("minecraft:water", 0))
+	s := &Server{world: w, simulationDimension: dimensionOverworld}
+	var changes []coreworld.BlockChange
+	s.processFluidUpdate(0, 65, 0, &changes)
+
+	below := w.GetBlock(0, 64, 0)
+	if below.ResourceLocation() != "minecraft:water" || coreworld.FluidLevel(below) != 8 {
+		t.Fatalf("downward flow = %+v, want falling water level 8", below)
+	}
+	for _, offset := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		if !w.GetBlock(offset[0], 65, offset[1]).IsAir() {
+			t.Fatalf("water spread sideways while it could flow down at %+v", offset)
+		}
+	}
+
+	w.SetBlock(0, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	changes = nil
+	s.processFluidUpdate(0, 64, 0, &changes)
+	if level := coreworld.FluidLevel(w.GetBlock(1, 64, 0)); level != 1 {
+		t.Fatalf("landed falling water side level = %d, want 1", level)
 	}
 }

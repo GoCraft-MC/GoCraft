@@ -4798,7 +4798,7 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 		}
 	}()
 
-	maxLevel, spreadDelay := fluidSpreadRules(name, s.simulationDimension)
+	dropOff, spreadDelay := fluidSpreadRules(name, s.simulationDimension)
 	if name == "minecraft:lava" {
 		for _, offset := range [5][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}} {
 			if s.world.GetBlock(x+offset[0], y+offset[1], z+offset[2]).ResourceLocation() == "minecraft:water" {
@@ -4806,6 +4806,17 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 				s.world.SetBlock(x, y, z, result)
 				*changes = append(*changes, coreworld.BlockChange{X: x, Y: y, Z: z, Block: result})
 				return
+			}
+		}
+	}
+	if name == "minecraft:water" {
+		for _, offset := range [5][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}} {
+			nx, ny, nz := x+offset[0], y+offset[1], z+offset[2]
+			lava := s.world.GetBlock(nx, ny, nz)
+			if lava.ResourceLocation() == "minecraft:lava" {
+				result := hardenedLava(coreworld.FluidLevel(lava))
+				s.world.SetBlock(nx, ny, nz, result)
+				*changes = append(*changes, coreworld.BlockChange{X: nx, Y: ny, Z: nz, Block: result})
 			}
 		}
 	}
@@ -4822,6 +4833,9 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 		}
 		s.world.SetBlock(x, y-1, z, result)
 		*changes = append(*changes, coreworld.BlockChange{X: x, Y: y - 1, Z: z, Block: result})
+		if name == "minecraft:lava" {
+			return
+		}
 	} else if belowName == "minecraft:air" || belowName == "minecraft:cave_air" ||
 		belowName == "minecraft:void_air" || coreworld.IsFluidPassable(belowName) {
 		if y-1 >= coreworld.WorldMinY {
@@ -4836,17 +4850,21 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 				s.world.SetBlock(x, y-1, z, hardened)
 				*changes = append(*changes, coreworld.BlockChange{X: x, Y: y - 1, Z: z, Block: hardened})
 			} else {
-				newBlock := coreworld.MakeFluid(name, level) // falling keeps level
+				newBlock := coreworld.MakeFluid(name, 8)
 				s.world.SetBlock(x, y-1, z, newBlock)
 				*changes = append(*changes, coreworld.BlockChange{X: x, Y: y - 1, Z: z, Block: newBlock})
 				s.world.BlockPhysics.ScheduleFluid(x, y-1, z, s.worldAge, spreadDelay)
+				return
 			}
 		}
 	}
 
 	// Spread horizontally if not too diluted.
-	if level < maxLevel {
-		newLevel := level + 1
+	newLevel := level + dropOff
+	if level >= 8 {
+		newLevel = dropOff
+	}
+	if newLevel <= 7 {
 		dirs := [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 		for _, d := range dirs {
 			nx, nz := x+d[0], z+d[1]
@@ -4891,15 +4909,15 @@ func (s *Server) processFluidUpdate(x, y, z int, changes *[]coreworld.BlockChang
 	}
 }
 
-// fluidSpreadRules mirrors Pumpkin's ultrawarm lava timing and reach.
-func fluidSpreadRules(name string, dimension int32) (maxLevel int, delay int64) {
+// fluidSpreadRules mirrors Pumpkin's level drop-off and ultrawarm timing.
+func fluidSpreadRules(name string, dimension int32) (dropOff int, delay int64) {
 	if name != "minecraft:lava" {
-		return 7, 5
+		return 1, 5
 	}
 	if dimension == dimensionNether {
-		return 7, 10
+		return 1, 10
 	}
-	return 3, 30
+	return 2, 30
 }
 
 // fluidOpposite returns the opposing fluid name for water/lava collision.
