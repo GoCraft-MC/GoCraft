@@ -43,6 +43,7 @@ import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
+	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -90,6 +91,7 @@ type Server struct {
 	chunkSender        *javaworld.Sender
 	sessions           *session.Manager
 	cmds               *handler.Dispatcher
+	permissions        *corepermission.Manager
 
 	// Bedrock adapter (nil when bedrock.enabled = false).
 	bedrockListener *bedrock.Listener
@@ -272,7 +274,17 @@ func New(cfg *config.Config) (*Server, error) {
 	if err := handler.ConfigureWhitelist(`whitelist.json`, cfg.Whitelist.Enabled, cfg.Whitelist.Players); err != nil {
 		slog.Warn(`server: could not load whitelist.json`, `err`, err)
 	}
+	permissionManager, err := corepermission.Load(`permissions.json`)
+	if err != nil {
+		return nil, fmt.Errorf("server: loading permissions: %w", err)
+	}
 	cmds := handler.NewDispatcher()
+	cmds.SetPermissionChecker(func(p *player.Player, node string, defaultAllowed bool) bool {
+		if p == nil {
+			return false
+		}
+		return permissionManager.Allowed(p.Username, node, p.Operator, defaultAllowed)
+	})
 	cmds.SetEntityIDAllocator(gameCore.NextEntityID)
 	cmds.SetPlayerFinder(func(name string) *player.Player {
 		var found *player.Player
@@ -322,6 +334,7 @@ func New(cfg *config.Config) (*Server, error) {
 		chunkSender:             javaworld.DefaultSender,
 		sessions:                session.NewManager(),
 		cmds:                    cmds,
+		permissions:             permissionManager,
 		intentBus:               bus,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
