@@ -648,7 +648,8 @@ func (s *Server) validNaturalSpawnPosition(players []naturalSpawnPlayer, categor
 	if nearestDistance <= 24*24 {
 		return false
 	}
-	dx, dz := center.X-(float64(s.spawnX)+0.5), center.Z-(float64(s.spawnZ)+0.5)
+	spawn := s.currentWorldSpawn()
+	dx, dz := center.X-spawn.X, center.Z-spawn.Z
 	if dx*dx+dz*dz <= 24*24 {
 		return false
 	}
