@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
@@ -10,6 +11,43 @@ import (
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
 )
+
+func TestLavaDamagesJavaSurvivalPlayers(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, coreworld.MakeFluid("minecraft:lava", 0))
+	p := player.New([16]byte{}, "lava-test", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Position = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+	sess := &session.Session{Player: p}
+
+	applyPlayerEnvironmentalDamage(sess, w, nil, p.Position.X, p.Position.Z)
+	if health, _, _, _ := p.HealthSnapshot(); health != 16 || p.LastDamageCause != "tried to swim in lava" {
+		t.Fatalf("first lava contact health=%v cause=%q", health, p.LastDamageCause)
+	}
+	applyPlayerEnvironmentalDamage(sess, w, nil, p.Position.X, p.Position.Z)
+	if health, _, _, _ := p.HealthSnapshot(); health != 16 {
+		t.Fatalf("lava bypassed hurt cooldown: health=%v", health)
+	}
+	p.LastEnvironmentDamage = time.Now().Add(-600 * time.Millisecond)
+	applyPlayerEnvironmentalDamage(sess, w, nil, p.Position.X, p.Position.Z)
+	if health, _, _, _ := p.HealthSnapshot(); health != 12 {
+		t.Fatalf("second lava damage health=%v, want 12", health)
+	}
+}
+
+func TestLavaDoesNotDamageCreativePlayers(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(0, 64, 0, coreworld.MakeFluid("minecraft:lava", 0))
+	p := player.New([16]byte{}, "creative", player.ClientEditionJava)
+	p.GameMode = player.GameModeCreative
+	p.Position = spatial.Vec3{X: 0.5, Y: 64, Z: 0.5}
+	applyPlayerEnvironmentalDamage(&session.Session{Player: p}, w, nil, p.Position.X, p.Position.Z)
+	if health, _, _, _ := p.HealthSnapshot(); health != 20 {
+		t.Fatalf("creative player lava health=%v, want 20", health)
+	}
+}
 
 func TestEnteringWaterCancelsAccumulatedFallDamage(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
