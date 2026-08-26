@@ -66,6 +66,9 @@ func buildCommandsPacket() *protocol.Packet {
 		addLiteral("gamemode", false, modeChildren...),
 		addLiteral("gm", false, modeChildren...),
 	)
+	applyEditsLink := addArgument("link", parserString, true, stringParser(2))
+	rootChildren = append(rootChildren, addLiteral("gocraft", true,
+		addLiteral("peditor", true), addLiteral("applyedits", false, applyEditsLink)))
 
 	tpZ := addArgument("z", parserDouble, true, noNumberBounds)
 	tpY := addArgument("y", parserDouble, false, noNumberBounds, tpZ)

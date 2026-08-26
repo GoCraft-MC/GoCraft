@@ -37,7 +37,7 @@ func TestServerCommandsAreTabCompletable(t *testing.T) {
 		t.Fatalf(`parse Commands packet: %v`, err)
 	}
 	top := commandTestChildrenByName(t, nodes, nodes[root])
-	for _, name := range []string{`timings`, `tps`, `mspt`, `spawn`, `setspawn`} {
+	for _, name := range []string{`timings`, `tps`, `mspt`, `spawn`, `setspawn`, `gocraft`} {
 		node, ok := top[name]
 		if !ok {
 			t.Errorf(`top-level command %q is missing`, name)
