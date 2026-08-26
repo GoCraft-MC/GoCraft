@@ -124,10 +124,14 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
   - `/potioneffect <player> <effect> <seconds>` — applies a registry-backed level-I effect with particles and HUD icon
   - `/walkspeed <value|reset>` and `/flyspeed <value|reset>` — update Player Abilities speed values (`/walkspeen` and `/flyyspeed` are accepted aliases)
   - `/kick <player> [reason]` — sends Disconnect (Play) with NBT-encoded reason, closes connection
+  - Every command has a `gocraft.command.<name>` permission node; Java suggestions hide denied commands
+  - Persistent groups, inheritance, wildcards, explicit denies, and per-player overrides are shared by Java and Bedrock
+  - `/gocraft peditor` opens the expiring browser editor documented in [`docs/permissions.md`](docs/permissions.md)
+  - Vanilla/Paper command gaps are tracked in [`docs/command-parity.md`](docs/command-parity.md)
 
 ### Not implemented
 
-Some vanilla systems remain incomplete: advanced Bedrock crafting/container transactions, timed furnace/smoker/blast-furnace processing, complete entity AI/pathfinding, permissions, and every edition-specific sound/particle are not implemented. Java and Bedrock players do share the canonical world, players, mobs, chat, combat, drops, time, movement, equipment, health/death/respawn, and basic block/inventory interactions. Paper plugin compatibility is not supported.
+Some vanilla systems remain incomplete: advanced Bedrock crafting/container transactions, timed furnace/smoker/blast-furnace processing, complete entity AI/pathfinding, and every edition-specific sound/particle are not implemented. Java and Bedrock players do share the canonical world, players, mobs, chat, combat, drops, time, movement, equipment, health/death/respawn, basic block/inventory interactions, and command permissions. Paper plugin compatibility is not supported.
 
 ## Architecture
 
@@ -218,7 +222,7 @@ type Provider interface {
 | 13.1 — Data-driven packet IDs | Complete | Semantic packet names (minecraft:login etc.) in versioned JSON; internal/protocoldata MustCB/MustSB panic at startup on missing names; all handler hex constants removed; validation test suite (7 distinct invariants); GitHub Actions CI on ubuntu-latest |
 | Experimental gameplay extensions | In progress | Full recipe catalog, basic crafting execution, persistent single chests, farming, configurable legacy-style mob combat, village residents and guards |
 | 14 — Bedrock adapter | Beta | RakNet/UDP, Xbox auth, canonical chunk encoding, shared simulation, inventory basics, and bidirectional Java/Bedrock visibility |
-| 15 — Go plugin API | Future work | Event bus, command registration, scheduler, permission nodes; plugins are compiled Go packages |
+| 15 — Go plugin API | Future work | Event bus, command registration, scheduler, and extension hooks; core permission nodes are implemented |
 
 Detailed records for completed milestones are kept in [`logs/`](logs/).
 
@@ -402,7 +406,7 @@ GoCraft/
 
 ## Plugin API plans
 
-A Go-native plugin API is planned, but **no plugin system is implemented today**. The intended direction includes events, scheduling, commands, permissions, and extension points built for GoCraft's own core. Paper, Bukkit, and Spigot plugin compatibility is not supported and should not be assumed.
+A Go-native plugin API is planned, but **no plugin system is implemented today**. The intended direction includes events, scheduling, commands, and extension points integrated with GoCraft's native permission core. Paper, Bukkit, and Spigot plugin compatibility is not supported and should not be assumed.
 
 ## Bedrock and cross-play
 
