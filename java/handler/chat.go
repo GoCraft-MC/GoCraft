@@ -143,6 +143,16 @@ func SendSystemMessage(conn *network.ClientConn, text string) error {
 	return sendSystemMessage(conn, text)
 }
 
+// SendLinkMessage sends a clickable open_url component to a Java client.
+func SendLinkMessage(conn *network.ClientConn, text, link string) error {
+	if conn == nil {
+		return nil
+	}
+	packet := protocol.NewBuilder(packetIDSystemChatMessage).
+		Bytes(nbtLinkComponent(text, link)).Bool(false).Build()
+	return conn.WritePacket(packet)
+}
+
 // buildSystemChatMessage constructs a System Chat Message (S→C) packet.
 //
 // Wire layout (1.21.4):
@@ -173,6 +183,23 @@ func nbtTextComponent(text string) []byte {
 	buf.WriteByte(0x0A) // TAG_Compound root
 	writeNBTStringEntry(&buf, "text", text)
 	buf.WriteByte(0x00) // TAG_End
+	return buf.Bytes()
+}
+
+func nbtLinkComponent(text, link string) []byte {
+	var buf bytes.Buffer
+	buf.WriteByte(0x0A)
+	writeNBTStringEntry(&buf, "text", text)
+	writeNBTStringEntry(&buf, "color", "aqua")
+	buf.WriteByte(0x01)
+	writeNBTString(&buf, "underlined")
+	buf.WriteByte(1)
+	buf.WriteByte(0x0A)
+	writeNBTString(&buf, "clickEvent")
+	writeNBTStringEntry(&buf, "action", "open_url")
+	writeNBTStringEntry(&buf, "value", link)
+	buf.WriteByte(0x00)
+	buf.WriteByte(0x00)
 	return buf.Bytes()
 }
 
