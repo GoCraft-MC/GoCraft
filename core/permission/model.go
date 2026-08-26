@@ -46,7 +46,7 @@ func (d Document) Validate() error {
 		return fmt.Errorf("default group is required")
 	}
 	for name, group := range d.Groups {
-		if name == "" || name != Normalize(name) {
+		if name == "" || name != Normalize(name) || strings.ContainsAny(name, " \t\r\n") {
 			return fmt.Errorf("group name %q must be normalized", name)
 		}
 		for _, parent := range group.Parents {

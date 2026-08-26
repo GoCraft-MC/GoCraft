@@ -68,4 +68,9 @@ func TestPermissionDocumentPersistsAndRejectsCycles(t *testing.T) {
 	if err := reloaded.Replace(invalid); err == nil {
 		t.Fatal("cyclic group inheritance was accepted")
 	}
+	invalid = reloaded.Snapshot()
+	invalid.Groups["bad group"] = Group{}
+	if err := reloaded.Replace(invalid); err == nil {
+		t.Fatal("group name containing whitespace was accepted")
+	}
 }

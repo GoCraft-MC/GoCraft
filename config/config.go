@@ -401,6 +401,9 @@ func (c *Config) validate() error {
 //	GOCRAFT_BEDROCK_ENABLED   "true"/"false"              (default: false)
 //	GOCRAFT_BEDROCK_ADDR      Bedrock UDP address         (default: 0.0.0.0:19106)
 //	GOCRAFT_BEDROCK_ONLINE_MODE Xbox Live auth required   (default: true)
+//	GOCRAFT_PERMISSION_EDITOR_ENABLED Enable browser permission editor
+//	GOCRAFT_PERMISSION_EDITOR_ADDR    Editor HTTP bind address
+//	GOCRAFT_PERMISSION_EDITOR_URL     Externally reachable editor base URL
 func (c *Config) ApplyEnvOverrides() error {
 	if v := os.Getenv("GOCRAFT_JAVA_HOST"); v != "" {
 		c.Host = v
@@ -518,6 +521,19 @@ func (c *Config) ApplyEnvOverrides() error {
 		}
 		c.Bedrock.OnlineMode = b
 	}
+	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_PERMISSION_EDITOR_ENABLED %q: %w", v, err)
+		}
+		c.PermissionEditor.Enabled = enabled
+	}
+	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_ADDR"); v != "" {
+		c.PermissionEditor.Address = v
+	}
+	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL"); v != "" {
+		c.PermissionEditor.PublicURL = strings.TrimRight(v, "/")
+	}
 
 	if c.Debug.EnvironmentOverrides {
 		logEnvOverrides()
@@ -549,6 +565,9 @@ func logEnvOverrides() {
 		{"GOCRAFT_KNOCKBACK_VERTICAL", os.Getenv("GOCRAFT_KNOCKBACK_VERTICAL")},
 		{"GOCRAFT_BEDROCK_ENABLED", os.Getenv("GOCRAFT_BEDROCK_ENABLED")},
 		{"GOCRAFT_BEDROCK_ADDR", os.Getenv("GOCRAFT_BEDROCK_ADDR")},
+		{"GOCRAFT_PERMISSION_EDITOR_ENABLED", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED")},
+		{"GOCRAFT_PERMISSION_EDITOR_ADDR", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ADDR")},
+		{"GOCRAFT_PERMISSION_EDITOR_URL", os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL")},
 		{"GOCRAFT_BEDROCK_ONLINE_MODE", os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE")},
 	}
 	for _, v := range vars {

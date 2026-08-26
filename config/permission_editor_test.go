@@ -39,3 +39,15 @@ func TestPermissionEditorConfigurationIsValidated(t *testing.T) {
 		t.Fatal("invalid permission editor bind address was accepted")
 	}
 }
+
+func TestPermissionEditorEnvironmentOverrides(t *testing.T) {
+	t.Setenv("GOCRAFT_PERMISSION_EDITOR_ADDR", "0.0.0.0:9090")
+	t.Setenv("GOCRAFT_PERMISSION_EDITOR_URL", "https://permissions.example/")
+	cfg := defaults()
+	if err := cfg.ApplyEnvOverrides(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PermissionEditor.Address != "0.0.0.0:9090" || cfg.PermissionEditor.PublicURL != "https://permissions.example" {
+		t.Fatalf("permission editor overrides = %+v", cfg.PermissionEditor)
+	}
+}
