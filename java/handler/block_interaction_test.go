@@ -522,6 +522,40 @@ func TestJavaBucketPickupAndPlacement(t *testing.T) {
 	}
 }
 
+func TestJavaImmediateFluidInteractionDirections(t *testing.T) {
+	tests := []struct {
+		name              string
+		placed, neighbor  string
+		dx, dy            int
+		wantPlaced, wantN string
+	}{
+		{"water above lava", "lava", "water", 0, 1, "minecraft:obsidian", "minecraft:water"},
+		{"water below lava", "lava", "water", 0, -1, "minecraft:lava", "minecraft:water"},
+		{"lava above water", "water", "lava", 0, 1, "minecraft:water", "minecraft:lava"},
+		{"lava below water", "water", "lava", 0, -1, "minecraft:water", "minecraft:obsidian"},
+		{"flowing lava beside water", "lava", "water", 1, 0, "minecraft:cobblestone", "minecraft:water"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer w.Close()
+			level := 0
+			if test.name == "flowing lava beside water" {
+				level = 2
+			}
+			w.SetBlock(0, 65, 0, coreworld.MakeFluid("minecraft:"+test.placed, level))
+			w.SetBlock(test.dx, 65+test.dy, 0, coreworld.MakeFluid("minecraft:"+test.neighbor, 0))
+			checkFluidInteraction(0, 65, 0, w, nil)
+			if got := w.GetBlock(0, 65, 0).ResourceLocation(); got != test.wantPlaced {
+				t.Errorf("placed block = %s, want %s", got, test.wantPlaced)
+			}
+			if got := w.GetBlock(test.dx, 65+test.dy, 0).ResourceLocation(); got != test.wantN {
+				t.Errorf("neighbor block = %s, want %s", got, test.wantN)
+			}
+		})
+	}
+}
+
 func TestJavaDecoratedPotStoresAnItem(t *testing.T) {
 	p := player.New([16]byte{}, "potter", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival

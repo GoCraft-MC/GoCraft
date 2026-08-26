@@ -1528,9 +1528,8 @@ func checkFluidInteraction(x, y, z int, w *coreworld.World, mgr *session.Manager
 			// Still lava (level 0) + water = obsidian; flowing = cobblestone.
 			level := coreworld.FluidLevel(placed)
 			var result coreworld.Block
-			if i == 4 {
-				// Water above lava → lava stays, water becomes stone (not cobblestone).
-				// (Skip — vanilla only generates stone in special still-lava cases.)
+			if i == 5 {
+				// Lava falling into water is resolved as stone by the fluid tick.
 				continue
 			}
 			if level == 0 {
@@ -1544,6 +1543,10 @@ func checkFluidInteraction(x, y, z int, w *coreworld.World, mgr *session.Manager
 			return
 		}
 		if isWater && nLoc == "minecraft:lava" {
+			if i == 4 {
+				// Lava above this water falls into it and forms stone.
+				continue
+			}
 			// Water meets lava → lava becomes cobblestone (or obsidian if still).
 			level := coreworld.FluidLevel(neighbor)
 			var result coreworld.Block
