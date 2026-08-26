@@ -1,0 +1,37 @@
+:root { color-scheme: dark; font: 15px system-ui, sans-serif; background: #101510; color: #e8f0e5; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { height: 64px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; background: #182019; border-bottom: 1px solid #344436; }
+header div { display: flex; gap: 12px; align-items: baseline; }
+header strong { color: #72dc72; font-size: 24px; }
+header span { color: #aeb9ac; }
+button { border: 1px solid #4c684f; border-radius: 6px; padding: 9px 13px; background: #263b28; color: inherit; cursor: pointer; }
+button:hover { background: #345337; }
+button.danger { margin-top: 24px; border-color: #814848; background: #4f2929; }
+#status { min-height: 40px; margin: 0; padding: 10px 24px; color: #b8c9b4; background: #131a14; }
+#status.ok { color: #78df78; }
+#status.error { color: #ff8080; }
+.layout { min-height: calc(100vh - 104px); display: grid; grid-template-columns: 260px 1fr; }
+aside { padding: 18px; background: #151c16; border-right: 1px solid #344436; }
+aside h2 { margin: 16px 0 8px; font-size: 13px; color: #94a392; text-transform: uppercase; letter-spacing: .08em; }
+aside button { width: 100%; margin: 3px 0; text-align: left; }
+aside button.selected { border-color: #71c876; background: #335136; }
+main { max-width: 1050px; width: 100%; padding: 28px 36px 80px; }
+h1 { margin-top: 0; font-size: 25px; }
+h2 { font-size: 17px; }
+label { display: block; margin: 18px 0 8px; color: #c8d5c5; }
+input, textarea, select { width: 100%; margin-top: 7px; border: 1px solid #465549; border-radius: 5px; padding: 9px; background: #101510; color: inherit; }
+textarea { font: 13px ui-monospace, monospace; resize: vertical; }
+#commands { margin-top: 10px; border: 1px solid #354238; border-radius: 6px; overflow: hidden; }
+.permission { display: grid; grid-template-columns: 140px 1fr 120px; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #2d382f; }
+.permission:last-child { border: 0; }
+.permission code { overflow-wrap: anywhere; color: #9fc9a1; }
+.permission select { margin: 0; }
+code { color: #9fc9a1; }
+@media (max-width: 700px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { border-right: 0; border-bottom: 1px solid #344436; }
+  main { padding: 22px 18px 60px; }
+  .permission { grid-template-columns: 90px 1fr; }
+  .permission select { grid-column: 1 / -1; }
+}
