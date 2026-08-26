@@ -21,7 +21,8 @@ editor.openGroup = name => {
     const node = document.createElement("code");
     node.textContent = command.node;
     const select = document.createElement("select");
-    for (const [value, label] of [["", "Unset"], ["true", "Allow"], ["false", "Deny"]]) {
+    const unsetLabel = command.default_allowed ? "Unset (public)" : "Unset (operator)";
+    for (const [value, label] of [["", unsetLabel], ["true", "Allow"], ["false", "Deny"]]) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
