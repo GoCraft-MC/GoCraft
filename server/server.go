@@ -531,6 +531,13 @@ func (s *Server) Run(ctx context.Context) error {
 	}()
 
 	var wg sync.WaitGroup
+	if s.permissionEditor != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.runPermissionEditor(ctx)
+		}()
+	}
 
 	// Entity tick + intent processing at 20 TPS.
 	wg.Add(1)
