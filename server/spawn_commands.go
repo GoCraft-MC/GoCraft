@@ -50,6 +50,14 @@ func (s *Server) setWorldSpawn(position spatial.Vec3) error {
 		s.spawnState.set(position)
 	}
 	s.game.OnlinePlayers(func(online *player.Player) { online.WorldSpawn = position })
+	if s.sessions != nil {
+		for _, current := range s.sessions.SnapshotAll() {
+			_ = handler.SyncDefaultSpawnPosition(current.Conn, current.Player)
+		}
+	}
+	if s.bedrockListener != nil {
+		s.bedrockListener.SetWorldSpawn(position)
+	}
 	return nil
 }
 

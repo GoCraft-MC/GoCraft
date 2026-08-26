@@ -371,9 +371,9 @@ func buildArmorAttributes(p *player.Player) *protocol.Packet {
 //	Long   position (64-bit packed block position)
 //	Float  angle    (spawn compass bearing)
 func sendDefaultSpawnPosition(conn *network.ClientConn, p *player.Player) error {
-	x := int64(p.Position.X)
-	y := int64(p.Position.Y)
-	z := int64(p.Position.Z)
+	x := int64(math.Floor(p.WorldSpawn.X))
+	y := int64(math.Floor(p.WorldSpawn.Y))
+	z := int64(math.Floor(p.WorldSpawn.Z))
 	// Minecraft 64-bit packed position: X(26 bits) | Z(26 bits) | Y(12 bits)
 	packed := ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF)
 	pkt := protocol.NewBuilder(packetIDSpawnPosition).
@@ -381,6 +381,11 @@ func sendDefaultSpawnPosition(conn *network.ClientConn, p *player.Player) error 
 		Float(0).
 		Build()
 	return conn.WritePacket(pkt)
+}
+
+// SyncDefaultSpawnPosition updates a Java client's compass/world-spawn target.
+func SyncDefaultSpawnPosition(conn *network.ClientConn, p *player.Player) error {
+	return sendDefaultSpawnPosition(conn, p)
 }
 
 // sendPlayerInfoUpdate sends Player Info Update (0x40 S→C) to add the player

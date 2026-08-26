@@ -67,7 +67,9 @@ type Listener struct {
 	encoder    *bedrockworld.Encoder
 	worldSeed  int64
 	spawnX     int
+	spawnY     int
 	spawnZ     int
+	spawnMu    sync.RWMutex
 	gameMode   player.GameMode
 	difficulty int32
 	sessionsMu sync.RWMutex
@@ -575,6 +577,9 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 
 	// conn.StartGame() blocks here until the client sends SetLocalPlayerAsInitialised.
 	// The goroutine above provides the chunk data the client needs to do so.
+	l.spawnMu.RLock()
+	worldSpawn := protocol.BlockPos{int32(l.spawnX), int32(l.spawnY), int32(l.spawnZ)}
+	l.spawnMu.RUnlock()
 	if err := conn.StartGame(minecraft.GameData{
 		WorldName:         "GoCraft",
 		EntityUniqueID:    int64(bedrockSelfRuntimeID),
@@ -596,7 +601,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		BaseGameVersion: protocol.CurrentVersion,
 		WorldSeed:       l.worldSeed,
 		Dimension:       result.Dimension,
-		WorldSpawn:      protocol.BlockPos{int32(l.spawnX), int32(result.Position.Y), int32(l.spawnZ)},
+		WorldSpawn:      worldSpawn,
 		ChunkRadius:     bedrockChunkRadius,
 		// Network block hashes are stable across Bedrock palette revisions. The
 		// Dragonfly registry and the 1.26.40 protocol fork do not necessarily use

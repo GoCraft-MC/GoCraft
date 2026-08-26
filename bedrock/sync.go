@@ -1466,6 +1466,28 @@ func (l *Listener) BroadcastBlockChange(change coreworld.BlockChange) {
 	l.broadcastDimensionBlockChange(packet.DimensionOverworld, change)
 }
 
+// SetWorldSpawn updates new joins and every connected Bedrock compass target.
+func (l *Listener) SetWorldSpawn(position spatial.Vec3) {
+	blockPosition := protocol.BlockPos{
+		int32(math.Floor(position.X)), int32(math.Floor(position.Y)), int32(math.Floor(position.Z)),
+	}
+	l.spawnMu.Lock()
+	l.spawnX, l.spawnY, l.spawnZ = int(blockPosition[0]), int(blockPosition[1]), int(blockPosition[2])
+	l.spawnMu.Unlock()
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(&packet.SetSpawnPosition{
+			SpawnType: packet.SpawnTypeWorld, Position: blockPosition,
+			Dimension: packet.DimensionOverworld, SpawnPosition: blockPosition,
+		})
+	}
+}
+
 // DimensionBlockObserver returns a world observer scoped to one Bedrock
 // dimension, preventing updates at identical coordinates leaking to viewers in
 // another dimension.

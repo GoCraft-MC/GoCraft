@@ -433,6 +433,7 @@ func New(cfg *config.Config) (*Server, error) {
 			configuredGameMode(cfg.DefaultGameMode),
 			difficultyID(cfg.Difficulty),
 		)
+		s.bedrockListener.SetWorldSpawn(s.currentWorldSpawn())
 		s.sessions.SetMessageObserver(s.bedrockListener.BroadcastMessage)
 		s.sessions.SetExternalKnockbackHandler(func(p *player.Player, sourceX, sourceZ, horizontal, vertical float64) {
 			s.sendLegacyPlayerKnockback(&session.Session{Player: p}, sourceX, sourceZ, horizontal, vertical)
