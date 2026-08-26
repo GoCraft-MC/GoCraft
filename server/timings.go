@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"runtime/metrics"
 	"strings"
@@ -28,8 +29,8 @@ var sectionNames = [sectionCount]string{
 }
 
 // windowSize is the number of ticks kept in the rolling timing window.
-// 600 ticks = 30 seconds at 20 TPS.
-const windowSize = 600
+// 1200 ticks = one minute at 20 TPS, matching Paper's /mspt windows.
+const windowSize = 1200
 
 // tickTimings records per-subsystem durations over a rolling window of ticks.
 // It is written only by the entity tick goroutine (commit, cur) and read
@@ -126,6 +127,55 @@ func (t *tickTimings) TPS() (tps float64, avgMs float64) {
 		tps = 20
 	}
 	return tps, avgMs
+}
+
+// MSPT returns Paper-style average/minimum/maximum tick times for recent windows.
+func (t *tickTimings) MSPT() string {
+	t.mu.Lock()
+	fill, position, window := t.windowFill, t.windowPos, t.window
+	t.mu.Unlock()
+	if fill == 0 {
+		return "§cNo tick-time data collected yet; wait a few seconds."
+	}
+	type period struct {
+		label string
+		ticks int
+	}
+	periods := []period{{"5s", 100}, {"10s", 200}, {"1m", 1200}}
+	parts := make([]string, 0, len(periods))
+	for _, current := range periods {
+		count := min(current.ticks, fill)
+		var total int64
+		minimum, maximum := int64(math.MaxInt64), int64(0)
+		for offset := 0; offset < count; offset++ {
+			index := (position - 1 - offset + windowSize) % windowSize
+			value := window[index]
+			total += value
+			if value < minimum {
+				minimum = value
+			}
+			if value > maximum {
+				maximum = value
+			}
+		}
+		averageMs := float64(total) / float64(count) / 1e6
+		minimumMs, maximumMs := float64(minimum)/1e6, float64(maximum)/1e6
+		parts = append(parts, fmt.Sprintf("§7%s: %s%.2f§7/%s%.2f§7/%s%.2f",
+			current.label, msptColour(averageMs), averageMs,
+			msptColour(minimumMs), minimumMs, msptColour(maximumMs), maximumMs))
+	}
+	return "§6Server tick times §7(avg/min/max): " + strings.Join(parts, "  ")
+}
+
+func msptColour(milliseconds float64) string {
+	switch {
+	case milliseconds >= 50:
+		return "§c"
+	case milliseconds >= 40:
+		return "§e"
+	default:
+		return "§a"
+	}
 }
 
 // Report returns a multi-line Spark-style timings report (Minecraft colour codes).

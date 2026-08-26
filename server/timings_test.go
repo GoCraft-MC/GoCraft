@@ -19,3 +19,25 @@ func TestTimingsReportIncludesRuntimeAndPlayerStats(t *testing.T) {
 		t.Fatalf(`plain console report still contains formatting: %q`, plain)
 	}
 }
+
+func TestMSPTReportsPaperStyleRollingWindows(t *testing.T) {
+	timings := newTickTimings()
+	for tick := 0; tick < 1200; tick++ {
+		timings.commit(time.Duration(10+tick%3) * time.Millisecond)
+	}
+	report := timings.MSPT()
+	for _, expected := range []string{"avg/min/max", "5s:", "10s:", "1m:"} {
+		if !strings.Contains(report, expected) {
+			t.Errorf("MSPT report does not contain %q: %s", expected, report)
+		}
+	}
+	if !strings.Contains(report, "§a") {
+		t.Fatalf("healthy MSPT report is not green: %s", report)
+	}
+}
+
+func TestMSPTReportsMissingSamples(t *testing.T) {
+	if report := newTickTimings().MSPT(); !strings.Contains(report, "No tick-time data") {
+		t.Fatalf("empty MSPT report = %q", report)
+	}
+}
