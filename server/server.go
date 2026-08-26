@@ -92,6 +92,7 @@ type Server struct {
 	sessions           *session.Manager
 	cmds               *handler.Dispatcher
 	permissions        *corepermission.Manager
+	permissionEditor   *permissionEditor
 
 	// Bedrock adapter (nil when bedrock.enabled = false).
 	bedrockListener *bedrock.Listener
@@ -430,6 +431,11 @@ func New(cfg *config.Config) (*Server, error) {
 			fmt.Sprintf("Time set to %d", s.worldAge%24000))
 	})
 	cmds.RequireOperator(`timings`, `tps`, `mspt`, `time`)
+	if cfg.PermissionEditor.Enabled {
+		s.permissionEditor = newPermissionEditor(permissionManager, cfg.PermissionEditor.PublicURL,
+			time.Duration(cfg.PermissionEditor.SessionMinutes)*time.Minute)
+	}
+	s.registerPermissionCommands()
 	// Warm spawn immediately; login-time streaming will reuse this cache.
 	s.world.QueuePregeneration(int32(math.Floor(float64(spawnX)/16)), int32(math.Floor(float64(spawnZ)/16)), int32(cfg.PreGenerateRadius))
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
@@ -642,6 +648,12 @@ func (s *Server) executeConsoleCommand(input string) string {
 			return `Timing collector is unavailable`
 		}
 		return stripMinecraftFormatting(s.timings.MSPT())
+	case `gocraft`:
+		message, err := s.executePermissionCommand(fields[1:])
+		if err != nil {
+			return `Error: ` + err.Error()
+		}
+		return message
 	case `op`:
 		if len(fields) != 2 {
 			return `Usage: op <player>`
