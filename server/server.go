@@ -298,6 +298,7 @@ func New(cfg *config.Config) (*Server, error) {
 	worldInstance := coreworld.New(coreworld.NewOverworldGenerator(cfg.WorldSeed), storage, cfg.Villagers)
 	netherWorld := coreworld.New(coreworld.NewNetherGenerator(cfg.WorldSeed^0x4e6574686572), netherStorage, false)
 	endWorld := coreworld.New(coreworld.NewEndGenerator(cfg.WorldSeed^0x456e64), endStorage, false)
+	netherWorld.SetLavaTickDelay(10)
 	worldInstance.SetMaxCachedChunks(cfg.MaxCachedChunks)
 	netherWorld.SetMaxCachedChunks(cfg.MaxCachedChunks)
 	endWorld.SetMaxCachedChunks(cfg.MaxCachedChunks)

@@ -75,8 +75,9 @@ type World struct {
 
 	// worldTime is the current time-of-day (0–23999) published by the server
 	// tick goroutine once per second so handler code can read it atomically.
-	worldTime   atomic.Int64
-	physicsTime atomic.Int64
+	worldTime     atomic.Int64
+	physicsTime   atomic.Int64
+	lavaTickDelay atomic.Int64
 
 	// requestTimeSkip is set by the bed-sleep handler and drained by the
 	// server tick goroutine which then advances worldAge to the next morning.
@@ -147,6 +148,7 @@ func New(gen Generator, storage Storage, villagersEnabled bool) *World {
 		BlockPhysics:         newBlockPhysics(),
 	}
 	w.Redstone = newRedstoneEngine(w)
+	w.lavaTickDelay.Store(30)
 	const workers = 2
 	w.pregenWG.Add(workers)
 	for i := 0; i < workers; i++ {
@@ -1090,7 +1092,7 @@ func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
 		for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
 			nb := w.GetBlock(x+d[0], y, z+d[1])
 			if IsFluidBlock(nb.ResourceLocation()) {
-				w.BlockPhysics.ScheduleFluid(x+d[0], y, z+d[1], age, 5)
+				w.BlockPhysics.ScheduleFluid(x+d[0], y, z+d[1], age, w.fluidTickDelay(nb.ResourceLocation()))
 			}
 		}
 		// Fluid from above may fall in.
@@ -1107,7 +1109,12 @@ func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
 
 	// 3. If we placed a fluid, schedule spreading.
 	if IsFluidBlock(placedName) {
-		w.BlockPhysics.ScheduleFluid(x, y, z, age, 5)
+		w.BlockPhysics.ScheduleFluid(x, y, z, age, w.fluidTickDelay(placedName))
+		for _, pos := range neighbors6(x, y, z) {
+			if IsFluidBlock(w.GetBlock(pos[0], pos[1], pos[2]).ResourceLocation()) {
+				w.BlockPhysics.ScheduleFluid(pos[0], pos[1], pos[2], age, 1)
+			}
+		}
 	}
 
 	// 4. Only removing/replacing a log can disconnect leaves. Previously every
@@ -1272,6 +1279,20 @@ func (w *World) SetPhysicsTime(t int64) { w.physicsTime.Store(t) }
 
 // PhysicsTime returns the last published monotonic server tick.
 func (w *World) PhysicsTime() int64 { return w.physicsTime.Load() }
+
+// SetLavaTickDelay configures the dimension-specific lava flow delay.
+func (w *World) SetLavaTickDelay(delay int64) {
+	if delay > 0 {
+		w.lavaTickDelay.Store(delay)
+	}
+}
+
+func (w *World) fluidTickDelay(name string) int64 {
+	if name == "minecraft:lava" {
+		return w.lavaTickDelay.Load()
+	}
+	return 5
+}
 
 // RequestTimeSkip is called by the sleep handler to ask the tick goroutine
 // to advance worldAge to the next morning (time-of-day 0).
