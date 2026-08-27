@@ -92,6 +92,10 @@ type Listener struct {
 
 	// resourcePacks holds optional Bedrock-format packs sent to every client.
 	resourcePacks []*resource.Pack
+
+	// customItemEntries are component-based item definitions appended to the
+	// vanilla item registry in every StartGame packet.
+	customItemEntries []protocol.ItemEntry
 }
 
 type bedrockSession struct {
@@ -257,6 +261,12 @@ func (l *Listener) SetResourcePack(pack *resource.Pack) {
 // equivalent to calling SetResourcePack for each element. Call before Listen.
 func (l *Listener) SetResourcePacks(packs []*resource.Pack) {
 	l.resourcePacks = append(l.resourcePacks, packs...)
+}
+
+// SetCustomItemEntries registers component-based custom item entries that are
+// appended to the vanilla item table in every StartGame packet. Call before Listen.
+func (l *Listener) SetCustomItemEntries(entries []protocol.ItemEntry) {
+	l.customItemEntries = entries
 }
 
 func (l *Listener) worldForDimension(dimension int32) *coreworld.World {
@@ -639,7 +649,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		// exact Pumpkin/BDS 1.26.40 runtime table. Omitting it leaves the client
 		// indexing unknown IDs when Creative search or scrolling is opened and
 		// drops data-driven behaviour such as consumable item components.
-		Items:           bedrockItemRegistry(),
+		Items:           append(bedrockItemRegistry(), l.customItemEntries...),
 		BaseGameVersion: protocol.CurrentVersion,
 		WorldSeed:       l.worldSeed,
 		Dimension:       result.Dimension,
