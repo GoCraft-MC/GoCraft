@@ -51,6 +51,19 @@ func TestSlotCarriesEnchantmentComponent(t *testing.T) {
 	}
 }
 
+func TestEnchantedSlotRoundTripsClientEncoding(t *testing.T) {
+	want := player.ItemStack{
+		ItemID: "minecraft:compass", Count: 1,
+		Enchantments: "minecraft:mending=1;minecraft:vanishing_curse=1",
+	}
+	b := protocol.NewBuilder(0)
+	encodeSlot(b, want)
+	got, err := readPlainSlot(bytes.NewReader(b.Build().Data))
+	if err != nil || got != want {
+		t.Fatalf("decoded slot = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 func TestLegacyTooltipHidesVanillaAttributesAndUsesInstantLabel(t *testing.T) {
 	ConfigureItemTooltips(true, true, true, true)
 	defer ConfigureItemTooltips(true, true, true, false)

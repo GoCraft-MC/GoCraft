@@ -371,6 +371,7 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 		return player.ItemStack{}, err
 	}
 	damage := int32(0)
+	enchantments := ""
 	for i := int32(0); i < added; i++ {
 		componentType, err := protocol.ReadVarInt(r)
 		if err != nil {
@@ -396,6 +397,22 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 					return player.ItemStack{}, fmt.Errorf("reading lore: %w", err)
 				}
 			}
+		case 10: // enchantments: registry ID/level pairs
+			length, readErr := protocol.ReadVarInt(r)
+			if readErr != nil || length < 0 || length > 256 {
+				return player.ItemStack{}, fmt.Errorf("invalid enchantment count %d: %w", length, readErr)
+			}
+			stack := player.ItemStack{ItemID: "minecraft:stone", Count: 1}
+			for entry := int32(0); entry < length; entry++ {
+				enchantmentID, idErr := protocol.ReadVarInt(r)
+				level, levelErr := protocol.ReadVarInt(r)
+				name := javaworld.EnchantmentName(enchantmentID)
+				if idErr != nil || levelErr != nil || name == "" || level < 1 || level > 255 {
+					return player.ItemStack{}, fmt.Errorf("invalid enchantment id=%d level=%d", enchantmentID, level)
+				}
+				stack.Enchant(name, int(level))
+			}
+			enchantments = stack.Enchantments
 		case 13: // attribute modifiers, including the final showTooltip flag
 			attributes, readErr := protocol.ReadVarInt(r)
 			if readErr != nil || attributes < 0 || attributes > 256 {
@@ -437,7 +454,7 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	if damage < 0 {
 		damage = 0
 	}
-	return player.ItemStack{ItemID: name, Count: int(count), Damage: int(damage)}, nil
+	return player.ItemStack{ItemID: name, Count: int(count), Damage: int(damage), Enchantments: enchantments}, nil
 }
 
 func skipNetworkNBT(r *bytes.Reader) error {
