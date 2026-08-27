@@ -129,6 +129,20 @@
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+      <dialog id="applyDialog" class="apply-dialog">
+        <div class="apply-card">
+          <div class="apply-icon">✓</div>
+          <h3>Changes saved!</h3>
+          <p>Run this command in-game or in your server console to apply:</p>
+          <div class="apply-command-row">
+            <code id="applyCommand"></code>
+            <button id="copyBtn" class="copy-btn" title="Copy to clipboard">⎘ Copy</button>
+          </div>
+          <p class="apply-hint">The command will expire after 15 minutes.</p>
+          <button id="closeApplyBtn" class="primary-button apply-close">Done</button>
+        </div>
+      </dialog>
+
       <dialog id="groupDialog">
         <form method="dialog" class="dialog-card">
           <h3>Create group</h3>

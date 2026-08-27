@@ -214,10 +214,9 @@ el("saveBtn").addEventListener("click", async () => {
     });
     if (!resp.ok) throw new Error(`Bytebin error ${resp.status}`);
     const {key} = await resp.json();
-    showToast(
-      `✓ Saved! Run in-game or console:<br><code>/gocraft applyedits ${key}</code>`,
-      0
-    );
+    const command = `/gocraft applyedits ${key}`;
+    el("applyCommand").textContent = command;
+    el("applyDialog").showModal();
   } catch (err) {
     showToast(`Error saving: ${err.message}`);
   } finally {
@@ -225,6 +224,16 @@ el("saveBtn").addEventListener("click", async () => {
     btn.textContent = "Save changes";
   }
 });
+
+el("copyBtn").addEventListener("click", () => {
+  const command = el("applyCommand").textContent;
+  navigator.clipboard.writeText(command).then(() => {
+    el("copyBtn").textContent = "✓ Copied!";
+    setTimeout(() => { el("copyBtn").textContent = "⎘ Copy"; }, 2000);
+  });
+});
+
+el("closeApplyBtn").addEventListener("click", () => el("applyDialog").close());
 
 // ── Add group dialog ──────────────────────────────────────────────────────────
 

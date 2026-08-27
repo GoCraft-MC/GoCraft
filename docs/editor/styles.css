@@ -632,3 +632,89 @@ dialog::backdrop {
   font-family: ui-monospace, monospace;
   color: var(--accent);
 }
+
+/* Apply command dialog */
+.apply-dialog {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.apply-dialog::backdrop {
+  background: rgba(2, 7, 18, .8);
+  backdrop-filter: blur(6px);
+}
+
+.apply-card {
+  width: min(520px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 32px 28px 24px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 12px;
+  text-align: center;
+}
+
+.apply-icon {
+  font-size: 2.4rem;
+  color: var(--success);
+  line-height: 1;
+}
+
+.apply-card h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.apply-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .9rem;
+}
+
+.apply-command-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #0a1020;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.apply-command-row code {
+  flex: 1;
+  font-family: ui-monospace, monospace;
+  font-size: .92rem;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.copy-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: .83rem;
+  white-space: nowrap;
+}
+
+.copy-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.apply-hint {
+  font-size: .8rem !important;
+}
+
+.apply-close {
+  width: 100%;
+  margin-top: 4px;
+}
