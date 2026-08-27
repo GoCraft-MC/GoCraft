@@ -90,6 +90,7 @@ func RegisterBuiltins(d *Dispatcher) {
 	d.RegisterOperator(`fill`, cmdFill)
 	d.RegisterOperator(`clone`, cmdClone)
 	d.RegisterOperator(`clear`, cmdClear)
+	d.RegisterOperator(`damage`, cmdDamage)
 }
 
 func cmdWhitelist(ctx CommandContext) error {
