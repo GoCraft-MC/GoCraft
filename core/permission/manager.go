@@ -58,6 +58,28 @@ func (m *Manager) Replace(document Document) error {
 	return nil
 }
 
+// Reload replaces the active document from its configured file atomically.
+func (m *Manager) Reload() error {
+	if m.path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(m.path)
+	if err != nil {
+		return err
+	}
+	var document Document
+	if err := json.Unmarshal(data, &document); err != nil {
+		return errors.New("decode permissions: " + err.Error())
+	}
+	if err := validateDocument(document); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.document = cloneDocument(document)
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *Manager) persist(document Document) error {
 	if m.path == "" {
 		return nil

@@ -1,6 +1,8 @@
 package permission
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -39,6 +41,30 @@ func TestAllowedResolvesGroupsWildcardsAndUserOverrides(t *testing.T) {
 	}
 	if !manager.Allowed("operator", "anything", true, false) {
 		t.Fatal("operator wildcard bypass was not honored")
+	}
+}
+
+func TestManagerReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "permissions.json")
+	manager, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := manager.Snapshot()
+	document.Groups["builder"] = Group{Permissions: map[string]bool{"gocraft.command.fill": true}}
+	document.Users["alex"] = User{Groups: []string{"builder"}}
+	data, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if !manager.Allowed("alex", "gocraft.command.fill", false, false) {
+		t.Fatal("reloaded permission was not applied")
 	}
 }
 
