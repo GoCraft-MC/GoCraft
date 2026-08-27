@@ -5,6 +5,7 @@ package player
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"GoCraft/core/spatial"
@@ -40,6 +41,7 @@ type Player struct {
 	healthMu     sync.Mutex
 	experienceMu sync.Mutex
 	tagsMu       sync.RWMutex
+	activityUnix atomic.Int64
 
 	// UUID is the player's unique identifier (edition-agnostic).
 	UUID [16]byte
@@ -470,7 +472,7 @@ func (p *Player) GiveItem(item ItemStack) bool {
 // Core-only callers get Creative for backwards compatibility; the server
 // overrides this with default_gamemode from server.yml when players join.
 func New(uuid [16]byte, username string, edition ClientEdition) *Player {
-	return &Player{
+	p := &Player{
 		UUID:                uuid,
 		Username:            username,
 		Edition:             edition,
@@ -488,4 +490,22 @@ func New(uuid [16]byte, username string, edition ClientEdition) *Player {
 		KnockbackHorizontal: 0.4,
 		KnockbackVertical:   0.4,
 	}
+	p.TouchActivity()
+	return p
+}
+
+// TouchActivity records client traffic for the server idle timeout.
+func (p *Player) TouchActivity() {
+	if p != nil {
+		p.activityUnix.Store(time.Now().UnixNano())
+	}
+}
+
+// IdleFor reports the duration since the player's last client packet.
+func (p *Player) IdleFor(now time.Time) time.Duration {
+	last := p.activityUnix.Load()
+	if last == 0 {
+		return 0
+	}
+	return now.Sub(time.Unix(0, last))
 }
