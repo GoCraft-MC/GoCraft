@@ -106,6 +106,28 @@ type ResourcePackConfig struct {
 	Bedrock BedrockResourcePackConfig `yaml:"bedrock"`
 }
 
+// CustomItemsConfig controls GoCraft's cross-edition custom item system.
+// Place item packs in sub-directories under PacksDir (default: "packs/").
+// Each pack directory must contain an items.yml and a textures/ folder.
+type CustomItemsConfig struct {
+	Enabled bool `yaml:"enabled"`
+
+	// PacksDir is the directory that contains individual pack sub-directories.
+	PacksDir string `yaml:"packs_dir"`
+
+	// Java controls how the auto-generated Java resource pack is delivered.
+	Java struct {
+		// ServePort is the port the embedded HTTP server listens on.
+		// Java clients download the generated pack from this port.
+		ServePort int `yaml:"serve_port"`
+
+		// PublicHost is the hostname or IP address that Java clients use to
+		// reach this server (e.g. your server's public IP or domain).
+		// Leave empty for local/LAN testing only.
+		PublicHost string `yaml:"public_host"`
+	} `yaml:"java"`
+}
+
 // PermissionEditorConfig controls the bytebin-based permission editor.
 // The server uploads permission data to bytebin (outbound only — no listening
 // port needed), and the editor runs as a static GitHub Pages site.
@@ -201,6 +223,7 @@ type Config struct {
 	Operators        []string
 	Whitelist        WhitelistConfig        `yaml:"whitelist"`
 	ResourcePack     ResourcePackConfig     `yaml:"resource_pack"`
+	CustomItems      CustomItemsConfig      `yaml:"custom_items"`
 	PermissionEditor PermissionEditorConfig `yaml:"permission_editor"`
 	Debug            DebugConfig            `yaml:"debug"`
 
@@ -244,6 +267,13 @@ func defaults() *Config {
 			WaterAmbient:              20,
 		},
 		Whitelist: WhitelistConfig{Enabled: false, Players: []string{}},
+		CustomItems: func() CustomItemsConfig {
+			var ci CustomItemsConfig
+			ci.Enabled = true
+			ci.PacksDir = "packs"
+			ci.Java.ServePort = 8080
+			return ci
+		}(),
 		PermissionEditor: PermissionEditorConfig{
 			Enabled:    true,
 			EditorURL:  "https://el211.github.io/GoCraft/editor",
