@@ -55,6 +55,7 @@ import (
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 	"GoCraft/java/world/anvil"
+	"GoCraft/customitems"
 	bedrockpacket "github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -93,6 +94,9 @@ type Server struct {
 	cmds               *handler.Dispatcher
 	permissions        *corepermission.Manager
 	permissionEditor   *permissionEditor
+
+	// Custom item packs (nil when custom_items.enabled = false or no packs found).
+	customItems *customitems.Manager
 
 	// Bedrock adapter (nil when bedrock.enabled = false).
 	bedrockListener *bedrock.Listener
@@ -309,6 +313,22 @@ func New(cfg *config.Config) (*Server, error) {
 		chatFmt.glyphs = glyphs
 	}
 	cmds.SetChatFormatter(chatFmt.apply)
+
+	// Custom item packs — loaded before the Bedrock listener so that the
+	// generated .mcaddon can be prepended to the pack list.
+	var customItemsMgr *customitems.Manager
+	if cfg.CustomItems.Enabled {
+		mgr, err := customitems.Load(cfg.CustomItems.PacksDir)
+		if err != nil {
+			slog.Warn("customitems: failed to load packs, custom items disabled", "err", err)
+		} else {
+			customItemsMgr = mgr
+			if !mgr.IsEmpty() {
+				slog.Info("customitems: loaded", "count", len(mgr.Items()))
+			}
+		}
+	}
+
 	cmds.SetEntityIDAllocator(gameCore.NextEntityID)
 	cmds.SetPlayerFinder(func(name string) *player.Player {
 		var found *player.Player
@@ -359,6 +379,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessions:                session.NewManager(),
 		cmds:                    cmds,
 		permissions:             permissionManager,
+		customItems:             customItemsMgr,
 		intentBus:               bus,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
@@ -488,12 +509,26 @@ func New(cfg *config.Config) (*Server, error) {
 			configuredGameMode(cfg.DefaultGameMode),
 			difficultyID(cfg.Difficulty),
 		)
+		// Load manually-configured Bedrock packs from server.yml.
 		if cfg.ResourcePack.Bedrock.Enabled && len(cfg.ResourcePack.Bedrock.Paths) > 0 {
 			if packs, err := loadBedrockPacks(cfg.ResourcePack.Bedrock.Paths); err != nil {
 				slog.Warn("could not load Bedrock resource packs", "err", err)
 			} else {
 				s.bedrockListener.SetResourcePacks(packs)
 			}
+		}
+		// Inject auto-generated custom-item Bedrock pack and StartGame entries.
+		if customItemsMgr != nil && !customItemsMgr.IsEmpty() {
+			if addonData, err := customItemsMgr.BuildBedrockPack(); err != nil {
+				slog.Warn("customitems: could not build Bedrock pack", "err", err)
+			} else if addonData != nil {
+				if pack, err := loadBedrockPackFromBytes(addonData); err != nil {
+					slog.Warn("customitems: could not load Bedrock pack", "err", err)
+				} else {
+					s.bedrockListener.SetResourcePack(pack)
+				}
+			}
+			s.bedrockListener.SetCustomItemEntries(customItemsMgr.BedrockItemEntries())
 		}
 		s.bedrockListener.SetWorldSpawn(s.currentWorldSpawn())
 		s.sessions.SetMessageObserver(s.bedrockListener.BroadcastMessage)
@@ -567,6 +602,28 @@ func (s *Server) Run(ctx context.Context) error {
 			"onlineMode", s.cfg.Bedrock.OnlineMode,
 		)
 	}
+	// Start the Java custom-item pack HTTP server if we have items and Java is enabled.
+	if s.cfg.JavaEnabled && s.customItems != nil && !s.customItems.IsEmpty() {
+		if packData, hash, err := s.customItems.BuildJavaPack(); err != nil {
+			slog.Warn("customitems: could not build Java pack", "err", err)
+		} else {
+			port := s.cfg.CustomItems.Java.ServePort
+			if port == 0 {
+				port = 8080
+			}
+			host := s.cfg.CustomItems.Java.PublicHost
+			if ps, err := customitems.StartJavaPackServer(packData, hash, host, port); err != nil {
+				slog.Warn("customitems: could not start Java pack server", "err", err)
+			} else {
+				// Override the Java resource pack config with the auto-generated URL/hash.
+				s.cfg.ResourcePack.Java.Enabled = true
+				s.cfg.ResourcePack.Java.URL = ps.URL()
+				s.cfg.ResourcePack.Java.Hash = ps.HashHex()
+				slog.Info("customitems: Java pack ready", "url", ps.URL())
+			}
+		}
+	}
+
 	slog.Info("starting GoCraft server", "motd", s.cfg.MOTD, "worldSeed", s.cfg.WorldSeed,
 		"worldStorage", s.cfg.WorldStorage, "maxCachedChunks", s.cfg.MaxCachedChunks)
 
