@@ -1224,13 +1224,13 @@ func (l *Listener) SetWeather(raining, thundering bool) {
 	}
 	l.sessionsMu.RUnlock()
 	for _, current := range sessions {
-		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: event, EventData: data})
+		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(event), EventData: data})
 		thunderEvent, thunderData := packet.LevelEventStopThunderstorm, int32(0)
 		if thundering {
 			thunderEvent = packet.LevelEventStartThunderstorm
 			thunderData = 65535
 		}
-		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: thunderEvent, EventData: thunderData})
+		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(thunderEvent), EventData: thunderData})
 	}
 }
 
