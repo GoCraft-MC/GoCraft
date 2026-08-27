@@ -348,6 +348,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		PlayerUUID:      playerUUID,
 		Username:        identity.DisplayName,
 		Edition:         "bedrock",
+		RemoteAddress:   remote.String(),
 		TrustedIdentity: authenticated,
 		Done:            done,
 	}); err != nil {

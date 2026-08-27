@@ -963,6 +963,7 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	}
 
 	p := player.New(i.PlayerUUID, i.Username, edition)
+	p.RemoteAddress = i.RemoteAddress
 	p.Operator = handler.IsOperatorName(i.Username)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
 	p.GameMode = configuredGameMode(s.cfg.DefaultGameMode)
@@ -4480,7 +4481,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 		}
 
 		// ── Play state ───────────────────────────────────────────────────────
-		p := s.registerPlayer(result)
+		p := s.registerPlayer(result, remote.String())
 		defer func() {
 			if p.VehicleEntityID != 0 {
 				s.dismountPlayer(p)
@@ -4501,9 +4502,10 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 
 // registerPlayer creates a core Player from a LoginResult, assigns an entity ID
 // via the game core, and updates the global online count used in status pings.
-func (s *Server) registerPlayer(result *handler.LoginResult) *player.Player {
+func (s *Server) registerPlayer(result *handler.LoginResult, remoteAddress string) *player.Player {
 	// protocol.UUID is [16]byte — convertible to the core's raw [16]byte UUID.
 	p := player.New([16]byte(result.UUID), result.Name, player.ClientEditionJava)
+	p.RemoteAddress = remoteAddress
 	p.Operator = handler.IsOperatorName(result.Name)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
 	p.GameMode = configuredGameMode(s.cfg.DefaultGameMode)
