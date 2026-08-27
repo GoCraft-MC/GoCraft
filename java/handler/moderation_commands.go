@@ -10,6 +10,8 @@ import (
 func registerModerationCommands(d *Dispatcher) {
 	d.RegisterOperator("ban", cmdBan)
 	d.RegisterOperator("ban-ip", cmdBanIP)
+	d.RegisterOperator("banlist", cmdBanList)
+	d.RegisterOperator("deop", cmdDeop)
 	d.RegisterOperator("pardon", cmdPardon)
 	d.RegisterOperator("pardon-ip", cmdPardonIP)
 }
