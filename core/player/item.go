@@ -38,6 +38,9 @@ type ItemStack struct {
 	// Damage is durability already consumed. New items start at zero and break
 	// when Damage reaches MaxDurability(ItemID).
 	Damage int
+	// Enchantments stores sorted resource-location/level pairs as a compact,
+	// comparable canonical component string.
+	Enchantments string `json:",omitempty"`
 }
 
 type armorItemStats struct {
