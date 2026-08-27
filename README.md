@@ -145,6 +145,7 @@ Every command literal has its own permission. `Public` is the fallback for playe
 | `/deop` | `gocraft.command.deop` | Operator |
 | `/difficulty` | `gocraft.command.difficulty` | Operator |
 | `/effect` | `gocraft.command.effect` | Operator |
+| `/experience` | `gocraft.command.experience` | Operator |
 | `/fill` | `gocraft.command.fill` | Operator |
 | `/fly` | `gocraft.command.fly` | Operator |
 | `/flyspeed` | `gocraft.command.flyspeed` | Operator |
@@ -196,6 +197,7 @@ Every command literal has its own permission. `Public` is the fallback for playe
 | `/weather` | `gocraft.command.weather` | Operator |
 | `/whitelist` | `gocraft.command.whitelist` | Operator |
 | `/world` | `gocraft.command.world` | Operator |
+| `/xp` | `gocraft.command.xp` | Operator |
 | `/xyz` | `gocraft.command.xyz` | Public |
 
 ### Not implemented

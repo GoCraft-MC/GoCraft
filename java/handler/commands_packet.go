@@ -179,7 +179,7 @@ func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
 		"ban", "ban-ip", "banlist", "pardon", "pardon-ip", "deop",
 		"save-all", "save-off", "save-on", "stop", "defaultgamemode", "difficulty",
 		"setblock", "fill", "clone", "spawnpoint", "setworldspawn", "weather",
-		"clear", "damage", "me", "say", "msg", "tell", "w",
+		"clear", "damage", "experience", "xp", "me", "say", "msg", "tell", "w",
 	} {
 		arguments := addArgument("arguments", parserString, true, stringParser(2))
 		rootChildren = append(rootChildren, addLiteral(name, true, arguments))
