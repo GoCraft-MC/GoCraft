@@ -169,6 +169,23 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 	if err := conn.WritePacket(buildSetTime(age, age%24000)); err != nil {
 		return fmt.Errorf("play: set time: %w", err)
 	}
+	weatherEvent, rainLevel := byte(2), float32(0)
+	if p.Raining {
+		weatherEvent, rainLevel = 1, 1
+	}
+	if err := sendGameEvent(conn, weatherEvent, 0); err != nil {
+		return fmt.Errorf("play: weather: %w", err)
+	}
+	if err := sendGameEvent(conn, 7, rainLevel); err != nil {
+		return fmt.Errorf("play: rain level: %w", err)
+	}
+	thunderLevel := float32(0)
+	if p.Thundering {
+		thunderLevel = 1
+	}
+	if err := sendGameEvent(conn, 8, thunderLevel); err != nil {
+		return fmt.Errorf("play: thunder level: %w", err)
+	}
 
 	slog.Info("player entered play state",
 		"remote", conn.RemoteAddr(),
