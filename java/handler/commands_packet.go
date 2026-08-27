@@ -177,7 +177,7 @@ func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
 
 	for _, name := range []string{
 		"ban", "ban-ip", "banlist", "pardon", "pardon-ip", "deop",
-		"save-all", "save-off", "save-on", "stop", "defaultgamemode", "difficulty",
+		"save-all", "save-off", "save-on", "stop", "defaultgamemode", "difficulty", "setidletimeout",
 		"setblock", "fill", "clone", "spawnpoint", "setworldspawn", "weather",
 		"clear", "damage", "experience", "xp", "rotate", "tag", "me", "say", "msg", "tell", "w", "random", "reload",
 	} {

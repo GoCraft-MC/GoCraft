@@ -178,6 +178,7 @@ Every command literal has its own permission. `Public` is the fallback for playe
 | `/say` | `gocraft.command.say` | Operator |
 | `/seed` | `gocraft.command.seed` | Operator |
 | `/setblock` | `gocraft.command.setblock` | Operator |
+| `/setidletimeout` | `gocraft.command.setidletimeout` | Operator |
 | `/setspawn` | `gocraft.command.setspawn` | Operator |
 | `/setworldspawn` | `gocraft.command.setworldspawn` | Operator |
 | `/spawn` | `gocraft.command.spawn` | Public |
