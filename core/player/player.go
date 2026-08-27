@@ -39,6 +39,7 @@ const (
 type Player struct {
 	healthMu     sync.Mutex
 	experienceMu sync.Mutex
+	tagsMu       sync.RWMutex
 
 	// UUID is the player's unique identifier (edition-agnostic).
 	UUID [16]byte
@@ -87,6 +88,7 @@ type Player struct {
 	ExperienceLevel    int32
 	ExperienceTotal    int32
 	ExperienceProgress float32
+	tags               map[string]struct{}
 	Dead               bool
 	LastDamageCause    string
 	InvulnerableUntil  time.Time
@@ -477,6 +479,7 @@ func New(uuid [16]byte, username string, edition ClientEdition) *Player {
 		GameMode:            GameModeCreative,
 		FlySpeed:            0.05,
 		WalkSpeed:           0.1,
+		tags:                make(map[string]struct{}),
 		Health:              20,
 		MaxHealth:           20,
 		Food:                20,
