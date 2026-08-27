@@ -1213,10 +1213,14 @@ func (l *Listener) SetDefaultGameMode(mode player.GameMode) {
 
 // SetWeather publishes vanilla rain level events to every Bedrock session.
 func (l *Listener) SetWeather(raining, thundering bool) {
-	event, data := packet.LevelEventStopRaining, int32(0)
+	state := uint32(0)
 	if raining {
-		event, data = packet.LevelEventStartRaining, 65535
+		state = 1
 	}
+	if thundering {
+		state = 2
+	}
+	l.weather.Store(state)
 	l.sessionsMu.RLock()
 	sessions := make([]*bedrockSession, 0, len(l.sessions))
 	for _, current := range l.sessions {
@@ -1224,14 +1228,22 @@ func (l *Listener) SetWeather(raining, thundering bool) {
 	}
 	l.sessionsMu.RUnlock()
 	for _, current := range sessions {
-		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(event), EventData: data})
-		thunderEvent, thunderData := packet.LevelEventStopThunderstorm, int32(0)
-		if thundering {
-			thunderEvent = packet.LevelEventStartThunderstorm
-			thunderData = 65535
-		}
-		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(thunderEvent), EventData: thunderData})
+		l.sendWeather(current, raining, thundering)
 	}
+}
+
+func (l *Listener) sendWeather(current *bedrockSession, raining, thundering bool) {
+	event, data := packet.LevelEventStopRaining, int32(0)
+	if raining {
+		event, data = packet.LevelEventStartRaining, 65535
+	}
+	_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(event), EventData: data})
+	thunderEvent, thunderData := packet.LevelEventStopThunderstorm, int32(0)
+	if thundering {
+		thunderEvent = packet.LevelEventStartThunderstorm
+		thunderData = 65535
+	}
+	_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(thunderEvent), EventData: thunderData})
 }
 
 // OpenContainerBlock sends a ContainerOpen packet to the player for the given

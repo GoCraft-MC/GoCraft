@@ -72,6 +72,7 @@ type Listener struct {
 	spawnMu    sync.RWMutex
 	gameMode   atomic.Uint32
 	difficulty int32
+	weather    atomic.Uint32
 	sessionsMu sync.RWMutex
 	sessions   map[[16]byte]*bedrockSession
 	screenID   atomic.Uint32
@@ -166,6 +167,7 @@ func (l *Listener) addSession(s *bedrockSession) {
 	l.sessionsMu.Lock()
 	l.sessions[s.uuid] = s
 	l.sessionsMu.Unlock()
+	l.sendWeather(s, l.weather.Load() >= 1, l.weather.Load() >= 2)
 	debuglog.Info(debuglog.BedrockLogin, "bedrock: session added", "displayName", s.displayName)
 }
 
