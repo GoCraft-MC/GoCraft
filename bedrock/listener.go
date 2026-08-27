@@ -812,6 +812,9 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 			)
 			return
 		}
+		if online := l.game.GetPlayer(bedrockSess.uuid); online != nil {
+			online.TouchActivity()
+		}
 
 		switch p := pk.(type) {
 		case *packet.SubChunkRequest:

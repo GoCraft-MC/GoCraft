@@ -782,6 +782,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 			return fmt.Errorf("play loop: reading packet: %w", err)
 		}
+		p.TouchActivity()
 
 		if pkt.ID == packetIDConfirmTeleport {
 			teleportID, readErr := protocol.ReadVarInt(pkt.Reader())
