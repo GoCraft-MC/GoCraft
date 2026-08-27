@@ -425,7 +425,7 @@ func (p *Player) GiveItem(item ItemStack) bool {
 			switch {
 			case slot.IsEmpty():
 				capacity += stackLimit
-			case slot.ItemID == item.ItemID && slot.Damage == item.Damage && slot.Count < stackLimit:
+			case slot.SameItem(item) && slot.Count < stackLimit:
 				capacity += stackLimit - slot.Count
 			}
 		}
@@ -438,7 +438,7 @@ func (p *Player) GiveItem(item ItemStack) bool {
 	for _, inventoryRange := range ranges {
 		for i := inventoryRange[0]; i < inventoryRange[1] && remaining > 0; i++ {
 			slot := &p.Inventory[i]
-			if slot.ItemID != item.ItemID || slot.Damage != item.Damage || slot.Count >= stackLimit {
+			if !slot.SameItem(item) || slot.Count >= stackLimit {
 				continue
 			}
 			room := stackLimit - slot.Count
