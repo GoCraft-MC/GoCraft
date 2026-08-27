@@ -38,7 +38,14 @@ resource_pack:
     prompt: ""     # MiniMessage text shown before the accept dialog
   bedrock:
     enabled: false
-    path: ""       # local path to a Bedrock .mcpack or .zip file
+    # List of local pack files. Supports .mcpack, .zip, and .mcaddon.
+    # .mcaddon files are automatically unpacked — every resource pack and
+    # behavior pack inside is sent to connecting Bedrock clients.
+    # Example:
+    #   paths:
+    #     - packs/Ore_Boost_V1.2.mcaddon
+    #     - packs/MyTextures.mcpack
+    paths: []
     forced: false  # kick the player if they decline
 
 # GoPerm — permission editor (bytebin relay, no inbound port needed).

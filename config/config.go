@@ -90,12 +90,14 @@ type JavaResourcePackConfig struct {
 	Prompt  string `yaml:"prompt"` // MiniMessage text shown before accept dialog
 }
 
-// BedrockResourcePackConfig controls the resource pack pushed to Bedrock clients.
-// The pack must be in Bedrock format (manifest.json at root).
+// BedrockResourcePackConfig controls the resource packs pushed to Bedrock clients.
+// Paths may point to .mcpack, .zip, or .mcaddon files.
+// .mcaddon files are automatically unpacked — each contained resource pack and
+// behavior pack sub-folder is loaded and sent to connecting clients.
 type BedrockResourcePackConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Path    string `yaml:"path"`   // local path to .mcpack or .zip file
-	Forced  bool   `yaml:"forced"` // kick the player if they decline
+	Enabled bool     `yaml:"enabled"`
+	Paths   []string `yaml:"paths"`  // local paths to .mcpack, .zip, or .mcaddon files
+	Forced  bool     `yaml:"forced"` // kick the player if they decline
 }
 
 // ResourcePackConfig bundles resource pack settings for both editions.

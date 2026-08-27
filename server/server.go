@@ -488,11 +488,11 @@ func New(cfg *config.Config) (*Server, error) {
 			configuredGameMode(cfg.DefaultGameMode),
 			difficultyID(cfg.Difficulty),
 		)
-		if cfg.ResourcePack.Bedrock.Enabled && cfg.ResourcePack.Bedrock.Path != "" {
-			if pack, err := loadBedrockPack(cfg.ResourcePack.Bedrock.Path); err != nil {
-				slog.Warn("could not load Bedrock resource pack", "err", err)
+		if cfg.ResourcePack.Bedrock.Enabled && len(cfg.ResourcePack.Bedrock.Paths) > 0 {
+			if packs, err := loadBedrockPacks(cfg.ResourcePack.Bedrock.Paths); err != nil {
+				slog.Warn("could not load Bedrock resource packs", "err", err)
 			} else {
-				s.bedrockListener.SetResourcePack(pack)
+				s.bedrockListener.SetResourcePacks(packs)
 			}
 		}
 		s.bedrockListener.SetWorldSpawn(s.currentWorldSpawn())

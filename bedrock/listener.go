@@ -247,10 +247,16 @@ func NewListener(
 	return l
 }
 
-// SetResourcePack adds a Bedrock-format resource pack that is sent to every
-// connecting Bedrock client. Call this before Listen.
+// SetResourcePack adds a single Bedrock-format resource pack that is sent to
+// every connecting Bedrock client. Call this before Listen.
 func (l *Listener) SetResourcePack(pack *resource.Pack) {
 	l.resourcePacks = append(l.resourcePacks, pack)
+}
+
+// SetResourcePacks registers multiple Bedrock-format packs at once. This is
+// equivalent to calling SetResourcePack for each element. Call before Listen.
+func (l *Listener) SetResourcePacks(packs []*resource.Pack) {
+	l.resourcePacks = append(l.resourcePacks, packs...)
 }
 
 func (l *Listener) worldForDimension(dimension int32) *coreworld.World {
