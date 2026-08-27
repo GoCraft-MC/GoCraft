@@ -857,16 +857,14 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 			continue
 		}
 		previous := viewer.lastInventory[slot]
-		if viewer.stackNetworkIDs[slot] == 0 ||
-			(!previous.IsEmpty() && (previous.ItemID != stack.ItemID || previous.Damage != stack.Damage)) {
+		if viewer.stackNetworkIDs[slot] == 0 || (!previous.IsEmpty() && !previous.SameItem(stack)) {
 			viewer.stackNetworkIDs[slot] = viewer.allocateStackNetworkID()
 		}
 	}
 	if p.CarriedItem.IsEmpty() {
 		viewer.cursorStackID = 0
 	} else if viewer.cursorStackID == 0 ||
-		(!viewer.lastCarriedItem.IsEmpty() &&
-			(viewer.lastCarriedItem.ItemID != p.CarriedItem.ItemID || viewer.lastCarriedItem.Damage != p.CarriedItem.Damage)) {
+		(!viewer.lastCarriedItem.IsEmpty() && !viewer.lastCarriedItem.SameItem(p.CarriedItem)) {
 		viewer.cursorStackID = viewer.allocateStackNetworkID()
 	}
 
@@ -1452,7 +1450,7 @@ func (l *Listener) SyncFurnaceContainer(p *player.Player, cookTime, burnTime, bu
 		if stack.IsEmpty() {
 			viewer.furnaceNetworkIDs[index] = 0
 		} else if !viewer.furnaceSent || viewer.furnaceNetworkIDs[index] == 0 ||
-			(!previous.IsEmpty() && (previous.ItemID != stack.ItemID || previous.Damage != stack.Damage)) {
+			(!previous.IsEmpty() && !previous.SameItem(stack)) {
 			viewer.furnaceNetworkIDs[index] = viewer.allocateStackNetworkID()
 		}
 	}
@@ -1879,9 +1877,15 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 			metadata = uint32(uint16(meta))
 		}
 	}
-	var nbtData map[string]any
+	nbtData := map[string]any{}
 	if stack.Damage > 0 && lightLevel < 0 {
-		nbtData = map[string]any{"Damage": int32(stack.Damage)}
+		nbtData["Damage"] = int32(stack.Damage)
+	}
+	if enchantments := bedrockEnchantments(stack); len(enchantments) > 0 {
+		nbtData["ench"] = enchantments
+	}
+	if len(nbtData) == 0 {
+		nbtData = nil
 	}
 	blockRuntimeID := mapping.blockRuntimeID
 	block := splitBlockName(stack.ItemID)
