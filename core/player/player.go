@@ -37,7 +37,8 @@ const (
 // owned by the edition adapter, which holds a *Player and updates it as
 // packets arrive.
 type Player struct {
-	healthMu sync.Mutex
+	healthMu     sync.Mutex
+	experienceMu sync.Mutex
 
 	// UUID is the player's unique identifier (edition-agnostic).
 	UUID [16]byte
@@ -78,14 +79,17 @@ type Player struct {
 
 	// Survival state is authoritative on the server. Health is measured in
 	// half-hearts (20 is the normal ten-heart maximum).
-	Health            float32
-	MaxHealth         float32
-	Food              int32
-	Saturation        float32
-	Exhaustion        float32
-	Dead              bool
-	LastDamageCause   string
-	InvulnerableUntil time.Time
+	Health             float32
+	MaxHealth          float32
+	Food               int32
+	Saturation         float32
+	Exhaustion         float32
+	ExperienceLevel    int32
+	ExperienceTotal    int32
+	ExperienceProgress float32
+	Dead               bool
+	LastDamageCause    string
+	InvulnerableUntil  time.Time
 	// OnDeath is installed by the owning server and runs once when health first
 	// reaches zero. It is used for edition-neutral world effects such as
 	// dropping the survival inventory.
