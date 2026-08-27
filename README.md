@@ -169,6 +169,7 @@ Every command literal has its own permission. `Public` is the fallback for playe
 | `/pardon` | `gocraft.command.pardon` | Operator |
 | `/pardon-ip` | `gocraft.command.pardon-ip` | Operator |
 | `/potioneffect` | `gocraft.command.potioneffect` | Operator |
+| `/random` | `gocraft.command.random` | Operator |
 | `/rotate` | `gocraft.command.rotate` | Operator |
 | `/save-all` | `gocraft.command.save-all` | Operator |
 | `/save-off` | `gocraft.command.save-off` | Operator |

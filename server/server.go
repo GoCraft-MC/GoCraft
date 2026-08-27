@@ -376,6 +376,7 @@ func New(cfg *config.Config) (*Server, error) {
 	s.registerLifecycleCommands()
 	s.registerWorldSettingsCommands()
 	s.registerMessagingCommands()
+	s.registerRandomCommand()
 
 	// Register server-state commands as closures after s is initialised.
 	cmds.Register("timings", func(ctx handler.CommandContext) error {
