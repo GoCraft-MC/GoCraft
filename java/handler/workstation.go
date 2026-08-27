@@ -33,7 +33,7 @@ func openWorkstation(p *player.Player, conn *network.ClientConn, w *coreworld.Wo
 	if kind == "minecraft:brewing_stand" && w != nil {
 		for _, ci := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 			if ci.Slot >= 0 && ci.Slot < len(p.ContainerSlots) {
-				p.ContainerSlots[ci.Slot] = player.ItemStack{ItemID: ci.ItemID, Count: ci.Count, Damage: ci.Damage}
+				p.ContainerSlots[ci.Slot] = player.ItemStack{ItemID: ci.ItemID, Count: ci.Count, Damage: ci.Damage, Enchantments: ci.Enchantments}
 			}
 		}
 	}
@@ -306,7 +306,7 @@ func closeWorkstation(p *player.Player, w *coreworld.World) {
 		items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots))
 		for slot, stack := range p.ContainerSlots {
 			if !stack.IsEmpty() {
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments})
 			}
 		}
 		w.SetContainerItems(int(p.OpenContainerPos.X), int(p.OpenContainerPos.Y), int(p.OpenContainerPos.Z), p.OpenContainerKind, items)

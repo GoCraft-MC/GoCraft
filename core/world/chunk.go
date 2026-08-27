@@ -49,10 +49,11 @@ type BlockEntity struct {
 // ContainerItem is an edition-independent item stored in a block container.
 // Slot is the zero-based index inside the container (0-26 for a single chest).
 type ContainerItem struct {
-	Slot   int
-	ItemID string
-	Count  int
-	Damage int
+	Slot         int
+	ItemID       string
+	Count        int
+	Damage       int
+	Enchantments string
 }
 
 // HighestBlockY returns the highest non-air block in the local x/z column.

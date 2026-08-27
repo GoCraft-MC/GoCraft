@@ -213,7 +213,7 @@ func loadAutomationContainer(world *coreworld.World, position [3]int) (string, [
 	stacks := make([]player.ItemStack, size)
 	for _, item := range world.ContainerItems(position[0], position[1], position[2]) {
 		if item.Slot >= 0 && item.Slot < size && item.ItemID != "" && item.Count > 0 {
-			stacks[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
+			stacks[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments}
 		}
 	}
 	return kind, stacks, true
@@ -223,7 +223,7 @@ func saveAutomationContainer(world *coreworld.World, position [3]int, kind strin
 	items := make([]coreworld.ContainerItem, 0, len(stacks))
 	for slot, stack := range stacks {
 		if !stack.IsEmpty() {
-			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
+			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments})
 		}
 	}
 	world.SetContainerItems(position[0], position[1], position[2], kind, items)
@@ -282,14 +282,14 @@ func insertOneAutomationItem(kind string, destination []player.ItemStack, item p
 	}
 	limit := player.MaxStackSize(item.ItemID)
 	for _, slot := range slots {
-		if destination[slot].ItemID == item.ItemID && destination[slot].Damage == item.Damage && destination[slot].Count < limit {
+		if destination[slot].SameItem(item) && destination[slot].Count < limit {
 			destination[slot].Count++
 			return true
 		}
 	}
 	for _, slot := range slots {
 		if destination[slot].IsEmpty() {
-			destination[slot] = player.ItemStack{ItemID: item.ItemID, Count: 1, Damage: item.Damage}
+			destination[slot] = player.ItemStack{ItemID: item.ItemID, Count: 1, Damage: item.Damage, Enchantments: item.Enchantments}
 			return true
 		}
 	}
