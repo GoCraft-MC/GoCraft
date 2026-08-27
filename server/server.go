@@ -131,6 +131,7 @@ type Server struct {
 	defaultGameMode atomic.Uint32
 	weather         atomic.Int32
 	weatherTicks    atomic.Int64
+	idleTimeout     atomic.Int64
 	stopOnce        sync.Once
 	stopRequested   chan struct{}
 }
@@ -790,6 +791,7 @@ func (s *Server) safeTick() {
 	s.tickAuxiliaryDimensionItems()
 	s.tickStationaryLavaDamage()
 	s.tickPlayerHunger()
+	s.tickIdleTimeout()
 	s.tickWeather()
 	if s.bedrockListener != nil {
 		s.bedrockListener.Sync(uint64(s.worldAge))
