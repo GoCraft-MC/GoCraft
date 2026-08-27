@@ -1,92 +1,318 @@
 "use strict";
 
-editor.renderSidebar = () => {
-  const render = (target, names, type, open) => {
-    target.replaceChildren();
-    for (const name of names.sort()) {
-      const button = document.createElement("button");
-      button.textContent = name;
-      button.className = editor.selected?.type === type && editor.selected.name === name ? "selected" : "";
-      button.addEventListener("click", () => open(name));
-      target.append(button);
-    }
-  };
-  render(editor.element("groups"), Object.keys(editor.document.groups), "group", editor.openGroup);
-  render(editor.element("users"), Object.keys(editor.document.users), "user", editor.openUser);
+const BYTEBIN = "https://bytebin.lucko.me";
+const SESSION_KEY = new URLSearchParams(location.search).get("key") || "";
+
+const state = {
+  document: null,   // {groups: {name: {parents, permissions}}, users: {name: {groups, permissions}}}
+  commands: [],     // [{command, node, default_allowed}]
+  selected: null,
 };
 
-editor.openUser = name => {
-  editor.selected = {type: "user", name};
-  editor.show("user-editor");
-  const user = editor.document.users[name];
-  user.groups ||= [];
-  user.permissions ||= {};
-  editor.element("user-name").textContent = name;
-  editor.element("user-groups").value = user.groups.join(", ");
-  editor.element("user-permissions").value = editor.rulesText(user.permissions);
-  editor.renderSidebar();
-};
+const el = id => document.getElementById(id);
 
-editor.element("user-groups").addEventListener("input", event => {
-  if (editor.selected?.type === "user")
-    editor.document.users[editor.selected.name].groups = editor.names(event.target.value);
-});
-editor.element("user-permissions").addEventListener("change", event => {
-  if (editor.selected?.type !== "user") return;
-  try {
-    editor.document.users[editor.selected.name].permissions = editor.parseRules(event.target.value);
-    editor.setStatus("User overrides updated locally.");
-  } catch (error) { editor.setStatus(error.message, true); }
-});
-editor.element("delete-user").addEventListener("click", () => {
-  if (!editor.selected || editor.selected.type !== "user") return;
-  delete editor.document.users[editor.selected.name];
-  editor.selected = null;
-  editor.show("welcome");
-  editor.renderSidebar();
-});
-editor.element("add-group").addEventListener("click", () => {
-  const name = (prompt("New group name:") || "").trim().toLowerCase();
-  if (!/^[a-z0-9_-]+$/.test(name)) return editor.setStatus("Use letters, numbers, _ or - for group names.", true);
-  if (editor.document.groups[name]) return editor.setStatus("That group already exists.", true);
-  editor.document.groups[name] = {parents: ["default"], permissions: {}};
-  editor.openGroup(name);
-});
-editor.element("add-user").addEventListener("click", () => {
-  const name = (prompt("Exact player name:") || "").trim().toLowerCase();
-  if (!name) return;
-  editor.document.users[name] ||= {groups: ["default"], permissions: {}};
-  editor.openUser(name);
-});
+// ── Toast ─────────────────────────────────────────────────────────────────────
 
-editor.element("save").addEventListener("click", async () => {
+let toastTimer = null;
+function showToast(msg, durationMs = 6000) {
+  const t = el("toast");
+  t.innerHTML = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  if (durationMs > 0) toastTimer = setTimeout(() => t.classList.remove("show"), durationMs);
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+
+function renderGroups() {
+  const list = el("groupList");
+  list.innerHTML = "";
+  for (const name of Object.keys(state.document.groups).sort()) {
+    const parents = (state.document.groups[name].parents || []).length;
+    const btn = document.createElement("button");
+    btn.className = "group-item" + (name === state.selected ? " active" : "");
+    btn.dataset.group = name;
+    btn.innerHTML = `
+      <span class="status-dot${name === "default" ? " muted" : ""}"></span>
+      <span></span>
+      <small></small>`;
+    btn.querySelectorAll("span")[1].textContent = name;
+    btn.querySelector("small").textContent = parents ? `+${parents}` : "";
+    btn.addEventListener("click", () => selectGroup(name));
+    list.appendChild(btn);
+  }
+}
+
+// ── Group selection ───────────────────────────────────────────────────────────
+
+function selectGroup(name) {
+  state.selected = name;
+  const group = state.document.groups[name];
+  if (!group) return;
+
+  el("groupTitle").textContent = name;
+  el("groupAvatar").textContent = name[0].toUpperCase();
+
+  const parentsInput = el("parentsInput");
+  if (parentsInput) {
+    parentsInput.value = (group.parents || []).join(", ");
+    parentsInput.oninput = () => {
+      group.parents = parentsInput.value
+        .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+      renderInheritance(group.parents);
+      renderGroups();
+    };
+  }
+
+  renderInheritance(group.parents || []);
+  renderGroups();
+  renderPermissions();
+  updateMetrics();
+}
+
+function renderInheritance(parents) {
+  const chain = el("inheritanceChain");
+  if (!chain) return;
+  chain.innerHTML = "";
+  for (const p of parents) {
+    const node = document.createElement("div");
+    node.className = "inheritance-node";
+    node.innerHTML = `${p} <span>Parent</span>`;
+    chain.appendChild(node);
+    const arrow = document.createElement("div");
+    arrow.className = "arrow";
+    arrow.textContent = "↓";
+    chain.appendChild(arrow);
+  }
+  const cur = document.createElement("div");
+  cur.className = "inheritance-node current";
+  cur.innerHTML = `<span id="inheritCurrent">${state.selected || "—"}</span><span>Current</span>`;
+  chain.appendChild(cur);
+}
+
+// ── Permission list ───────────────────────────────────────────────────────────
+
+function renderPermissions() {
+  const list = el("permissionList");
+  list.innerHTML = "";
+  const group = state.document.groups[state.selected];
+  if (!group) return;
+
+  const perms = group.permissions || {};
+  const knownNodes = new Set(state.commands.map(c => c.node));
+
+  for (const cmd of state.commands) {
+    list.appendChild(buildRow(cmd.node, perms, cmd));
+  }
+
+  for (const node of Object.keys(perms).sort()) {
+    if (knownNodes.has(node)) continue;
+    list.appendChild(buildRow(node, perms, null));
+  }
+
+  applyFilter();
+  updateMetrics();
+}
+
+function buildRow(node, perms, cmd) {
+  const currentValue = Object.hasOwn(perms, node) ? String(perms[node]) : "";
+  const defaultLabel = cmd
+    ? (cmd.default_allowed ? "Unset — public" : "Unset — op only")
+    : "Unset";
+
+  const row = document.createElement("div");
+  row.className = "permission-row";
+  row.dataset.node = node;
+  row.dataset.search = (cmd ? `${cmd.command} ` : "") + node;
+
+  const info = document.createElement("div");
+  const code = document.createElement("code");
+  code.textContent = node;
+  const desc = document.createElement("p");
+  desc.textContent = cmd ? `/${cmd.command}` : "Custom node";
+  info.append(code, desc);
+
+  const select = document.createElement("select");
+  select.className = "perm-select";
+  for (const [val, label] of [["", defaultLabel], ["true", "Allow"], ["false", "Deny"]]) {
+    const opt = document.createElement("option");
+    opt.value = val;
+    opt.textContent = label;
+    select.appendChild(opt);
+  }
+  select.value = currentValue;
+  styleSelect(select);
+
+  select.addEventListener("change", () => {
+    const group = state.document.groups[state.selected];
+    if (!group) return;
+    group.permissions ||= {};
+    if (select.value === "") delete group.permissions[node];
+    else group.permissions[node] = select.value === "true";
+    styleSelect(select);
+    updateMetrics();
+  });
+
+  row.append(info, select);
+  return row;
+}
+
+function styleSelect(select) {
+  select.style.borderColor =
+    select.value === "true" ? "var(--success)" :
+    select.value === "false" ? "var(--danger)" :
+    "var(--border)";
+}
+
+// ── Filter ────────────────────────────────────────────────────────────────────
+
+function applyFilter() {
+  const query = el("searchPerm").value.trim().toLowerCase();
+  const filter = el("categoryFilter").value;
+  for (const row of el("permissionList").querySelectorAll(".permission-row:not(.empty-state)")) {
+    const matchesText = !query || row.dataset.search.toLowerCase().includes(query);
+    const sel = row.querySelector(".perm-select");
+    const val = sel ? sel.value : "";
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "allowed" && val === "true") ||
+      (filter === "denied" && val === "false") ||
+      (filter === "unset" && val === "");
+    row.hidden = !(matchesText && matchesFilter);
+  }
+}
+
+el("searchPerm").addEventListener("input", applyFilter);
+el("categoryFilter").addEventListener("change", applyFilter);
+
+// ── Metrics ───────────────────────────────────────────────────────────────────
+
+function updateMetrics() {
+  const group = state.document && state.selected && state.document.groups[state.selected];
+  if (!group) return;
+  const perms = group.permissions || {};
+  const members = Object.values(state.document.users || {})
+    .filter(u => (u.groups || []).includes(state.selected)).length;
+  el("metricPerms").textContent = Object.keys(perms).length;
+  el("metricMembers").textContent = members;
+  el("metricParents").textContent = (group.parents || []).length;
+  el("metricCommands").textContent = state.commands.length;
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+
+el("saveBtn").addEventListener("click", async () => {
+  if (!state.document) return;
+  const btn = el("saveBtn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
   try {
-    editor.setStatus("Saving edits…");
-    const response = await fetch(`${editor.bytebinURL}/post`, {
+    const resp = await fetch(`${BYTEBIN}/post`, {
       method: "POST",
       headers: {"Content-Type": "application/json; charset=utf-8"},
-      body: JSON.stringify({type: "gocraft-permissions-save", document: editor.document}),
+      body: JSON.stringify({type: "gocraft-permissions-save", document: state.document}),
     });
-    if (!response.ok) throw new Error(`Bytebin error: ${response.status}`);
-    const {key} = await response.json();
-    editor.setStatus(`Saved! Apply in-game or console: /gocraft applyedits ${key}`);
-  } catch (error) { editor.setStatus(error.message, true); }
+    if (!resp.ok) throw new Error(`Bytebin error ${resp.status}`);
+    const {key} = await resp.json();
+    showToast(
+      `✓ Saved! Run in-game or console:<br><code>/gocraft applyedits ${key}</code>`,
+      0
+    );
+  } catch (err) {
+    showToast(`Error saving: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save changes";
+  }
 });
 
-(async () => {
-  if (!editor.token) {
-    editor.setStatus("No key provided in URL. Open this page from the link given by /gocraft peditor.", true);
+// ── Add group dialog ──────────────────────────────────────────────────────────
+
+el("addGroupBtn").addEventListener("click", () => {
+  el("newGroupName").value = "";
+  el("groupDialog").showModal();
+  el("newGroupName").focus();
+});
+
+el("createGroupBtn").addEventListener("click", e => {
+  e.preventDefault();
+  const name = el("newGroupName").value.trim().toLowerCase();
+  if (!name || !/^[a-z0-9_-]+$/.test(name)) {
+    el("newGroupName").setCustomValidity("Use letters, numbers, _ or - only.");
+    el("newGroupName").reportValidity();
+    return;
+  }
+  if (state.document.groups[name]) {
+    el("newGroupName").setCustomValidity("Group already exists.");
+    el("newGroupName").reportValidity();
+    return;
+  }
+  el("newGroupName").setCustomValidity("");
+  state.document.groups[name] = {parents: ["default"], permissions: {}};
+  el("groupDialog").close();
+  renderGroups();
+  selectGroup(name);
+});
+
+// ── Add custom permission dialog ──────────────────────────────────────────────
+
+el("addPermBtn").addEventListener("click", () => {
+  el("newPermNode").value = "";
+  el("permDialog").showModal();
+  el("newPermNode").focus();
+});
+
+el("createPermBtn").addEventListener("click", e => {
+  e.preventDefault();
+  const node = el("newPermNode").value.trim().toLowerCase();
+  if (!node) return;
+  const group = state.document.groups[state.selected];
+  if (!group) return;
+  group.permissions ||= {};
+  group.permissions[node] = el("newPermValue").value === "true";
+  el("permDialog").close();
+  renderPermissions();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+async function init() {
+  if (!SESSION_KEY) {
+    el("statusText").textContent = "No key";
+    el("statusDot").style.background = "var(--danger)";
+    showToast("No key in URL. Run <code>/gocraft peditor</code> in-game to get a link.", 0);
     return;
   }
   try {
-    const response = await fetch(`${editor.bytebinURL}/${editor.token}`, {cache: "no-store"});
-    if (response.status === 404) throw new Error("Permission editor session not found or expired.");
-    if (!response.ok) throw new Error(`Failed to load: ${response.status}`);
-    const payload = await response.json();
-    if (!payload.document || !payload.commands) throw new Error("Invalid permission data from server.");
-    editor.document = payload.document;
-    editor.commands = payload.commands;
-    editor.renderSidebar();
-    editor.setStatus("Loaded. Edit permissions, then click Save — you will get a command to run in-game.");
-  } catch (error) { editor.setStatus(error.message, true); }
-})();
+    el("serverStatus").textContent = "Loading data…";
+    const resp = await fetch(`${BYTEBIN}/${SESSION_KEY}`, {cache: "no-store"});
+    if (resp.status === 404) throw new Error("Session not found or expired. Run /gocraft peditor again.");
+    if (!resp.ok) throw new Error(`Failed to load data (${resp.status})`);
+
+    const payload = await resp.json();
+    if (payload.type !== "gocraft-permissions")
+      throw new Error("Not a GoCraft permission editor link.");
+
+    state.document = payload.document;
+    state.commands = payload.commands || [];
+    state.document.groups ||= {};
+    state.document.users ||= {};
+
+    el("serverStatus").textContent = "GoCraft Survival";
+    el("statusDot").style.background = "var(--success)";
+    el("statusText").textContent = "Connected";
+    el("metricCommands").textContent = state.commands.length;
+
+    renderGroups();
+    const first = Object.keys(state.document.groups).sort()[0];
+    if (first) selectGroup(first);
+
+  } catch (err) {
+    el("statusDot").style.background = "var(--danger)";
+    el("statusText").textContent = "Error";
+    el("serverStatus").textContent = "Failed to load";
+    showToast(`Error: ${err.message}`, 0);
+  }
+}
+
+init();
