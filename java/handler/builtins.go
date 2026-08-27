@@ -94,6 +94,7 @@ func RegisterBuiltins(d *Dispatcher) {
 	d.RegisterOperator(`experience`, cmdExperience)
 	d.RegisterOperator(`xp`, cmdExperience)
 	d.RegisterOperator(`rotate`, cmdRotate)
+	d.RegisterOperator(`tag`, cmdTag)
 }
 
 func cmdWhitelist(ctx CommandContext) error {

@@ -183,6 +183,7 @@ Every command literal has its own permission. `Public` is the fallback for playe
 | `/spawnpoint` | `gocraft.command.spawnpoint` | Operator |
 | `/stop` | `gocraft.command.stop` | Operator |
 | `/summon` | `gocraft.command.summon` | Operator |
+| `/tag` | `gocraft.command.tag` | Operator |
 | `/tell` | `gocraft.command.tell` | Public |
 | `/time` | `gocraft.command.time` | Operator |
 | `/timings` | `gocraft.command.timings` | Operator |
