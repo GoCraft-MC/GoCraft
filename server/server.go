@@ -125,7 +125,10 @@ type Server struct {
 	sleepAllTick int64
 
 	// timings collects per-subsystem tick durations for /timings and /tps.
-	timings *tickTimings
+	timings         *tickTimings
+	autosaveEnabled atomic.Bool
+	stopOnce        sync.Once
+	stopRequested   chan struct{}
 }
 
 // mobAI holds the wander state for a passive mob.
@@ -347,10 +350,12 @@ func New(cfg *config.Config) (*Server, error) {
 		furnaces:                make(map[furnaceKey]*furnaceState),
 		campfireCooking:         make(map[campfireCookKey]int64),
 		timings:                 timings,
+		stopRequested:           make(chan struct{}),
 		javaCrossKnown:          make(map[[16]byte]map[[16]byte]crossPlayerView),
 		playerStore:             playerStore,
 		bedrockBlockUse:         make(map[[16]byte]bedrockRecentBlockUse),
 	}
+	s.autosaveEnabled.Store(true)
 	s.spawnState = newWorldSpawnState(spatial.Vec3{
 		X: float64(spawnX) + 0.5,
 		Y: float64(s.safeSpawnY(spawnX, spawnZ)),
