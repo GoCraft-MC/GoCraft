@@ -22,8 +22,8 @@ func TestGiveItemDoesNotMergeDifferentEnchantments(t *testing.T) {
 	if !p.GiveItem(ItemStack{ItemID: "minecraft:compass", Count: 1}) {
 		t.Fatal("unenchanted compass was not inserted")
 	}
-	if p.Inventory[9].Count != 1 || p.Inventory[10].Count != 1 {
-		t.Fatalf("different item components merged: %+v %+v", p.Inventory[9], p.Inventory[10])
+	if p.Inventory[9].Count != 1 || p.Inventory[HotbarStart].Count != 1 {
+		t.Fatalf("different item components merged: %+v %+v", p.Inventory[9], p.Inventory[HotbarStart])
 	}
 }
 
