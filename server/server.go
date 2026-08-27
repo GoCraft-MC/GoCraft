@@ -469,6 +469,7 @@ func New(cfg *config.Config) (*Server, error) {
 		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
 	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
+	cmds.SetPlayerDisconnector(s.disconnectPlayer)
 	return s, nil
 }
 
