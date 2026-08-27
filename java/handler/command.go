@@ -63,8 +63,9 @@ type CommandContext struct {
 
 	// Reply sends command feedback to the issuing edition. SyncAbilities asks
 	// that edition adapter to publish changed flight/permission state.
-	Reply         func(text string) error
-	SyncAbilities func(*player.Player)
+	Reply            func(text string) error
+	SyncAbilities    func(*player.Player)
+	DisconnectPlayer func(*player.Player, string) error
 }
 
 // CommandFunc is the handler signature for a built-in server command.
@@ -84,14 +85,15 @@ type PermissionChecker func(player *player.Player, node string, defaultAllowed b
 // Dispatcher maps command names (lower-case) to their implementations.
 // All methods are safe for concurrent use.
 type Dispatcher struct {
-	mu             sync.RWMutex
-	cmds           map[string]registeredCommand
-	nextEntityID   func() int32
-	findPlayer     func(string) *player.Player
-	listPlayers    func() []*player.Player
-	teleportPlayer func(*player.Player, float64, float64, float64) error
-	permission     PermissionChecker
-	maxPlayers     int
+	mu               sync.RWMutex
+	cmds             map[string]registeredCommand
+	nextEntityID     func() int32
+	findPlayer       func(string) *player.Player
+	listPlayers      func() []*player.Player
+	teleportPlayer   func(*player.Player, float64, float64, float64) error
+	disconnectPlayer func(*player.Player, string) error
+	permission       PermissionChecker
+	maxPlayers       int
 }
 
 // NewDispatcher returns an empty, ready-to-use Dispatcher.
@@ -186,6 +188,12 @@ func (d *Dispatcher) SetPlayerTeleporter(teleport func(*player.Player, float64, 
 	d.mu.Unlock()
 }
 
+func (d *Dispatcher) SetPlayerDisconnector(disconnect func(*player.Player, string) error) {
+	d.mu.Lock()
+	d.disconnectPlayer = disconnect
+	d.mu.Unlock()
+}
+
 // SetMaxPlayers publishes the configured player capacity to commands.
 func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 	d.mu.Lock()
@@ -216,6 +224,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	findPlayer := d.findPlayer
 	listPlayers := d.listPlayers
 	teleportPlayer := d.teleportPlayer
+	disconnectPlayer := d.disconnectPlayer
 	maxPlayers := d.maxPlayers
 	checkPermission := d.permission
 	d.mu.RUnlock()
@@ -223,6 +232,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	ctx.FindPlayer = findPlayer
 	ctx.ListPlayers = listPlayers
 	ctx.TeleportPlayer = teleportPlayer
+	ctx.DisconnectPlayer = disconnectPlayer
 	ctx.MaxPlayers = maxPlayers
 	ctx.AvailableCommands = d.VisibleCommands(ctx.Player)
 
