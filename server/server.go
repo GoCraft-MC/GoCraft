@@ -127,6 +127,8 @@ type Server struct {
 	// timings collects per-subsystem tick durations for /timings and /tps.
 	timings         *tickTimings
 	autosaveEnabled atomic.Bool
+	difficulty      atomic.Int32
+	defaultGameMode atomic.Uint32
 	stopOnce        sync.Once
 	stopRequested   chan struct{}
 }
@@ -356,6 +358,8 @@ func New(cfg *config.Config) (*Server, error) {
 		bedrockBlockUse:         make(map[[16]byte]bedrockRecentBlockUse),
 	}
 	s.autosaveEnabled.Store(true)
+	s.difficulty.Store(difficultyID(cfg.Difficulty) + 1)
+	s.defaultGameMode.Store(uint32(configuredGameMode(cfg.DefaultGameMode)))
 	s.spawnState = newWorldSpawnState(spatial.Vec3{
 		X: float64(spawnX) + 0.5,
 		Y: float64(s.safeSpawnY(spawnX, spawnZ)),
@@ -987,7 +991,7 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	p.RemoteAddress = i.RemoteAddress
 	p.Operator = handler.IsOperatorName(i.Username)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
-	p.GameMode = configuredGameMode(s.cfg.DefaultGameMode)
+	p.GameMode = player.GameMode(s.defaultGameMode.Load())
 	p.AttackCooldown = s.cfg.Combat.AttackCooldown
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical
@@ -4059,10 +4063,10 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 				damage = float32(settings.attackDamage)
 			}
 			healthBefore, _, _, _ := target.Player.HealthSnapshot()
-			switch s.cfg.Difficulty {
-			case "easy":
+			switch s.currentDifficulty() {
+			case 1:
 				damage *= 0.5
-			case "hard":
+			case 3:
 				damage *= 1.5
 			}
 			name := strings.ReplaceAll(strings.TrimPrefix(string(e.Type), "minecraft:"), "_", " ")
@@ -4529,7 +4533,7 @@ func (s *Server) registerPlayer(result *handler.LoginResult, remoteAddress strin
 	p.RemoteAddress = remoteAddress
 	p.Operator = handler.IsOperatorName(result.Name)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
-	p.GameMode = configuredGameMode(s.cfg.DefaultGameMode)
+	p.GameMode = player.GameMode(s.defaultGameMode.Load())
 	p.AttackCooldown = s.cfg.Combat.AttackCooldown
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical
