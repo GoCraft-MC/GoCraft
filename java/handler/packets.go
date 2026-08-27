@@ -103,6 +103,7 @@ var (
 	packetIDRecipeBookAdd          = protocoldata.MustCB("play", "minecraft:recipe_book_add")
 	packetIDSetEntityMotion        = protocoldata.MustCB("play", "minecraft:set_entity_motion")
 	packetIDSetEquipment           = protocoldata.MustCB("play", "minecraft:set_equipment")
+	packetIDSetExperience          = protocoldata.MustCB("play", "minecraft:set_experience")
 	packetIDSoundEntity            = protocoldata.MustCB("play", "minecraft:sound_entity")
 	packetIDSound                  = protocoldata.MustCB("play", "minecraft:sound")
 	packetIDUpdateMobEffect        = protocoldata.MustCB("play", "minecraft:update_mob_effect")

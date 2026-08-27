@@ -48,6 +48,7 @@
     "minecraft:recipe_book_add": 68,
     "minecraft:set_entity_motion": 95,
 	"minecraft:set_equipment": 96,
+	"minecraft:set_experience": 97,
     "minecraft:sound_entity": 110,
     "minecraft:sound": 111,
     "minecraft:update_mob_effect": 125,

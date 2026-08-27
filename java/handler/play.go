@@ -125,6 +125,9 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 	if err := sendUpdateHealth(conn, p); err != nil {
 		return fmt.Errorf("play: health: %w", err)
 	}
+	if err := sendExperience(conn, p); err != nil {
+		return fmt.Errorf("play: experience: %w", err)
+	}
 	if err := sendDefaultSpawnPosition(conn, p); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
