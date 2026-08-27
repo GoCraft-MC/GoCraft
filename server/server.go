@@ -275,6 +275,9 @@ func New(cfg *config.Config) (*Server, error) {
 	if err := handler.ConfigureWhitelist(`whitelist.json`, cfg.Whitelist.Enabled, cfg.Whitelist.Players); err != nil {
 		slog.Warn(`server: could not load whitelist.json`, `err`, err)
 	}
+	if err := handler.ConfigureBans(`banned-players.json`, `banned-ips.json`); err != nil {
+		return nil, fmt.Errorf("server: loading bans: %w", err)
+	}
 	permissionManager, err := corepermission.Load(`permissions.json`)
 	if err != nil {
 		return nil, fmt.Errorf("server: loading permissions: %w", err)
@@ -439,6 +442,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// Warm spawn immediately; login-time streaming will reuse this cache.
 	s.world.QueuePregeneration(int32(math.Floor(float64(spawnX)/16)), int32(math.Floor(float64(spawnZ)/16)), int32(cfg.PreGenerateRadius))
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
+	s.loginHandler.SetAdmissionCheck(admissionError)
 	s.listener = network.NewListener(cfg.Addr(), s.handleConn)
 
 	if cfg.Bedrock.Enabled {
@@ -951,9 +955,8 @@ func (s *Server) applyBedrockPlayerState(i intent.PlayerStateIntent) {
 // applyJoin creates a canonical Player, registers it with the game core, and
 // sends a JoinResult to the waiting adapter goroutine.
 func (s *Server) applyJoin(i intent.JoinIntent) {
-	if !handler.IsWhitelisted(i.Username) {
-		err := fmt.Errorf("you are not whitelisted on this server")
-		slog.Warn("applyJoin: player rejected by whitelist", "name", i.Username, "edition", i.Edition)
+	if err := admissionError(i.Username, i.RemoteAddress); err != nil {
+		slog.Warn("applyJoin: player rejected", "name", i.Username, "edition", i.Edition, "err", err)
 		i.Done <- intent.JoinResult{Err: err}
 		return
 	}
