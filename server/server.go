@@ -511,6 +511,16 @@ func (s *Server) teleportPlayer(target *player.Player, x, y, z float64) error {
 // All background goroutines are tracked with a WaitGroup and are joined before
 // the world is flushed to disk, ensuring clean shutdown of both listeners.
 func (s *Server) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-s.stopRequested:
+			cancel()
+		case <-runCtx.Done():
+		}
+	}()
+	ctx = runCtx
 	go s.runConsole(ctx)
 	if s.cfg.JavaEnabled {
 		slog.Info("java listener enabled",
@@ -574,6 +584,7 @@ func (s *Server) Run(ctx context.Context) error {
 	} else {
 		<-ctx.Done()
 	}
+	cancel()
 
 	// ctx is now done: wait for entity tick and Bedrock listener to finish.
 	wg.Wait()
