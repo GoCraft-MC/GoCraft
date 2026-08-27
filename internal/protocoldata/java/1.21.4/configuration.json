@@ -7,6 +7,7 @@
     "minecraft:custom_payload":            1,
     "minecraft:finish_configuration":      3,
     "minecraft:registry_data":             7,
+    "minecraft:resource_pack_push":        9,
     "minecraft:update_enabled_features":   12,
     "minecraft:update_tags":               13,
     "minecraft:select_known_packs":        14
@@ -14,6 +15,7 @@
   "serverbound": {
     "minecraft:client_information":        0,
     "minecraft:finish_configuration":      3,
+    "minecraft:resource_pack":             6,
     "minecraft:select_known_packs":        7
   }
 }
