@@ -48,6 +48,41 @@ resource_pack:
     paths: []
     forced: false  # kick the player if they decline
 
+# Custom items — cross-edition custom item system.
+# Place item packs in sub-directories under packs_dir. Each pack directory
+# must contain an items.yml and a textures/ folder.
+#
+# Example pack layout:
+#   packs/
+#     mypacks/
+#       items.yml
+#       textures/
+#         ruby.png
+#
+# Example items.yml:
+#   namespace: mypacks
+#   items:
+#     ruby:
+#       display_name: "<red>Ruby"
+#       material: paper
+#       texture: ruby.png
+#     ruby_sword:
+#       display_name: "<gradient:#ff0000:#aa0000>Ruby Sword"
+#       material: diamond_sword
+#       texture: ruby_sword.png
+#       parent: item/handheld
+#       hand_equipped: true
+#
+# The server auto-generates a Java resource pack (served on java.serve_port)
+# and a Bedrock .mcaddon (injected at startup). No manual pack building needed.
+custom_items:
+  enabled: true
+  packs_dir: packs
+  java:
+    serve_port: 8080
+    # Set this to your server's public IP or domain so Java clients can download the pack.
+    public_host: ""
+
 # GoPerm — permission editor (bytebin relay, no inbound port needed).
 permission_editor:
   enabled: true
