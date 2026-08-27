@@ -87,6 +87,7 @@ func RegisterBuiltins(d *Dispatcher) {
 	d.RegisterOperator(`spawnboat`, cmdSpawnBoat)
 	d.RegisterOperator(`whitelist`, cmdWhitelist)
 	d.RegisterOperator(`setblock`, cmdSetBlock)
+	d.RegisterOperator(`fill`, cmdFill)
 }
 
 func cmdWhitelist(ctx CommandContext) error {
