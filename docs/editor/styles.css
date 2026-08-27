@@ -134,12 +134,34 @@ button {
 
 .group-item {
   display: grid;
-  grid-template-columns: 12px 1fr auto;
+  grid-template-columns: 14px 12px 1fr auto;
   gap: 9px;
   align-items: center;
   padding: 9px 10px;
   border-radius: 9px;
   text-align: left;
+  cursor: grab;
+}
+
+.drag-handle {
+  color: var(--muted);
+  font-size: .9rem;
+  cursor: grab;
+  user-select: none;
+  opacity: .5;
+}
+
+.group-item:hover .drag-handle {
+  opacity: 1;
+}
+
+.group-item.dragging {
+  opacity: .4;
+}
+
+.group-item.drag-over {
+  outline: 2px solid var(--accent);
+  background: var(--accent-soft);
 }
 
 .group-item:hover,

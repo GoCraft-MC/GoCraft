@@ -4,9 +4,10 @@ const BYTEBIN = "https://bytebin.lucko.me";
 const SESSION_KEY = new URLSearchParams(location.search).get("key") || "";
 
 const state = {
-  document: null,   // {groups: {name: {parents, permissions}}, users: {name: {groups, permissions}}}
+  document: null,   // {groups: {name: {weight, prefix, parents, permissions}}, users: {name: {groups, permissions}}}
   commands: [],     // [{command, node, default_allowed}]
   selected: null,
+  dragSrc: null,    // group name being dragged
 };
 
 const el = id => document.getElementById(id);
@@ -24,23 +25,74 @@ function showToast(msg, durationMs = 6000) {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
+function groupsSorted() {
+  return Object.keys(state.document.groups).sort((a, b) => {
+    const wa = state.document.groups[a].weight ?? 0;
+    const wb = state.document.groups[b].weight ?? 0;
+    return wb - wa || a.localeCompare(b);
+  });
+}
+
 function renderGroups() {
   const list = el("groupList");
   list.innerHTML = "";
-  for (const name of Object.keys(state.document.groups).sort()) {
-    const parents = (state.document.groups[name].parents || []).length;
+
+  for (const name of groupsSorted()) {
+    const group = state.document.groups[name];
+    const parents = (group.parents || []).length;
+
     const btn = document.createElement("button");
     btn.className = "group-item" + (name === state.selected ? " active" : "");
     btn.dataset.group = name;
+    btn.draggable = true;
     btn.innerHTML = `
+      <span class="drag-handle" title="Drag to reorder">⠿</span>
       <span class="status-dot${name === "default" ? " muted" : ""}"></span>
-      <span></span>
+      <span class="group-name"></span>
       <small></small>`;
-    btn.querySelectorAll("span")[1].textContent = name;
+    btn.querySelector(".group-name").textContent = name;
     btn.querySelector("small").textContent = parents ? `+${parents}` : "";
     btn.addEventListener("click", () => selectGroup(name));
+
+    // ── drag-and-drop ──────────────────────────────────────────────────────
+    btn.addEventListener("dragstart", e => {
+      state.dragSrc = name;
+      btn.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    btn.addEventListener("dragend", () => {
+      btn.classList.remove("dragging");
+      list.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+    });
+    btn.addEventListener("dragover", e => {
+      if (state.dragSrc && state.dragSrc !== name) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        btn.classList.add("drag-over");
+      }
+    });
+    btn.addEventListener("dragleave", () => btn.classList.remove("drag-over"));
+    btn.addEventListener("drop", e => {
+      e.preventDefault();
+      btn.classList.remove("drag-over");
+      if (!state.dragSrc || state.dragSrc === name) return;
+      swapGroupWeights(state.dragSrc, name);
+    });
+
     list.appendChild(btn);
   }
+}
+
+// Swap the weights of two groups so the dragged group takes the target's
+// position in the hierarchy, then re-render the sidebar and metrics.
+function swapGroupWeights(srcName, dstName) {
+  const src = state.document.groups[srcName];
+  const dst = state.document.groups[dstName];
+  const tmp = src.weight ?? 0;
+  src.weight = dst.weight ?? 0;
+  dst.weight = tmp;
+  renderGroups();
+  if (state.selected === srcName || state.selected === dstName) updateMetrics();
 }
 
 // ── Group selection ───────────────────────────────────────────────────────────
@@ -60,6 +112,24 @@ function selectGroup(name) {
       group.parents = parentsInput.value
         .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
       renderInheritance(group.parents);
+      renderGroups();
+    };
+  }
+
+  const prefixInput = el("prefixInput");
+  if (prefixInput) {
+    prefixInput.value = group.prefix || "";
+    prefixInput.oninput = () => {
+      group.prefix = prefixInput.value;
+    };
+  }
+
+  const weightInput = el("weightInput");
+  if (weightInput) {
+    weightInput.value = group.weight ?? 0;
+    weightInput.oninput = () => {
+      const w = parseInt(weightInput.value, 10);
+      group.weight = isNaN(w) ? 0 : w;
       renderGroups();
     };
   }
@@ -257,7 +327,7 @@ el("createGroupBtn").addEventListener("click", e => {
     return;
   }
   el("newGroupName").setCustomValidity("");
-  state.document.groups[name] = {parents: ["default"], permissions: {}};
+  state.document.groups[name] = {weight: 0, prefix: "", parents: ["default"], permissions: {}};
   el("groupDialog").close();
   renderGroups();
   selectGroup(name);
@@ -313,7 +383,7 @@ async function init() {
     el("metricCommands").textContent = state.commands.length;
 
     renderGroups();
-    const first = Object.keys(state.document.groups).sort()[0];
+    const first = groupsSorted()[0];
     if (first) selectGroup(first);
 
   } catch (err) {

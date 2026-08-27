@@ -8,6 +8,8 @@ import (
 const DocumentVersion = 1
 
 type Group struct {
+	Weight      int             `json:"weight,omitempty"`
+	Prefix      string          `json:"prefix,omitempty"`
 	Parents     []string        `json:"parents,omitempty"`
 	Permissions map[string]bool `json:"permissions,omitempty"`
 }
