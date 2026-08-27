@@ -44,7 +44,8 @@ type Player struct {
 	// Username is the player's display name.
 	Username string
 	// Edition indicates which protocol the player is connecting over.
-	Edition ClientEdition
+	Edition       ClientEdition
+	RemoteAddress string
 
 	// Position is the player's current world position.
 	Position spatial.Vec3

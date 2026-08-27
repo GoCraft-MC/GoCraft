@@ -72,6 +72,7 @@ type JoinIntent struct {
 	PlayerUUID      [16]byte
 	Username        string
 	Edition         string // "java" or "bedrock"
+	RemoteAddress   string
 	TrustedIdentity bool
 	Done            chan<- JoinResult // buffered(1); never nil
 }
