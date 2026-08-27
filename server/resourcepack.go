@@ -11,6 +11,22 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/resource"
 )
 
+// loadBedrockPackFromBytes writes raw pack bytes to a temp file and loads it
+// via resource.ReadPath. Used to load in-memory generated .mcaddon files.
+func loadBedrockPackFromBytes(data []byte) (*resource.Pack, error) {
+	f, err := os.CreateTemp("", "gocraft-pack-*.mcaddon")
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("write temp file: %w", err)
+	}
+	f.Close()
+	return resource.ReadPath(f.Name())
+}
+
 // loadBedrockPacks loads all Bedrock-format packs from the given file paths.
 // Each path may be:
 //   - a .mcpack or .zip file (single resource pack with manifest.json at root)
