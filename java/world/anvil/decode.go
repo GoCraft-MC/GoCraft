@@ -6,6 +6,7 @@ import (
 	"math/bits"
 	"strings"
 
+	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 )
 
@@ -141,13 +142,29 @@ func decodeContainerItems(list Tag) []coreworld.ContainerItem {
 		if slot < 0 || itemID == "" || count <= 0 {
 			continue
 		}
-		damage := 0
+		damage, enchantments := 0, ""
 		if components := entry.compound["components"]; components.typ == tagCompound {
 			damage = numericTagValue(components.compound["minecraft:damage"])
+			enchantments = decodeItemEnchantments(components.compound["minecraft:enchantments"])
 		}
-		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: itemID, Count: count, Damage: damage})
+		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: itemID, Count: count, Damage: damage, Enchantments: enchantments})
 	}
 	return items
+}
+
+func decodeItemEnchantments(tag Tag) string {
+	if tag.typ != tagCompound {
+		return ""
+	}
+	levels := tag.compound["levels"]
+	if levels.typ != tagCompound {
+		levels = tag
+	}
+	stack := player.ItemStack{ItemID: "minecraft:stone", Count: 1}
+	for id, level := range levels.compound {
+		stack.Enchant(id, numericTagValue(level))
+	}
+	return stack.Enchantments
 }
 
 func numericTagValue(tag Tag) int {

@@ -5,6 +5,7 @@ import (
 	"math/bits"
 	"sort"
 
+	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 )
 
@@ -172,12 +173,30 @@ func containerItemsTag(items []coreworld.ContainerItem) Tag {
 			"id":    {typ: tagString, strV: item.ItemID},
 			"count": {typ: tagInt, intV: int32(item.Count)},
 		}
+		components := map[string]Tag{}
 		if item.Damage > 0 {
-			compound["components"] = Tag{typ: tagCompound, compound: map[string]Tag{
-				"minecraft:damage": {typ: tagInt, intV: int32(item.Damage)},
-			}}
+			components["minecraft:damage"] = Tag{typ: tagInt, intV: int32(item.Damage)}
+		}
+		if enchantments := encodeItemEnchantments(item.Enchantments); enchantments.typ != tagEnd {
+			components["minecraft:enchantments"] = enchantments
+		}
+		if len(components) != 0 {
+			compound["components"] = Tag{typ: tagCompound, compound: components}
 		}
 		entries = append(entries, Tag{typ: tagCompound, compound: compound})
 	}
 	return Tag{typ: tagList, listElem: tagCompound, listV: entries}
+}
+
+func encodeItemEnchantments(encoded string) Tag {
+	levels := map[string]Tag{}
+	for _, enchantment := range (player.ItemStack{Enchantments: encoded}).EnchantmentLevels() {
+		levels[enchantment.ID] = Tag{typ: tagInt, intV: int32(enchantment.Level)}
+	}
+	if len(levels) == 0 {
+		return Tag{}
+	}
+	return Tag{typ: tagCompound, compound: map[string]Tag{
+		"levels": {typ: tagCompound, compound: levels},
+	}}
 }
