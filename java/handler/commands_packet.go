@@ -175,6 +175,15 @@ func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
 		addLiteral("remove", false, whitelistRemoveName),
 	))
 
+	for _, name := range []string{
+		"ban", "ban-ip", "banlist", "pardon", "pardon-ip", "deop",
+		"save-all", "save-off", "save-on", "stop", "defaultgamemode", "difficulty",
+		"setblock", "fill", "clone", "spawnpoint", "setworldspawn", "weather",
+	} {
+		arguments := addArgument("arguments", parserString, true, stringParser(2))
+		rootChildren = append(rootChildren, addLiteral(name, true, arguments))
+	}
+
 	if len(filters) != 0 && filters[0] != nil {
 		visible := rootChildren[:0]
 		for _, index := range rootChildren {
