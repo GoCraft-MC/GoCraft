@@ -297,6 +297,13 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 		return permissionManager.Allowed(p.Username, node, p.Operator, defaultAllowed)
 	})
+	cmds.SetGroupPrefixResolver(permissionManager.GroupPrefix)
+	chatFmt, err := loadChatFormat("configuration/chatformat.yml")
+	if err != nil {
+		slog.Warn("could not load chat format, using default", "err", err)
+		chatFmt = &chatFormatConfig{Format: defaultChatFormat}
+	}
+	cmds.SetChatFormatter(chatFmt.apply)
 	cmds.SetEntityIDAllocator(gameCore.NextEntityID)
 	cmds.SetPlayerFinder(func(name string) *player.Player {
 		var found *player.Player

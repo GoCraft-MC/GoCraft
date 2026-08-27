@@ -80,6 +80,29 @@ func (m *Manager) Reload() error {
 	return nil
 }
 
+// GroupPrefix returns the chat prefix of the highest-weight group the player
+// belongs to. Returns "" when no group has a prefix set.
+func (m *Manager) GroupPrefix(username string) string {
+	username = Normalize(username)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	user := m.document.Users[username]
+	groups := append([]string{"default"}, user.Groups...)
+
+	bestPrefix := ""
+	bestWeight := -1
+	for _, name := range groups {
+		if g, ok := m.document.Groups[Normalize(name)]; ok && g.Prefix != "" {
+			if g.Weight > bestWeight {
+				bestPrefix = g.Prefix
+				bestWeight = g.Weight
+			}
+		}
+	}
+	return bestPrefix
+}
+
 func (m *Manager) persist(document Document) error {
 	if m.path == "" {
 		return nil

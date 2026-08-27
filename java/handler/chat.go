@@ -81,7 +81,7 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 		return nil
 	}
 
-	text := fmt.Sprintf("<%s> %s", p.Username, msg)
+	text := cmds.FormatChat(p.Username, msg)
 	slog.Info("chat", "player", p.Username, "message", msg)
 	broadcastSystemMessage(mgr, text)
 	return nil

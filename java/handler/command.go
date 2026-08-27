@@ -82,6 +82,11 @@ type registeredCommand struct {
 
 type PermissionChecker func(player *player.Player, node string, defaultAllowed bool) bool
 
+// ChatFormatter formats a single chat line.  prefix is the player's
+// highest-weight group prefix (may be ""), username is the speaker, message is
+// the raw chat text.
+type ChatFormatter func(prefix, username, message string) string
+
 // Dispatcher maps command names (lower-case) to their implementations.
 // All methods are safe for concurrent use.
 type Dispatcher struct {
@@ -93,6 +98,8 @@ type Dispatcher struct {
 	teleportPlayer   func(*player.Player, float64, float64, float64) error
 	disconnectPlayer func(*player.Player, string) error
 	permission       PermissionChecker
+	chatFormatter    ChatFormatter
+	groupPrefix      func(username string) string
 	maxPlayers       int
 }
 
@@ -141,6 +148,43 @@ func (d *Dispatcher) SetPermissionChecker(check PermissionChecker) {
 	d.mu.Lock()
 	d.permission = check
 	d.mu.Unlock()
+}
+
+// SetChatFormatter installs the function used to build chat lines.
+func (d *Dispatcher) SetChatFormatter(f ChatFormatter) {
+	d.mu.Lock()
+	d.chatFormatter = f
+	d.mu.Unlock()
+}
+
+// SetGroupPrefixResolver installs the function used to look up a player's
+// group prefix from the permission manager.
+func (d *Dispatcher) SetGroupPrefixResolver(fn func(username string) string) {
+	d.mu.Lock()
+	d.groupPrefix = fn
+	d.mu.Unlock()
+}
+
+// FormatChat produces the full chat line for the given player and message.
+// It resolves the group prefix via the installed resolver, then calls the
+// ChatFormatter.  Falls back to "<username> message" when nothing is set.
+func (d *Dispatcher) FormatChat(username, message string) string {
+	d.mu.RLock()
+	f := d.chatFormatter
+	gpfn := d.groupPrefix
+	d.mu.RUnlock()
+
+	prefix := ""
+	if gpfn != nil {
+		prefix = gpfn(username)
+	}
+	if f != nil {
+		return f(prefix, username, message)
+	}
+	if prefix != "" {
+		return prefix + "<" + username + "> " + message
+	}
+	return "<" + username + "> " + message
 }
 
 func (d *Dispatcher) CanUse(player *player.Player, name string) bool {
