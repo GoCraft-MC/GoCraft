@@ -129,6 +129,75 @@ Changing `version_name` or `protocol_version` in `server.yml` changes the advert
   - `/gocraft peditor` opens the expiring browser editor documented in [`docs/permissions.md`](docs/permissions.md)
   - Vanilla/Paper command gaps are tracked in [`docs/command-parity.md`](docs/command-parity.md)
 
+### Command permissions
+
+Every command literal has its own permission. `Public` is the fallback for players without a matching group rule; `Operator` requires an operator or an explicit permission grant. Explicit denies and group inheritance are documented in [`docs/permissions.md`](docs/permissions.md).
+
+| Command | Permission | Default |
+| --- | --- | --- |
+| `/ban` | `gocraft.command.ban` | Operator |
+| `/ban-ip` | `gocraft.command.ban-ip` | Operator |
+| `/banlist` | `gocraft.command.banlist` | Operator |
+| `/clear` | `gocraft.command.clear` | Operator |
+| `/clone` | `gocraft.command.clone` | Operator |
+| `/damage` | `gocraft.command.damage` | Operator |
+| `/defaultgamemode` | `gocraft.command.defaultgamemode` | Operator |
+| `/deop` | `gocraft.command.deop` | Operator |
+| `/difficulty` | `gocraft.command.difficulty` | Operator |
+| `/effect` | `gocraft.command.effect` | Operator |
+| `/fill` | `gocraft.command.fill` | Operator |
+| `/fly` | `gocraft.command.fly` | Operator |
+| `/flyspeed` | `gocraft.command.flyspeed` | Operator |
+| `/flyyspeed` | `gocraft.command.flyyspeed` | Operator |
+| `/gamemode` | `gocraft.command.gamemode` | Operator |
+| `/get` | `gocraft.command.get` | Operator |
+| `/give` | `gocraft.command.give` | Operator |
+| `/gm` | `gocraft.command.gm` | Operator |
+| `/gocraft` | `gocraft.command.gocraft` | Operator |
+| `/god` | `gocraft.command.god` | Operator |
+| `/heal` | `gocraft.command.heal` | Operator |
+| `/help` | `gocraft.command.help` | Public |
+| `/kick` | `gocraft.command.kick` | Operator |
+| `/kill` | `gocraft.command.kill` | Operator |
+| `/list` | `gocraft.command.list` | Public |
+| `/locate` | `gocraft.command.locate` | Operator |
+| `/me` | `gocraft.command.me` | Public |
+| `/msg` | `gocraft.command.msg` | Public |
+| `/mspt` | `gocraft.command.mspt` | Operator |
+| `/op` | `gocraft.command.op` | Public (bootstrap protected) |
+| `/pardon` | `gocraft.command.pardon` | Operator |
+| `/pardon-ip` | `gocraft.command.pardon-ip` | Operator |
+| `/potioneffect` | `gocraft.command.potioneffect` | Operator |
+| `/save-all` | `gocraft.command.save-all` | Operator |
+| `/save-off` | `gocraft.command.save-off` | Operator |
+| `/save-on` | `gocraft.command.save-on` | Operator |
+| `/say` | `gocraft.command.say` | Operator |
+| `/seed` | `gocraft.command.seed` | Operator |
+| `/setblock` | `gocraft.command.setblock` | Operator |
+| `/setspawn` | `gocraft.command.setspawn` | Operator |
+| `/setworldspawn` | `gocraft.command.setworldspawn` | Operator |
+| `/spawn` | `gocraft.command.spawn` | Public |
+| `/spawnboat` | `gocraft.command.spawnboat` | Operator |
+| `/spawnpoint` | `gocraft.command.spawnpoint` | Operator |
+| `/stop` | `gocraft.command.stop` | Operator |
+| `/summon` | `gocraft.command.summon` | Operator |
+| `/tell` | `gocraft.command.tell` | Public |
+| `/time` | `gocraft.command.time` | Operator |
+| `/timings` | `gocraft.command.timings` | Operator |
+| `/tp` | `gocraft.command.tp` | Operator |
+| `/tphere` | `gocraft.command.tphere` | Operator |
+| `/tps` | `gocraft.command.tps` | Operator |
+| `/ungod` | `gocraft.command.ungod` | Operator |
+| `/ver` | `gocraft.command.ver` | Public |
+| `/version` | `gocraft.command.version` | Public |
+| `/w` | `gocraft.command.w` | Public |
+| `/walkspeed` | `gocraft.command.walkspeed` | Operator |
+| `/walkspeen` | `gocraft.command.walkspeen` | Operator |
+| `/weather` | `gocraft.command.weather` | Operator |
+| `/whitelist` | `gocraft.command.whitelist` | Operator |
+| `/world` | `gocraft.command.world` | Operator |
+| `/xyz` | `gocraft.command.xyz` | Public |
+
 ### Not implemented
 
 Some vanilla systems remain incomplete: advanced Bedrock crafting/container transactions, timed furnace/smoker/blast-furnace processing, complete entity AI/pathfinding, and every edition-specific sound/particle are not implemented. Java and Bedrock players do share the canonical world, players, mobs, chat, combat, drops, time, movement, equipment, health/death/respawn, basic block/inventory interactions, and command permissions. Paper plugin compatibility is not supported.
