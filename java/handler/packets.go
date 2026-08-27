@@ -47,9 +47,10 @@ var (
 
 var (
 	// Serverbound
-	packetIDClientInformation     = protocoldata.MustSB("configuration", "minecraft:client_information")
-	packetIDServerboundKnownPacks = protocoldata.MustSB("configuration", "minecraft:select_known_packs")
-	packetIDAcknowledgeFinish     = protocoldata.MustSB("configuration", "minecraft:finish_configuration")
+	packetIDClientInformation      = protocoldata.MustSB("configuration", "minecraft:client_information")
+	packetIDServerboundKnownPacks  = protocoldata.MustSB("configuration", "minecraft:select_known_packs")
+	packetIDAcknowledgeFinish      = protocoldata.MustSB("configuration", "minecraft:finish_configuration")
+	packetIDResourcePackResponse   = protocoldata.MustSB("configuration", "minecraft:resource_pack")
 
 	// Clientbound
 	packetIDConfigPluginMessage   = protocoldata.MustCB("configuration", "minecraft:custom_payload")
@@ -57,6 +58,7 @@ var (
 	packetIDFeatureFlags          = protocoldata.MustCB("configuration", "minecraft:update_enabled_features")
 	packetIDUpdateTags            = protocoldata.MustCB("configuration", "minecraft:update_tags")
 	packetIDClientboundKnownPacks = protocoldata.MustCB("configuration", "minecraft:select_known_packs")
+	packetIDResourcePackPush      = protocoldata.MustCB("configuration", "minecraft:resource_pack_push")
 )
 
 // ── Play state — clientbound (S→C) ───────────────────────────────────────────

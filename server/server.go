@@ -303,6 +303,11 @@ func New(cfg *config.Config) (*Server, error) {
 		slog.Warn("could not load chat format, using default", "err", err)
 		chatFmt = &chatFormatConfig{Format: defaultChatFormat}
 	}
+	if glyphs, glyphErr := loadGlyphs("configuration/glyphs.yml"); glyphErr != nil {
+		slog.Warn("could not load glyphs", "err", glyphErr)
+	} else {
+		chatFmt.glyphs = glyphs
+	}
 	cmds.SetChatFormatter(chatFmt.apply)
 	cmds.SetEntityIDAllocator(gameCore.NextEntityID)
 	cmds.SetPlayerFinder(func(name string) *player.Player {
@@ -483,6 +488,13 @@ func New(cfg *config.Config) (*Server, error) {
 			configuredGameMode(cfg.DefaultGameMode),
 			difficultyID(cfg.Difficulty),
 		)
+		if cfg.ResourcePack.Bedrock.Enabled && cfg.ResourcePack.Bedrock.Path != "" {
+			if pack, err := loadBedrockPack(cfg.ResourcePack.Bedrock.Path); err != nil {
+				slog.Warn("could not load Bedrock resource pack", "err", err)
+			} else {
+				s.bedrockListener.SetResourcePack(pack)
+			}
+		}
 		s.bedrockListener.SetWorldSpawn(s.currentWorldSpawn())
 		s.sessions.SetMessageObserver(s.bedrockListener.BroadcastMessage)
 		s.sessions.SetExternalKnockbackHandler(func(p *player.Player, sourceX, sourceZ, horizontal, vertical float64) {
@@ -4510,7 +4522,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 		}
 
 		// ── Configuration state ──────────────────────────────────────────────
-		if err := handler.HandleConfiguration(conn, s.regProvider); err != nil {
+		if err := handler.HandleConfiguration(conn, s.regProvider, s.cfg.ResourcePack.Java); err != nil {
 			slog.Warn("configuration error", "remote", remote, "err", err)
 			return
 		}

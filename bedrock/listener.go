@@ -41,6 +41,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+	"github.com/sandertv/gophertunnel/minecraft/resource"
 	"github.com/sandertv/gophertunnel/minecraft/text"
 
 	bedrockworld "GoCraft/bedrock/world"
@@ -88,6 +89,9 @@ type Listener struct {
 	creativeItems  []protocol.CreativeItem
 	craftingData   []*packet.CraftingData
 	creativeNames  map[uint32]creativeKnownItem // creative network ID → item name/meta
+
+	// resourcePacks holds optional Bedrock-format packs sent to every client.
+	resourcePacks []*resource.Pack
 }
 
 type bedrockSession struct {
@@ -243,6 +247,12 @@ func NewListener(
 	return l
 }
 
+// SetResourcePack adds a Bedrock-format resource pack that is sent to every
+// connecting Bedrock client. Call this before Listen.
+func (l *Listener) SetResourcePack(pack *resource.Pack) {
+	l.resourcePacks = append(l.resourcePacks, pack)
+}
+
 func (l *Listener) worldForDimension(dimension int32) *coreworld.World {
 	if dimensionWorld := l.worlds[dimension]; dimensionWorld != nil {
 		return dimensionWorld
@@ -263,6 +273,7 @@ func (l *Listener) Listen(ctx context.Context) error {
 	gt, err := minecraft.ListenConfig{
 		AuthenticationDisabled: !l.cfg.OnlineMode,
 		ErrorLog:               slog.Default(),
+		ResourcePacks:          l.resourcePacks,
 		// AllowUnknownPackets prevents gophertunnel from closing the conn when
 		// the client sends a packet whose ID we do not recognise. Without this,
 		// any novel 1.26.40 packet ID causes an immediate server-side close and

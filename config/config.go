@@ -80,6 +80,30 @@ type WhitelistConfig struct {
 	Players []string `yaml:"players"`
 }
 
+// JavaResourcePackConfig controls the resource pack pushed to Java clients.
+// Java and Bedrock use different pack formats — configure each separately.
+type JavaResourcePackConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url"`    // HTTPS URL to the .zip resource pack
+	Hash    string `yaml:"hash"`   // SHA-1 hex of the zip (for client caching)
+	Forced  bool   `yaml:"forced"` // kick the player if they decline
+	Prompt  string `yaml:"prompt"` // MiniMessage text shown before accept dialog
+}
+
+// BedrockResourcePackConfig controls the resource pack pushed to Bedrock clients.
+// The pack must be in Bedrock format (manifest.json at root).
+type BedrockResourcePackConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`   // local path to .mcpack or .zip file
+	Forced  bool   `yaml:"forced"` // kick the player if they decline
+}
+
+// ResourcePackConfig bundles resource pack settings for both editions.
+type ResourcePackConfig struct {
+	Java    JavaResourcePackConfig    `yaml:"java"`
+	Bedrock BedrockResourcePackConfig `yaml:"bedrock"`
+}
+
 // PermissionEditorConfig controls the bytebin-based permission editor.
 // The server uploads permission data to bytebin (outbound only — no listening
 // port needed), and the editor runs as a static GitHub Pages site.
@@ -174,6 +198,7 @@ type Config struct {
 	// separately in ops.json, matching the vanilla server convention.
 	Operators        []string
 	Whitelist        WhitelistConfig        `yaml:"whitelist"`
+	ResourcePack     ResourcePackConfig     `yaml:"resource_pack"`
 	PermissionEditor PermissionEditorConfig `yaml:"permission_editor"`
 	Debug            DebugConfig            `yaml:"debug"`
 

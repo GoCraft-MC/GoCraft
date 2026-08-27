@@ -2,9 +2,14 @@ package handler
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 
+	"GoCraft/config"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/registry"
@@ -23,7 +28,7 @@ import (
 //	S→C  Update Tags (0x0D)        — complete network-safe tag snapshot using assigned IDs
 //	S→C  Finish Configuration (0x03)
 //	C→S  Acknowledge Finish (0x03)
-func HandleConfiguration(conn *network.ClientConn, reg registry.Provider) error {
+func HandleConfiguration(conn *network.ClientConn, reg registry.Provider, rp config.JavaResourcePackConfig) error {
 	// Mojang sends brand and enabled features before starting the registry
 	// synchronization task and Known Packs negotiation.
 	if err := sendConfigPluginMessage(conn, "minecraft:brand", "GoCraft"); err != nil {
@@ -33,10 +38,16 @@ func HandleConfiguration(conn *network.ClientConn, reg registry.Provider) error 
 		return fmt.Errorf("config: %w", err)
 	}
 
+	if rp.Enabled && rp.URL != "" {
+		if err := sendResourcePackPush(conn, rp); err != nil {
+			return fmt.Errorf("config: resource pack: %w", err)
+		}
+	}
+
 	if err := sendKnownPacks(conn, reg.Packs()); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-	selectedPacks, err := readUntilKnownPacks(conn)
+	selectedPacks, err := readUntilKnownPacks(conn, rp.Forced)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
@@ -129,7 +140,7 @@ func sendFeatureFlags(conn *network.ClientConn) error {
 //
 //	C→S Client Information (0x00)  — client display and locale settings
 //	C→S Known Packs (0x07)         — acknowledgement of server's known packs
-func readUntilKnownPacks(conn *network.ClientConn) ([]registry.Pack, error) {
+func readUntilKnownPacks(conn *network.ClientConn, packForced bool) ([]registry.Pack, error) {
 	for {
 		pkt, err := conn.ReadPacket()
 		if err != nil {
@@ -139,6 +150,25 @@ func readUntilKnownPacks(conn *network.ClientConn) ([]registry.Pack, error) {
 		case packetIDClientInformation:
 			slog.Debug("client information received (configuration)", "remote", conn.RemoteAddr())
 			// No fields need to be parsed for basic play; just acknowledge receipt.
+		case packetIDResourcePackResponse:
+			// Resource Pack Response: UUID (16 bytes) + status VarInt
+			// Status: 1=loaded 2=declined 3=failed 4=accepted
+			if len(pkt.Data) >= 17 {
+				status, _ := protocol.ReadVarInt(bytes.NewReader(pkt.Data[16:]))
+				switch status {
+				case 2: // declined
+					if packForced {
+						return nil, fmt.Errorf("player declined required resource pack")
+					}
+					slog.Info("player declined resource pack", "remote", conn.RemoteAddr())
+				case 3: // failed
+					slog.Warn("player failed to download resource pack", "remote", conn.RemoteAddr())
+				case 4: // accepted — still downloading, wait for loaded (1)
+					slog.Debug("player accepted resource pack", "remote", conn.RemoteAddr())
+				case 1: // successfully loaded
+					slog.Info("player loaded resource pack", "remote", conn.RemoteAddr())
+				}
+			}
 		case packetIDServerboundKnownPacks:
 			packs, err := decodeKnownPacks(pkt.Data)
 			if err != nil {
@@ -185,3 +215,48 @@ func decodeKnownPacks(data []byte) ([]registry.Pack, error) {
 	}
 	return packs, nil
 }
+
+// sendResourcePackPush sends the Resource Pack Push (configuration) packet.
+//
+// Wire layout (1.21.4):
+//
+//	UUID      (16 bytes)  — deterministic from URL so repeated joins reuse cache
+//	String    URL
+//	String    Hash        — SHA-1 hex of the zip, or ""
+//	Boolean   Forced      — kick if declined
+//	Boolean   Has prompt
+//	NBT       Prompt      — optional MiniMessage text shown before the dialog
+func sendResourcePackPush(conn *network.ClientConn, rp config.JavaResourcePackConfig) error {
+	uuid := urlToPackUUID(rp.URL)
+	hash := strings.ToLower(strings.TrimSpace(rp.Hash))
+
+	b := protocol.NewBuilder(packetIDResourcePackPush)
+	b.Bytes(uuid[:])
+	b.String(rp.URL)
+	b.String(hash)
+	b.Bool(rp.Forced)
+	if rp.Prompt != "" {
+		b.Bool(true)
+		b.Bytes(nbtTextComponent(ParseMiniMessage(rp.Prompt)))
+	} else {
+		b.Bool(false)
+	}
+	return conn.WritePacket(b.Build())
+}
+
+// urlToPackUUID derives a stable UUID (version 5 / SHA-1 namespace) from a URL
+// so the same pack URL always maps to the same UUID — clients skip re-downloading
+// a pack they already have cached from a previous session.
+func urlToPackUUID(url string) [16]byte {
+	h := sha1.Sum([]byte("gocraft:resource_pack:" + url))
+	var uuid [16]byte
+	copy(uuid[:], h[:16])
+	// Set version 5 (SHA-1 name-based) and variant bits.
+	uuid[6] = (uuid[6] & 0x0F) | 0x50
+	uuid[8] = (uuid[8] & 0x3F) | 0x80
+	return uuid
+}
+
+// keep compiler happy for hex import used in hash validation elsewhere
+var _ = hex.EncodeToString
+var _ = binary.BigEndian

@@ -23,12 +23,25 @@ import (
 	"strings"
 )
 
+// MMOptions controls optional features of the MiniMessage parser.
+type MMOptions struct {
+	// Glyphs maps glyph names to their Unicode characters.
+	// Enables <glyph:name> tags in templates.
+	Glyphs map[string]string
+}
+
 // ParseMiniMessage converts a MiniMessage string to a §-coded string.
 // Call EscapeMiniMessage on untrusted player input before embedding it
 // inside a MiniMessage template.
 func ParseMiniMessage(input string) string {
+	return ParseMiniMessageWithOptions(input, MMOptions{})
+}
+
+// ParseMiniMessageWithOptions is like ParseMiniMessage but accepts extra options
+// such as a glyph map for <glyph:name> tags.
+func ParseMiniMessageWithOptions(input string, opts MMOptions) string {
 	input = expandLegacyCodes(input)
-	p := &mmParser{runes: []rune(input)}
+	p := &mmParser{runes: []rune(input), glyphs: opts.Glyphs}
 	p.stack = []mmState{{}}
 	p.run()
 	return p.buf.String()
@@ -79,10 +92,11 @@ func (s mmState) codes() string {
 // ── parser ────────────────────────────────────────────────────────────────────
 
 type mmParser struct {
-	runes []rune
-	pos   int
-	stack []mmState
-	buf   strings.Builder
+	runes  []rune
+	pos    int
+	stack  []mmState
+	buf    strings.Builder
+	glyphs map[string]string
 }
 
 func (p *mmParser) cur() mmState {
@@ -148,6 +162,17 @@ func (p *mmParser) handleTag(raw string) {
 	if strings.HasPrefix(lower, "/") {
 		p.pop()
 		p.buf.WriteString(p.cur().codes())
+		return
+	}
+
+	// ── glyph ─────────────────────────────────────────────────────────────────
+	if strings.HasPrefix(lower, "glyph:") {
+		name := strings.TrimPrefix(lower, "glyph:")
+		if p.glyphs != nil {
+			if ch, ok := p.glyphs[name]; ok {
+				p.buf.WriteString(ch)
+			}
+		}
 		return
 	}
 

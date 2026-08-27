@@ -12,7 +12,8 @@ import (
 
 // chatFormatConfig holds the chat line template from configuration/chatformat.yml.
 type chatFormatConfig struct {
-	Format string `yaml:"format"`
+	Format string            `yaml:"format"`
+	glyphs map[string]string // loaded separately from configuration/glyphs.yml
 }
 
 const defaultChatFormat = "<{player}> {message}"
@@ -61,5 +62,5 @@ func (cf *chatFormatConfig) apply(prefix, player, message string) string {
 	s = strings.ReplaceAll(s, "{prefix}", prefix)
 	s = strings.ReplaceAll(s, "{player}", player)
 	s = strings.ReplaceAll(s, "{message}", handler.EscapeMiniMessage(message))
-	return handler.ParseMiniMessage(s)
+	return handler.ParseMiniMessageWithOptions(s, handler.MMOptions{Glyphs: cf.glyphs})
 }
