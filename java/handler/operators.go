@@ -80,6 +80,18 @@ func SetOperator(name string) error {
 	return saveOperatorsLocked()
 }
 
+// RemoveOperator demotes a name and persists the updated ops.json file.
+func RemoveOperator(name string) (bool, error) {
+	operatorRegistry.Lock()
+	defer operatorRegistry.Unlock()
+	key := strings.ToLower(strings.TrimSpace(name))
+	if _, exists := operatorRegistry.names[key]; !exists {
+		return false, nil
+	}
+	delete(operatorRegistry.names, key)
+	return true, saveOperatorsLocked()
+}
+
 func addOperatorLocked(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == `` {
