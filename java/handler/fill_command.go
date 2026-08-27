@@ -18,7 +18,7 @@ func cmdFill(ctx CommandContext) error {
 	origins := []float64{ctx.Player.Position.X, ctx.Player.Position.Y, ctx.Player.Position.Z,
 		ctx.Player.Position.X, ctx.Player.Position.Y, ctx.Player.Position.Z}
 	for i := range coords {
-		value, err := parseCommandCoordinate(ctx.Args[i], origins[i])
+		value, err := ParseCommandCoordinate(ctx.Args[i], origins[i])
 		if err != nil {
 			return err
 		}

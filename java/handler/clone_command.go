@@ -22,7 +22,7 @@ func cmdClone(ctx CommandContext) error {
 	coords := make([]int, 9)
 	for i := range coords {
 		origin := []float64{ctx.Player.Position.X, ctx.Player.Position.Y, ctx.Player.Position.Z}[i%3]
-		value, err := parseCommandCoordinate(ctx.Args[i], origin)
+		value, err := ParseCommandCoordinate(ctx.Args[i], origin)
 		if err != nil {
 			return err
 		}

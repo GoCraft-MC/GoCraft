@@ -12,15 +12,15 @@ func cmdSetBlock(ctx CommandContext) error {
 	if len(ctx.Args) < 4 || len(ctx.Args) > 5 {
 		return fmt.Errorf("usage: /setblock <x> <y> <z> <block> [replace|keep|destroy]")
 	}
-	x, err := parseCommandCoordinate(ctx.Args[0], ctx.Player.Position.X)
+	x, err := ParseCommandCoordinate(ctx.Args[0], ctx.Player.Position.X)
 	if err != nil {
 		return err
 	}
-	y, err := parseCommandCoordinate(ctx.Args[1], ctx.Player.Position.Y)
+	y, err := ParseCommandCoordinate(ctx.Args[1], ctx.Player.Position.Y)
 	if err != nil {
 		return err
 	}
-	z, err := parseCommandCoordinate(ctx.Args[2], ctx.Player.Position.Z)
+	z, err := ParseCommandCoordinate(ctx.Args[2], ctx.Player.Position.Z)
 	if err != nil {
 		return err
 	}

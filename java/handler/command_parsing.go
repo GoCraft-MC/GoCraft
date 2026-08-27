@@ -10,7 +10,7 @@ import (
 	javaworld "GoCraft/java/world"
 )
 
-func parseCommandCoordinate(value string, origin float64) (int, error) {
+func ParseCommandCoordinate(value string, origin float64) (int, error) {
 	if strings.HasPrefix(value, "~") {
 		offset := 0.0
 		var err error
