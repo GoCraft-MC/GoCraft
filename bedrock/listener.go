@@ -175,6 +175,21 @@ func (l *Listener) removeSession(uuid [16]byte) {
 	l.sessionsMu.Unlock()
 }
 
+// DisconnectPlayer closes a Bedrock session with a client-visible reason.
+func (l *Listener) DisconnectPlayer(uuid [16]byte, reason string) bool {
+	l.sessionsMu.RLock()
+	s, ok := l.sessions[uuid]
+	l.sessionsMu.RUnlock()
+	if !ok {
+		return false
+	}
+	_ = s.conn.WritePacket(&packet.Disconnect{
+		Reason: packet.DisconnectReasonKicked, Message: reason,
+	})
+	_ = s.conn.Close()
+	return true
+}
+
 // NewListener creates a Listener from the Bedrock section of the server config.
 // The intent bus is used to submit player lifecycle and gameplay events to the
 // core simulation tick goroutine.
