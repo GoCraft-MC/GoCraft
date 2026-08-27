@@ -367,6 +367,7 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 	}
 	s.registerSpawnCommands()
+	s.registerLifecycleCommands()
 
 	// Register server-state commands as closures after s is initialised.
 	cmds.Register("timings", func(ctx handler.CommandContext) error {
@@ -783,7 +784,7 @@ func (s *Server) safeTick() {
 		s.bedrockListener.Sync(uint64(s.worldAge))
 		s.syncBedrockPlayersToJava()
 	}
-	if s.worldAge%600 == 0 {
+	if s.autosaveEnabled.Load() && s.worldAge%600 == 0 {
 		for dimension, dimensionWorld := range map[string]*coreworld.World{"overworld": s.world, "nether": s.netherWorld, "end": s.endWorld} {
 			if err := dimensionWorld.Flush(); err != nil {
 				slog.Warn("world autosave failed", "dimension", dimension, "err", err)
