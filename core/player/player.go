@@ -134,6 +134,8 @@ type Player struct {
 	SpawnPoint    spatial.BlockPos
 	HasSpawnPoint bool
 	WorldSpawn    spatial.Vec3
+	Raining       bool
+	Thundering    bool
 	// Dimension uses Bedrock's vanilla IDs: 0 overworld, 1 Nether, 2 End.
 	Dimension int32
 	// PortalCooldownUntil prevents a player standing inside a portal from

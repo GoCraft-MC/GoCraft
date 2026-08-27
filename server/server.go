@@ -129,6 +129,8 @@ type Server struct {
 	autosaveEnabled atomic.Bool
 	difficulty      atomic.Int32
 	defaultGameMode atomic.Uint32
+	weather         atomic.Int32
+	weatherTicks    atomic.Int64
 	stopOnce        sync.Once
 	stopRequested   chan struct{}
 }
@@ -990,6 +992,7 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 
 	p := player.New(i.PlayerUUID, i.Username, edition)
 	p.RemoteAddress = i.RemoteAddress
+	p.Raining, p.Thundering = s.currentWeather()
 	p.Operator = handler.IsOperatorName(i.Username)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
 	p.GameMode = player.GameMode(s.defaultGameMode.Load())
@@ -4532,6 +4535,7 @@ func (s *Server) registerPlayer(result *handler.LoginResult, remoteAddress strin
 	// protocol.UUID is [16]byte — convertible to the core's raw [16]byte UUID.
 	p := player.New([16]byte(result.UUID), result.Name, player.ClientEditionJava)
 	p.RemoteAddress = remoteAddress
+	p.Raining, p.Thundering = s.currentWeather()
 	p.Operator = handler.IsOperatorName(result.Name)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
 	p.GameMode = player.GameMode(s.defaultGameMode.Load())
