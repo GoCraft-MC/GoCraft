@@ -1501,7 +1501,7 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 		s.cmds.Dispatch(i.Message, ctx)
 		return
 	}
-	msg := fmt.Sprintf("<%s> %s", i.DisplayName, i.Message)
+	msg := s.cmds.FormatChat(i.DisplayName, i.Message)
 	handler.BroadcastSystemMessage(s.sessions, msg)
 }
 
