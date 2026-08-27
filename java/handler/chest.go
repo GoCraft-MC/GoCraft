@@ -472,7 +472,7 @@ func clickChestSlot(p *player.Player, containerSlot int, button byte) {
 			p.CarriedItem, *target = *target, player.ItemStack{}
 		case target.IsEmpty():
 			*target, p.CarriedItem = p.CarriedItem, player.ItemStack{}
-		case target.ItemID == p.CarriedItem.ItemID && target.Count < 64:
+		case target.SameItem(p.CarriedItem) && target.Count < 64:
 			add := minInt(64-target.Count, p.CarriedItem.Count)
 			target.Count += add
 			p.CarriedItem.Count -= add
@@ -487,14 +487,16 @@ func clickChestSlot(p *player.Player, containerSlot int, button byte) {
 			return
 		}
 		take := (target.Count + 1) / 2
-		p.CarriedItem = player.ItemStack{ItemID: target.ItemID, Count: take}
+		p.CarriedItem = *target
+		p.CarriedItem.Count = take
 		target.Count -= take
 		normalizeStack(target)
 	} else if target.IsEmpty() {
-		*target = player.ItemStack{ItemID: p.CarriedItem.ItemID, Count: 1}
+		*target = p.CarriedItem
+		target.Count = 1
 		p.CarriedItem.Count--
 		normalizeStack(&p.CarriedItem)
-	} else if target.ItemID == p.CarriedItem.ItemID && target.Count < 64 {
+	} else if target.SameItem(p.CarriedItem) && target.Count < 64 {
 		target.Count++
 		p.CarriedItem.Count--
 		normalizeStack(&p.CarriedItem)
@@ -531,7 +533,7 @@ func addStackToContainer(slots []player.ItemStack, item player.ItemStack) bool {
 		switch {
 		case slot.IsEmpty():
 			capacity += 64
-		case slot.ItemID == item.ItemID && slot.Count < 64:
+		case slot.SameItem(item) && slot.Count < 64:
 			capacity += 64 - slot.Count
 		}
 	}
@@ -540,7 +542,7 @@ func addStackToContainer(slots []player.ItemStack, item player.ItemStack) bool {
 	}
 	remaining := item.Count
 	for i := range slots {
-		if slots[i].ItemID != item.ItemID || slots[i].Count >= 64 {
+		if !slots[i].SameItem(item) || slots[i].Count >= 64 {
 			continue
 		}
 		add := minInt(64-slots[i].Count, remaining)
@@ -555,7 +557,8 @@ func addStackToContainer(slots []player.ItemStack, item player.ItemStack) bool {
 			continue
 		}
 		add := minInt(64, remaining)
-		slots[i] = player.ItemStack{ItemID: item.ItemID, Count: add}
+		slots[i] = item
+		slots[i].Count = add
 		remaining -= add
 		if remaining == 0 {
 			return true

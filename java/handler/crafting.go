@@ -163,7 +163,7 @@ func addStackToInventory(inventory *[player.InventorySize]player.ItemStack, item
 	stackLimit := player.MaxStackSize(item.ItemID)
 	for _, bounds := range [][2]int{{player.HotbarStart, player.HotbarStart + 9}, {9, player.HotbarStart}} {
 		for i := bounds[0]; i < bounds[1] && remaining > 0; i++ {
-			if inventory[i].ItemID != item.ItemID || inventory[i].Damage != item.Damage || inventory[i].Count >= stackLimit {
+			if !inventory[i].SameItem(item) || inventory[i].Count >= stackLimit {
 				continue
 			}
 			add := minInt(stackLimit-inventory[i].Count, remaining)
@@ -813,7 +813,7 @@ func clickCraftingSlot(p *player.Player, containerSlot int, button byte) {
 			p.CarriedItem, *target = *target, player.ItemStack{}
 		case target.IsEmpty():
 			*target, p.CarriedItem = p.CarriedItem, player.ItemStack{}
-		case target.ItemID == p.CarriedItem.ItemID && target.Count < 64:
+		case target.SameItem(p.CarriedItem) && target.Count < 64:
 			add := minInt(64-target.Count, p.CarriedItem.Count)
 			target.Count += add
 			p.CarriedItem.Count -= add
@@ -825,14 +825,16 @@ func clickCraftingSlot(p *player.Player, containerSlot int, button byte) {
 	}
 	if p.CarriedItem.IsEmpty() {
 		take := (target.Count + 1) / 2
-		p.CarriedItem = player.ItemStack{ItemID: target.ItemID, Count: take}
+		p.CarriedItem = *target
+		p.CarriedItem.Count = take
 		target.Count -= take
 		normalizeStack(target)
 	} else if target.IsEmpty() {
-		*target = player.ItemStack{ItemID: p.CarriedItem.ItemID, Count: 1}
+		*target = p.CarriedItem
+		target.Count = 1
 		p.CarriedItem.Count--
 		normalizeStack(&p.CarriedItem)
-	} else if target.ItemID == p.CarriedItem.ItemID && target.Count < 64 {
+	} else if target.SameItem(p.CarriedItem) && target.Count < 64 {
 		target.Count++
 		p.CarriedItem.Count--
 		normalizeStack(&p.CarriedItem)

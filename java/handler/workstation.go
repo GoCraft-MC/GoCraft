@@ -201,7 +201,7 @@ func shiftWorkstationSlot(p *player.Player, containerSlot int) {
 		if index == WorkstationOutputIndex(p.OpenContainerKind) || !canPlaceWorkstationSlot(p.OpenContainerKind, index, remaining) {
 			continue
 		}
-		if slots[index].ItemID == remaining.ItemID && slots[index].Damage == remaining.Damage && slots[index].Count < player.MaxStackSize(remaining.ItemID) {
+		if slots[index].SameItem(remaining) && slots[index].Count < player.MaxStackSize(remaining.ItemID) {
 			add := minInt(player.MaxStackSize(remaining.ItemID)-slots[index].Count, remaining.Count)
 			slots[index].Count += add
 			remaining.Count -= add
