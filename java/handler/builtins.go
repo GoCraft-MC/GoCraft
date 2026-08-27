@@ -52,6 +52,7 @@ var summonableMobNames = []string{
 
 // RegisterBuiltins registers all built-in GoCraft commands with d.
 func RegisterBuiltins(d *Dispatcher) {
+	registerModerationCommands(d)
 	d.Register(`help`, cmdHelp)
 	d.Register(`list`, cmdList)
 	d.Register(`xyz`, cmdXYZ)
