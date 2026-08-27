@@ -3,4 +3,4 @@
 #   {prefix}  — the player's highest-weight group prefix (e.g. "[MOD] ")
 #   {player}  — the player's username
 #   {message} — the chat message
-format: "{prefix}<{player}> {message}"
+format: "{prefix} {player}  : {message}"
