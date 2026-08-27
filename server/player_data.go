@@ -37,6 +37,7 @@ type persistedPlayerData struct {
 	Saturation    float32                                `json:"saturation"`
 	Exhaustion    float32                                `json:"exhaustion"`
 	Experience    int32                                  `json:"experience"`
+	Tags          []string                               `json:"tags,omitempty"`
 	Inventory     [player.InventorySize]player.ItemStack `json:"inventory"`
 	EnderChest    [27]player.ItemStack                   `json:"ender_chest"`
 	HeldSlot      int                                    `json:"held_slot"`
@@ -64,7 +65,7 @@ func snapshotPlayerData(p *player.Player) persistedPlayerData {
 	return persistedPlayerData{
 		Version: playerDataVersion, Username: p.Username,
 		Position: p.Position, Rotation: p.Rotation, GameMode: p.GameMode,
-		Health: health, Dead: dead, Food: food, Saturation: saturation, Exhaustion: exhaustion, Experience: experience,
+		Health: health, Dead: dead, Food: food, Saturation: saturation, Exhaustion: exhaustion, Experience: experience, Tags: p.Tags(),
 		Inventory: p.Inventory, EnderChest: p.EnderChestInventory, HeldSlot: p.HeldSlot,
 		SpawnPoint: p.SpawnPoint, HasSpawnPoint: p.HasSpawnPoint,
 		Dimension: p.Dimension,
@@ -181,6 +182,12 @@ func applyPersistedPlayerData(p *player.Player, data persistedPlayerData) error 
 	p.Saturation = min(max(data.Saturation, 0), 20)
 	p.Exhaustion = min(max(data.Exhaustion, 0), 4)
 	p.SetTotalExperience(data.Experience)
+	for _, tag := range data.Tags {
+		if strings.TrimSpace(tag) == "" || len(tag) > 1024 {
+			return fmt.Errorf("invalid player tag %q", tag)
+		}
+		p.AddTag(tag)
+	}
 	p.Inventory = data.Inventory
 	p.EnderChestInventory = data.EnderChest
 	p.HeldSlot = data.HeldSlot
