@@ -11,6 +11,7 @@ import (
 func (s *Server) registerWorldSettingsCommands() {
 	s.cmds.RegisterOperator("defaultgamemode", s.commandDefaultGameMode)
 	s.cmds.RegisterOperator("difficulty", s.commandDifficulty)
+	s.cmds.RegisterOperator("weather", s.commandWeather)
 }
 
 func (s *Server) commandDefaultGameMode(ctx handler.CommandContext) error {

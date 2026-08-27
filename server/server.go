@@ -787,6 +787,7 @@ func (s *Server) safeTick() {
 	s.tickAuxiliaryDimensionItems()
 	s.tickStationaryLavaDamage()
 	s.tickPlayerHunger()
+	s.tickWeather()
 	if s.bedrockListener != nil {
 		s.bedrockListener.Sync(uint64(s.worldAge))
 		s.syncBedrockPlayersToJava()
