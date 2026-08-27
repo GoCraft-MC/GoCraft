@@ -1193,6 +1193,20 @@ func (l *Listener) SendMessage(playerUUID [16]byte, message string) {
 	}
 }
 
+// SetDifficulty updates future joins and every connected Bedrock client.
+func (l *Listener) SetDifficulty(difficulty int32) {
+	l.difficulty = difficulty
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(&packet.SetDifficulty{Difficulty: uint32(difficulty)})
+	}
+}
+
 // OpenContainerBlock sends a ContainerOpen packet to the player for the given
 // block position. Returns true if the block is a supported interactive container,
 // false if it is not (so the caller can fall through to block placement logic).
