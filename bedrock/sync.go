@@ -1211,6 +1211,29 @@ func (l *Listener) SetDefaultGameMode(mode player.GameMode) {
 	l.gameMode.Store(uint32(mode))
 }
 
+// SetWeather publishes vanilla rain level events to every Bedrock session.
+func (l *Listener) SetWeather(raining, thundering bool) {
+	event, data := packet.LevelEventStopRaining, int32(0)
+	if raining {
+		event, data = packet.LevelEventStartRaining, 65535
+	}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: event, EventData: data})
+		thunderEvent, thunderData := packet.LevelEventStopThunderstorm, int32(0)
+		if thundering {
+			thunderEvent = packet.LevelEventStartThunderstorm
+			thunderData = 65535
+		}
+		_ = current.conn.WritePacket(&packet.LevelEvent{EventType: thunderEvent, EventData: thunderData})
+	}
+}
+
 // OpenContainerBlock sends a ContainerOpen packet to the player for the given
 // block position. Returns true if the block is a supported interactive container,
 // false if it is not (so the caller can fall through to block placement logic).

@@ -489,6 +489,16 @@ func sendGameEvent(conn *network.ClientConn, reason byte, value float32) error {
 	return conn.WritePacket(pkt)
 }
 
+// BroadcastGameEvent sends a world-state event to all Java sessions.
+func BroadcastGameEvent(manager *session.Manager, reason byte, value float32) {
+	if manager == nil {
+		return
+	}
+	for _, current := range manager.SnapshotAll() {
+		_ = sendGameEvent(current.Conn, reason, value)
+	}
+}
+
 // sendForgetChunk sends Forget Level Chunk (0x22 S→C), instructing the client
 // to unload the given chunk column.
 // Wire order for this packet is Z then X.
