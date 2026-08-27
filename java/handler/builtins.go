@@ -919,6 +919,20 @@ func cmdKick(ctx CommandContext) error {
 	return fmt.Errorf("player not found: %s", targetName)
 }
 
+// DisconnectJavaPlayer closes an online Java session with a visible reason.
+func DisconnectJavaPlayer(target *player.Player, manager *session.Manager, reason string) bool {
+	if target == nil || manager == nil {
+		return false
+	}
+	current, ok := manager.Get(target.UUID)
+	if !ok {
+		return false
+	}
+	_ = current.Conn.WritePacket(buildDisconnectPlay(reason))
+	_ = current.Conn.Close()
+	return true
+}
+
 // -- /kill -----------------------------------------------------------------
 
 func cmdKill(ctx CommandContext) error {
