@@ -91,6 +91,8 @@ func RegisterBuiltins(d *Dispatcher) {
 	d.RegisterOperator(`clone`, cmdClone)
 	d.RegisterOperator(`clear`, cmdClear)
 	d.RegisterOperator(`damage`, cmdDamage)
+	d.RegisterOperator(`experience`, cmdExperience)
+	d.RegisterOperator(`xp`, cmdExperience)
 }
 
 func cmdWhitelist(ctx CommandContext) error {

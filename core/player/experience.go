@@ -5,6 +5,9 @@ func ExperienceForLevel(level int32) int32 {
 	if level <= 0 {
 		return 0
 	}
+	if level > 21863 {
+		return 2147483647
+	}
 	l := int64(level)
 	var total int64
 	switch {
@@ -60,6 +63,8 @@ func (p *Player) SetTotalExperience(total int32) {
 func (p *Player) SetExperienceLevel(level int32) {
 	if level < 0 {
 		level = 0
+	} else if level > 21863 {
+		level = 21863
 	}
 	p.SetTotalExperience(ExperienceForLevel(level))
 }
