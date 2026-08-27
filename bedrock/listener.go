@@ -70,7 +70,7 @@ type Listener struct {
 	spawnY     int
 	spawnZ     int
 	spawnMu    sync.RWMutex
-	gameMode   player.GameMode
+	gameMode   atomic.Uint32
 	difficulty int32
 	sessionsMu sync.RWMutex
 	sessions   map[[16]byte]*bedrockSession
@@ -215,11 +215,11 @@ func NewListener(
 		worldSeed:   worldSeed,
 		spawnX:      spawnX,
 		spawnZ:      spawnZ,
-		gameMode:    gameMode,
 		difficulty:  difficulty,
 		sessions:    make(map[[16]byte]*bedrockSession),
 		spawnNotify: make(map[string]chan struct{}),
 	}
+	l.gameMode.Store(uint32(gameMode))
 	l.initCreativeContent()
 	l.craftingData = bedrockCraftingData()
 	shapedRecipes, shapelessRecipes := 0, 0
@@ -601,8 +601,8 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		EntityUniqueID:    int64(bedrockSelfRuntimeID),
 		EntityRuntimeID:   bedrockSelfRuntimeID,
 		PlayerPosition:    spawnPos,
-		PlayerGameMode:    bedrockGameType(l.gameMode),
-		WorldGameMode:     bedrockGameType(l.gameMode),
+		PlayerGameMode:    bedrockGameType(player.GameMode(l.gameMode.Load())),
+		WorldGameMode:     bedrockGameType(player.GameMode(l.gameMode.Load())),
 		Difficulty:        l.difficulty,
 		PlayerPermissions: packet.PermissionLevelMember,
 		PlayerMovementSettings: protocol.PlayerMovementSettings{

@@ -1207,6 +1207,10 @@ func (l *Listener) SetDifficulty(difficulty int32) {
 	}
 }
 
+func (l *Listener) SetDefaultGameMode(mode player.GameMode) {
+	l.gameMode.Store(uint32(mode))
+}
+
 // OpenContainerBlock sends a ContainerOpen packet to the player for the given
 // block position. Returns true if the block is a supported interactive container,
 // false if it is not (so the caller can fall through to block placement logic).
