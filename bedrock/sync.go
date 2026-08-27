@@ -113,9 +113,32 @@ func (l *Listener) Sync(tick uint64) {
 		l.syncEntities(viewer, entitiesByDimension[viewer.dimension.Load()], tick)
 		l.syncLocalHealth(viewer, tick)
 		l.syncLocalHunger(viewer, tick)
+		l.syncLocalExperience(viewer, tick)
 		l.syncLocalPlayerState(viewer)
 		l.syncLocalInventory(viewer)
 	}
+}
+
+func (l *Listener) syncLocalExperience(viewer *bedrockSession, tick uint64) {
+	p := l.game.GetPlayer(viewer.uuid)
+	if p == nil {
+		return
+	}
+	level, _, progress := p.ExperienceSnapshot()
+	if viewer.experienceSent && viewer.lastExperienceLevel == level && viewer.lastExperience == progress {
+		return
+	}
+	_ = viewer.conn.WritePacket(&packet.UpdateAttributes{
+		EntityRuntimeID: bedrockSelfRuntimeID,
+		Attributes: []protocol.Attribute{
+			{AttributeValue: protocol.AttributeValue{Name: "minecraft:player.level", Min: 0, Max: math.MaxInt32, Value: float32(level)}, DefaultMax: math.MaxInt32},
+			{AttributeValue: protocol.AttributeValue{Name: "minecraft:player.experience", Min: 0, Max: 1, Value: progress}, DefaultMax: 1},
+		},
+		Tick: tick,
+	})
+	viewer.lastExperienceLevel = level
+	viewer.lastExperience = progress
+	viewer.experienceSent = true
 }
 
 func (l *Listener) syncLocalHunger(viewer *bedrockSession, tick uint64) {

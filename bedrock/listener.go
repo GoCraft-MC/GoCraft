@@ -105,6 +105,9 @@ type bedrockSession struct {
 	lastSaturation      float32
 	lastExhaustion      float32
 	hungerSent          bool
+	lastExperienceLevel int32
+	lastExperience      float32
+	experienceSent      bool
 	wasDead             bool
 	inventorySent       bool
 	lastInventory       [player.InventorySize]player.ItemStack
@@ -488,6 +491,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		if p := l.game.GetPlayer(playerUUID); p != nil {
 			health, food, saturation, _ := p.HealthSnapshot()
 			_, _, exhaustion := p.HungerSnapshot()
+			experienceLevel, _, experienceProgress := p.ExperienceSnapshot()
 			maxHealth := p.MaxHealth
 			if maxHealth <= 0 {
 				maxHealth = 20
@@ -519,12 +523,12 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 				EntityRuntimeID: bedrockSelfRuntimeID,
 				Attributes: []protocol.Attribute{{
 					AttributeValue: protocol.AttributeValue{
-						Name: "minecraft:player.level", Value: 0, Max: math.MaxInt32,
+						Name: "minecraft:player.level", Value: float32(experienceLevel), Max: math.MaxInt32,
 					},
 					DefaultMax: math.MaxInt32,
 				}, {
 					AttributeValue: protocol.AttributeValue{
-						Name: "minecraft:player.experience", Value: 0, Max: 1,
+						Name: "minecraft:player.experience", Value: experienceProgress, Max: 1,
 					},
 					DefaultMax: 1,
 				}},
@@ -533,6 +537,9 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 				chunkStreamErr <- err
 				return
 			}
+			bedrockSess.lastExperienceLevel = experienceLevel
+			bedrockSess.lastExperience = experienceProgress
+			bedrockSess.experienceSent = true
 
 			foodPk := &packet.UpdateAttributes{
 				EntityRuntimeID: bedrockSelfRuntimeID,
