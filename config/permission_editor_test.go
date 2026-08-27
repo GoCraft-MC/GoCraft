@@ -13,14 +13,20 @@ func TestPermissionEditorDefaultsAreSafeAndPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.PermissionEditor.Enabled || cfg.PermissionEditor.Address != "127.0.0.1:8080" {
-		t.Fatalf("permission editor defaults = %+v", cfg.PermissionEditor)
+	if !cfg.PermissionEditor.Enabled {
+		t.Fatalf("permission editor should be enabled by default, got %+v", cfg.PermissionEditor)
+	}
+	if !strings.HasPrefix(cfg.PermissionEditor.EditorURL, "https://") {
+		t.Fatalf("editor_url should be an https URL, got %q", cfg.PermissionEditor.EditorURL)
+	}
+	if !strings.HasPrefix(cfg.PermissionEditor.BytebinURL, "https://") {
+		t.Fatalf("bytebin_url should be an https URL, got %q", cfg.PermissionEditor.BytebinURL)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"permission_editor:", "session_minutes: 15"} {
+	for _, expected := range []string{"permission_editor:", "editor_url:", "bytebin_url:"} {
 		if !strings.Contains(string(data), expected) {
 			t.Errorf("generated config is missing %q", expected)
 		}
@@ -29,25 +35,28 @@ func TestPermissionEditorDefaultsAreSafeAndPersisted(t *testing.T) {
 
 func TestPermissionEditorConfigurationIsValidated(t *testing.T) {
 	cfg := defaults()
-	cfg.PermissionEditor.PublicURL = "javascript:alert(1)"
+	cfg.PermissionEditor.EditorURL = "javascript:alert(1)"
 	if err := cfg.validate(); err == nil {
-		t.Fatal("unsafe permission editor URL was accepted")
+		t.Fatal("unsafe permission editor editor_url was accepted")
 	}
 	cfg = defaults()
-	cfg.PermissionEditor.Address = "missing-port"
+	cfg.PermissionEditor.BytebinURL = "not-a-url"
 	if err := cfg.validate(); err == nil {
-		t.Fatal("invalid permission editor bind address was accepted")
+		t.Fatal("invalid bytebin_url was accepted")
 	}
 }
 
 func TestPermissionEditorEnvironmentOverrides(t *testing.T) {
-	t.Setenv("GOCRAFT_PERMISSION_EDITOR_ADDR", "0.0.0.0:9090")
-	t.Setenv("GOCRAFT_PERMISSION_EDITOR_URL", "https://permissions.example/")
+	t.Setenv("GOCRAFT_PERMISSION_EDITOR_URL", "https://myeditor.example/editor")
+	t.Setenv("GOCRAFT_PERMISSION_EDITOR_BYTEBIN", "https://mybytebin.example")
 	cfg := defaults()
 	if err := cfg.ApplyEnvOverrides(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PermissionEditor.Address != "0.0.0.0:9090" || cfg.PermissionEditor.PublicURL != "https://permissions.example" {
-		t.Fatalf("permission editor overrides = %+v", cfg.PermissionEditor)
+	if cfg.PermissionEditor.EditorURL != "https://myeditor.example/editor" {
+		t.Fatalf("editor URL override = %q", cfg.PermissionEditor.EditorURL)
+	}
+	if cfg.PermissionEditor.BytebinURL != "https://mybytebin.example" {
+		t.Fatalf("bytebin URL override = %q", cfg.PermissionEditor.BytebinURL)
 	}
 }

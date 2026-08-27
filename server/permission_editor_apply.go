@@ -1,48 +1,62 @@
 package server
 
 import (
-	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
-	"reflect"
 	"strings"
-	"time"
+
+	corepermission "GoCraft/core/permission"
 )
 
-func permissionEditToken(reference string) (string, error) {
-	reference = strings.TrimSpace(reference)
-	if parsed, err := url.Parse(reference); err == nil && parsed.Path != "" {
-		reference = path.Base(strings.TrimRight(parsed.Path, "/"))
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(reference)
-	if err != nil || len(decoded) != 24 {
-		return "", fmt.Errorf("invalid permission editor link or code")
-	}
-	return reference, nil
-}
-
 func (e *permissionEditor) apply(reference string) error {
-	token, err := permissionEditToken(reference)
+	key, err := extractBytebinKey(reference)
 	if err != nil {
 		return err
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	session, ok := e.sessions[token]
-	if !ok || time.Now().After(session.expires) {
-		delete(e.sessions, token)
-		return fmt.Errorf("permission edit session expired")
+	resp, err := e.client.Get(e.bytebinURL + "/" + key)
+	if err != nil {
+		return fmt.Errorf("downloading from bytebin: %w", err)
 	}
-	if !session.staged {
-		return fmt.Errorf("save the permission editor before applying it")
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("permission editor session not found or expired")
 	}
-	if !reflect.DeepEqual(e.manager.Snapshot(), session.baseline) {
-		return fmt.Errorf("permissions changed since this editor was opened; create a new editor")
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bytebin returned %s", resp.Status)
 	}
-	if err := e.manager.Replace(session.document); err != nil {
-		return err
+	var payload struct {
+		Type     string                  `json:"type"`
+		Document corepermission.Document `json:"document"`
 	}
-	delete(e.sessions, token)
-	return nil
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return fmt.Errorf("decoding permission data: %w", err)
+	}
+	if payload.Type != "gocraft-permissions" && payload.Type != "gocraft-permissions-save" {
+		return fmt.Errorf("not a GoCraft permission editor link")
+	}
+	if err := corepermission.Validate(payload.Document); err != nil {
+		return fmt.Errorf("invalid permission document: %w", err)
+	}
+	return e.manager.Replace(payload.Document)
+}
+
+func extractBytebinKey(reference string) (string, error) {
+	reference = strings.TrimSpace(reference)
+	if parsed, err := url.Parse(reference); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+		if key := parsed.Query().Get("key"); key != "" {
+			return key, nil
+		}
+		if parsed.Path != "" {
+			if base := path.Base(strings.TrimRight(parsed.Path, "/")); base != "" && base != "." {
+				return base, nil
+			}
+		}
+	}
+	if reference != "" {
+		return reference, nil
+	}
+	return "", fmt.Errorf("invalid permission editor link or key")
 }

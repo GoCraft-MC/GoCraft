@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -81,11 +80,13 @@ type WhitelistConfig struct {
 	Players []string `yaml:"players"`
 }
 
+// PermissionEditorConfig controls the bytebin-based permission editor.
+// The server uploads permission data to bytebin (outbound only — no listening
+// port needed), and the editor runs as a static GitHub Pages site.
 type PermissionEditorConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	Address        string `yaml:"address"`
-	PublicURL      string `yaml:"public_url"`
-	SessionMinutes int    `yaml:"session_minutes"`
+	Enabled    bool   `yaml:"enabled"`
+	EditorURL  string `yaml:"editor_url"`
+	BytebinURL string `yaml:"bytebin_url"`
 }
 
 // DebugConfig controls verbose diagnostic log categories. All switches default
@@ -217,8 +218,9 @@ func defaults() *Config {
 		},
 		Whitelist: WhitelistConfig{Enabled: false, Players: []string{}},
 		PermissionEditor: PermissionEditorConfig{
-			Enabled: true, Address: "127.0.0.1:8080",
-			PublicURL: "http://127.0.0.1:8080", SessionMinutes: 15,
+			Enabled:    true,
+			EditorURL:  "https://el211.github.io/GoCraft/editor",
+			BytebinURL: "https://bytebin.lucko.me",
 		},
 		Combat: CombatConfig{
 			AttackCooldown:      false,
@@ -363,15 +365,11 @@ func (c *Config) validate() error {
 		return errors.New("bedrock.address must not be empty when bedrock is enabled")
 	}
 	if c.PermissionEditor.Enabled {
-		if _, _, err := net.SplitHostPort(c.PermissionEditor.Address); err != nil {
-			return fmt.Errorf("permission_editor.address: %w", err)
+		if parsed, err := url.ParseRequestURI(c.PermissionEditor.EditorURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("permission_editor.editor_url %q must be a valid http/https URL", c.PermissionEditor.EditorURL)
 		}
-		parsed, err := url.ParseRequestURI(c.PermissionEditor.PublicURL)
-		if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return errors.New("permission_editor.public_url must be an absolute HTTP(S) URL")
-		}
-		if c.PermissionEditor.SessionMinutes < 1 || c.PermissionEditor.SessionMinutes > 1440 {
-			return errors.New("permission_editor.session_minutes must be between 1 and 1440")
+		if parsed, err := url.ParseRequestURI(c.PermissionEditor.BytebinURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("permission_editor.bytebin_url %q must be a valid http/https URL", c.PermissionEditor.BytebinURL)
 		}
 	}
 	return nil
@@ -398,12 +396,12 @@ func (c *Config) validate() error {
 //	GOCRAFT_MAX_CACHED_CHUNKS Clean chunk cache limit       (default: 768)
 //	GOCRAFT_DIFFICULTY        peaceful/easy/normal/hard    (default: normal)
 //	GOCRAFT_WHITELIST_ENABLED "true"/"false"              (default: false)
-//	GOCRAFT_BEDROCK_ENABLED   "true"/"false"              (default: false)
-//	GOCRAFT_BEDROCK_ADDR      Bedrock UDP address         (default: 0.0.0.0:19106)
-//	GOCRAFT_BEDROCK_ONLINE_MODE Xbox Live auth required   (default: true)
-//	GOCRAFT_PERMISSION_EDITOR_ENABLED Enable browser permission editor
-//	GOCRAFT_PERMISSION_EDITOR_ADDR    Editor HTTP bind address
-//	GOCRAFT_PERMISSION_EDITOR_URL     Externally reachable editor base URL
+//	GOCRAFT_BEDROCK_ENABLED            "true"/"false"              (default: false)
+//	GOCRAFT_BEDROCK_ADDR               Bedrock UDP address         (default: 0.0.0.0:19106)
+//	GOCRAFT_BEDROCK_ONLINE_MODE        Xbox Live auth required     (default: true)
+//	GOCRAFT_PERMISSION_EDITOR_ENABLED  "true"/"false"              (default: true)
+//	GOCRAFT_PERMISSION_EDITOR_URL      Editor GitHub Pages URL
+//	GOCRAFT_PERMISSION_EDITOR_BYTEBIN  Bytebin base URL
 func (c *Config) ApplyEnvOverrides() error {
 	if v := os.Getenv("GOCRAFT_JAVA_HOST"); v != "" {
 		c.Host = v
@@ -522,17 +520,17 @@ func (c *Config) ApplyEnvOverrides() error {
 		c.Bedrock.OnlineMode = b
 	}
 	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED"); v != "" {
-		enabled, err := strconv.ParseBool(v)
+		b, err := strconv.ParseBool(v)
 		if err != nil {
 			return fmt.Errorf("GOCRAFT_PERMISSION_EDITOR_ENABLED %q: %w", v, err)
 		}
-		c.PermissionEditor.Enabled = enabled
-	}
-	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_ADDR"); v != "" {
-		c.PermissionEditor.Address = v
+		c.PermissionEditor.Enabled = b
 	}
 	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL"); v != "" {
-		c.PermissionEditor.PublicURL = strings.TrimRight(v, "/")
+		c.PermissionEditor.EditorURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_BYTEBIN"); v != "" {
+		c.PermissionEditor.BytebinURL = strings.TrimRight(v, "/")
 	}
 
 	if c.Debug.EnvironmentOverrides {
@@ -565,10 +563,10 @@ func logEnvOverrides() {
 		{"GOCRAFT_KNOCKBACK_VERTICAL", os.Getenv("GOCRAFT_KNOCKBACK_VERTICAL")},
 		{"GOCRAFT_BEDROCK_ENABLED", os.Getenv("GOCRAFT_BEDROCK_ENABLED")},
 		{"GOCRAFT_BEDROCK_ADDR", os.Getenv("GOCRAFT_BEDROCK_ADDR")},
-		{"GOCRAFT_PERMISSION_EDITOR_ENABLED", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED")},
-		{"GOCRAFT_PERMISSION_EDITOR_ADDR", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ADDR")},
-		{"GOCRAFT_PERMISSION_EDITOR_URL", os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL")},
 		{"GOCRAFT_BEDROCK_ONLINE_MODE", os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE")},
+		{"GOCRAFT_PERMISSION_EDITOR_ENABLED", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED")},
+		{"GOCRAFT_PERMISSION_EDITOR_URL", os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL")},
+		{"GOCRAFT_PERMISSION_EDITOR_BYTEBIN", os.Getenv("GOCRAFT_PERMISSION_EDITOR_BYTEBIN")},
 	}
 	for _, v := range vars {
 		if v.val != "" {

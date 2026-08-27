@@ -3,7 +3,6 @@ package server
 import (
 	"strings"
 	"testing"
-	"time"
 
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
@@ -11,10 +10,11 @@ import (
 )
 
 func TestGoCraftPermissionEditorCommandRequiresPermission(t *testing.T) {
+	bytebin := newMockBytebin(t)
 	dispatcher := handler.NewDispatcher()
 	server := &Server{
 		cmds:             dispatcher,
-		permissionEditor: newPermissionEditor(corepermission.NewMemory(), "https://permissions.example", time.Minute),
+		permissionEditor: newPermissionEditor(corepermission.NewMemory(), "https://permissions.example", bytebin.URL),
 	}
 	server.registerPermissionCommands()
 
@@ -25,7 +25,7 @@ func TestGoCraftPermissionEditorCommandRequiresPermission(t *testing.T) {
 		Player: operator,
 		Reply:  func(message string) error { reply = message; return nil },
 	})
-	if !strings.Contains(reply, "https://permissions.example/permissions/") {
+	if !strings.Contains(reply, "https://permissions.example") || !strings.Contains(reply, "?key=") {
 		t.Fatalf("operator editor reply = %q", reply)
 	}
 

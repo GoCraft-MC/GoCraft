@@ -1,88 +1,65 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/base64"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	corepermission "GoCraft/core/permission"
 	"GoCraft/java/handler"
 )
 
-type permissionEditSession struct {
-	baseline corepermission.Document
-	document corepermission.Document
-	commands []handler.CommandPermission
-	expires  time.Time
-	staged   bool
-}
-
 type permissionEditor struct {
-	mu        sync.Mutex
-	manager   *corepermission.Manager
-	publicURL string
-	lifetime  time.Duration
-	sessions  map[string]*permissionEditSession
+	manager    *corepermission.Manager
+	editorURL  string
+	bytebinURL string
+	client     *http.Client
 }
 
-func newPermissionEditor(manager *corepermission.Manager, publicURL string, lifetime time.Duration) *permissionEditor {
+func newPermissionEditor(manager *corepermission.Manager, editorURL, bytebinURL string) *permissionEditor {
 	return &permissionEditor{
-		manager: manager, publicURL: strings.TrimRight(publicURL, "/"),
-		lifetime: lifetime, sessions: make(map[string]*permissionEditSession),
+		manager:    manager,
+		editorURL:  strings.TrimRight(editorURL, "/"),
+		bytebinURL: strings.TrimRight(bytebinURL, "/"),
+		client:     &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+type bytebinUpload struct {
+	Type     string                      `json:"type"`
+	Document corepermission.Document     `json:"document"`
+	Commands []handler.CommandPermission `json:"commands,omitempty"`
 }
 
 func (e *permissionEditor) create(commands []handler.CommandPermission) (string, error) {
-	random := make([]byte, 24)
-	if _, err := rand.Read(random); err != nil {
+	payload := bytebinUpload{
+		Type:     "gocraft-permissions",
+		Document: e.manager.Snapshot(),
+		Commands: commands,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
 		return "", err
 	}
-	token := base64.RawURLEncoding.EncodeToString(random)
-	now := time.Now()
-	e.mu.Lock()
-	for key, session := range e.sessions {
-		if now.After(session.expires) {
-			delete(e.sessions, key)
-		}
+	resp, err := e.client.Post(e.bytebinURL+"/post", "application/json; charset=utf-8", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("uploading to bytebin: %w", err)
 	}
-	baseline := e.manager.Snapshot()
-	e.sessions[token] = &permissionEditSession{
-		baseline: baseline, document: corepermission.Clone(baseline), commands: append([]handler.CommandPermission(nil), commands...),
-		expires: now.Add(e.lifetime),
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bytebin returned %s", resp.Status)
 	}
-	e.mu.Unlock()
-	return e.publicURL + "/permissions/" + token, nil
-}
-
-func (e *permissionEditor) snapshot(token string) (permissionEditSession, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	session, ok := e.sessions[token]
-	if !ok || time.Now().After(session.expires) {
-		delete(e.sessions, token)
-		return permissionEditSession{}, false
+	var result struct {
+		Key string `json:"key"`
 	}
-	copy := *session
-	copy.document = corepermission.Clone(session.document)
-	copy.commands = append([]handler.CommandPermission(nil), session.commands...)
-	return copy, true
-}
-
-func (e *permissionEditor) stage(token string, document corepermission.Document) error {
-	if err := corepermission.Validate(document); err != nil {
-		return err
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decoding bytebin response: %w", err)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	session, ok := e.sessions[token]
-	if !ok || time.Now().After(session.expires) {
-		delete(e.sessions, token)
-		return fmt.Errorf("permission edit session expired")
+	if result.Key == "" {
+		return "", fmt.Errorf("bytebin returned empty key")
 	}
-	session.document = corepermission.Clone(document)
-	session.staged = true
-	return nil
+	return e.editorURL + "?key=" + result.Key, nil
 }
