@@ -17,7 +17,7 @@ type chatFormatConfig struct {
 	glyphs        map[string]string // loaded separately from configuration/glyphs.yml
 }
 
-const defaultChatFormat = "<{player}> {message}"
+const defaultChatFormat = "<gradient:#5865F2:#EB459E>{player}</gradient> <white>:</white> <gray>{message}</gray>"
 
 const defaultChatFormatYAML = `# Chat format configuration for GoCraft.
 # Supports MiniMessage tags: <red>, <gold>, <bold>, <#RRGGBB>,
@@ -27,7 +27,11 @@ const defaultChatFormatYAML = `# Chat format configuration for GoCraft.
 #   {prefix}  — the player's highest-weight group prefix (e.g. "[MOD] ")
 #   {player}  — the player's username
 #   {message} — the chat message (safe — cannot inject formatting tags)
-format: "{prefix}<{player}> {message}"
+format: "{prefix}<gradient:#5865F2:#EB459E>{player}</gradient> <white>:</white> <gray>{message}</gray>"
+
+# Bedrock clients don't support hex colors or gradients in chat.
+# This format is used for Bedrock players instead. Supports named colors only.
+bedrock_format: "{prefix}<light_purple>{player}</light_purple> <white>:</white> <gray>{message}</gray>"
 `
 
 // loadChatFormat reads the file at path.  If it does not exist the
