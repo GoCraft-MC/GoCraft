@@ -14,6 +14,7 @@ const (
 type healthSample struct {
 	at     time.Time
 	failed bool
+	took   time.Duration
 }
 
 type healthTracker struct {
@@ -25,21 +26,22 @@ type healthTracker struct {
 
 // HealthSnapshot is a point-in-time view of one plugin's event health.
 type HealthSnapshot struct {
-	Calls    int
-	Failures int
-	Starved  map[string]uint64
-	Disabled bool
+	Calls           int
+	Failures        int
+	AverageDuration time.Duration
+	Starved         map[string]uint64
+	Disabled        bool
 }
 
 func newHealthTracker() *healthTracker {
 	return &healthTracker{starved: make(map[string]uint64)}
 }
 
-func (h *healthTracker) record(now time.Time, failed bool) {
+func (h *healthTracker) record(now time.Time, failed bool, took time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.prune(now)
-	h.samples = append(h.samples, healthSample{at: now, failed: failed})
+	h.samples = append(h.samples, healthSample{at: now, failed: failed, took: took})
 	failures := 0
 	for _, sample := range h.samples {
 		if sample.failed {
@@ -57,15 +59,26 @@ func (h *healthTracker) recordStarved(event string) {
 	h.mu.Unlock()
 }
 
+func (h *healthTracker) isDisabled() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.disabled
+}
+
 func (h *healthTracker) snapshot(now time.Time) HealthSnapshot {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.prune(now)
 	snapshot := HealthSnapshot{Calls: len(h.samples), Starved: make(map[string]uint64), Disabled: h.disabled}
+	var total time.Duration
 	for _, sample := range h.samples {
+		total += sample.took
 		if sample.failed {
 			snapshot.Failures++
 		}
+	}
+	if snapshot.Calls != 0 {
+		snapshot.AverageDuration = total / time.Duration(snapshot.Calls)
 	}
 	for event, count := range h.starved {
 		snapshot.Starved[event] = count
