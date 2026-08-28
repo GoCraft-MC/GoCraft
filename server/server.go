@@ -72,7 +72,8 @@ type Server struct {
 	privKey   *rsa.PrivateKey
 	pubKeyDER []byte
 
-	loginHandler *handler.LoginHandler
+	loginHandler  *handler.LoginHandler
+	statusFavicon string
 
 	// World and Java encoding resources.
 	world       *coreworld.World
@@ -365,12 +366,17 @@ func New(cfg *config.Config) (*Server, error) {
 	timings := newTickTimings(func() (int, int) {
 		return gameCore.OnlineCount(), cfg.MaxPlayers
 	})
+	statusFavicon, iconErr := handler.LoadServerIcon(cfg.ServerIcon)
+	if iconErr != nil {
+		slog.Warn("server: could not load server-list icon", "path", cfg.ServerIcon, "err", iconErr)
+	}
 
 	s := &Server{
 		cfg:                     cfg,
 		game:                    gameCore,
 		privKey:                 privKey,
 		pubKeyDER:               pubKeyDER,
+		statusFavicon:           statusFavicon,
 		world:                   worldInstance,
 		netherWorld:             netherWorld,
 		endWorld:                endWorld,
@@ -4717,7 +4723,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 	// ── Route by state ───────────────────────────────────────────────────────
 	switch conn.State {
 	case network.StateStatus:
-		if err := handler.HandleStatus(conn, s.cfg); err != nil {
+		if err := handler.HandleStatus(conn, s.cfg, s.statusFavicon); err != nil {
 			slog.Debug("status error", "remote", remote, "err", err)
 		}
 

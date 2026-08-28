@@ -61,7 +61,7 @@ type statusResponse struct {
 //
 // Either the ping or the connection close is acceptable after step 2;
 // some clients do not send a ping.
-func HandleStatus(conn *network.ClientConn, cfg *config.Config) error {
+func HandleStatus(conn *network.ClientConn, cfg *config.Config, favicon string) error {
 	// --- Step 1: Status Request ---
 	pkt, err := conn.ReadPacket()
 	if err != nil {
@@ -72,7 +72,7 @@ func HandleStatus(conn *network.ClientConn, cfg *config.Config) error {
 	}
 
 	// --- Step 2: Status Response ---
-	payload, err := buildStatusJSON(cfg)
+	payload, err := buildStatusJSON(cfg, favicon)
 	if err != nil {
 		return fmt.Errorf("status: building response JSON: %w", err)
 	}
@@ -121,7 +121,7 @@ func HandleStatus(conn *network.ClientConn, cfg *config.Config) error {
 }
 
 // buildStatusJSON marshals the status payload using the server configuration.
-func buildStatusJSON(cfg *config.Config) ([]byte, error) {
+func buildStatusJSON(cfg *config.Config, favicon string) ([]byte, error) {
 	resp := statusResponse{
 		Version: statusVersion{
 			Name:     cfg.VersionName,
@@ -135,6 +135,7 @@ func buildStatusJSON(cfg *config.Config) ([]byte, error) {
 		Description: statusDescription{
 			Text: cfg.MOTD,
 		},
+		Favicon: favicon,
 	}
 	return json.Marshal(resp)
 }
