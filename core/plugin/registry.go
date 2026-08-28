@@ -14,6 +14,7 @@ type subscriber struct {
 	id       string
 	priority Priority
 	instance Instance
+	health   *healthTracker
 }
 
 // Bus routes events to subscriptions declared before plugin code starts.
@@ -21,8 +22,9 @@ type Bus struct {
 	ctx    context.Context
 	budget time.Duration
 
-	mu   sync.RWMutex
-	subs map[string][]*subscriber
+	mu     sync.RWMutex
+	subs   map[string][]*subscriber
+	health map[string]*healthTracker
 }
 
 func NewBus(ctx context.Context, budget time.Duration) *Bus {
@@ -32,7 +34,7 @@ func NewBus(ctx context.Context, budget time.Duration) *Bus {
 	if budget <= 0 {
 		budget = defaultEventBudget
 	}
-	return &Bus{ctx: ctx, budget: budget, subs: make(map[string][]*subscriber)}
+	return &Bus{ctx: ctx, budget: budget, subs: make(map[string][]*subscriber), health: make(map[string]*healthTracker)}
 }
 
 func (b *Bus) Attach(instance Instance) error {
@@ -59,8 +61,13 @@ func (b *Bus) Attach(instance Instance) error {
 			}
 		}
 	}
+	tracker := b.health[manifest.ID]
+	if tracker == nil {
+		tracker = newHealthTracker()
+		b.health[manifest.ID] = tracker
+	}
 	for _, declared := range manifest.Subscriptions {
-		sub := &subscriber{id: manifest.ID, priority: declared.Priority, instance: instance}
+		sub := &subscriber{id: manifest.ID, priority: declared.Priority, instance: instance, health: tracker}
 		b.subs[declared.Event] = append(b.subs[declared.Event], sub)
 		sort.Slice(b.subs[declared.Event], func(i, j int) bool {
 			left, right := b.subs[declared.Event][i], b.subs[declared.Event][j]
@@ -76,6 +83,7 @@ func (b *Bus) Attach(instance Instance) error {
 func (b *Bus) Detach(pluginID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	delete(b.health, pluginID)
 	for event, subscribers := range b.subs {
 		kept := subscribers[:0]
 		for _, sub := range subscribers {
@@ -89,6 +97,17 @@ func (b *Bus) Detach(pluginID string) {
 			b.subs[event] = kept
 		}
 	}
+}
+
+// Health reports event failures and starvation for a loaded plugin.
+func (b *Bus) Health(pluginID string) (HealthSnapshot, bool) {
+	b.mu.RLock()
+	tracker, ok := b.health[pluginID]
+	b.mu.RUnlock()
+	if !ok {
+		return HealthSnapshot{}, false
+	}
+	return tracker.snapshot(time.Now()), true
 }
 
 func priorityRank(priority Priority) int {
