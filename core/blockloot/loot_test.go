@@ -155,6 +155,22 @@ func TestShearsAndSilkTouchConditions(t *testing.T) {
 	wantDrop(t, stone, "minecraft:stone", 1)
 }
 
+func TestBlockExperienceRequiresToolAndRejectsSilkTouch(t *testing.T) {
+	ctx := Context{Block: block("diamond_ore"), Tool: player.ItemStack{ItemID: "minecraft:iron_pickaxe", Count: 1}, Random: rand.New(rand.NewSource(1))}
+	if got := Experience(ctx); got < 3 || got > 7 {
+		t.Fatalf("diamond XP = %d, want 3..7", got)
+	}
+	ctx.Tool.ItemID = "minecraft:wooden_pickaxe"
+	if got := Experience(ctx); got != 0 {
+		t.Fatalf("wrong-tool diamond XP = %d, want 0", got)
+	}
+	ctx.Tool.ItemID = "minecraft:iron_pickaxe"
+	ctx.Enchantments = map[string]int{"minecraft:silk_touch": 1}
+	if got := Experience(ctx); got != 0 {
+		t.Fatalf("Silk Touch diamond XP = %d, want 0", got)
+	}
+}
+
 func TestDoublePlantChecksOtherHalf(t *testing.T) {
 	lower := block("large_fern", map[string]string{"half": "lower"})
 	got := Drops(Context{

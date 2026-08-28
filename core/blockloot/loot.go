@@ -89,6 +89,34 @@ func CanHarvest(blockID, toolID string) bool {
 	return !db.toolRequiredSet[blockID] || db.correctTool(blockID, toolID)
 }
 
+// Experience returns the vanilla experience dropped by a normal block break.
+// It follows the same correct-tool and Silk Touch conditions as the loot table.
+func Experience(ctx Context) int32 {
+	blockID := ctx.Block.ResourceLocation()
+	db := data()
+	if ctx.Enchantments["minecraft:silk_touch"] > 0 ||
+		(db.toolRequiredSet[blockID] && !db.correctTool(blockID, ctx.Tool.ItemID)) {
+		return 0
+	}
+	type reward struct{ minimum, maximum int }
+	rewards := map[string]reward{
+		"minecraft:coal_ore": {0, 2}, "minecraft:deepslate_coal_ore": {0, 2},
+		"minecraft:nether_gold_ore": {0, 1},
+		"minecraft:lapis_ore":       {2, 5}, "minecraft:deepslate_lapis_ore": {2, 5},
+		"minecraft:redstone_ore": {1, 5}, "minecraft:deepslate_redstone_ore": {1, 5},
+		"minecraft:diamond_ore": {3, 7}, "minecraft:deepslate_diamond_ore": {3, 7},
+		"minecraft:emerald_ore": {3, 7}, "minecraft:deepslate_emerald_ore": {3, 7},
+		"minecraft:nether_quartz_ore": {2, 5},
+		"minecraft:sculk":             {1, 1},
+		"minecraft:spawner":           {15, 43},
+	}
+	value, ok := rewards[blockID]
+	if !ok {
+		return 0
+	}
+	return int32(value.minimum + randomInt(ctx, value.maximum-value.minimum+1))
+}
+
 // TableCount is exposed for registry completeness tests and diagnostics.
 func TableCount() int { return len(data().LootTables) }
 
