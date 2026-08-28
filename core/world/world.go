@@ -118,6 +118,8 @@ type EntityDamage struct {
 	Amount           float32
 	SourceX, SourceZ float64
 	HasSource        bool
+	SourcePlayerUUID [16]byte
+	HasPlayerSource  bool
 }
 
 // New creates an empty world that generates chunks with gen on demand.
@@ -414,16 +416,22 @@ func (w *World) trimChunksLocked() {
 // QueueEntityDamage schedules damage for the entity tick goroutine. It returns
 // false if the entity does not exist or amount is invalid. Dead entities are ignored by the tick.
 func (w *World) QueueEntityDamage(entityID int32, amount float32) bool {
-	return w.queueEntityDamage(entityID, amount, 0, 0, false)
+	return w.queueEntityDamage(entityID, amount, 0, 0, false, [16]byte{}, false)
 }
 
 // QueueEntityDamageFrom queues damage with the horizontal position of its
 // source, allowing passive mobs to panic away from the attacker.
 func (w *World) QueueEntityDamageFrom(entityID int32, amount float32, sourceX, sourceZ float64) bool {
-	return w.queueEntityDamage(entityID, amount, sourceX, sourceZ, true)
+	return w.queueEntityDamage(entityID, amount, sourceX, sourceZ, true, [16]byte{}, false)
 }
 
-func (w *World) queueEntityDamage(entityID int32, amount float32, sourceX, sourceZ float64, hasSource bool) bool {
+// QueueEntityDamageFromPlayer queues player-caused damage. The UUID is kept in
+// the edition-neutral event so Java and Bedrock kills award identical XP.
+func (w *World) QueueEntityDamageFromPlayer(entityID int32, amount float32, sourceX, sourceZ float64, playerUUID [16]byte) bool {
+	return w.queueEntityDamage(entityID, amount, sourceX, sourceZ, true, playerUUID, true)
+}
+
+func (w *World) queueEntityDamage(entityID int32, amount float32, sourceX, sourceZ float64, hasSource bool, playerUUID [16]byte, hasPlayerSource bool) bool {
 	if amount <= 0 {
 		return false
 	}
@@ -435,6 +443,9 @@ func (w *World) queueEntityDamage(entityID int32, amount float32, sourceX, sourc
 	event.Amount += amount
 	if hasSource {
 		event.SourceX, event.SourceZ, event.HasSource = sourceX, sourceZ, true
+	}
+	if hasPlayerSource {
+		event.SourcePlayerUUID, event.HasPlayerSource = playerUUID, true
 	}
 	w.pendingDamage[entityID] = event
 	w.damageMu.Unlock()
