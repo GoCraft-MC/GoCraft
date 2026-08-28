@@ -176,6 +176,20 @@ func (s *bedrockSession) acceptMovement(position spatial.Vec3) bool {
 }
 
 func (l *Listener) addSession(s *bedrockSession) {
+	// Publish the complete roster before the tick loop can expose this session.
+	// This matches Dragonfly's join ordering and makes the pause-menu Social
+	// list available immediately, including for a player who joins between ticks.
+	players := make([]*player.Player, 0, l.game.OnlineCount())
+	l.game.OnlinePlayers(func(p *player.Player) { players = append(players, p) })
+	l.sessionsMu.RLock()
+	bedrockByUUID := make(map[[16]byte]*bedrockSession, len(l.sessions)+1)
+	for id, current := range l.sessions {
+		bedrockByUUID[id] = current
+	}
+	l.sessionsMu.RUnlock()
+	bedrockByUUID[s.uuid] = s
+	l.syncPlayerList(s, players, bedrockByUUID)
+
 	l.sessionsMu.Lock()
 	l.sessions[s.uuid] = s
 	l.sessionsMu.Unlock()
