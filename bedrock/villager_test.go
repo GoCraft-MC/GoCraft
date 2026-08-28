@@ -35,6 +35,18 @@ func TestBedrockVillagerSpawnCarriesProfessionAndBiomeVariant(t *testing.T) {
 	}
 }
 
+func TestBedrockExperienceOrbUsesDedicatedSpawnPacket(t *testing.T) {
+	orb := corentity.New(8, [16]byte{}, corentity.TypeExperienceOrb, 1, 65, 2)
+	orb.ExperienceAmount = 17
+	spawn, ok := (&Listener{}).buildAddEntity(&bedrockSession{}, orb).(*packet.SpawnExperienceOrb)
+	if !ok {
+		t.Fatal("experience orb did not build a SpawnExperienceOrb packet")
+	}
+	if spawn.ExperienceAmount != 17 || spawn.Position != vec32(orb.Position) {
+		t.Fatalf("experience orb packet = %+v", spawn)
+	}
+}
+
 func TestBedrockVillagerOffersUseNetworkNBT(t *testing.T) {
 	offers := handler.VillagerTrades(corentity.VillagerProfessionLibrarian, 3)
 	encoded, err := bedrockVillagerOffersNBT(offers)
