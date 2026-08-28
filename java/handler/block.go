@@ -96,7 +96,11 @@ func handleBlockPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.Worl
 //	Byte      face     (0=−Y, 1=+Y, 2=−Z, 3=+Z, 4=−X, 5=+X)
 //	VarInt    sequence (monotonic counter; echoed in Acknowledge Block Change)
 func handlePlayerAction(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager) error {
-	return handlePlayerActionWithContext(pkt, p, w, mgr, nil, nil)
+	nextID := int32(0)
+	return handlePlayerActionWithContext(pkt, p, w, mgr, nil, func() int32 {
+		nextID++
+		return nextID
+	})
 }
 
 func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) error {
@@ -156,27 +160,27 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 		w.EmitVibration(int(bx), int(by), int(bz))
 
-		// Give drop to player in survival/adventure mode.
+		// Spawn block and container drops in survival/adventure mode.
 		inventoryChanged := false
 		if p.GameMode != player.GameModeCreative && p.GameMode != player.GameModeSpectator {
-			// Chest contents: give stored items to the player before clearing.
+			dropPosition := spatial.Vec3{X: float64(bx) + 0.5, Y: float64(by) + 0.5, Z: float64(bz) + 0.5}
+			ordinal := 0
 			if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) {
 				for _, item := range w.ContainerItems(int(bx), int(by), int(bz)) {
 					if item.ItemID != "" && item.Count > 0 {
-						if p.GiveItem(player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}) {
-							inventoryChanged = true
-						}
+						spawnBlockDrop(w, nextEntityID, dropPosition,
+							player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}, ordinal, mgr, p.Dimension)
+						ordinal++
 					}
 				}
 			}
 
 			for _, drop := range drops {
-				if p.GiveItem(drop) {
-					inventoryChanged = true
-				}
+				spawnBlockDrop(w, nextEntityID, dropPosition, drop, ordinal, mgr, p.Dimension)
+				ordinal++
 			}
 			for _, orb := range coreexperience.SpawnOrbs(w, nextEntityID,
-				spatial.Vec3{X: float64(bx) + 0.5, Y: float64(by) + 0.5, Z: float64(bz) + 0.5},
+				dropPosition,
 				blockloot.Experience(lootContext)) {
 				BroadcastSpawnMobInDimension(orb, mgr, p.Dimension)
 			}
@@ -189,7 +193,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) {
 			w.SetContainerItems(int(bx), int(by), int(bz), broken.ResourceLocation(), nil)
 		}
-		// Sync inventory once if anything was added.
+		// Sync inventory once if the held tool was damaged.
 		if inventoryChanged {
 			if sess, ok := mgr.Get(p.UUID); ok {
 				p.ContainerStateID++
@@ -205,6 +209,27 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 	// Always acknowledge so the client does not roll back its optimistic update.
 	sendAcknowledgeBlockChange(mgr, p, seq)
 	return nil
+}
+
+func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spatial.Vec3, stack player.ItemStack, ordinal int, mgr *session.Manager, dimension int32) {
+	if w == nil || nextEntityID == nil || stack.IsEmpty() {
+		return
+	}
+	id := nextEntityID()
+	var entityUUID [16]byte
+	if _, err := cryptorand.Read(entityUUID[:]); err != nil {
+		for index := range entityUUID {
+			entityUUID[index] = byte(uint32(id) >> (uint(index%4) * 8))
+		}
+	}
+	entityUUID[6] = (entityUUID[6] & 0x0f) | 0x40
+	entityUUID[8] = (entityUUID[8] & 0x3f) | 0x80
+	dropped := corentity.New(id, entityUUID, corentity.TypeItem, position.X, position.Y+0.25, position.Z)
+	dropped.ItemID, dropped.ItemCount, dropped.ItemDamage = stack.ItemID, stack.Count, stack.Damage
+	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
+	dropped.VX, dropped.VY, dropped.VZ = math.Cos(angle)*0.1, 0.2, math.Sin(angle)*0.1
+	w.Entities.Add(dropped)
+	BroadcastSpawnMobInDimension(dropped, mgr, dimension)
 }
 
 func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.World, mgr *session.Manager) {

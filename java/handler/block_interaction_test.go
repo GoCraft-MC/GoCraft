@@ -201,8 +201,8 @@ func TestSurvivalBreaksOnlyOnFinishDigging(t *testing.T) {
 	if got := w.GetBlock(3, 64, 0); !got.IsAir() {
 		t.Fatalf("survival target = %q, want air after FINISH_DIGGING", got.ResourceLocation())
 	}
-	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:dirt" || got.Count != 1 {
-		t.Fatalf("survival drop = %+v, want one dirt", got)
+	if !javaWorldHasDroppedItem(w, "minecraft:dirt", 1) {
+		t.Fatal("survival break did not spawn one dirt item")
 	}
 }
 
@@ -231,8 +231,8 @@ func TestBreakingLowerDoublePlantRemovesUpperHalfAndDropsFlower(t *testing.T) {
 			t.Fatalf("plant half y=%d = %q, want air", y, got.ResourceLocation())
 		}
 	}
-	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:peony" || got.Count != 1 {
-		t.Fatalf("flower drop = %+v, want one peony", got)
+	if !javaWorldHasDroppedItem(w, "minecraft:peony", 1) {
+		t.Fatal("flower break did not spawn one peony item")
 	}
 }
 
@@ -283,11 +283,23 @@ func TestSurvivalGrassBreaksOnStartDigging(t *testing.T) {
 	if got := w.GetBlock(6, 64, 0); !got.IsAir() {
 		t.Fatalf("grass = %q, want air after START_DIGGING", got.ResourceLocation())
 	}
-	// Vanilla 1.21.4 gives short grass a 12.5% seed chance. Either result is
-	// valid; this test is about instant breaking rather than forcing a drop.
-	if got := p.Inventory[player.HotbarStart]; !got.IsEmpty() && (got.ItemID != "minecraft:wheat_seeds" || got.Count != 1) {
-		t.Fatalf("grass drop = %+v, want empty or one wheat seed", got)
+	if got := p.Inventory[player.HotbarStart]; !got.IsEmpty() {
+		t.Fatalf("grass drop went directly to inventory: %+v", got)
 	}
+	for _, entity := range w.Entities.Snapshot() {
+		if entity.Type == corentity.TypeItem && (entity.ItemID != "minecraft:wheat_seeds" || entity.ItemCount != 1) {
+			t.Fatalf("grass drop = %+v, want one wheat seed", entity)
+		}
+	}
+}
+
+func javaWorldHasDroppedItem(w *coreworld.World, itemID string, count int) bool {
+	for _, entity := range w.Entities.Snapshot() {
+		if entity.Type == corentity.TypeItem && entity.ItemID == itemID && entity.ItemCount == count {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
