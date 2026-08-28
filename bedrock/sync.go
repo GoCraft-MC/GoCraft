@@ -109,6 +109,7 @@ func (l *Listener) Sync(tick uint64) {
 		if tick%20 == 0 {
 			_ = viewer.conn.WritePacket(&packet.SetTime{Time: int32(tick)})
 		}
+		l.syncPlayerList(viewer, players, bedrockByUUID)
 		l.syncPlayers(viewer, players, bedrockByUUID, tick)
 		l.syncEntities(viewer, entitiesByDimension[viewer.dimension.Load()], tick)
 		l.syncLocalHealth(viewer, tick)
@@ -269,24 +270,12 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 		previous, known := viewer.knownPlayers[p.UUID]
 		if !known {
 			targetSession := bedrockByUUID[p.UUID]
-			entry := playerListEntry(p, targetSession, p.UUID == viewer.uuid)
 			platform := int32(0)
 			if targetSession != nil {
 				platform = targetSession.buildPlatform
 			} else if p.Edition == player.ClientEditionJava {
-				// Java players do not provide Bedrock skin geometry. Reuse a
-				// validated skin from the viewing Bedrock connection with new
-				// identity fields. The old generated fallback referenced custom
-				// geometry without supplying SkinGeometry, which makes current
-				// Bedrock clients close as soon as AddPlayer is received.
-				entry.Skin = crossEditionFallbackSkin(viewer.skin, p.UUID)
-				entry.BuildPlatform = viewer.buildPlatform
 				platform = viewer.buildPlatform
 			}
-			entry.ActionType = protocol.PlayerListActionAdd
-			_ = viewer.conn.WritePacket(&packet.PlayerList{
-				Entries: []protocol.PlayerListEntry{entry},
-			})
 			if p.UUID != viewer.uuid {
 				_ = viewer.conn.WritePacket(buildAddBedrockPlayer(p, platform))
 				l.sendPlayerEquipment(viewer, p)
@@ -354,12 +343,6 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 		if id != viewer.uuid {
 			_ = viewer.conn.WritePacket(&packet.RemoveActor{EntityUniqueID: int64(bedrockRemoteRuntimeID(previous.entityID))})
 		}
-		_ = viewer.conn.WritePacket(&packet.PlayerList{
-			Entries: []protocol.PlayerListEntry{{
-				ActionType: protocol.PlayerListActionRemove,
-				UUID:       uuid.UUID(id),
-			}},
-		})
 		delete(viewer.knownPlayers, id)
 	}
 }
