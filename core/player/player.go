@@ -82,18 +82,19 @@ type Player struct {
 
 	// Survival state is authoritative on the server. Health is measured in
 	// half-hearts (20 is the normal ten-heart maximum).
-	Health             float32
-	MaxHealth          float32
-	Food               int32
-	Saturation         float32
-	Exhaustion         float32
-	ExperienceLevel    int32
-	ExperienceTotal    int32
-	ExperienceProgress float32
-	tags               map[string]struct{}
-	Dead               bool
-	LastDamageCause    string
-	InvulnerableUntil  time.Time
+	Health               float32
+	MaxHealth            float32
+	Food                 int32
+	Saturation           float32
+	Exhaustion           float32
+	ExperienceLevel      int32
+	ExperienceTotal      int32
+	ExperienceProgress   float32
+	experiencePickupTick int64
+	tags                 map[string]struct{}
+	Dead                 bool
+	LastDamageCause      string
+	InvulnerableUntil    time.Time
 	// OnDeath is installed by the owning server and runs once when health first
 	// reaches zero. It is used for edition-neutral world effects such as
 	// dropping the survival inventory.

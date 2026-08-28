@@ -80,6 +80,31 @@ func (p *Player) AddExperience(points int32) {
 	p.SetTotalExperience(int32(updated))
 }
 
+// TryPickupExperience applies an orb once Pumpkin's two-tick pickup delay has
+// elapsed. The world tick is supplied by the simulation so this is deterministic
+// and shared by both protocol editions.
+func (p *Player) TryPickupExperience(points int32, tick int64) bool {
+	if points <= 0 {
+		return false
+	}
+	p.experienceMu.Lock()
+	if p.experiencePickupTick != 0 && tick-p.experiencePickupTick < 2 {
+		p.experienceMu.Unlock()
+		return false
+	}
+	updated := int64(p.ExperienceTotal) + int64(points)
+	if updated > 2147483647 {
+		updated = 2147483647
+	}
+	p.ExperienceTotal = int32(updated)
+	p.ExperienceLevel = levelForExperience(p.ExperienceTotal)
+	within := p.ExperienceTotal - ExperienceForLevel(p.ExperienceLevel)
+	p.ExperienceProgress = float32(within) / float32(ExperienceToNextLevel(p.ExperienceLevel))
+	p.experiencePickupTick = tick
+	p.experienceMu.Unlock()
+	return true
+}
+
 func (p *Player) ExperienceSnapshot() (level, total int32, progress float32) {
 	p.experienceMu.Lock()
 	level, total, progress = p.ExperienceLevel, p.ExperienceTotal, p.ExperienceProgress
