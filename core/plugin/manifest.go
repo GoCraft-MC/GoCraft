@@ -26,6 +26,7 @@ type Manifest struct {
 	APIVersion    uint32
 	Runtime       string
 	Entry         string
+	Permissions   []string
 	Subscriptions []Subscription
 }
 
