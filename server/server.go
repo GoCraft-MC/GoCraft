@@ -41,12 +41,14 @@ import (
 	"GoCraft/config"
 	"GoCraft/core/blockloot"
 	corentity "GoCraft/core/entity"
+	coreexperience "GoCraft/core/experience"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/customitems"
 	"GoCraft/internal/debuglog"
 	"GoCraft/java/auth"
 	"GoCraft/java/handler"
@@ -55,7 +57,6 @@ import (
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 	"GoCraft/java/world/anvil"
-	"GoCraft/customitems"
 	bedrockpacket "github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -1613,13 +1614,14 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		held := p.HeldItem()
-		drops := blockloot.Drops(blockloot.Context{
+		lootContext := blockloot.Context{
 			Block: block,
 			Tool:  held,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return actionWorld.GetBlock(x+dx, y+dy, z+dz)
 			},
-		})
+		}
+		drops := blockloot.Drops(lootContext)
 		containerItems := []coreworld.ContainerItem(nil)
 		if bedrockSpillingContainer(block.ResourceLocation()) {
 			containerItems = actionWorld.ContainerItems(x, y, z)
@@ -1654,6 +1656,9 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 				if !p.GiveItem(drop) {
 					s.newDroppedItemForPlayer(p, drop, p.Position, 0)
 				}
+			}
+			for _, orb := range coreexperience.SpawnOrbs(actionWorld, s.game.NextEntityID, center, blockloot.Experience(lootContext)) {
+				handler.BroadcastSpawnMobInDimension(orb, s.sessions, p.Dimension)
 			}
 			if wear := player.BlockUseDamage(held.ItemID); wear > 0 {
 				s.damageBedrockHeldItem(p, wear)
