@@ -90,4 +90,12 @@ func TestEventDeadlineStopsRemainingSubscribers(t *testing.T) {
 	if lateCalled {
 		t.Fatal("subscriber ran after the shared budget expired")
 	}
+	slowHealth, _ := bus.Health("slow")
+	if slowHealth.Failures != 1 || slowHealth.Starved["block.break"] != 0 {
+		t.Fatalf("slow plugin health = %+v", slowHealth)
+	}
+	lateHealth, _ := bus.Health("late")
+	if lateHealth.Failures != 0 || lateHealth.Starved["block.break"] != 1 {
+		t.Fatalf("late plugin health = %+v", lateHealth)
+	}
 }
