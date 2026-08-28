@@ -28,6 +28,28 @@ func TestBedrockPlayerVisibilityFollowsLoadedChunkWindow(t *testing.T) {
 	}
 }
 
+func TestSocialRosterIncludesSelfAndDistantJavaPlayers(t *testing.T) {
+	viewer := player.New([16]byte{1}, "viewer", player.ClientEditionBedrock)
+	javaPlayer := player.New([16]byte{2}, "java", player.ClientEditionJava)
+	javaPlayer.Dimension = 2
+	javaPlayer.Position = spatial.Vec3{X: 10000, Y: 64, Z: 10000}
+	pendingBedrock := player.New([16]byte{3}, "pending", player.ClientEditionBedrock)
+	readyBedrock := player.New([16]byte{4}, "ready", player.ClientEditionBedrock)
+
+	got := bedrockPlayerListCandidates(viewer.UUID,
+		[]*player.Player{viewer, javaPlayer, pendingBedrock, readyBedrock},
+		map[[16]byte]*bedrockSession{readyBedrock.UUID: {}})
+	want := map[[16]byte]bool{viewer.UUID: true, javaPlayer.UUID: true, readyBedrock.UUID: true}
+	if len(got) != len(want) {
+		t.Fatalf("Social roster has %d players, want %d", len(got), len(want))
+	}
+	for _, candidate := range got {
+		if !want[candidate.UUID] {
+			t.Fatalf("unexpected Social player %q", candidate.Username)
+		}
+	}
+}
+
 func TestCrossEditionFallbackSkinKeepsValidGeometry(t *testing.T) {
 	source := protocol.Skin{
 		SkinID:            "bedrock-owner",
