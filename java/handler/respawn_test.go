@@ -25,6 +25,18 @@ func TestBedRespawnFindsSafeSpaceBesideBed(t *testing.T) {
 	}
 }
 
+func TestRespawnBootstrapCompletesAfterThreeByThreeArea(t *testing.T) {
+	if got := respawnBootstrapCount(12, len(chunkKeysAround(0, 0, 12))); got != 9 {
+		t.Fatalf("large-view bootstrap count = %d, want 9", got)
+	}
+	if got := respawnBootstrapCount(0, 1); got != 1 {
+		t.Fatalf("zero-view bootstrap count = %d, want 1", got)
+	}
+	if got := respawnBootstrapCount(2, 4); got != 4 {
+		t.Fatalf("short available bootstrap count = %d, want 4", got)
+	}
+}
+
 func TestMissingBedFallsBackToWorldSpawn(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	p := player.New([16]byte{}, "sleeper", player.ClientEditionJava)

@@ -648,21 +648,16 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if streamRespawn {
 			streamRespawn = false
 			keys := chunkKeysAround(newCX, newCZ, viewRadius)
-			// A single centre chunk is not enough for modern Java clients to leave
-			// Loading terrain promptly. Bootstrap a bounded 5x5 area so respawn is
-			// immediately playable without synchronously sending the entire view.
-			bootstrapRadius := min(viewRadius, int32(2))
-			nearCount := int((bootstrapRadius*2 + 1) * (bootstrapRadius*2 + 1))
-			if len(keys) < nearCount {
-				nearCount = len(keys)
-			}
+			// Finish a 3x3 batch promptly so the client can leave Loading terrain.
+			// Encoding a 5x5 batch here used to block packet reads during respawn.
+			nearCount := respawnBootstrapCount(viewRadius, len(keys))
 			if err := sendChunkKeys(conn, w, sender, sentChunks, keys[:nearCount]); err != nil {
 				return fmt.Errorf(`send nearby respawn chunks: %w`, err)
 			}
 			// Warm the same bootstrap radius. The rest remains background work so
 			// large configured view distances do not stall the respawn handshake.
 			if preGenerateRadius > 0 {
-				w.QueuePregeneration(newCX, newCZ, bootstrapRadius)
+				w.QueuePregeneration(newCX, newCZ, 1)
 			}
 			pendingRespawnChunks = append(pendingRespawnChunks, keys[nearCount:]...)
 			broadcastGeneratedEntities(w, mgr)
@@ -746,7 +741,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		}
 		broadcastGeneratedEntities(w, mgr)
 		if len(pendingRespawnChunks) > 0 {
-			batchSize := 16
+			batchSize := 8
 			if len(pendingRespawnChunks) < batchSize {
 				batchSize = len(pendingRespawnChunks)
 			}
@@ -1146,6 +1141,12 @@ func chunkKeysAround(cx, cz, radius int32) [][2]int32 {
 		}
 	}
 	return keys
+}
+
+func respawnBootstrapCount(viewRadius int32, available int) int {
+	radius := min(viewRadius, int32(1))
+	count := int((radius*2 + 1) * (radius*2 + 1))
+	return min(count, available)
 }
 
 func isPlayerMovementPacket(packetID int32) bool {
