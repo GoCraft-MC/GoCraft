@@ -1889,7 +1889,7 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 
 	if attackerWorld := s.worldForPlayer(attacker); attackerWorld != nil {
 		if entity, ok := attackerWorld.Entities.Get(i.TargetID); ok && !entity.Dead && attacker.Position.Distance(entity.Position) <= 3.25 &&
-			attackerWorld.QueueEntityDamageFrom(entity.EntityID, damage, attacker.Position.X, attacker.Position.Z) {
+			attackerWorld.QueueEntityDamageFromPlayer(entity.EntityID, damage, attacker.Position.X, attacker.Position.Z, attacker.UUID) {
 			attacker.LastAttack = time.Now()
 			attacker.LastAttackedEntityID = entity.EntityID
 			s.damageBedrockHeldItem(attacker, 1)
@@ -2564,6 +2564,10 @@ func (s *Server) tickEntities() {
 			continue
 		}
 		entity.Damage(event.Amount)
+		if entity.Dead && event.HasPlayerSource {
+			entity.ExperienceKillerUUID = event.SourcePlayerUUID
+			entity.HasExperienceKiller = true
+		}
 		if !entity.Dead && event.HasSource {
 			// Apply knockback to all mobs when damaged by a player.
 			s.applyMobKnockback(entity, event)
@@ -3130,6 +3134,10 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				continue
 			}
 			entity.Damage(event.Amount)
+			if entity.Dead && event.HasPlayerSource {
+				entity.ExperienceKillerUUID = event.SourcePlayerUUID
+				entity.HasExperienceKiller = true
+			}
 			if !entity.Dead && event.HasSource {
 				simulation.applyMobKnockback(entity, event)
 			}
@@ -4334,13 +4342,30 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 			if projectile.Type == corentity.TypeWindCharge {
 				s.explodeWindCharge(projectile, projectile.Position)
 			} else if damage := projectileDamageAgainst(projectile, target); damage > 0 {
-				s.world.QueueEntityDamageFrom(target.EntityID, damage, start.X, start.Z)
+				if owner := s.playerByEntityID(projectile.OwnerEntityID); owner != nil {
+					s.world.QueueEntityDamageFromPlayer(target.EntityID, damage, start.X, start.Z, owner.UUID)
+				} else {
+					s.world.QueueEntityDamageFrom(target.EntityID, damage, start.X, start.Z)
+				}
 			}
 			s.resolveProjectileImpact(projectile, projectile.Position)
 			return true
 		}
 	}
 	return false
+}
+
+func (s *Server) playerByEntityID(entityID int32) *player.Player {
+	if s == nil || s.game == nil || entityID == 0 {
+		return nil
+	}
+	var found *player.Player
+	s.game.OnlinePlayers(func(candidate *player.Player) {
+		if candidate.EntityID == entityID {
+			found = candidate
+		}
+	})
+	return found
 }
 
 // tickEyeOfEnder mirrors Pumpkin's no-gravity movement and homing blend.
