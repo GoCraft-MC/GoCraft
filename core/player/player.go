@@ -29,6 +29,7 @@ const (
 	GameModeCreative  GameMode = 1
 	GameModeAdventure GameMode = 2
 	GameModeSpectator GameMode = 3
+	MaxAirSupply               = 300
 )
 
 // Player is the canonical server-side player representation.
@@ -113,6 +114,8 @@ type Player struct {
 	UsingItemSlot         int
 	LastEnvironmentDamage time.Time
 	UnderwaterSince       time.Time
+	AirSupply             int32
+	DrowningTicks         int32
 	LastVibrationPosition spatial.Vec3
 	HasVibrationPosition  bool
 	LastWindChargeUse     time.Time
@@ -273,6 +276,43 @@ func (p *Player) HungerSnapshot() (food int32, saturation, exhaustion float32) {
 	return p.Food, p.Saturation, p.Exhaustion
 }
 
+// TickBreathing advances Pumpkin's air supply state by one server tick.
+func (p *Player) TickBreathing(underwater bool) (air int32, changed, drown bool) {
+	p.healthMu.Lock()
+	defer p.healthMu.Unlock()
+	if p.Dead || p.GameMode == GameModeCreative || p.GameMode == GameModeSpectator {
+		changed = p.AirSupply != MaxAirSupply
+		p.AirSupply, p.DrowningTicks = MaxAirSupply, 0
+		return p.AirSupply, changed, false
+	}
+	if underwater {
+		if p.AirSupply > 0 {
+			p.AirSupply--
+			changed = true
+		}
+		if p.AirSupply == 0 {
+			p.DrowningTicks++
+			if p.DrowningTicks >= 20 {
+				p.DrowningTicks = 0
+				drown = true
+			}
+		}
+		return p.AirSupply, changed, drown
+	}
+	p.DrowningTicks = 0
+	if p.AirSupply < MaxAirSupply {
+		p.AirSupply = min(MaxAirSupply, p.AirSupply+4)
+		changed = true
+	}
+	return p.AirSupply, changed, false
+}
+
+func (p *Player) AirSupplySnapshot() int32 {
+	p.healthMu.Lock()
+	defer p.healthMu.Unlock()
+	return p.AirSupply
+}
+
 // AddExhaustion applies vanilla's exhaustion rollover. Each four exhaustion
 // points consumes saturation first, then one food point.
 func (p *Player) AddExhaustion(amount float32) {
@@ -359,6 +399,8 @@ func (p *Player) HealFull() bool {
 	p.Food = 20
 	p.Saturation = 5
 	p.Exhaustion = 0
+	p.AirSupply = MaxAirSupply
+	p.DrowningTicks = 0
 	p.LastDamageCause = ``
 	p.LastEnvironmentDamage = time.Time{}
 	p.UnderwaterSince = time.Time{}
@@ -387,6 +429,8 @@ func (p *Player) Revive() {
 	p.Food = 20
 	p.Saturation = 5
 	p.Exhaustion = 0
+	p.AirSupply = MaxAirSupply
+	p.DrowningTicks = 0
 	p.Dead = false
 	p.LastDamageCause = ""
 	p.FallDistance = 0
@@ -487,6 +531,7 @@ func New(uuid [16]byte, username string, edition ClientEdition) *Player {
 		MaxHealth:           20,
 		Food:                20,
 		Saturation:          5,
+		AirSupply:           MaxAirSupply,
 		UsingItemSlot:       -1,
 		KnockbackHorizontal: 0.4,
 		KnockbackVertical:   0.4,
