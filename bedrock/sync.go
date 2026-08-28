@@ -349,10 +349,7 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 
 func (l *Listener) syncPlayerList(viewer *bedrockSession, players []*player.Player, bedrockByUUID map[[16]byte]*bedrockSession) {
 	present := make(map[[16]byte]struct{}, len(players))
-	for _, p := range players {
-		if p.Edition == player.ClientEditionBedrock && p.UUID != viewer.uuid && bedrockByUUID[p.UUID] == nil {
-			continue
-		}
+	for _, p := range bedrockPlayerListCandidates(viewer.uuid, players, bedrockByUUID) {
 		present[p.UUID] = struct{}{}
 		if _, listed := viewer.listedPlayers[p.UUID]; listed {
 			continue
@@ -377,6 +374,17 @@ func (l *Listener) syncPlayerList(viewer *bedrockSession, players []*player.Play
 		}}})
 		delete(viewer.listedPlayers, id)
 	}
+}
+
+func bedrockPlayerListCandidates(viewerUUID [16]byte, players []*player.Player, bedrockByUUID map[[16]byte]*bedrockSession) []*player.Player {
+	result := make([]*player.Player, 0, len(players))
+	for _, p := range players {
+		if p == nil || p.Edition == player.ClientEditionBedrock && p.UUID != viewerUUID && bedrockByUUID[p.UUID] == nil {
+			continue
+		}
+		result = append(result, p)
+	}
+	return result
 }
 
 func playerRuntimeIDForViewer(viewer *bedrockSession, p *player.Player) uint64 {
