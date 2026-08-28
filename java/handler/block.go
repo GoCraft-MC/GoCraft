@@ -20,6 +20,7 @@ import (
 
 	"GoCraft/core/blockloot"
 	corentity "GoCraft/core/entity"
+	coreexperience "GoCraft/core/experience"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -133,13 +134,14 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 	if !broken.IsAir() && digBreaksBlock(status, p.GameMode, broken.ResourceLocation()) {
 		heldSlot := player.HotbarStart + p.HeldSlot
 		held := p.Inventory[heldSlot]
-		drops := blockloot.Drops(blockloot.Context{
+		lootContext := blockloot.Context{
 			Block: broken,
 			Tool:  held,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return w.GetBlock(int(bx)+dx, int(by)+dy, int(bz)+dz)
 			},
-		})
+		}
+		drops := blockloot.Drops(lootContext)
 		slog.Info("block break", "player", p.Username,
 			"x", bx, "y", by, "z", bz,
 			"block", broken.ResourceLocation(),
@@ -171,13 +173,12 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 			for _, drop := range drops {
 				if p.GiveItem(drop) {
 					inventoryChanged = true
-					// GoCraft does not yet spawn experience-orb entities, but
-					// experience-bearing ores still provide vanilla pickup feedback.
-					if rewardsExperience(broken.ResourceLocation()) {
-						broadcastSoundAt(mgr, "minecraft:entity.experience_orb.pickup", soundCategoryPlayers,
-							float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 0.2, 1)
-					}
 				}
+			}
+			for _, orb := range coreexperience.SpawnOrbs(w, nextEntityID,
+				spatial.Vec3{X: float64(bx) + 0.5, Y: float64(by) + 0.5, Z: float64(bz) + 0.5},
+				blockloot.Experience(lootContext)) {
+				BroadcastSpawnMobInDimension(orb, mgr, p.Dimension)
 			}
 			if wear := player.BlockUseDamage(p.Inventory[heldSlot].ItemID); wear > 0 {
 				p.Inventory[heldSlot].ApplyDamage(wear)
