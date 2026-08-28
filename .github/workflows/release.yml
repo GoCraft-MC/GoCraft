@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
 
       - name: Build Linux amd64 binary
         env:
@@ -33,8 +33,24 @@ jobs:
             -o gocraft-linux-amd64 \
             .
 
+      - name: Build Windows amd64 binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+            -o gocraft-windows-amd64.exe \
+            .
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: gocraft-linux-amd64
+          name: GoCraft ${{ github.ref_name }} — Experimental Dev Build
+          prerelease: true
+          files: |
+            gocraft-linux-amd64
+            gocraft-windows-amd64.exe
           generate_release_notes: true
