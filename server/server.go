@@ -313,6 +313,7 @@ func New(cfg *config.Config) (*Server, error) {
 		chatFmt.glyphs = glyphs
 	}
 	cmds.SetChatFormatter(chatFmt.apply)
+	cmds.SetBedrockChatFormatter(chatFmt.applyBedrock)
 
 	// Custom item packs — loaded before the Bedrock listener so that the
 	// generated .mcaddon can be prepended to the pack list.
@@ -1570,8 +1571,16 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 		s.cmds.Dispatch(i.Message, ctx)
 		return
 	}
-	msg := s.cmds.FormatChat(i.DisplayName, i.Message)
-	handler.BroadcastSystemMessage(s.sessions, msg)
+	// Java and Bedrock receive separately formatted strings: Java supports
+	// §x hex colors and gradients; Bedrock only supports basic §-codes.
+	// Use the Java-only broadcast so the Bedrock observer is not triggered
+	// with the Java-formatted (gradient) string.
+	javaMsg := s.cmds.FormatChat(i.DisplayName, i.Message)
+	handler.BroadcastSystemMessageJavaOnly(s.sessions, javaMsg)
+	if s.bedrockListener != nil {
+		bedrockMsg := s.cmds.FormatBedrockChat(i.DisplayName, i.Message)
+		s.bedrockListener.BroadcastMessage(bedrockMsg)
+	}
 }
 
 func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {

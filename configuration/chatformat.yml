@@ -3,4 +3,8 @@
 #   {prefix}  — the player's highest-weight group prefix (e.g. "[MOD] ")
 #   {player}  — the player's username
 #   {message} — the chat message
-format: "{prefix} {player}  : {message}"
+format: "{prefix}<gradient:#5865F2:#EB459E>{player}</gradient> <white>:</white> <gray>{message}</gray>"
+
+# Bedrock clients don't support hex colors or gradients in chat.
+# This format is used for Bedrock players instead. Supports named colors only.
+bedrock_format: "{prefix}<light_purple>{player}</light_purple> <white>:</white> <gray>{message}</gray>"

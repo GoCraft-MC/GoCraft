@@ -112,10 +112,21 @@ func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 // ── Send helpers ──────────────────────────────────────────────────────────────
 
 // BroadcastSystemMessage sends a plain-text System Chat Message to every
-// currently-online Java session.  Exported for use by the server simulation
-// layer (e.g. applyChat, which processes intents from both adapters).
+// currently-online Java session and notifies the message observer (which
+// forwards the message to the Bedrock listener for non-chat system messages
+// such as death and join notifications).
 func BroadcastSystemMessage(mgr *session.Manager, text string) {
 	broadcastSystemMessage(mgr, text)
+}
+
+// BroadcastSystemMessageJavaOnly sends a System Chat Message to Java sessions
+// only, without triggering the Bedrock message observer. Use this when the
+// caller handles Bedrock separately (e.g. with a Bedrock-safe formatted string).
+func BroadcastSystemMessageJavaOnly(mgr *session.Manager, text string) {
+	pkt := buildSystemChatMessage(text, false)
+	for _, s := range mgr.SnapshotAll() {
+		_ = s.Conn.WritePacket(pkt)
+	}
 }
 
 // broadcastSystemMessage sends a plain-text System Chat Message to every

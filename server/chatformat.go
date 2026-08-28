@@ -12,8 +12,9 @@ import (
 
 // chatFormatConfig holds the chat line template from configuration/chatformat.yml.
 type chatFormatConfig struct {
-	Format string            `yaml:"format"`
-	glyphs map[string]string // loaded separately from configuration/glyphs.yml
+	Format        string            `yaml:"format"`
+	BedrockFormat string            `yaml:"bedrock_format"` // optional; falls back to Format with gradient/hex collapsed
+	glyphs        map[string]string // loaded separately from configuration/glyphs.yml
 }
 
 const defaultChatFormat = "<{player}> {message}"
@@ -63,4 +64,20 @@ func (cf *chatFormatConfig) apply(prefix, player, message string) string {
 	s = strings.ReplaceAll(s, "{player}", player)
 	s = strings.ReplaceAll(s, "{message}", handler.EscapeMiniMessage(message))
 	return handler.ParseMiniMessageWithOptions(s, handler.MMOptions{Glyphs: cf.glyphs})
+}
+
+// applyBedrock is like apply but produces a Bedrock-safe §-coded string.
+// If bedrock_format is set in chatformat.yml it is used as the template;
+// otherwise the standard format is run through the Bedrock-safe renderer
+// which collapses gradients and hex colors to the nearest named §-color.
+func (cf *chatFormatConfig) applyBedrock(prefix, player, message string) string {
+	tmpl := cf.BedrockFormat
+	if tmpl == "" {
+		tmpl = cf.Format
+	}
+	s := tmpl
+	s = strings.ReplaceAll(s, "{prefix}", prefix)
+	s = strings.ReplaceAll(s, "{player}", player)
+	s = strings.ReplaceAll(s, "{message}", handler.EscapeMiniMessage(message))
+	return handler.ParseMiniMessageBedrock(s)
 }

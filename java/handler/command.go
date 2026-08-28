@@ -98,8 +98,9 @@ type Dispatcher struct {
 	teleportPlayer   func(*player.Player, float64, float64, float64) error
 	disconnectPlayer func(*player.Player, string) error
 	permission       PermissionChecker
-	chatFormatter    ChatFormatter
-	groupPrefix      func(username string) string
+	chatFormatter        ChatFormatter
+	bedrockChatFormatter ChatFormatter
+	groupPrefix          func(username string) string
 	maxPlayers       int
 }
 
@@ -155,6 +156,33 @@ func (d *Dispatcher) SetChatFormatter(f ChatFormatter) {
 	d.mu.Lock()
 	d.chatFormatter = f
 	d.mu.Unlock()
+}
+
+// SetBedrockChatFormatter installs a separate formatter for Bedrock chat lines.
+// It should produce text with only basic §-color codes (no hex, no gradients)
+// since Bedrock clients do not support the §x hex sequence in chat.
+func (d *Dispatcher) SetBedrockChatFormatter(f ChatFormatter) {
+	d.mu.Lock()
+	d.bedrockChatFormatter = f
+	d.mu.Unlock()
+}
+
+// FormatBedrockChat is like FormatChat but uses the Bedrock-specific formatter.
+// Falls back to FormatChat when no Bedrock formatter is set.
+func (d *Dispatcher) FormatBedrockChat(username, message string) string {
+	d.mu.RLock()
+	f := d.bedrockChatFormatter
+	gpfn := d.groupPrefix
+	d.mu.RUnlock()
+
+	if f == nil {
+		return d.FormatChat(username, message)
+	}
+	prefix := ""
+	if gpfn != nil {
+		prefix = gpfn(username)
+	}
+	return f(prefix, username, message)
 }
 
 // SetGroupPrefixResolver installs the function used to look up a player's

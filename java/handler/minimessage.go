@@ -47,6 +47,18 @@ func ParseMiniMessageWithOptions(input string, opts MMOptions) string {
 	return p.buf.String()
 }
 
+// ParseMiniMessageBedrock parses a MiniMessage string and returns a §-coded
+// string that is safe for Bedrock Edition chat. Gradients are collapsed to
+// their first stop color; hex <#RRGGBB> colors are mapped to the nearest
+// named §-color. Everything else behaves identically to ParseMiniMessage.
+func ParseMiniMessageBedrock(input string) string {
+	input = expandLegacyCodes(input)
+	p := &mmParser{runes: []rune(input), bedrockSafe: true}
+	p.stack = []mmState{{}}
+	p.run()
+	return p.buf.String()
+}
+
 // EscapeMiniMessage escapes '<' so the string is treated as plain text when
 // embedded inside a MiniMessage template (prevents tag injection).
 func EscapeMiniMessage(s string) string {
@@ -92,11 +104,12 @@ func (s mmState) codes() string {
 // ── parser ────────────────────────────────────────────────────────────────────
 
 type mmParser struct {
-	runes  []rune
-	pos    int
-	stack  []mmState
-	buf    strings.Builder
-	glyphs map[string]string
+	runes       []rune
+	pos         int
+	stack       []mmState
+	buf         strings.Builder
+	glyphs      map[string]string
+	bedrockSafe bool // when true: collapse gradients to first color, map hex to nearest named color
 }
 
 func (p *mmParser) cur() mmState {
@@ -187,7 +200,19 @@ func (p *mmParser) handleTag(raw string) {
 		}
 		if len(colors) >= 2 {
 			inner := p.collectUntil("/gradient")
-			p.emitGradient(colors, inner)
+			if p.bedrockSafe {
+				// Collapse to the nearest named color for the first stop.
+				code := nearestNamedColor(colors[0])
+				next := p.cur()
+				next.color = code
+				p.push(next)
+				p.buf.WriteString(code)
+				p.buf.WriteString(inner)
+				p.pop()
+				p.buf.WriteString(p.cur().codes())
+			} else {
+				p.emitGradient(colors, inner)
+			}
 			return
 		}
 		// bad gradient: treat as unknown
@@ -226,6 +251,11 @@ func (p *mmParser) handleTag(raw string) {
 		p.buf.WriteString("§k")
 	default:
 		if code, ok := resolveMMColor(lower); ok {
+			if p.bedrockSafe && strings.HasPrefix(lower, "#") {
+				if rgb, ok2 := parseHexColor(lower); ok2 {
+					code = nearestNamedColor(rgb)
+				}
+			}
 			next.color = code
 			p.push(next)
 			p.buf.WriteString(code)
@@ -357,6 +387,42 @@ func parseHexColor(s string) ([3]uint8, bool) {
 		return [3]uint8{}, false
 	}
 	return [3]uint8{uint8(rv), uint8(gv), uint8(bv)}, true
+}
+
+// nearestNamedColor maps an RGB value to the closest Minecraft named §-color
+// code using Euclidean distance in RGB space. Used by the Bedrock-safe parser
+// to replace hex and gradient colors with colors Bedrock can actually render.
+func nearestNamedColor(rgb [3]uint8) string {
+	named := [][4]int{
+		{0x00, 0x00, 0x00, '0'}, // black
+		{0x00, 0x00, 0xAA, '1'}, // dark_blue
+		{0x00, 0xAA, 0x00, '2'}, // dark_green
+		{0x00, 0xAA, 0xAA, '3'}, // dark_aqua
+		{0xAA, 0x00, 0x00, '4'}, // dark_red
+		{0xAA, 0x00, 0xAA, '5'}, // dark_purple
+		{0xFF, 0xAA, 0x00, '6'}, // gold
+		{0xAA, 0xAA, 0xAA, '7'}, // gray
+		{0x55, 0x55, 0x55, '8'}, // dark_gray
+		{0x55, 0x55, 0xFF, '9'}, // blue
+		{0x55, 0xFF, 0x55, 'a'}, // green
+		{0x55, 0xFF, 0xFF, 'b'}, // aqua
+		{0xFF, 0x55, 0x55, 'c'}, // red
+		{0xFF, 0x55, 0xFF, 'd'}, // light_purple
+		{0xFF, 0xFF, 0x55, 'e'}, // yellow
+		{0xFF, 0xFF, 0xFF, 'f'}, // white
+	}
+	best, bestDist := '7', int(1<<31-1)
+	for _, c := range named {
+		dr := int(rgb[0]) - c[0]
+		dg := int(rgb[1]) - c[1]
+		db := int(rgb[2]) - c[2]
+		dist := dr*dr + dg*dg + db*db
+		if dist < bestDist {
+			bestDist = dist
+			best = rune(c[3])
+		}
+	}
+	return "§" + string(best)
 }
 
 // ── legacy & codes ────────────────────────────────────────────────────────────
