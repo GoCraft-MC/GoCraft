@@ -174,7 +174,7 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 					damageHeldItem(p, conn, 1)
 					slog.Info("player attacked player", "attacker", p.Username, "target", target.Player.Username, "damage", damage)
 				}
-			} else if w.QueueEntityDamageFrom(entityID, damage, p.Position.X, p.Position.Z) {
+			} else if w.QueueEntityDamageFromPlayer(entityID, damage, p.Position.X, p.Position.Z, p.UUID) {
 				p.LastAttack = now
 				damageHeldItem(p, conn, 1)
 				slog.Info("entity attack queued", "player", p.Username, "entityID", entityID, "damage", damage)
