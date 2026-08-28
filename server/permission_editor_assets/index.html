@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GoCraft Permission Editor</title>
+  <link rel="stylesheet" href="/permission-editor/style.css">
+  <script defer src="/permission-editor/model.js"></script>
+  <script defer src="/permission-editor/group.js"></script>
+  <script defer src="/permission-editor/app.js"></script>
+</head>
+<body>
+  <header>
+    <div><strong>GoCraft</strong><span>Permission Editor</span></div>
+    <button id="save">Save edits</button>
+  </header>
+  <p id="status">Loading permission data…</p>
+  <div class="layout">
+    <aside>
+      <h2>Groups</h2>
+      <div id="groups"></div>
+      <button id="add-group">+ Create group</button>
+      <h2>Users</h2>
+      <div id="users"></div>
+      <button id="add-user">+ Assign user</button>
+    </aside>
+    <main>
+      <section id="group-editor" hidden>
+        <h1>Group: <span id="group-name"></span></h1>
+        <label>Parent groups<input id="parents" placeholder="default, moderator"></label>
+        <h2>Command permissions</h2>
+        <input id="filter" placeholder="Filter commands or permission nodes">
+        <div id="commands"></div>
+        <label>Custom nodes (one per line: <code>node=true</code> or <code>node=false</code>)
+          <textarea id="custom" rows="7"></textarea>
+        </label>
+        <button class="danger" id="delete-group">Delete group</button>
+      </section>
+      <section id="user-editor" hidden>
+        <h1>User: <span id="user-name"></span></h1>
+        <label>Groups<input id="user-groups" placeholder="default, builder"></label>
+        <label>User overrides (one per line: <code>node=true</code> or <code>node=false</code>)
+          <textarea id="user-permissions" rows="10"></textarea>
+        </label>
+        <button class="danger" id="delete-user">Remove assignment</button>
+      </section>
+      <section id="welcome"><h1>Select or create a group</h1><p>Every command is listed with its permission node.</p></section>
+    </main>
+  </div>
+</body>
+</html>

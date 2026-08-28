@@ -29,11 +29,18 @@ type LoginHandler struct {
 	cfg       *config.Config
 	privKey   *rsa.PrivateKey
 	pubKeyDER []byte
+	admit     func(name, address string) error
 }
 
 // NewLoginHandler creates a handler with the given config and pre-generated key.
 func NewLoginHandler(cfg *config.Config, privKey *rsa.PrivateKey, pubKeyDER []byte) *LoginHandler {
 	return &LoginHandler{cfg: cfg, privKey: privKey, pubKeyDER: pubKeyDER}
+}
+
+// SetAdmissionCheck installs a server-owned check that runs before Mojang
+// authentication and configuration packets are exchanged.
+func (h *LoginHandler) SetAdmissionCheck(check func(name, address string) error) {
+	h.admit = check
 }
 
 // Handle drives a connection through the complete Minecraft login sequence.
@@ -61,6 +68,11 @@ func (h *LoginHandler) Handle(conn *network.ClientConn) (*LoginResult, error) {
 	}
 
 	slog.Info("login attempt", "remote", conn.RemoteAddr(), "name", name)
+	if h.admit != nil {
+		if err := h.admit(name, conn.RemoteAddr().String()); err != nil {
+			return nil, h.disconnect(conn, err.Error(), err)
+		}
+	}
 
 	var result *LoginResult
 

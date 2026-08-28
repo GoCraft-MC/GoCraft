@@ -52,6 +52,7 @@ var summonableMobNames = []string{
 
 // RegisterBuiltins registers all built-in GoCraft commands with d.
 func RegisterBuiltins(d *Dispatcher) {
+	registerModerationCommands(d)
 	d.Register(`help`, cmdHelp)
 	d.Register(`list`, cmdList)
 	d.Register(`xyz`, cmdXYZ)
@@ -85,6 +86,15 @@ func RegisterBuiltins(d *Dispatcher) {
 	d.RegisterOperator(`seed`, cmdSeed)
 	d.RegisterOperator(`spawnboat`, cmdSpawnBoat)
 	d.RegisterOperator(`whitelist`, cmdWhitelist)
+	d.RegisterOperator(`setblock`, cmdSetBlock)
+	d.RegisterOperator(`fill`, cmdFill)
+	d.RegisterOperator(`clone`, cmdClone)
+	d.RegisterOperator(`clear`, cmdClear)
+	d.RegisterOperator(`damage`, cmdDamage)
+	d.RegisterOperator(`experience`, cmdExperience)
+	d.RegisterOperator(`xp`, cmdExperience)
+	d.RegisterOperator(`rotate`, cmdRotate)
+	d.RegisterOperator(`tag`, cmdTag)
 }
 
 func cmdWhitelist(ctx CommandContext) error {
@@ -169,9 +179,11 @@ func registerBuiltinsWithoutPermissions(d *Dispatcher) {
 // ── /help ─────────────────────────────────────────────────────────────────────
 
 func cmdHelp(ctx CommandContext) error {
-	_ = sendSystemMessage(ctx.Conn,
-		"Commands: /spawn /setspawn /gamemode /tp /tphere /xyz /locate /summon /give /get /kill /fly /potioneffect /walkspeed /flyspeed /kick /whitelist /list /version /seed /spawnboat /time /tps /mspt /timings /help")
-	return nil
+	commands := ctx.AvailableCommands
+	if len(commands) == 0 {
+		commands = []string{"help", "list", "version", "xyz"}
+	}
+	return sendCommandMessage(ctx, "Commands: /"+strings.Join(commands, " /"))
 }
 
 // ── /seed ─────────────────────────────────────────────────────────────────────
@@ -915,6 +927,20 @@ func cmdKick(ctx CommandContext) error {
 		}
 	}
 	return fmt.Errorf("player not found: %s", targetName)
+}
+
+// DisconnectJavaPlayer closes an online Java session with a visible reason.
+func DisconnectJavaPlayer(target *player.Player, manager *session.Manager, reason string) bool {
+	if target == nil || manager == nil {
+		return false
+	}
+	current, ok := manager.Get(target.UUID)
+	if !ok {
+		return false
+	}
+	_ = current.Conn.WritePacket(buildDisconnectPlay(reason))
+	_ = current.Conn.Close()
+	return true
 }
 
 // -- /kill -----------------------------------------------------------------

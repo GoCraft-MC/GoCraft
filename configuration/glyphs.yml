@@ -1,0 +1,18 @@
+# Glyph configuration for GoCraft.
+# Maps glyph names to Unicode characters for use in chat prefixes and format strings.
+# Use <glyph:name> inside MiniMessage templates (chatformat.yml, group prefixes, etc.)
+#
+# These characters are rendered as images by your resource pack.
+# Private Use Area characters (U+E000–U+F8FF) are the standard choice.
+#
+# Example usage in chatformat.yml:
+#   prefix: "<red><glyph:crown> [OWNER]</red> "
+#
+# Example usage in-game:
+#   /gocraft group owner setprefix <glyph:logo> [OWNER]
+glyphs:
+  logo:  "\uE000"
+  crown: "\uE001"
+  star:  "\uE002"
+  heart: "\uE003"
+  sword: "\uE004"

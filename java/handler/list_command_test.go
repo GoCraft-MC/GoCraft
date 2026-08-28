@@ -37,7 +37,7 @@ func TestServerCommandsAreTabCompletable(t *testing.T) {
 		t.Fatalf(`parse Commands packet: %v`, err)
 	}
 	top := commandTestChildrenByName(t, nodes, nodes[root])
-	for _, name := range []string{`timings`, `tps`, `mspt`, `spawn`, `setspawn`} {
+	for _, name := range []string{`timings`, `tps`, `mspt`, `spawn`, `setspawn`, `gocraft`} {
 		node, ok := top[name]
 		if !ok {
 			t.Errorf(`top-level command %q is missing`, name)
@@ -46,5 +46,23 @@ func TestServerCommandsAreTabCompletable(t *testing.T) {
 		if node.flags&commandExecutable == 0 {
 			t.Errorf(`command %q is not executable`, name)
 		}
+	}
+}
+
+func TestCommandTreeHidesCommandsWithoutPermission(t *testing.T) {
+	dispatcher := NewDispatcher()
+	RegisterBuiltins(dispatcher)
+	nonOperator := player.New([16]byte{4}, "viewer", player.ClientEditionJava)
+	packet := buildCommandsPacket(func(name string) bool { return dispatcher.CanUse(nonOperator, name) })
+	nodes, root, err := parseCommandTestGraph(packet.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top := commandTestChildrenByName(t, nodes, nodes[root])
+	if _, ok := top["help"]; !ok {
+		t.Fatal("public /help command was hidden")
+	}
+	if _, ok := top["gamemode"]; ok {
+		t.Fatal("operator-default /gamemode command was exposed")
 	}
 }

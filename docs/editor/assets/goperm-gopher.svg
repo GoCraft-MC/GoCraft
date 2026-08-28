@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title desc">
+  <title id="title">GoPerm Gopher</title>
+  <desc id="desc">A friendly stylized gopher mascot for the GoPerm permission manager.</desc>
+  <defs>
+    <linearGradient id="fur" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#75d7e6"/>
+      <stop offset="1" stop-color="#45a9c2"/>
+    </linearGradient>
+  </defs>
+  <circle cx="47" cy="48" r="25" fill="#7dddea" stroke="#122033" stroke-width="6"/>
+  <circle cx="133" cy="48" r="25" fill="#7dddea" stroke="#122033" stroke-width="6"/>
+  <ellipse cx="90" cy="101" rx="62" ry="66" fill="url(#fur)" stroke="#122033" stroke-width="7"/>
+  <ellipse cx="90" cy="121" rx="39" ry="27" fill="#9ce5ee" opacity=".55"/>
+  <ellipse cx="65" cy="83" rx="15" ry="18" fill="#fff" stroke="#122033" stroke-width="5"/>
+  <ellipse cx="115" cy="83" rx="15" ry="18" fill="#fff" stroke="#122033" stroke-width="5"/>
+  <circle cx="69" cy="87" r="6" fill="#122033"/>
+  <circle cx="111" cy="87" r="6" fill="#122033"/>
+  <circle cx="71" cy="84" r="2.2" fill="#fff"/>
+  <circle cx="109" cy="84" r="2.2" fill="#fff"/>
+  <ellipse cx="90" cy="105" rx="12" ry="9" fill="#122033"/>
+  <path d="M73 120 Q90 136 107 120" fill="none" stroke="#122033" stroke-width="5" stroke-linecap="round"/>
+  <rect x="76" y="122" width="12" height="19" rx="3" fill="#fff" stroke="#122033" stroke-width="3"/>
+  <rect x="92" y="122" width="12" height="19" rx="3" fill="#fff" stroke="#122033" stroke-width="3"/>
+  <path d="M33 109 Q12 101 16 83" fill="none" stroke="#122033" stroke-width="6" stroke-linecap="round"/>
+  <path d="M147 109 Q168 101 164 83" fill="none" stroke="#122033" stroke-width="6" stroke-linecap="round"/>
+  <path d="M52 150 Q41 165 30 160" fill="none" stroke="#122033" stroke-width="7" stroke-linecap="round"/>
+  <path d="M128 150 Q139 165 150 160" fill="none" stroke="#122033" stroke-width="7" stroke-linecap="round"/>
+</svg>

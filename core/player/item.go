@@ -38,6 +38,9 @@ type ItemStack struct {
 	// Damage is durability already consumed. New items start at zero and break
 	// when Damage reaches MaxDurability(ItemID).
 	Damage int
+	// Enchantments stores sorted resource-location/level pairs as a compact,
+	// comparable canonical component string.
+	Enchantments string `json:",omitempty"`
 }
 
 type armorItemStats struct {
@@ -107,6 +110,11 @@ var armorItemStatsByID = map[string]armorItemStats{
 // IsEmpty reports whether the slot contains no item.
 func (s ItemStack) IsEmpty() bool {
 	return s.Count <= 0 || s.ItemID == ""
+}
+
+// SameItem reports whether two stacks may merge without losing components.
+func (s ItemStack) SameItem(other ItemStack) bool {
+	return s.ItemID == other.ItemID && s.Damage == other.Damage && s.Enchantments == other.Enchantments
 }
 
 // MaxDurability returns Java Edition's vanilla maximum durability for the

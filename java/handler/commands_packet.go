@@ -32,7 +32,7 @@ type commandGraphNode struct {
 	parserData func(*protocol.Builder)
 }
 
-func buildCommandsPacket() *protocol.Packet {
+func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
 	nodes := []commandGraphNode{{flags: commandNodeRoot}}
 	addLiteral := func(name string, executable bool, children ...int32) int32 {
 		flags := commandNodeLiteral
@@ -66,6 +66,9 @@ func buildCommandsPacket() *protocol.Packet {
 		addLiteral("gamemode", false, modeChildren...),
 		addLiteral("gm", false, modeChildren...),
 	)
+	applyEditsLink := addArgument("link", parserString, true, stringParser(2))
+	rootChildren = append(rootChildren, addLiteral("gocraft", true,
+		addLiteral("peditor", true), addLiteral("applyedits", false, applyEditsLink)))
 
 	tpZ := addArgument("z", parserDouble, true, noNumberBounds)
 	tpY := addArgument("y", parserDouble, false, noNumberBounds, tpZ)
@@ -172,6 +175,25 @@ func buildCommandsPacket() *protocol.Packet {
 		addLiteral("remove", false, whitelistRemoveName),
 	))
 
+	for _, name := range []string{
+		"ban", "ban-ip", "banlist", "pardon", "pardon-ip", "deop",
+		"save-all", "save-off", "save-on", "stop", "defaultgamemode", "difficulty", "setidletimeout",
+		"setblock", "fill", "clone", "spawnpoint", "setworldspawn", "weather",
+		"clear", "damage", "experience", "xp", "rotate", "tag", "me", "say", "msg", "tell", "w", "random", "reload",
+	} {
+		arguments := addArgument("arguments", parserString, true, stringParser(2))
+		rootChildren = append(rootChildren, addLiteral(name, true, arguments))
+	}
+
+	if len(filters) != 0 && filters[0] != nil {
+		visible := rootChildren[:0]
+		for _, index := range rootChildren {
+			if filters[0](nodes[index].name) {
+				visible = append(visible, index)
+			}
+		}
+		rootChildren = visible
+	}
 	nodes[0].children = rootChildren
 
 	b := protocol.NewBuilder(packetIDCommands).VarInt(int32(len(nodes)))

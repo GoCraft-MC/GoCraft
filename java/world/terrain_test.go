@@ -213,3 +213,12 @@ func TestCropStatesExistInProtocol769Registry(t *testing.T) {
 		}
 	}
 }
+
+func TestEnchantmentRegistryIDs(t *testing.T) {
+	if got := EnchantmentID("minecraft:aqua_affinity"); got != 0 {
+		t.Fatalf("aqua affinity ID = %d, want 0", got)
+	}
+	if got := EnchantmentID("minecraft:wind_burst"); got != 41 {
+		t.Fatalf("wind burst ID = %d, want 41", got)
+	}
+}

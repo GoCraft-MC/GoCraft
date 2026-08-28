@@ -192,7 +192,7 @@ func (s *Server) tickNaturalSpawning() {
 
 	s.populatePumpkinGenerationCreatures(chunks, players)
 	state := s.newNaturalSpawnState(players, chunks)
-	categories := filteredSpawningCategories(&state, s.cfg == nil || s.cfg.Difficulty != "peaceful", s.worldAge%400 == 0)
+	categories := filteredSpawningCategories(&state, s.currentDifficulty() != 0, s.worldAge%400 == 0)
 	if len(categories) == 0 {
 		return
 	}

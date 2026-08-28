@@ -1114,7 +1114,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1, Damage: held.Damage})
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments})
 				w.SetContainerItems(x, y, z, target.ResourceLocation(), items)
 				if p.GameMode != player.GameModeCreative {
 					inventorySlot := player.HotbarStart + p.HeldSlot
@@ -1171,17 +1171,17 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		items := w.ContainerItems(x, y, z)
 		var stored player.ItemStack
 		if len(items) > 0 {
-			stored = player.ItemStack{ItemID: items[0].ItemID, Count: items[0].Count, Damage: items[0].Damage}
+			stored = player.ItemStack{ItemID: items[0].ItemID, Count: items[0].Count, Damage: items[0].Damage, Enchantments: items[0].Enchantments}
 		}
 		if !stored.IsEmpty() && (stored.ItemID != held.ItemID || stored.Damage != held.Damage || stored.Count >= player.MaxStackSize(stored.ItemID)) {
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage}
+			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments}
 		} else {
 			stored.Count++
 		}
-		w.SetContainerItems(x, y, z, target.ResourceLocation(), []coreworld.ContainerItem{{Slot: 0, ItemID: stored.ItemID, Count: stored.Count, Damage: stored.Damage}})
+		w.SetContainerItems(x, y, z, target.ResourceLocation(), []coreworld.ContainerItem{{Slot: 0, ItemID: stored.ItemID, Count: stored.Count, Damage: stored.Damage, Enchantments: stored.Enchantments}})
 		if p.GameMode != player.GameModeCreative {
 			slot := player.HotbarStart + p.HeldSlot
 			p.Inventory[slot].Count--

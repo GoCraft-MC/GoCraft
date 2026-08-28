@@ -475,11 +475,17 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		return
 	}
 	maxDamage := player.MaxDurability(item.ItemID)
+	enchantments := item.EnchantmentLevels()
 	if maxDamage <= 0 {
+		componentCount := int32(0)
+		if len(enchantments) > 0 {
+			componentCount = 1
+		}
 		b.VarInt(int32(item.Count)).
 			VarInt(id).
-			VarInt(0). // components_to_add
-			VarInt(0)  // components_to_remove
+			VarInt(componentCount).
+			VarInt(0) // components_to_remove
+		encodeSlotEnchantments(b, enchantments)
 		return
 	}
 	damage := item.Damage
@@ -534,12 +540,16 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 	if options.hideVanillaAttributes {
 		componentCount++
 	}
+	if len(enchantments) > 0 {
+		componentCount++
+	}
 	b.VarInt(int32(item.Count)).
 		VarInt(id).
 		VarInt(componentCount).
 		VarInt(0). // components_to_remove
 		VarInt(2).VarInt(int32(maxDamage)).
 		VarInt(3).VarInt(int32(damage))
+	encodeSlotEnchantments(b, enchantments)
 	if len(lore) > 0 {
 		b.VarInt(8).VarInt(int32(len(lore)))
 		for _, line := range lore {
@@ -551,6 +561,16 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		// non-displayed list. This hides the client-visible 1024 attack speed;
 		// actual damage, armour, and cooldown remain server-authoritative.
 		b.VarInt(13).VarInt(0).Bool(false)
+	}
+}
+
+func encodeSlotEnchantments(b *protocol.Builder, enchantments []player.EnchantmentLevel) {
+	if len(enchantments) == 0 {
+		return
+	}
+	b.VarInt(10).VarInt(int32(len(enchantments)))
+	for _, enchantment := range enchantments {
+		b.VarInt(javaworld.EnchantmentID(enchantment.ID)).VarInt(int32(enchantment.Level))
 	}
 }
 

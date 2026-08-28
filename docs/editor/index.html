@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GoPerm — Permission Editor</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="assets/goperm-gopher.svg" alt="GoPerm Gopher mascot" class="brand-logo" />
+        <div>
+          <h1>GoPerm</h1>
+          <p>GoCraft permissions</p>
+        </div>
+      </div>
+
+      <nav class="main-nav" aria-label="Main navigation">
+        <button class="nav-item active">▦ <span>Permission Editor</span></button>
+      </nav>
+
+      <div class="sidebar-section">
+        <div class="section-title">
+          <span>Groups</span>
+          <button id="addGroupBtn" class="text-button">+ Add</button>
+        </div>
+        <div id="groupList" class="group-list"></div>
+      </div>
+
+      <div class="server-card">
+        <strong>GoCraft</strong>
+        <span id="serverStatus">Loading…</span>
+        <div class="connection"><span class="status-dot" id="statusDot"></span><span id="statusText">Connecting</span></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="group-heading">
+          <div class="avatar" id="groupAvatar">?</div>
+          <div>
+            <h2 id="groupTitle">Select a group</h2>
+            <p>Group permission editor</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="badge">Live editor</span>
+          <button id="saveBtn" class="primary-button">Save changes</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <section class="metrics">
+          <article class="metric-card">
+            <span>Permissions</span>
+            <strong id="metricPerms">—</strong>
+          </article>
+          <article class="metric-card">
+            <span>Members</span>
+            <strong id="metricMembers">—</strong>
+          </article>
+          <article class="metric-card">
+            <span>Parents</span>
+            <strong id="metricParents">—</strong>
+          </article>
+          <article class="metric-card">
+            <span>Commands</span>
+            <strong id="metricCommands">—</strong>
+          </article>
+        </section>
+
+        <section class="toolbar-card">
+          <label class="search-field">
+            <span>Search permission nodes</span>
+            <input id="searchPerm" type="search" placeholder="e.g. teleport, ban, gocraft.command…" />
+          </label>
+          <label class="category-field">
+            <span>Filter</span>
+            <select id="categoryFilter">
+              <option value="all">All nodes</option>
+              <option value="allowed">Allowed</option>
+              <option value="denied">Denied</option>
+              <option value="unset">Unset</option>
+            </select>
+          </label>
+          <button id="addPermBtn" class="secondary-button">+ Custom node</button>
+        </section>
+
+        <section class="editor-grid">
+          <div class="permissions-panel">
+            <div class="panel-heading">
+              <h3>Permission nodes</h3>
+              <span>Command • Node • Value</span>
+            </div>
+            <div id="permissionList" class="permission-list">
+              <div class="permission-row empty-state">
+                <div><p>Select a group from the sidebar to edit its permissions.</p></div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="side-panels">
+            <section class="panel-card">
+              <h3>Group settings</h3>
+              <label>
+                <span>Parent groups (comma-separated)</span>
+                <input id="parentsInput" placeholder="default, vip" />
+              </label>
+              <label>
+                <span>Chat prefix</span>
+                <input id="prefixInput" placeholder="[MOD] " />
+              </label>
+              <label>
+                <span>Weight (higher = higher rank)</span>
+                <input id="weightInput" type="number" placeholder="0" />
+              </label>
+            </section>
+
+            <section class="panel-card">
+              <h3>Inheritance</h3>
+              <div class="inheritance-chain" id="inheritanceChain">
+                <div class="inheritance-node current">
+                  <span id="inheritCurrent">—</span><span>Current</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="native-callout">
+              <strong>GoCraft native</strong>
+              <p>Designed for GoCraft's Go permission backend — no Java plugin required.</p>
+            </section>
+          </aside>
+        </section>
+      </div>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+      <dialog id="applyDialog" class="apply-dialog">
+        <div class="apply-card">
+          <div class="apply-icon">✓</div>
+          <h3>Changes saved!</h3>
+          <p>Run this command in-game or in your server console to apply:</p>
+          <div class="apply-command-row">
+            <code id="applyCommand"></code>
+            <button id="copyBtn" class="copy-btn" title="Copy to clipboard">⎘ Copy</button>
+          </div>
+          <p class="apply-hint">The command will expire after 15 minutes.</p>
+          <button id="closeApplyBtn" class="primary-button apply-close">Done</button>
+        </div>
+      </dialog>
+
+      <dialog id="groupDialog">
+        <form method="dialog" class="dialog-card">
+          <h3>Create group</h3>
+          <label>
+            <span>Group name</span>
+            <input id="newGroupName" placeholder="builder" autocomplete="off" />
+          </label>
+          <div class="dialog-actions">
+            <button value="cancel" class="secondary-button">Cancel</button>
+            <button id="createGroupBtn" value="default" class="primary-button">Create</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="permDialog">
+        <form method="dialog" class="dialog-card">
+          <h3>Add custom node</h3>
+          <label>
+            <span>Permission node</span>
+            <input id="newPermNode" placeholder="gocraft.command.fly" autocomplete="off" />
+          </label>
+          <label>
+            <span>Value</span>
+            <select id="newPermValue">
+              <option value="true">Allow (true)</option>
+              <option value="false">Deny (false)</option>
+            </select>
+          </label>
+          <div class="dialog-actions">
+            <button value="cancel" class="secondary-button">Cancel</button>
+            <button id="createPermBtn" value="default" class="primary-button">Add</button>
+          </div>
+        </form>
+      </dialog>
+    </main>
+  </div>
+
+  <script src="app.js?v=4"></script>
+</body>
+</html>

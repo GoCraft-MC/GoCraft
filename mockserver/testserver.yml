@@ -1,0 +1,147 @@
+java_enabled: true
+host: 0.0.0.0
+port: 25565
+motd: A GoCraft Server
+max_players: 20
+version_name: 1.21.4
+protocol_version: 769
+online_mode: false
+villagers: true
+difficulty: normal
+default_gamemode: survival
+
+# Natural-mob caps for a complete 17x17 chunk simulation area. Use 0 to
+# disable a category; smaller loaded areas scale the cap down automatically.
+mob_spawning:
+  hostile: 35
+  passive: 16
+  ambient: 15
+  axolotls: 5
+  underground_water_creatures: 5
+  water_creatures: 5
+  water_ambient: 20
+
+operators: []
+
+whitelist:
+  enabled: false
+  players: []
+
+# Resource pack configuration. Java and Bedrock need separate pack files
+# (different formats). Set enabled: true and fill in the fields to use.
+resource_pack:
+  java:
+    enabled: false
+    url: ""        # HTTPS URL to the Java .zip resource pack
+    hash: ""       # SHA-1 hex of the zip (for client-side caching)
+    forced: false  # kick the player if they decline
+    prompt: ""     # MiniMessage text shown before the accept dialog
+  bedrock:
+    enabled: false
+    # List of local pack files. Supports .mcpack, .zip, and .mcaddon.
+    # .mcaddon files are automatically unpacked — every resource pack and
+    # behavior pack inside is sent to connecting Bedrock clients.
+    # Example:
+    #   paths:
+    #     - packs/Ore_Boost_V1.2.mcaddon
+    #     - packs/MyTextures.mcpack
+    paths: []
+    forced: false  # kick the player if they decline
+
+# Custom items — cross-edition custom item system.
+# Place item packs in sub-directories under packs_dir. Each pack directory
+# must contain an items.yml and a textures/ folder.
+#
+# Example pack layout:
+#   packs/
+#     mypacks/
+#       items.yml
+#       textures/
+#         ruby.png
+#
+# Example items.yml:
+#   namespace: mypacks
+#   items:
+#     ruby:
+#       display_name: "<red>Ruby"
+#       material: paper
+#       texture: ruby.png
+#     ruby_sword:
+#       display_name: "<gradient:#ff0000:#aa0000>Ruby Sword"
+#       material: diamond_sword
+#       texture: ruby_sword.png
+#       parent: item/handheld
+#       hand_equipped: true
+#
+# The server auto-generates a Java resource pack (served on java.serve_port)
+# and a Bedrock .mcaddon (injected at startup). No manual pack building needed.
+custom_items:
+  enabled: true
+  packs_dir: packs
+  java:
+    serve_port: 8080
+    # Set this to your server's public IP or domain so Java clients can download the pack.
+    public_host: ""
+
+# GoPerm — permission editor (bytebin relay, no inbound port needed).
+permission_editor:
+  enabled: true
+  editor_url: https://el211.github.io/GoCraft/editor
+  bytebin_url: https://bytebin.lucko.me
+
+combat:
+  attack_cooldown: false
+  knockback_horizontal: 0.4
+  knockback_vertical: 0.4
+
+item_tooltips:
+  show_durability: true
+  show_attributes: true
+  hide_vanilla_attributes: true
+
+clear_lag:
+  enabled: false
+  interval_seconds: 300
+  minimum_entity_age_seconds: 30
+  warning_seconds: [60, 30, 10, 5, 4, 3, 2, 1]
+  warning_message: "[ClearLag] Removing old entities in {seconds}s"
+  complete_message: "[ClearLag] Removed {count} old entities"
+  remove:
+    dropped_items: true
+    experience_orbs: true
+    projectiles: true
+    primed_tnt: true
+    falling_blocks: true
+    boats: false
+    passive_mobs: false
+    hostile_mobs: false
+
+world_storage: disk
+# Dimension layout: Overworld is here; sibling folders with suffixes _nether
+# and _end are created at server startup (world, world_nether, world_end).
+# Existing world/DIM-1 and world/DIM1 data is copied automatically once.
+world_dir: world
+world_seed: 0
+view_distance: 8
+pregenerate_radius: 8
+max_cached_chunks: 256
+
+bedrock:
+  enabled: true
+  address: 88.99.150.35:19106
+  online_mode: true
+
+# Verbose diagnostics. Enable only the category you are investigating.
+debug:
+  startup_registry: false
+  environment_overrides: false
+  world_loading: false
+  mob_spawning: false
+  autosaves: false
+  entity_events: false
+  entity_tick_overruns: false
+  bedrock_catalogues: false
+  bedrock_login: false
+  bedrock_chunks: false
+  bedrock_inventory: false
+  profiling: false

@@ -16,6 +16,17 @@ func TestGiveItemMergesWithoutOverflow(t *testing.T) {
 	}
 }
 
+func TestGiveItemDoesNotMergeDifferentEnchantments(t *testing.T) {
+	p := New([16]byte{}, "Alex", ClientEditionJava)
+	p.Inventory[9] = ItemStack{ItemID: "minecraft:compass", Count: 1, Enchantments: "minecraft:vanishing_curse=1"}
+	if !p.GiveItem(ItemStack{ItemID: "minecraft:compass", Count: 1}) {
+		t.Fatal("unenchanted compass was not inserted")
+	}
+	if p.Inventory[9].Count != 1 || p.Inventory[HotbarStart].Count != 1 {
+		t.Fatalf("different item components merged: %+v %+v", p.Inventory[9], p.Inventory[HotbarStart])
+	}
+}
+
 func TestGiveItemFailureIsAtomic(t *testing.T) {
 	p := &Player{}
 	for slot := 9; slot < InventorySize; slot++ {

@@ -62,6 +62,7 @@ func (s *Server) setWorldSpawn(position spatial.Vec3) error {
 }
 
 func (s *Server) registerSpawnCommands() {
+	s.registerVanillaSpawnCommands()
 	s.cmds.Register("spawn", func(ctx handler.CommandContext) error {
 		if ctx.Player == nil || ctx.TeleportTo == nil {
 			return fmt.Errorf("teleport service is unavailable")

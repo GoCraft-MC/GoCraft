@@ -125,6 +125,9 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 	if err := sendUpdateHealth(conn, p); err != nil {
 		return fmt.Errorf("play: health: %w", err)
 	}
+	if err := sendExperience(conn, p); err != nil {
+		return fmt.Errorf("play: experience: %w", err)
+	}
 	if err := sendDefaultSpawnPosition(conn, p); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
@@ -161,13 +164,30 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		return fmt.Errorf("play: recipes: %w", err)
 	}
 	// Send command graph for tab completion.
-	if err := conn.WritePacket(buildCommandsPacket()); err != nil {
+	if err := conn.WritePacket(buildCommandsPacket(func(name string) bool { return cmds.CanUse(p, name) })); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
 	// Send the current time so the client shows the correct sky/lighting immediately.
 	age := worldAge()
 	if err := conn.WritePacket(buildSetTime(age, age%24000)); err != nil {
 		return fmt.Errorf("play: set time: %w", err)
+	}
+	weatherEvent, rainLevel := byte(2), float32(0)
+	if p.Raining {
+		weatherEvent, rainLevel = 1, 1
+	}
+	if err := sendGameEvent(conn, weatherEvent, 0); err != nil {
+		return fmt.Errorf("play: weather: %w", err)
+	}
+	if err := sendGameEvent(conn, 7, rainLevel); err != nil {
+		return fmt.Errorf("play: rain level: %w", err)
+	}
+	thunderLevel := float32(0)
+	if p.Thundering {
+		thunderLevel = 1
+	}
+	if err := sendGameEvent(conn, 8, thunderLevel); err != nil {
+		return fmt.Errorf("play: thunder level: %w", err)
 	}
 
 	slog.Info("player entered play state",
@@ -489,6 +509,16 @@ func sendGameEvent(conn *network.ClientConn, reason byte, value float32) error {
 	return conn.WritePacket(pkt)
 }
 
+// BroadcastGameEvent sends a world-state event to all Java sessions.
+func BroadcastGameEvent(manager *session.Manager, reason byte, value float32) {
+	if manager == nil {
+		return
+	}
+	for _, current := range manager.SnapshotAll() {
+		_ = sendGameEvent(current.Conn, reason, value)
+	}
+}
+
 // sendForgetChunk sends Forget Level Chunk (0x22 S→C), instructing the client
 // to unload the given chunk column.
 // Wire order for this packet is Z then X.
@@ -752,6 +782,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 			return fmt.Errorf("play loop: reading packet: %w", err)
 		}
+		p.TouchActivity()
 
 		if pkt.ID == packetIDConfirmTeleport {
 			teleportID, readErr := protocol.ReadVarInt(pkt.Reader())

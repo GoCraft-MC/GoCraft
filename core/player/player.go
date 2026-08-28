@@ -5,6 +5,7 @@ package player
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"GoCraft/core/spatial"
@@ -37,14 +38,18 @@ const (
 // owned by the edition adapter, which holds a *Player and updates it as
 // packets arrive.
 type Player struct {
-	healthMu sync.Mutex
+	healthMu     sync.Mutex
+	experienceMu sync.Mutex
+	tagsMu       sync.RWMutex
+	activityUnix atomic.Int64
 
 	// UUID is the player's unique identifier (edition-agnostic).
 	UUID [16]byte
 	// Username is the player's display name.
 	Username string
 	// Edition indicates which protocol the player is connecting over.
-	Edition ClientEdition
+	Edition       ClientEdition
+	RemoteAddress string
 
 	// Position is the player's current world position.
 	Position spatial.Vec3
@@ -77,14 +82,18 @@ type Player struct {
 
 	// Survival state is authoritative on the server. Health is measured in
 	// half-hearts (20 is the normal ten-heart maximum).
-	Health            float32
-	MaxHealth         float32
-	Food              int32
-	Saturation        float32
-	Exhaustion        float32
-	Dead              bool
-	LastDamageCause   string
-	InvulnerableUntil time.Time
+	Health             float32
+	MaxHealth          float32
+	Food               int32
+	Saturation         float32
+	Exhaustion         float32
+	ExperienceLevel    int32
+	ExperienceTotal    int32
+	ExperienceProgress float32
+	tags               map[string]struct{}
+	Dead               bool
+	LastDamageCause    string
+	InvulnerableUntil  time.Time
 	// OnDeath is installed by the owning server and runs once when health first
 	// reaches zero. It is used for edition-neutral world effects such as
 	// dropping the survival inventory.
@@ -133,6 +142,8 @@ type Player struct {
 	SpawnPoint    spatial.BlockPos
 	HasSpawnPoint bool
 	WorldSpawn    spatial.Vec3
+	Raining       bool
+	Thundering    bool
 	// Dimension uses Bedrock's vanilla IDs: 0 overworld, 1 Nether, 2 End.
 	Dimension int32
 	// PortalCooldownUntil prevents a player standing inside a portal from
@@ -414,7 +425,7 @@ func (p *Player) GiveItem(item ItemStack) bool {
 			switch {
 			case slot.IsEmpty():
 				capacity += stackLimit
-			case slot.ItemID == item.ItemID && slot.Damage == item.Damage && slot.Count < stackLimit:
+			case slot.SameItem(item) && slot.Count < stackLimit:
 				capacity += stackLimit - slot.Count
 			}
 		}
@@ -427,7 +438,7 @@ func (p *Player) GiveItem(item ItemStack) bool {
 	for _, inventoryRange := range ranges {
 		for i := inventoryRange[0]; i < inventoryRange[1] && remaining > 0; i++ {
 			slot := &p.Inventory[i]
-			if slot.ItemID != item.ItemID || slot.Damage != item.Damage || slot.Count >= stackLimit {
+			if !slot.SameItem(item) || slot.Count >= stackLimit {
 				continue
 			}
 			room := stackLimit - slot.Count
@@ -461,7 +472,7 @@ func (p *Player) GiveItem(item ItemStack) bool {
 // Core-only callers get Creative for backwards compatibility; the server
 // overrides this with default_gamemode from server.yml when players join.
 func New(uuid [16]byte, username string, edition ClientEdition) *Player {
-	return &Player{
+	p := &Player{
 		UUID:                uuid,
 		Username:            username,
 		Edition:             edition,
@@ -470,6 +481,7 @@ func New(uuid [16]byte, username string, edition ClientEdition) *Player {
 		GameMode:            GameModeCreative,
 		FlySpeed:            0.05,
 		WalkSpeed:           0.1,
+		tags:                make(map[string]struct{}),
 		Health:              20,
 		MaxHealth:           20,
 		Food:                20,
@@ -478,4 +490,22 @@ func New(uuid [16]byte, username string, edition ClientEdition) *Player {
 		KnockbackHorizontal: 0.4,
 		KnockbackVertical:   0.4,
 	}
+	p.TouchActivity()
+	return p
+}
+
+// TouchActivity records client traffic for the server idle timeout.
+func (p *Player) TouchActivity() {
+	if p != nil {
+		p.activityUnix.Store(time.Now().UnixNano())
+	}
+}
+
+// IdleFor reports the duration since the player's last client packet.
+func (p *Player) IdleFor(now time.Time) time.Duration {
+	last := p.activityUnix.Load()
+	if last == 0 {
+		return 0
+	}
+	return now.Sub(time.Unix(0, last))
 }

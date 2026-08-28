@@ -113,9 +113,32 @@ func (l *Listener) Sync(tick uint64) {
 		l.syncEntities(viewer, entitiesByDimension[viewer.dimension.Load()], tick)
 		l.syncLocalHealth(viewer, tick)
 		l.syncLocalHunger(viewer, tick)
+		l.syncLocalExperience(viewer, tick)
 		l.syncLocalPlayerState(viewer)
 		l.syncLocalInventory(viewer)
 	}
+}
+
+func (l *Listener) syncLocalExperience(viewer *bedrockSession, tick uint64) {
+	p := l.game.GetPlayer(viewer.uuid)
+	if p == nil {
+		return
+	}
+	level, _, progress := p.ExperienceSnapshot()
+	if viewer.experienceSent && viewer.lastExperienceLevel == level && viewer.lastExperience == progress {
+		return
+	}
+	_ = viewer.conn.WritePacket(&packet.UpdateAttributes{
+		EntityRuntimeID: bedrockSelfRuntimeID,
+		Attributes: []protocol.Attribute{
+			{AttributeValue: protocol.AttributeValue{Name: "minecraft:player.level", Min: 0, Max: math.MaxInt32, Value: float32(level)}, DefaultMax: math.MaxInt32},
+			{AttributeValue: protocol.AttributeValue{Name: "minecraft:player.experience", Min: 0, Max: 1, Value: progress}, DefaultMax: 1},
+		},
+		Tick: tick,
+	})
+	viewer.lastExperienceLevel = level
+	viewer.lastExperience = progress
+	viewer.experienceSent = true
 }
 
 func (l *Listener) syncLocalHunger(viewer *bedrockSession, tick uint64) {
@@ -834,16 +857,14 @@ func (l *Listener) syncLocalInventory(viewer *bedrockSession) {
 			continue
 		}
 		previous := viewer.lastInventory[slot]
-		if viewer.stackNetworkIDs[slot] == 0 ||
-			(!previous.IsEmpty() && (previous.ItemID != stack.ItemID || previous.Damage != stack.Damage)) {
+		if viewer.stackNetworkIDs[slot] == 0 || (!previous.IsEmpty() && !previous.SameItem(stack)) {
 			viewer.stackNetworkIDs[slot] = viewer.allocateStackNetworkID()
 		}
 	}
 	if p.CarriedItem.IsEmpty() {
 		viewer.cursorStackID = 0
 	} else if viewer.cursorStackID == 0 ||
-		(!viewer.lastCarriedItem.IsEmpty() &&
-			(viewer.lastCarriedItem.ItemID != p.CarriedItem.ItemID || viewer.lastCarriedItem.Damage != p.CarriedItem.Damage)) {
+		(!viewer.lastCarriedItem.IsEmpty() && !viewer.lastCarriedItem.SameItem(p.CarriedItem)) {
 		viewer.cursorStackID = viewer.allocateStackNetworkID()
 	}
 
@@ -1193,6 +1214,59 @@ func (l *Listener) SendMessage(playerUUID [16]byte, message string) {
 	}
 }
 
+// SetDifficulty updates future joins and every connected Bedrock client.
+func (l *Listener) SetDifficulty(difficulty int32) {
+	l.difficulty = difficulty
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(&packet.SetDifficulty{Difficulty: uint32(difficulty)})
+	}
+}
+
+func (l *Listener) SetDefaultGameMode(mode player.GameMode) {
+	l.gameMode.Store(uint32(mode))
+}
+
+// SetWeather publishes vanilla rain level events to every Bedrock session.
+func (l *Listener) SetWeather(raining, thundering bool) {
+	state := uint32(0)
+	if raining {
+		state = 1
+	}
+	if thundering {
+		state = 2
+	}
+	l.weather.Store(state)
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		l.sendWeather(current, raining, thundering)
+	}
+}
+
+func (l *Listener) sendWeather(current *bedrockSession, raining, thundering bool) {
+	event, data := packet.LevelEventStopRaining, int32(0)
+	if raining {
+		event, data = packet.LevelEventStartRaining, 65535
+	}
+	_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(event), EventData: data})
+	thunderEvent, thunderData := packet.LevelEventStopThunderstorm, int32(0)
+	if thundering {
+		thunderEvent = packet.LevelEventStartThunderstorm
+		thunderData = 65535
+	}
+	_ = current.conn.WritePacket(&packet.LevelEvent{EventType: int32(thunderEvent), EventData: thunderData})
+}
+
 // OpenContainerBlock sends a ContainerOpen packet to the player for the given
 // block position. Returns true if the block is a supported interactive container,
 // false if it is not (so the caller can fall through to block placement logic).
@@ -1376,7 +1450,7 @@ func (l *Listener) SyncFurnaceContainer(p *player.Player, cookTime, burnTime, bu
 		if stack.IsEmpty() {
 			viewer.furnaceNetworkIDs[index] = 0
 		} else if !viewer.furnaceSent || viewer.furnaceNetworkIDs[index] == 0 ||
-			(!previous.IsEmpty() && (previous.ItemID != stack.ItemID || previous.Damage != stack.Damage)) {
+			(!previous.IsEmpty() && !previous.SameItem(stack)) {
 			viewer.furnaceNetworkIDs[index] = viewer.allocateStackNetworkID()
 		}
 	}
@@ -1803,9 +1877,15 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 			metadata = uint32(uint16(meta))
 		}
 	}
-	var nbtData map[string]any
+	nbtData := map[string]any{}
 	if stack.Damage > 0 && lightLevel < 0 {
-		nbtData = map[string]any{"Damage": int32(stack.Damage)}
+		nbtData["Damage"] = int32(stack.Damage)
+	}
+	if enchantments := bedrockEnchantments(stack); len(enchantments) > 0 {
+		nbtData["ench"] = enchantments
+	}
+	if len(nbtData) == 0 {
+		nbtData = nil
 	}
 	blockRuntimeID := mapping.blockRuntimeID
 	block := splitBlockName(stack.ItemID)

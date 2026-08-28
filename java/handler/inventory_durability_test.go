@@ -27,6 +27,43 @@ func TestDamageableSlotCarriesVisibleDurability(t *testing.T) {
 	}
 }
 
+func TestSlotCarriesEnchantmentComponent(t *testing.T) {
+	b := protocol.NewBuilder(0)
+	encodeSlot(b, player.ItemStack{
+		ItemID: "minecraft:compass", Count: 1,
+		Enchantments: "minecraft:mending=1;minecraft:vanishing_curse=1",
+	})
+	r := bytes.NewReader(b.Build().Data)
+	count, _ := protocol.ReadVarInt(r)
+	_, _ = protocol.ReadVarInt(r)
+	added, _ := protocol.ReadVarInt(r)
+	removed, _ := protocol.ReadVarInt(r)
+	component, _ := protocol.ReadVarInt(r)
+	length, _ := protocol.ReadVarInt(r)
+	firstID, _ := protocol.ReadVarInt(r)
+	firstLevel, _ := protocol.ReadVarInt(r)
+	secondID, _ := protocol.ReadVarInt(r)
+	secondLevel, _ := protocol.ReadVarInt(r)
+	if count != 1 || added != 1 || removed != 0 || component != 10 || length != 2 ||
+		firstID != 22 || firstLevel != 1 || secondID != 40 || secondLevel != 1 || r.Len() != 0 {
+		t.Fatalf("enchantment component count=%d add=%d remove=%d type=%d length=%d values=%d/%d,%d/%d trailing=%d",
+			count, added, removed, component, length, firstID, firstLevel, secondID, secondLevel, r.Len())
+	}
+}
+
+func TestEnchantedSlotRoundTripsClientEncoding(t *testing.T) {
+	want := player.ItemStack{
+		ItemID: "minecraft:compass", Count: 1,
+		Enchantments: "minecraft:mending=1;minecraft:vanishing_curse=1",
+	}
+	b := protocol.NewBuilder(0)
+	encodeSlot(b, want)
+	got, err := readPlainSlot(bytes.NewReader(b.Build().Data))
+	if err != nil || got != want {
+		t.Fatalf("decoded slot = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 func TestLegacyTooltipHidesVanillaAttributesAndUsesInstantLabel(t *testing.T) {
 	ConfigureItemTooltips(true, true, true, true)
 	defer ConfigureItemTooltips(true, true, true, false)

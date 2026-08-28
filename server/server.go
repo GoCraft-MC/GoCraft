@@ -43,6 +43,7 @@ import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
+	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -54,6 +55,7 @@ import (
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 	"GoCraft/java/world/anvil"
+	"GoCraft/customitems"
 	bedrockpacket "github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -90,6 +92,11 @@ type Server struct {
 	chunkSender        *javaworld.Sender
 	sessions           *session.Manager
 	cmds               *handler.Dispatcher
+	permissions        *corepermission.Manager
+	permissionEditor   *permissionEditor
+
+	// Custom item packs (nil when custom_items.enabled = false or no packs found).
+	customItems *customitems.Manager
 
 	// Bedrock adapter (nil when bedrock.enabled = false).
 	bedrockListener *bedrock.Listener
@@ -122,7 +129,15 @@ type Server struct {
 	sleepAllTick int64
 
 	// timings collects per-subsystem tick durations for /timings and /tps.
-	timings *tickTimings
+	timings         *tickTimings
+	autosaveEnabled atomic.Bool
+	difficulty      atomic.Int32
+	defaultGameMode atomic.Uint32
+	weather         atomic.Int32
+	weatherTicks    atomic.Int64
+	idleTimeout     atomic.Int64
+	stopOnce        sync.Once
+	stopRequested   chan struct{}
 }
 
 // mobAI holds the wander state for a passive mob.
@@ -272,7 +287,48 @@ func New(cfg *config.Config) (*Server, error) {
 	if err := handler.ConfigureWhitelist(`whitelist.json`, cfg.Whitelist.Enabled, cfg.Whitelist.Players); err != nil {
 		slog.Warn(`server: could not load whitelist.json`, `err`, err)
 	}
+	if err := handler.ConfigureBans(`banned-players.json`, `banned-ips.json`); err != nil {
+		return nil, fmt.Errorf("server: loading bans: %w", err)
+	}
+	permissionManager, err := corepermission.Load(`permissions.json`)
+	if err != nil {
+		return nil, fmt.Errorf("server: loading permissions: %w", err)
+	}
 	cmds := handler.NewDispatcher()
+	cmds.SetPermissionChecker(func(p *player.Player, node string, defaultAllowed bool) bool {
+		if p == nil {
+			return false
+		}
+		return permissionManager.Allowed(p.Username, node, p.Operator, defaultAllowed)
+	})
+	cmds.SetGroupPrefixResolver(permissionManager.GroupPrefix)
+	chatFmt, err := loadChatFormat("configuration/chatformat.yml")
+	if err != nil {
+		slog.Warn("could not load chat format, using default", "err", err)
+		chatFmt = &chatFormatConfig{Format: defaultChatFormat}
+	}
+	if glyphs, glyphErr := loadGlyphs("configuration/glyphs.yml"); glyphErr != nil {
+		slog.Warn("could not load glyphs", "err", glyphErr)
+	} else {
+		chatFmt.glyphs = glyphs
+	}
+	cmds.SetChatFormatter(chatFmt.apply)
+
+	// Custom item packs — loaded before the Bedrock listener so that the
+	// generated .mcaddon can be prepended to the pack list.
+	var customItemsMgr *customitems.Manager
+	if cfg.CustomItems.Enabled {
+		mgr, err := customitems.Load(cfg.CustomItems.PacksDir)
+		if err != nil {
+			slog.Warn("customitems: failed to load packs, custom items disabled", "err", err)
+		} else {
+			customItemsMgr = mgr
+			if !mgr.IsEmpty() {
+				slog.Info("customitems: loaded", "count", len(mgr.Items()))
+			}
+		}
+	}
+
 	cmds.SetEntityIDAllocator(gameCore.NextEntityID)
 	cmds.SetPlayerFinder(func(name string) *player.Player {
 		var found *player.Player
@@ -322,6 +378,8 @@ func New(cfg *config.Config) (*Server, error) {
 		chunkSender:             javaworld.DefaultSender,
 		sessions:                session.NewManager(),
 		cmds:                    cmds,
+		permissions:             permissionManager,
+		customItems:             customItemsMgr,
 		intentBus:               bus,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
@@ -330,10 +388,14 @@ func New(cfg *config.Config) (*Server, error) {
 		furnaces:                make(map[furnaceKey]*furnaceState),
 		campfireCooking:         make(map[campfireCookKey]int64),
 		timings:                 timings,
+		stopRequested:           make(chan struct{}),
 		javaCrossKnown:          make(map[[16]byte]map[[16]byte]crossPlayerView),
 		playerStore:             playerStore,
 		bedrockBlockUse:         make(map[[16]byte]bedrockRecentBlockUse),
 	}
+	s.autosaveEnabled.Store(true)
+	s.difficulty.Store(difficultyID(cfg.Difficulty) + 1)
+	s.defaultGameMode.Store(uint32(configuredGameMode(cfg.DefaultGameMode)))
 	s.spawnState = newWorldSpawnState(spatial.Vec3{
 		X: float64(spawnX) + 0.5,
 		Y: float64(s.safeSpawnY(spawnX, spawnZ)),
@@ -345,6 +407,12 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 	}
 	s.registerSpawnCommands()
+	s.registerLifecycleCommands()
+	s.registerWorldSettingsCommands()
+	s.registerMessagingCommands()
+	s.registerRandomCommand()
+	s.registerReloadCommand()
+	s.registerIdleTimeoutCommand()
 
 	// Register server-state commands as closures after s is initialised.
 	cmds.Register("timings", func(ctx handler.CommandContext) error {
@@ -417,9 +485,14 @@ func New(cfg *config.Config) (*Server, error) {
 			fmt.Sprintf("Time set to %d", s.worldAge%24000))
 	})
 	cmds.RequireOperator(`timings`, `tps`, `mspt`, `time`)
+	if cfg.PermissionEditor.Enabled {
+		s.permissionEditor = newPermissionEditor(permissionManager, cfg.PermissionEditor.EditorURL, cfg.PermissionEditor.BytebinURL)
+	}
+	s.registerPermissionCommands()
 	// Warm spawn immediately; login-time streaming will reuse this cache.
 	s.world.QueuePregeneration(int32(math.Floor(float64(spawnX)/16)), int32(math.Floor(float64(spawnZ)/16)), int32(cfg.PreGenerateRadius))
 	s.loginHandler = handler.NewLoginHandler(cfg, privKey, pubKeyDER)
+	s.loginHandler.SetAdmissionCheck(admissionError)
 	s.listener = network.NewListener(cfg.Addr(), s.handleConn)
 
 	if cfg.Bedrock.Enabled {
@@ -436,6 +509,27 @@ func New(cfg *config.Config) (*Server, error) {
 			configuredGameMode(cfg.DefaultGameMode),
 			difficultyID(cfg.Difficulty),
 		)
+		// Load manually-configured Bedrock packs from server.yml.
+		if cfg.ResourcePack.Bedrock.Enabled && len(cfg.ResourcePack.Bedrock.Paths) > 0 {
+			if packs, err := loadBedrockPacks(cfg.ResourcePack.Bedrock.Paths); err != nil {
+				slog.Warn("could not load Bedrock resource packs", "err", err)
+			} else {
+				s.bedrockListener.SetResourcePacks(packs)
+			}
+		}
+		// Inject auto-generated custom-item Bedrock pack and StartGame entries.
+		if customItemsMgr != nil && !customItemsMgr.IsEmpty() {
+			if addonData, err := customItemsMgr.BuildBedrockPack(); err != nil {
+				slog.Warn("customitems: could not build Bedrock pack", "err", err)
+			} else if addonData != nil {
+				if pack, err := loadBedrockPackFromBytes(addonData); err != nil {
+					slog.Warn("customitems: could not load Bedrock pack", "err", err)
+				} else {
+					s.bedrockListener.SetResourcePack(pack)
+				}
+			}
+			s.bedrockListener.SetCustomItemEntries(customItemsMgr.BedrockItemEntries())
+		}
 		s.bedrockListener.SetWorldSpawn(s.currentWorldSpawn())
 		s.sessions.SetMessageObserver(s.bedrockListener.BroadcastMessage)
 		s.sessions.SetExternalKnockbackHandler(func(p *player.Player, sourceX, sourceZ, horizontal, vertical float64) {
@@ -446,6 +540,7 @@ func New(cfg *config.Config) (*Server, error) {
 		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
 	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
+	cmds.SetPlayerDisconnector(s.disconnectPlayer)
 	return s, nil
 }
 
@@ -482,6 +577,16 @@ func (s *Server) teleportPlayer(target *player.Player, x, y, z float64) error {
 // All background goroutines are tracked with a WaitGroup and are joined before
 // the world is flushed to disk, ensuring clean shutdown of both listeners.
 func (s *Server) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-s.stopRequested:
+			cancel()
+		case <-runCtx.Done():
+		}
+	}()
+	ctx = runCtx
 	go s.runConsole(ctx)
 	if s.cfg.JavaEnabled {
 		slog.Info("java listener enabled",
@@ -497,6 +602,28 @@ func (s *Server) Run(ctx context.Context) error {
 			"onlineMode", s.cfg.Bedrock.OnlineMode,
 		)
 	}
+	// Start the Java custom-item pack HTTP server if we have items and Java is enabled.
+	if s.cfg.JavaEnabled && s.customItems != nil && !s.customItems.IsEmpty() {
+		if packData, hash, err := s.customItems.BuildJavaPack(); err != nil {
+			slog.Warn("customitems: could not build Java pack", "err", err)
+		} else {
+			port := s.cfg.CustomItems.Java.ServePort
+			if port == 0 {
+				port = 8080
+			}
+			host := s.cfg.CustomItems.Java.PublicHost
+			if ps, err := customitems.StartJavaPackServer(packData, hash, host, port); err != nil {
+				slog.Warn("customitems: could not start Java pack server", "err", err)
+			} else {
+				// Override the Java resource pack config with the auto-generated URL/hash.
+				s.cfg.ResourcePack.Java.Enabled = true
+				s.cfg.ResourcePack.Java.URL = ps.URL()
+				s.cfg.ResourcePack.Java.Hash = ps.HashHex()
+				slog.Info("customitems: Java pack ready", "url", ps.URL())
+			}
+		}
+	}
+
 	slog.Info("starting GoCraft server", "motd", s.cfg.MOTD, "worldSeed", s.cfg.WorldSeed,
 		"worldStorage", s.cfg.WorldStorage, "maxCachedChunks", s.cfg.MaxCachedChunks)
 
@@ -538,6 +665,7 @@ func (s *Server) Run(ctx context.Context) error {
 	} else {
 		<-ctx.Done()
 	}
+	cancel()
 
 	// ctx is now done: wait for entity tick and Bedrock listener to finish.
 	wg.Wait()
@@ -629,6 +757,12 @@ func (s *Server) executeConsoleCommand(input string) string {
 			return `Timing collector is unavailable`
 		}
 		return stripMinecraftFormatting(s.timings.MSPT())
+	case `gocraft`:
+		message, err := s.executePermissionCommand(fields[1:])
+		if err != nil {
+			return `Error: ` + err.Error()
+		}
+		return message
 	case `op`:
 		if len(fields) != 2 {
 			return `Usage: op <player>`
@@ -726,11 +860,13 @@ func (s *Server) safeTick() {
 	s.tickAuxiliaryDimensionItems()
 	s.tickStationaryLavaDamage()
 	s.tickPlayerHunger()
+	s.tickIdleTimeout()
+	s.tickWeather()
 	if s.bedrockListener != nil {
 		s.bedrockListener.Sync(uint64(s.worldAge))
 		s.syncBedrockPlayersToJava()
 	}
-	if s.worldAge%600 == 0 {
+	if s.autosaveEnabled.Load() && s.worldAge%600 == 0 {
 		for dimension, dimensionWorld := range map[string]*coreworld.World{"overworld": s.world, "nether": s.netherWorld, "end": s.endWorld} {
 			if err := dimensionWorld.Flush(); err != nil {
 				slog.Warn("world autosave failed", "dimension", dimension, "err", err)
@@ -919,9 +1055,8 @@ func (s *Server) applyBedrockPlayerState(i intent.PlayerStateIntent) {
 // applyJoin creates a canonical Player, registers it with the game core, and
 // sends a JoinResult to the waiting adapter goroutine.
 func (s *Server) applyJoin(i intent.JoinIntent) {
-	if !handler.IsWhitelisted(i.Username) {
-		err := fmt.Errorf("you are not whitelisted on this server")
-		slog.Warn("applyJoin: player rejected by whitelist", "name", i.Username, "edition", i.Edition)
+	if err := admissionError(i.Username, i.RemoteAddress); err != nil {
+		slog.Warn("applyJoin: player rejected", "name", i.Username, "edition", i.Edition, "err", err)
 		i.Done <- intent.JoinResult{Err: err}
 		return
 	}
@@ -931,9 +1066,11 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	}
 
 	p := player.New(i.PlayerUUID, i.Username, edition)
+	p.RemoteAddress = i.RemoteAddress
+	p.Raining, p.Thundering = s.currentWeather()
 	p.Operator = handler.IsOperatorName(i.Username)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
-	p.GameMode = configuredGameMode(s.cfg.DefaultGameMode)
+	p.GameMode = player.GameMode(s.defaultGameMode.Load())
 	p.AttackCooldown = s.cfg.Combat.AttackCooldown
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical
@@ -1433,7 +1570,7 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 		s.cmds.Dispatch(i.Message, ctx)
 		return
 	}
-	msg := fmt.Sprintf("<%s> %s", i.DisplayName, i.Message)
+	msg := s.cmds.FormatChat(i.DisplayName, i.Message)
 	handler.BroadcastSystemMessage(s.sessions, msg)
 }
 
@@ -4005,10 +4142,10 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 				damage = float32(settings.attackDamage)
 			}
 			healthBefore, _, _, _ := target.Player.HealthSnapshot()
-			switch s.cfg.Difficulty {
-			case "easy":
+			switch s.currentDifficulty() {
+			case 1:
 				damage *= 0.5
-			case "hard":
+			case 3:
 				damage *= 1.5
 			}
 			name := strings.ReplaceAll(strings.TrimPrefix(string(e.Type), "minecraft:"), "_", " ")
@@ -4442,13 +4579,13 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 		}
 
 		// ── Configuration state ──────────────────────────────────────────────
-		if err := handler.HandleConfiguration(conn, s.regProvider); err != nil {
+		if err := handler.HandleConfiguration(conn, s.regProvider, s.cfg.ResourcePack.Java); err != nil {
 			slog.Warn("configuration error", "remote", remote, "err", err)
 			return
 		}
 
 		// ── Play state ───────────────────────────────────────────────────────
-		p := s.registerPlayer(result)
+		p := s.registerPlayer(result, remote.String())
 		defer func() {
 			if p.VehicleEntityID != 0 {
 				s.dismountPlayer(p)
@@ -4469,12 +4606,14 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 
 // registerPlayer creates a core Player from a LoginResult, assigns an entity ID
 // via the game core, and updates the global online count used in status pings.
-func (s *Server) registerPlayer(result *handler.LoginResult) *player.Player {
+func (s *Server) registerPlayer(result *handler.LoginResult, remoteAddress string) *player.Player {
 	// protocol.UUID is [16]byte — convertible to the core's raw [16]byte UUID.
 	p := player.New([16]byte(result.UUID), result.Name, player.ClientEditionJava)
+	p.RemoteAddress = remoteAddress
+	p.Raining, p.Thundering = s.currentWeather()
 	p.Operator = handler.IsOperatorName(result.Name)
 	p.InvulnerableUntil = time.Now().Add(3 * time.Second)
-	p.GameMode = configuredGameMode(s.cfg.DefaultGameMode)
+	p.GameMode = player.GameMode(s.defaultGameMode.Load())
 	p.AttackCooldown = s.cfg.Combat.AttackCooldown
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical

@@ -41,6 +41,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+	"github.com/sandertv/gophertunnel/minecraft/resource"
 	"github.com/sandertv/gophertunnel/minecraft/text"
 
 	bedrockworld "GoCraft/bedrock/world"
@@ -70,8 +71,9 @@ type Listener struct {
 	spawnY     int
 	spawnZ     int
 	spawnMu    sync.RWMutex
-	gameMode   player.GameMode
+	gameMode   atomic.Uint32
 	difficulty int32
+	weather    atomic.Uint32
 	sessionsMu sync.RWMutex
 	sessions   map[[16]byte]*bedrockSession
 	screenID   atomic.Uint32
@@ -87,6 +89,13 @@ type Listener struct {
 	creativeItems  []protocol.CreativeItem
 	craftingData   []*packet.CraftingData
 	creativeNames  map[uint32]creativeKnownItem // creative network ID → item name/meta
+
+	// resourcePacks holds optional Bedrock-format packs sent to every client.
+	resourcePacks []*resource.Pack
+
+	// customItemEntries are component-based item definitions appended to the
+	// vanilla item registry in every StartGame packet.
+	customItemEntries []protocol.ItemEntry
 }
 
 type bedrockSession struct {
@@ -104,6 +113,9 @@ type bedrockSession struct {
 	lastSaturation      float32
 	lastExhaustion      float32
 	hungerSent          bool
+	lastExperienceLevel int32
+	lastExperience      float32
+	experienceSent      bool
 	wasDead             bool
 	inventorySent       bool
 	lastInventory       [player.InventorySize]player.ItemStack
@@ -166,6 +178,7 @@ func (l *Listener) addSession(s *bedrockSession) {
 	l.sessionsMu.Lock()
 	l.sessions[s.uuid] = s
 	l.sessionsMu.Unlock()
+	l.sendWeather(s, l.weather.Load() >= 1, l.weather.Load() >= 2)
 	debuglog.Info(debuglog.BedrockLogin, "bedrock: session added", "displayName", s.displayName)
 }
 
@@ -173,6 +186,21 @@ func (l *Listener) removeSession(uuid [16]byte) {
 	l.sessionsMu.Lock()
 	delete(l.sessions, uuid)
 	l.sessionsMu.Unlock()
+}
+
+// DisconnectPlayer closes a Bedrock session with a client-visible reason.
+func (l *Listener) DisconnectPlayer(uuid [16]byte, reason string) bool {
+	l.sessionsMu.RLock()
+	s, ok := l.sessions[uuid]
+	l.sessionsMu.RUnlock()
+	if !ok {
+		return false
+	}
+	_ = s.conn.WritePacket(&packet.Disconnect{
+		Reason: packet.DisconnectReasonKicked, Message: reason,
+	})
+	_ = s.conn.Close()
+	return true
 }
 
 // NewListener creates a Listener from the Bedrock section of the server config.
@@ -200,11 +228,11 @@ func NewListener(
 		worldSeed:   worldSeed,
 		spawnX:      spawnX,
 		spawnZ:      spawnZ,
-		gameMode:    gameMode,
 		difficulty:  difficulty,
 		sessions:    make(map[[16]byte]*bedrockSession),
 		spawnNotify: make(map[string]chan struct{}),
 	}
+	l.gameMode.Store(uint32(gameMode))
 	l.initCreativeContent()
 	l.craftingData = bedrockCraftingData()
 	shapedRecipes, shapelessRecipes := 0, 0
@@ -221,6 +249,24 @@ func NewListener(
 		"total", shapedRecipes+shapelessRecipes,
 	)
 	return l
+}
+
+// SetResourcePack adds a single Bedrock-format resource pack that is sent to
+// every connecting Bedrock client. Call this before Listen.
+func (l *Listener) SetResourcePack(pack *resource.Pack) {
+	l.resourcePacks = append(l.resourcePacks, pack)
+}
+
+// SetResourcePacks registers multiple Bedrock-format packs at once. This is
+// equivalent to calling SetResourcePack for each element. Call before Listen.
+func (l *Listener) SetResourcePacks(packs []*resource.Pack) {
+	l.resourcePacks = append(l.resourcePacks, packs...)
+}
+
+// SetCustomItemEntries registers component-based custom item entries that are
+// appended to the vanilla item table in every StartGame packet. Call before Listen.
+func (l *Listener) SetCustomItemEntries(entries []protocol.ItemEntry) {
+	l.customItemEntries = entries
 }
 
 func (l *Listener) worldForDimension(dimension int32) *coreworld.World {
@@ -243,6 +289,7 @@ func (l *Listener) Listen(ctx context.Context) error {
 	gt, err := minecraft.ListenConfig{
 		AuthenticationDisabled: !l.cfg.OnlineMode,
 		ErrorLog:               slog.Default(),
+		ResourcePacks:          l.resourcePacks,
 		// AllowUnknownPackets prevents gophertunnel from closing the conn when
 		// the client sends a packet whose ID we do not recognise. Without this,
 		// any novel 1.26.40 packet ID causes an immediate server-side close and
@@ -348,6 +395,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		PlayerUUID:      playerUUID,
 		Username:        identity.DisplayName,
 		Edition:         "bedrock",
+		RemoteAddress:   remote.String(),
 		TrustedIdentity: authenticated,
 		Done:            done,
 	}); err != nil {
@@ -470,6 +518,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		if p := l.game.GetPlayer(playerUUID); p != nil {
 			health, food, saturation, _ := p.HealthSnapshot()
 			_, _, exhaustion := p.HungerSnapshot()
+			experienceLevel, _, experienceProgress := p.ExperienceSnapshot()
 			maxHealth := p.MaxHealth
 			if maxHealth <= 0 {
 				maxHealth = 20
@@ -501,12 +550,12 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 				EntityRuntimeID: bedrockSelfRuntimeID,
 				Attributes: []protocol.Attribute{{
 					AttributeValue: protocol.AttributeValue{
-						Name: "minecraft:player.level", Value: 0, Max: math.MaxInt32,
+						Name: "minecraft:player.level", Value: float32(experienceLevel), Max: math.MaxInt32,
 					},
 					DefaultMax: math.MaxInt32,
 				}, {
 					AttributeValue: protocol.AttributeValue{
-						Name: "minecraft:player.experience", Value: 0, Max: 1,
+						Name: "minecraft:player.experience", Value: experienceProgress, Max: 1,
 					},
 					DefaultMax: 1,
 				}},
@@ -515,6 +564,9 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 				chunkStreamErr <- err
 				return
 			}
+			bedrockSess.lastExperienceLevel = experienceLevel
+			bedrockSess.lastExperience = experienceProgress
+			bedrockSess.experienceSent = true
 
 			foodPk := &packet.UpdateAttributes{
 				EntityRuntimeID: bedrockSelfRuntimeID,
@@ -585,8 +637,8 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		EntityUniqueID:    int64(bedrockSelfRuntimeID),
 		EntityRuntimeID:   bedrockSelfRuntimeID,
 		PlayerPosition:    spawnPos,
-		PlayerGameMode:    bedrockGameType(l.gameMode),
-		WorldGameMode:     bedrockGameType(l.gameMode),
+		PlayerGameMode:    bedrockGameType(player.GameMode(l.gameMode.Load())),
+		WorldGameMode:     bedrockGameType(player.GameMode(l.gameMode.Load())),
 		Difficulty:        l.difficulty,
 		PlayerPermissions: packet.PermissionLevelMember,
 		PlayerMovementSettings: protocol.PlayerMovementSettings{
@@ -597,7 +649,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		// exact Pumpkin/BDS 1.26.40 runtime table. Omitting it leaves the client
 		// indexing unknown IDs when Creative search or scrolling is opened and
 		// drops data-driven behaviour such as consumable item components.
-		Items:           bedrockItemRegistry(),
+		Items:           append(bedrockItemRegistry(), l.customItemEntries...),
 		BaseGameVersion: protocol.CurrentVersion,
 		WorldSeed:       l.worldSeed,
 		Dimension:       result.Dimension,
@@ -786,6 +838,9 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 				"readyForWorldSync", readyForWorldSync,
 			)
 			return
+		}
+		if online := l.game.GetPlayer(bedrockSess.uuid); online != nil {
+			online.TouchActivity()
 		}
 
 		switch p := pk.(type) {

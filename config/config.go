@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -77,6 +78,63 @@ type ClearLagConfig struct {
 type WhitelistConfig struct {
 	Enabled bool     `yaml:"enabled"`
 	Players []string `yaml:"players"`
+}
+
+// JavaResourcePackConfig controls the resource pack pushed to Java clients.
+// Java and Bedrock use different pack formats — configure each separately.
+type JavaResourcePackConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url"`    // HTTPS URL to the .zip resource pack
+	Hash    string `yaml:"hash"`   // SHA-1 hex of the zip (for client caching)
+	Forced  bool   `yaml:"forced"` // kick the player if they decline
+	Prompt  string `yaml:"prompt"` // MiniMessage text shown before accept dialog
+}
+
+// BedrockResourcePackConfig controls the resource packs pushed to Bedrock clients.
+// Paths may point to .mcpack, .zip, or .mcaddon files.
+// .mcaddon files are automatically unpacked — each contained resource pack and
+// behavior pack sub-folder is loaded and sent to connecting clients.
+type BedrockResourcePackConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	Paths   []string `yaml:"paths"`  // local paths to .mcpack, .zip, or .mcaddon files
+	Forced  bool     `yaml:"forced"` // kick the player if they decline
+}
+
+// ResourcePackConfig bundles resource pack settings for both editions.
+type ResourcePackConfig struct {
+	Java    JavaResourcePackConfig    `yaml:"java"`
+	Bedrock BedrockResourcePackConfig `yaml:"bedrock"`
+}
+
+// CustomItemsConfig controls GoCraft's cross-edition custom item system.
+// Place item packs in sub-directories under PacksDir (default: "packs/").
+// Each pack directory must contain an items.yml and a textures/ folder.
+type CustomItemsConfig struct {
+	Enabled bool `yaml:"enabled"`
+
+	// PacksDir is the directory that contains individual pack sub-directories.
+	PacksDir string `yaml:"packs_dir"`
+
+	// Java controls how the auto-generated Java resource pack is delivered.
+	Java struct {
+		// ServePort is the port the embedded HTTP server listens on.
+		// Java clients download the generated pack from this port.
+		ServePort int `yaml:"serve_port"`
+
+		// PublicHost is the hostname or IP address that Java clients use to
+		// reach this server (e.g. your server's public IP or domain).
+		// Leave empty for local/LAN testing only.
+		PublicHost string `yaml:"public_host"`
+	} `yaml:"java"`
+}
+
+// PermissionEditorConfig controls the bytebin-based permission editor.
+// The server uploads permission data to bytebin (outbound only — no listening
+// port needed), and the editor runs as a static GitHub Pages site.
+type PermissionEditorConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	EditorURL  string `yaml:"editor_url"`
+	BytebinURL string `yaml:"bytebin_url"`
 }
 
 // DebugConfig controls verbose diagnostic log categories. All switches default
@@ -162,9 +220,12 @@ type Config struct {
 
 	// Operators bootstraps named operators. Runtime /op changes are persisted
 	// separately in ops.json, matching the vanilla server convention.
-	Operators []string
-	Whitelist WhitelistConfig `yaml:"whitelist"`
-	Debug     DebugConfig     `yaml:"debug"`
+	Operators        []string
+	Whitelist        WhitelistConfig        `yaml:"whitelist"`
+	ResourcePack     ResourcePackConfig     `yaml:"resource_pack"`
+	CustomItems      CustomItemsConfig      `yaml:"custom_items"`
+	PermissionEditor PermissionEditorConfig `yaml:"permission_editor"`
+	Debug            DebugConfig            `yaml:"debug"`
 
 	// Combat timing and knockback settings.
 	Combat CombatConfig `yaml:"combat"`
@@ -206,6 +267,18 @@ func defaults() *Config {
 			WaterAmbient:              20,
 		},
 		Whitelist: WhitelistConfig{Enabled: false, Players: []string{}},
+		CustomItems: func() CustomItemsConfig {
+			var ci CustomItemsConfig
+			ci.Enabled = true
+			ci.PacksDir = "packs"
+			ci.Java.ServePort = 8080
+			return ci
+		}(),
+		PermissionEditor: PermissionEditorConfig{
+			Enabled:    true,
+			EditorURL:  "https://el211.github.io/GoCraft/editor",
+			BytebinURL: "https://bytebin.lucko.me",
+		},
 		Combat: CombatConfig{
 			AttackCooldown:      false,
 			KnockbackHorizontal: 0.4,
@@ -348,6 +421,14 @@ func (c *Config) validate() error {
 	if c.Bedrock.Enabled && c.Bedrock.Address == "" {
 		return errors.New("bedrock.address must not be empty when bedrock is enabled")
 	}
+	if c.PermissionEditor.Enabled {
+		if parsed, err := url.ParseRequestURI(c.PermissionEditor.EditorURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("permission_editor.editor_url %q must be a valid http/https URL", c.PermissionEditor.EditorURL)
+		}
+		if parsed, err := url.ParseRequestURI(c.PermissionEditor.BytebinURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("permission_editor.bytebin_url %q must be a valid http/https URL", c.PermissionEditor.BytebinURL)
+		}
+	}
 	return nil
 }
 
@@ -372,9 +453,12 @@ func (c *Config) validate() error {
 //	GOCRAFT_MAX_CACHED_CHUNKS Clean chunk cache limit       (default: 768)
 //	GOCRAFT_DIFFICULTY        peaceful/easy/normal/hard    (default: normal)
 //	GOCRAFT_WHITELIST_ENABLED "true"/"false"              (default: false)
-//	GOCRAFT_BEDROCK_ENABLED   "true"/"false"              (default: false)
-//	GOCRAFT_BEDROCK_ADDR      Bedrock UDP address         (default: 0.0.0.0:19106)
-//	GOCRAFT_BEDROCK_ONLINE_MODE Xbox Live auth required   (default: true)
+//	GOCRAFT_BEDROCK_ENABLED            "true"/"false"              (default: false)
+//	GOCRAFT_BEDROCK_ADDR               Bedrock UDP address         (default: 0.0.0.0:19106)
+//	GOCRAFT_BEDROCK_ONLINE_MODE        Xbox Live auth required     (default: true)
+//	GOCRAFT_PERMISSION_EDITOR_ENABLED  "true"/"false"              (default: true)
+//	GOCRAFT_PERMISSION_EDITOR_URL      Editor GitHub Pages URL
+//	GOCRAFT_PERMISSION_EDITOR_BYTEBIN  Bytebin base URL
 func (c *Config) ApplyEnvOverrides() error {
 	if v := os.Getenv("GOCRAFT_JAVA_HOST"); v != "" {
 		c.Host = v
@@ -492,6 +576,19 @@ func (c *Config) ApplyEnvOverrides() error {
 		}
 		c.Bedrock.OnlineMode = b
 	}
+	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_PERMISSION_EDITOR_ENABLED %q: %w", v, err)
+		}
+		c.PermissionEditor.Enabled = b
+	}
+	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL"); v != "" {
+		c.PermissionEditor.EditorURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_BYTEBIN"); v != "" {
+		c.PermissionEditor.BytebinURL = strings.TrimRight(v, "/")
+	}
 
 	if c.Debug.EnvironmentOverrides {
 		logEnvOverrides()
@@ -524,6 +621,9 @@ func logEnvOverrides() {
 		{"GOCRAFT_BEDROCK_ENABLED", os.Getenv("GOCRAFT_BEDROCK_ENABLED")},
 		{"GOCRAFT_BEDROCK_ADDR", os.Getenv("GOCRAFT_BEDROCK_ADDR")},
 		{"GOCRAFT_BEDROCK_ONLINE_MODE", os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE")},
+		{"GOCRAFT_PERMISSION_EDITOR_ENABLED", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED")},
+		{"GOCRAFT_PERMISSION_EDITOR_URL", os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL")},
+		{"GOCRAFT_PERMISSION_EDITOR_BYTEBIN", os.Getenv("GOCRAFT_PERMISSION_EDITOR_BYTEBIN")},
 	}
 	for _, v := range vars {
 		if v.val != "" {

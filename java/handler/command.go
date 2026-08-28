@@ -57,13 +57,15 @@ type CommandContext struct {
 
 	// ListPlayers returns all online players from the edition-neutral game
 	// registry. MaxPlayers is the configured server capacity.
-	ListPlayers func() []*player.Player
-	MaxPlayers  int
+	ListPlayers       func() []*player.Player
+	MaxPlayers        int
+	AvailableCommands []string
 
 	// Reply sends command feedback to the issuing edition. SyncAbilities asks
 	// that edition adapter to publish changed flight/permission state.
-	Reply         func(text string) error
-	SyncAbilities func(*player.Player)
+	Reply            func(text string) error
+	SyncAbilities    func(*player.Player)
+	DisconnectPlayer func(*player.Player, string) error
 }
 
 // CommandFunc is the handler signature for a built-in server command.
@@ -74,18 +76,31 @@ type CommandFunc func(ctx CommandContext) error
 type registeredCommand struct {
 	fn           CommandFunc
 	operatorOnly bool
+	permission   string
+	defaultAllow bool
 }
+
+type PermissionChecker func(player *player.Player, node string, defaultAllowed bool) bool
+
+// ChatFormatter formats a single chat line.  prefix is the player's
+// highest-weight group prefix (may be ""), username is the speaker, message is
+// the raw chat text.
+type ChatFormatter func(prefix, username, message string) string
 
 // Dispatcher maps command names (lower-case) to their implementations.
 // All methods are safe for concurrent use.
 type Dispatcher struct {
-	mu             sync.RWMutex
-	cmds           map[string]registeredCommand
-	nextEntityID   func() int32
-	findPlayer     func(string) *player.Player
-	listPlayers    func() []*player.Player
-	teleportPlayer func(*player.Player, float64, float64, float64) error
-	maxPlayers     int
+	mu               sync.RWMutex
+	cmds             map[string]registeredCommand
+	nextEntityID     func() int32
+	findPlayer       func(string) *player.Player
+	listPlayers      func() []*player.Player
+	teleportPlayer   func(*player.Player, float64, float64, float64) error
+	disconnectPlayer func(*player.Player, string) error
+	permission       PermissionChecker
+	chatFormatter    ChatFormatter
+	groupPrefix      func(username string) string
+	maxPlayers       int
 }
 
 // NewDispatcher returns an empty, ready-to-use Dispatcher.
@@ -97,14 +112,16 @@ func NewDispatcher() *Dispatcher {
 // and matched case-insensitively at dispatch time.
 func (d *Dispatcher) Register(name string, fn CommandFunc) {
 	d.mu.Lock()
-	d.cmds[strings.ToLower(name)] = registeredCommand{fn: fn}
+	name = strings.ToLower(name)
+	d.cmds[name] = registeredCommand{fn: fn, permission: commandPermissionNode(name), defaultAllow: true}
 	d.mu.Unlock()
 }
 
 // RegisterOperator adds a command that may only be used by server operators.
 func (d *Dispatcher) RegisterOperator(name string, fn CommandFunc) {
 	d.mu.Lock()
-	d.cmds[strings.ToLower(name)] = registeredCommand{fn: fn, operatorOnly: true}
+	name = strings.ToLower(name)
+	d.cmds[name] = registeredCommand{fn: fn, operatorOnly: true, permission: commandPermissionNode(name)}
 	d.mu.Unlock()
 }
 
@@ -116,10 +133,72 @@ func (d *Dispatcher) RequireOperator(names ...string) {
 		command, ok := d.cmds[key]
 		if ok {
 			command.operatorOnly = true
+			command.defaultAllow = false
 			d.cmds[key] = command
 		}
 	}
 	d.mu.Unlock()
+}
+
+func commandPermissionNode(name string) string {
+	return "gocraft.command." + strings.ToLower(strings.TrimSpace(name))
+}
+
+func (d *Dispatcher) SetPermissionChecker(check PermissionChecker) {
+	d.mu.Lock()
+	d.permission = check
+	d.mu.Unlock()
+}
+
+// SetChatFormatter installs the function used to build chat lines.
+func (d *Dispatcher) SetChatFormatter(f ChatFormatter) {
+	d.mu.Lock()
+	d.chatFormatter = f
+	d.mu.Unlock()
+}
+
+// SetGroupPrefixResolver installs the function used to look up a player's
+// group prefix from the permission manager.
+func (d *Dispatcher) SetGroupPrefixResolver(fn func(username string) string) {
+	d.mu.Lock()
+	d.groupPrefix = fn
+	d.mu.Unlock()
+}
+
+// FormatChat produces the full chat line for the given player and message.
+// It resolves the group prefix via the installed resolver, then calls the
+// ChatFormatter.  Falls back to "<username> message" when nothing is set.
+func (d *Dispatcher) FormatChat(username, message string) string {
+	d.mu.RLock()
+	f := d.chatFormatter
+	gpfn := d.groupPrefix
+	d.mu.RUnlock()
+
+	prefix := ""
+	if gpfn != nil {
+		prefix = gpfn(username)
+	}
+	if f != nil {
+		return f(prefix, username, message)
+	}
+	if prefix != "" {
+		return prefix + "<" + username + "> " + message
+	}
+	return "<" + username + "> " + message
+}
+
+func (d *Dispatcher) CanUse(player *player.Player, name string) bool {
+	d.mu.RLock()
+	command, ok := d.cmds[strings.ToLower(name)]
+	check := d.permission
+	d.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	if check != nil {
+		return check(player, command.permission, command.defaultAllow)
+	}
+	return !command.operatorOnly && command.defaultAllow || player != nil && player.Operator
 }
 
 // SetEntityIDAllocator installs the game-wide allocator used by entity-spawning
@@ -153,6 +232,12 @@ func (d *Dispatcher) SetPlayerTeleporter(teleport func(*player.Player, float64, 
 	d.mu.Unlock()
 }
 
+func (d *Dispatcher) SetPlayerDisconnector(disconnect func(*player.Player, string) error) {
+	d.mu.Lock()
+	d.disconnectPlayer = disconnect
+	d.mu.Unlock()
+}
+
 // SetMaxPlayers publishes the configured player capacity to commands.
 func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 	d.mu.Lock()
@@ -183,13 +268,17 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	findPlayer := d.findPlayer
 	listPlayers := d.listPlayers
 	teleportPlayer := d.teleportPlayer
+	disconnectPlayer := d.disconnectPlayer
 	maxPlayers := d.maxPlayers
+	checkPermission := d.permission
 	d.mu.RUnlock()
 	ctx.NextEntityID = allocateEntityID
 	ctx.FindPlayer = findPlayer
 	ctx.ListPlayers = listPlayers
 	ctx.TeleportPlayer = teleportPlayer
+	ctx.DisconnectPlayer = disconnectPlayer
 	ctx.MaxPlayers = maxPlayers
+	ctx.AvailableCommands = d.VisibleCommands(ctx.Player)
 
 	if !ok {
 		if ctx.Reply != nil {
@@ -199,7 +288,11 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 		_ = sendSystemMessage(ctx.Conn, fmt.Sprintf("Unknown command: /%s", name))
 		return
 	}
-	if command.operatorOnly && (ctx.Player == nil || !ctx.Player.Operator) {
+	allowed := !command.operatorOnly && command.defaultAllow || ctx.Player != nil && ctx.Player.Operator
+	if checkPermission != nil {
+		allowed = checkPermission(ctx.Player, command.permission, command.defaultAllow)
+	}
+	if !allowed {
 		_ = sendCommandMessage(ctx, `You do not have permission to use this command`)
 		return
 	}

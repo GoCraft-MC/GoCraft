@@ -185,6 +185,7 @@ func loadRegistries() {
 	soundEventIDs = soundMap
 	effectMap, _ := loadRegistry(raw, "minecraft:mob_effect", "registries.json")
 	mobEffectIDs = effectMap
+	enchantmentIDs, enchantmentNames = loadNetworkRegistry("minecraft:enchantment")
 }
 
 // LogStartupSummary emits registry counts after main has configured both the
