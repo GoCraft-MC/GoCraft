@@ -68,8 +68,9 @@ func cloneHostCall(call abi.HostCall) abi.HostCall {
 func cloneValue(value abi.Value) abi.Value {
 	value.Bytes = append([]byte(nil), value.Bytes...)
 	if value.List != nil {
-		value.List = make([]abi.Value, len(value.List))
-		for index, child := range value.List {
+		children := value.List
+		value.List = make([]abi.Value, len(children))
+		for index, child := range children {
 			value.List[index] = cloneValue(child)
 		}
 	}
