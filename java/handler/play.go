@@ -125,6 +125,12 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 	if err := sendUpdateHealth(conn, p); err != nil {
 		return fmt.Errorf("play: health: %w", err)
 	}
+	if _, _, _, dead := p.HealthSnapshot(); dead {
+		message := fmt.Sprintf("%s died", p.Username)
+		if err := conn.WritePacket(buildDeathCombatEvent(p, message)); err != nil {
+			return fmt.Errorf("play: restoring death screen: %w", err)
+		}
+	}
 	if err := sendExperience(conn, p); err != nil {
 		return fmt.Errorf("play: experience: %w", err)
 	}
@@ -853,12 +859,14 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 					}
 					p.VehicleEntityID = 0
 				}
-				p.Revive()
-				if bedSpawn, ok := resolveBedRespawn(p, w); ok {
-					p.Position = bedSpawn
-				} else {
-					p.Position = p.WorldSpawn
+				destinationWorld := w
+				if worldForDimension != nil {
+					if overworld := worldForDimension(0); overworld != nil {
+						destinationWorld = overworld
+					}
 				}
+				respawnPlayerInOverworld(p, destinationWorld)
+				w = destinationWorld
 				if err := conn.WritePacket(buildRespawn(p, dimensionTypeIDs[p.Dimension], hashedSeed)); err != nil {
 					return fmt.Errorf("play loop: respawn packet: %w", err)
 				}
@@ -1028,6 +1036,16 @@ func resolveBedRespawn(p *player.Player, w *coreworld.World) (spatial.Vec3, bool
 // Bedrock respawn intent without duplicating safety rules in another adapter.
 func ResolveBedRespawn(p *player.Player, w *coreworld.World) (spatial.Vec3, bool) {
 	return resolveBedRespawn(p, w)
+}
+
+func respawnPlayerInOverworld(p *player.Player, w *coreworld.World) {
+	p.Dimension = 0
+	p.Revive()
+	if bedSpawn, ok := resolveBedRespawn(p, w); ok {
+		p.Position = bedSpawn
+	} else {
+		p.Position = p.WorldSpawn
+	}
 }
 
 func safeRespawnSpace(w *coreworld.World, x, y, z int) bool {

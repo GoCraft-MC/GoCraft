@@ -46,3 +46,26 @@ func TestMissingBedFallsBackToWorldSpawn(t *testing.T) {
 		t.Fatal("missing bed remained a valid personal spawn")
 	}
 }
+
+func TestDeathRespawnMovesFromEndToOverworldBed(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	p := player.New([16]byte{7}, "traveler", player.ClientEditionJava)
+	p.Dimension = 2
+	p.WorldSpawn = spatial.Vec3{X: 20.5, Y: 65, Z: 20.5}
+	p.SpawnPoint = spatial.BlockPos{X: 0, Y: 64, Z: 0}
+	p.HasSpawnPoint = true
+	p.ApplyDamage(p.MaxHealth, "fell out of the world")
+	w.SetBlock(0, 64, 0, coreworld.Block{
+		Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{"facing": "north", "part": "foot"},
+	})
+
+	respawnPlayerInOverworld(p, w)
+	health, food, _, dead := p.HealthSnapshot()
+	if dead || health != 20 || food != 20 || p.Dimension != 0 {
+		t.Fatalf("respawn state = health %.1f food %d dead %t dimension %d", health, food, dead, p.Dimension)
+	}
+	if p.Position == p.WorldSpawn {
+		t.Fatal("valid bed respawn fell back to world spawn")
+	}
+}
