@@ -38,3 +38,19 @@ func TestExperienceProgressAndClamping(t *testing.T) {
 		t.Fatalf("level set snapshot = %d, %d, %f", level, total, progress)
 	}
 }
+
+func TestExperiencePickupDelay(t *testing.T) {
+	p := New([16]byte{}, "test", ClientEditionJava)
+	if !p.TryPickupExperience(3, 10) {
+		t.Fatal("first orb was rejected")
+	}
+	if p.TryPickupExperience(4, 11) {
+		t.Fatal("orb ignored Pumpkin's two-tick pickup delay")
+	}
+	if !p.TryPickupExperience(4, 12) {
+		t.Fatal("orb remained blocked after two ticks")
+	}
+	if _, total, _ := p.ExperienceSnapshot(); total != 7 {
+		t.Fatalf("picked-up total = %d, want 7", total)
+	}
+}
