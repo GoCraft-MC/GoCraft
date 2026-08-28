@@ -74,7 +74,7 @@ func TestPlayerDataStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestReconnectFromDeathScreenRespawnsAtFullHealth(t *testing.T) {
+func TestReconnectFromDeathScreenKeepsDeathState(t *testing.T) {
 	store := newPlayerDataStore(t.TempDir())
 	uuid := [16]byte{0xde, 0xad}
 	dead := player.New(uuid, "dead-player", player.ClientEditionJava)
@@ -91,16 +91,16 @@ func TestReconnectFromDeathScreenRespawnsAtFullHealth(t *testing.T) {
 	restored.WorldSpawn = spatial.Vec3{X: 0.5, Y: 65, Z: 0.5}
 	s := &Server{world: w, playerStore: store}
 	s.loadPlayerData(restored)
-	health, food, saturation, isDead := restored.HealthSnapshot()
-	if isDead || health != restored.MaxHealth || food != 20 || saturation != 5 {
-		t.Fatalf("restored survival state = health %.1f food %d saturation %.1f dead %t", health, food, saturation, isDead)
+	health, _, _, isDead := restored.HealthSnapshot()
+	if !isDead || health != 0 {
+		t.Fatalf("restored death state = health %.1f dead %t", health, isDead)
 	}
-	if restored.Dimension != dimensionOverworld || restored.Position != restored.WorldSpawn {
-		t.Fatalf("restored location = dim %d pos %+v, want overworld spawn %+v", restored.Dimension, restored.Position, restored.WorldSpawn)
+	if restored.Dimension != dimensionEnd || restored.Position != dead.Position {
+		t.Fatalf("death location = dim %d pos %+v, want dim %d pos %+v", restored.Dimension, restored.Position, dimensionEnd, dead.Position)
 	}
 }
 
-func TestLegacyZeroHealthReconnectRespawnsAtFullHealth(t *testing.T) {
+func TestLegacyZeroHealthReconnectKeepsDeathState(t *testing.T) {
 	store := newPlayerDataStore(t.TempDir())
 	uuid := [16]byte{0xfa, 0xce}
 	legacy := snapshotPlayerData(player.New(uuid, "legacy-dead", player.ClientEditionJava))
@@ -117,9 +117,28 @@ func TestLegacyZeroHealthReconnectRespawnsAtFullHealth(t *testing.T) {
 	s := &Server{world: w, playerStore: store}
 	s.loadPlayerData(restored)
 
-	health, food, saturation, dead := restored.HealthSnapshot()
-	if dead || health != 20 || food != 20 || saturation != 5 {
-		t.Fatalf("legacy death restored as health %.1f food %d saturation %.1f dead %t", health, food, saturation, dead)
+	health, _, _, dead := restored.HealthSnapshot()
+	if !dead || health != 0 {
+		t.Fatalf("legacy death restored as health %.1f dead %t", health, dead)
+	}
+}
+
+func TestLivingReconnectKeepsLastPositionAndDimension(t *testing.T) {
+	store := newPlayerDataStore(t.TempDir())
+	uuid := [16]byte{0x12, 0x34}
+	saved := player.New(uuid, "traveler", player.ClientEditionJava)
+	saved.Position = spatial.Vec3{X: 42.25, Y: 73, Z: -91.75}
+	saved.Dimension = dimensionNether
+	if err := store.save(uuid, snapshotPlayerData(saved)); err != nil {
+		t.Fatal(err)
+	}
+
+	restored := player.New(uuid, "traveler", player.ClientEditionJava)
+	s := &Server{world: coreworld.New(&coreworld.FlatGenerator{}, nil, false), playerStore: store}
+	defer s.world.Close()
+	s.loadPlayerData(restored)
+	if restored.Position != saved.Position || restored.Dimension != saved.Dimension {
+		t.Fatalf("reconnect location = dim %d pos %+v, want dim %d pos %+v", restored.Dimension, restored.Position, saved.Dimension, saved.Position)
 	}
 }
 

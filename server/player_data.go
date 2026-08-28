@@ -15,7 +15,6 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	"GoCraft/internal/debuglog"
-	"GoCraft/java/handler"
 )
 
 const playerDataVersion = 1
@@ -224,18 +223,6 @@ func (s *Server) loadPlayerData(p *player.Player) {
 	if err := applyPersistedPlayerData(p, data); err != nil {
 		slog.Warn("ignored invalid player data", "uuid", p.UUID, "err", err)
 		return
-	}
-	// A client may leave from the death screen without sending the respawn
-	// command. Persist that state explicitly and complete the normal respawn on
-	// the next join instead of silently clamping zero health to one heart.
-	if persistedPlayerWasDead(data) {
-		p.Dimension = dimensionOverworld
-		p.Revive()
-		if bedSpawn, ok := handler.ResolveBedRespawn(p, s.world); ok {
-			p.Position = bedSpawn
-		} else {
-			p.Position = p.WorldSpawn
-		}
 	}
 	debuglog.Info(debuglog.WorldLoading, "loaded player data", "uuid", p.UUID, "position", p.Position)
 }
