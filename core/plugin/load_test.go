@@ -70,3 +70,26 @@ func TestLoadAllAndStopUseDeterministicReverseOrder(t *testing.T) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
 	}
 }
+
+func TestLoadAllRollsBackPartialStartup(t *testing.T) {
+	var order []string
+	registry := NewRegistry(context.Background(), 0, nil, nil)
+	runtime := &recordingRuntime{order: &order, failID: "b"}
+	if err := registry.RegisterRuntime(runtime); err != nil {
+		t.Fatal(err)
+	}
+	err := registry.LoadAll(context.Background(), []Bundle{testBundle("a"), testBundle("b")})
+	if err == nil {
+		t.Fatal("failed runtime load was accepted")
+	}
+	want := []string{"start", "load:a", "load:b", "unload:a", "stop"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("rollback order = %v, want %v", order, want)
+	}
+	if _, ok := registry.Instance("a"); ok {
+		t.Fatal("rolled-back instance remains registered")
+	}
+	if _, ok := registry.Bus().Health("a"); ok {
+		t.Fatal("rolled-back event subscriptions remain attached")
+	}
+}
