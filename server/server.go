@@ -3133,7 +3133,9 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool
 }
 
 func (s *Server) tryPickupExperienceOrb(e *corentity.Entity, dimension int32) bool {
-	if e == nil || e.ExperienceAmount <= 0 {
+	// Bedrock discovers orbs during the post-entity sync. Keep a new orb alive
+	// through that first sync so its native spawn packet reaches the client.
+	if e == nil || e.ExperienceAmount <= 0 || e.AgeTicks < 2 {
 		return false
 	}
 	for _, sess := range s.allPlayerSessions() {
