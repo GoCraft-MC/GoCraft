@@ -89,6 +89,33 @@ func TestBedrockFurnaceTransactionsAcceptInputAndFuelButProtectOutput(t *testing
 	}
 }
 
+func TestBedrockTakingFurnaceOutputAwardsAccumulatedExperience(t *testing.T) {
+	s, pos := newFurnaceTestServer(t, "minecraft:furnace")
+	p := player.New([16]byte{63}, "smelter", player.ClientEditionBedrock)
+	p.OpenContainerID = 1
+	p.OpenContainerKind = "minecraft:furnace"
+	p.OpenContainerPos = pos
+	p.ContainerSlots = []player.ItemStack{{}, {}, {ItemID: "minecraft:iron_ingot", Count: 2}}
+	if err := s.game.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	state := s.furnaceStateFor(pos)
+	state.recordRecipe(handler.CookingRecipeDescription{Name: "minecraft:iron_ingot", Experience: 0.7})
+	state.recordRecipe(handler.CookingRecipeDescription{Name: "minecraft:iron_ingot", Experience: 0.7})
+	done := make(chan intent.InventoryResult, 1)
+	s.applyBedrockInventory(intent.InventoryIntent{PlayerUUID: p.UUID, Actions: []intent.InventoryAction{{
+		Kind: intent.InventoryActionMove, Source: intent.InventoryFurnaceOutput,
+		Destination: player.HotbarStart, Count: 2,
+	}}, Done: done})
+
+	if result := <-done; !result.Accepted {
+		t.Fatal("taking furnace output was rejected")
+	}
+	if _, total, _ := p.ExperienceSnapshot(); total != 1 {
+		t.Fatalf("furnace output awarded %d XP, want 1", total)
+	}
+}
+
 func TestFurnaceConsumesFuelAndCooksJava1214Recipe(t *testing.T) {
 	s, pos := newFurnaceTestServer(t, "minecraft:furnace")
 	s.world.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), "minecraft:furnace", []coreworld.ContainerItem{

@@ -97,6 +97,20 @@ func (s *Server) furnaceStateForDimension(dimension int32, pos spatial.BlockPos)
 	return state
 }
 
+func (s *Server) awardFurnaceExperience(p *player.Player) {
+	if p == nil {
+		return
+	}
+	state := s.furnaces[furnaceKey{Dimension: p.Dimension, Position: p.OpenContainerPos}]
+	if state == nil {
+		return
+	}
+	if points := state.extractExperience(); points > 0 {
+		p.AddExperience(points)
+		handler.SyncPlayerExperience(p, s.sessions)
+	}
+}
+
 func furnaceCanAccept(slots []player.ItemStack, result player.ItemStack) bool {
 	if len(slots) < furnaceSlotCount || result.IsEmpty() {
 		return false

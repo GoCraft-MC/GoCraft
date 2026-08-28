@@ -1961,6 +1961,10 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	craftingResult := handler.FindBedrockCraftingTableResult(craftingGrid)
 	furnaceSlots := append([]player.ItemStack(nil), p.ContainerSlots...)
 	furnaceOpen := handler.IsFurnaceContainer(p.OpenContainerKind) && len(furnaceSlots) == furnaceSlotCount
+	furnaceOutputBefore := player.ItemStack{}
+	if furnaceOpen {
+		furnaceOutputBefore = furnaceSlots[2]
+	}
 	containerSlots := append([]player.ItemStack(nil), p.ContainerSlots...)
 	containerOpen := (isBedrockGenericContainer(p.OpenContainerKind) || isBedrockWorkstation(p.OpenContainerKind)) &&
 		len(containerSlots) > 0 && len(containerSlots) <= 54
@@ -2208,6 +2212,9 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 		p.ContainerSlots = furnaceSlots
 		persistFurnaceSlots(s.worldForPlayer(p), p.OpenContainerPos, p.OpenContainerKind, furnaceSlots)
 		s.furnaceStateForDimension(p.Dimension, p.OpenContainerPos)
+		if !furnaceOutputBefore.IsEmpty() && furnaceSlots[2].Count < furnaceOutputBefore.Count {
+			s.awardFurnaceExperience(p)
+		}
 	} else if containerOpen {
 		if workstationOpen {
 			handler.UpdateWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
