@@ -106,6 +106,7 @@ type bedrockSession struct {
 	xuid                string
 	buildPlatform       int32
 	skin                protocol.Skin
+	listedPlayers       map[[16]byte]struct{}
 	knownPlayers        map[[16]byte]bedrockPlayerView
 	knownEntities       map[int32]bedrockEntityView
 	lastHealth          float32
@@ -456,6 +457,7 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 		xuid:               identity.XUID,
 		buildPlatform:      int32(conn.ClientData().DeviceOS),
 		skin:               skinFromClientData(conn.ClientData()),
+		listedPlayers:      make(map[[16]byte]struct{}),
 		knownPlayers:       make(map[[16]byte]bedrockPlayerView),
 		knownEntities:      make(map[int32]bedrockEntityView),
 		lastHealth:         -1,

@@ -364,6 +364,38 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 	}
 }
 
+func (l *Listener) syncPlayerList(viewer *bedrockSession, players []*player.Player, bedrockByUUID map[[16]byte]*bedrockSession) {
+	present := make(map[[16]byte]struct{}, len(players))
+	for _, p := range players {
+		if p.Edition == player.ClientEditionBedrock && p.UUID != viewer.uuid && bedrockByUUID[p.UUID] == nil {
+			continue
+		}
+		present[p.UUID] = struct{}{}
+		if _, listed := viewer.listedPlayers[p.UUID]; listed {
+			continue
+		}
+		targetSession := bedrockByUUID[p.UUID]
+		entry := playerListEntry(p, targetSession, p.UUID == viewer.uuid)
+		if targetSession == nil && p.Edition == player.ClientEditionJava {
+			entry.Skin = crossEditionFallbackSkin(viewer.skin, p.UUID)
+			entry.BuildPlatform = viewer.buildPlatform
+		}
+		entry.ActionType = protocol.PlayerListActionAdd
+		_ = viewer.conn.WritePacket(&packet.PlayerList{Entries: []protocol.PlayerListEntry{entry}})
+		viewer.listedPlayers[p.UUID] = struct{}{}
+	}
+	for id := range viewer.listedPlayers {
+		if _, online := present[id]; online {
+			continue
+		}
+		_ = viewer.conn.WritePacket(&packet.PlayerList{Entries: []protocol.PlayerListEntry{{
+			ActionType: protocol.PlayerListActionRemove,
+			UUID:       uuid.UUID(id),
+		}}})
+		delete(viewer.listedPlayers, id)
+	}
+}
+
 func playerRuntimeIDForViewer(viewer *bedrockSession, p *player.Player) uint64 {
 	if p.UUID == viewer.uuid {
 		return bedrockSelfRuntimeID
