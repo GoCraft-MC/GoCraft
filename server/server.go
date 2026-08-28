@@ -46,6 +46,7 @@ import (
 	"GoCraft/core/intent"
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/customitems"
@@ -110,6 +111,7 @@ type Server struct {
 	// Both Java (M14.1+) and Bedrock handlers post intents here; the tick
 	// goroutine drains and applies them once per tick.
 	intentBus *intent.Bus
+	plugins   *coreplugin.Bus
 
 	// connCount tracks the number of active TCP connections (Java).
 	connCount atomic.Int64
@@ -353,6 +355,7 @@ func New(cfg *config.Config) (*Server, error) {
 	handler.RegisterBuiltins(cmds)
 
 	bus := intent.NewBus(64, 512)
+	plugins := coreplugin.NewBus(context.Background(), 0)
 
 	debuglog.Info(debuglog.WorldLoading, "server: world seed resolved", "seed", cfg.WorldSeed)
 	worldInstance := coreworld.New(coreworld.NewOverworldGenerator(cfg.WorldSeed), storage, cfg.Villagers)
@@ -389,6 +392,7 @@ func New(cfg *config.Config) (*Server, error) {
 		permissions:             permissionManager,
 		customItems:             customItemsMgr,
 		intentBus:               bus,
+		plugins:                 plugins,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
 		creaturePopulatedChunks: make(map[[2]int32]struct{}),
@@ -1641,6 +1645,12 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		held := p.HeldItem()
+		if s.plugins != nil && !s.plugins.EmitBlockBreak(p, i.Position, block, held) {
+			if s.bedrockListener != nil {
+				s.bedrockListener.DimensionBlockObserver(p.Dimension)(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block})
+			}
+			return
+		}
 		lootContext := blockloot.Context{
 			Block: block,
 			Tool:  held,
@@ -4751,7 +4761,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 			handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 		}()
 
-		if err := handler.HandlePlay(conn, p, s.world, s.worldForDimension, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus); err != nil {
+		if err := handler.HandlePlay(conn, p, s.world, s.worldForDimension, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus, s.plugins); err != nil {
 			slog.Debug("play error", "remote", remote, "err", err)
 		}
 

@@ -22,6 +22,7 @@ import (
 	corentity "GoCraft/core/entity"
 	coreexperience "GoCraft/core/experience"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
@@ -75,10 +76,10 @@ const (
 
 // handleBlockPacket dispatches an incoming block-interaction packet.
 // Called from the play loop for packets that need the world and session manager.
-func handleBlockPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) error {
+func handleBlockPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, plugins *coreplugin.Bus) error {
 	switch pkt.ID {
 	case packetIDPlayerAction:
-		return handlePlayerActionWithContext(pkt, p, w, mgr, conn, nextEntityID)
+		return handlePlayerActionWithContext(pkt, p, w, mgr, conn, nextEntityID, plugins)
 	case packetIDUseItemOn:
 		return handleUseItemOn(pkt, p, w, mgr, conn, nextEntityID)
 	}
@@ -100,10 +101,10 @@ func handlePlayerAction(pkt *protocol.Packet, p *player.Player, w *coreworld.Wor
 	return handlePlayerActionWithContext(pkt, p, w, mgr, nil, func() int32 {
 		nextID++
 		return nextID
-	})
+	}, nil)
 }
 
-func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) error {
+func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, plugins *coreplugin.Bus) error {
 	r := pkt.Reader()
 
 	status, err := protocol.ReadVarInt(r)
@@ -138,6 +139,12 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 	if !broken.IsAir() && digBreaksBlock(status, p.GameMode, broken.ResourceLocation()) {
 		heldSlot := player.HotbarStart + p.HeldSlot
 		held := p.Inventory[heldSlot]
+		position := spatial.BlockPos{X: bx, Y: by, Z: bz}
+		if plugins != nil && !plugins.EmitBlockBreak(p, position, broken, held) {
+			BroadcastBlockChange(coreworld.BlockChange{X: int(bx), Y: int(by), Z: int(bz), Block: broken}, mgr)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
 		lootContext := blockloot.Context{
 			Block: broken,
 			Tool:  held,

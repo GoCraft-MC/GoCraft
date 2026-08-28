@@ -14,6 +14,7 @@ import (
 
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
@@ -88,7 +89,7 @@ const keepAliveTimeout = 30 * time.Second
 //	C→S  Confirm Teleport (ID 1)   (0x00)
 //	S→C  Level Chunk With Light    (0x28) × (2·viewRadius+1)² — initial burst
 //	     … keep-alive / movement / play loop …
-func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, worldForDimension func(int32) *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, reg registry.Provider, worldSeed int64, worldAge func() int64, viewDistance, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
+func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, worldForDimension func(int32) *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, reg registry.Provider, worldSeed int64, worldAge func() int64, viewDistance, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus, plugins *coreplugin.Bus) error {
 	// ── Initial burst ────────────────────────────────────────────────────────
 	if viewDistance < 2 {
 		viewDistance = 2
@@ -202,7 +203,7 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		"uuid", p.UUID,
 	)
 
-	return playLoop(conn, p, teleportID, w, worldForDimension, sender, mgr, cmds, dimensionTypeIDs, hashedSeed, viewDistance, preGenerateRadius, nextEntityID, intentBus)
+	return playLoop(conn, p, teleportID, w, worldForDimension, sender, mgr, cmds, dimensionTypeIDs, hashedSeed, viewDistance, preGenerateRadius, nextEntityID, intentBus, plugins)
 }
 
 // ── Clientbound packet helpers ────────────────────────────────────────────────
@@ -547,7 +548,7 @@ func sendForgetChunk(conn *network.ClientConn, cx, cz int32) error {
 //     chunk boundary.
 //
 // On exit the session is removed from mgr and all other players are notified.
-func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, worldForDimension func(int32) *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, dimensionTypeIDs [3]int32, hashedSeed int64, viewRadius, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus) error {
+func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32, w *coreworld.World, worldForDimension func(int32) *coreworld.World, sender *javaworld.Sender, mgr *session.Manager, cmds *Dispatcher, dimensionTypeIDs [3]int32, hashedSeed int64, viewRadius, preGenerateRadius int32, nextEntityID func() int32, intentBus *intent.Bus, plugins *coreplugin.Bus) error {
 	// Must receive Confirm Teleport for the spawn position before anything else.
 	if err := readConfirmTeleport(conn, spawnTeleportID); err != nil {
 		return fmt.Errorf("play loop: %w", err)
@@ -896,7 +897,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Block interaction needs both the world and the session manager.
 		if pkt.ID == packetIDPlayerAction || pkt.ID == packetIDUseItemOn {
-			if err := handleBlockPacket(pkt, p, w, mgr, conn, nextEntityID); err != nil {
+			if err := handleBlockPacket(pkt, p, w, mgr, conn, nextEntityID, plugins); err != nil {
 				slog.Warn("block interaction error", "player", p.Username, "err", err)
 			}
 		}
