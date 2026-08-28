@@ -9,6 +9,7 @@ java_enabled: true
 host: 0.0.0.0
 port: 25565
 motd: A GoCraft Server
+server_icon: server-icon.png
 max_players: 20
 version_name: 1.21.4
 protocol_version: 769
@@ -118,6 +119,7 @@ debug:
 | `host` | Bind address for the Java TCP listener |
 | `port` | Java Edition server port (default `25565`) |
 | `motd` | Text shown in the multiplayer server list |
+| `server_icon` | Java server-list image; PNG files are resized to 64×64 automatically |
 | `max_players` | Advertised player limit |
 | `online_mode` | Requires Mojang session authentication |
 | `villagers` | Spawns village residents and iron-golem guards |
@@ -165,6 +167,7 @@ All critical fields can be overridden at runtime via environment variables. Usef
 | `GOCRAFT_JAVA_ENABLED` | `java_enabled` |
 | `GOCRAFT_ONLINE_MODE` | `online_mode` |
 | `GOCRAFT_MOTD` | `motd` |
+| `GOCRAFT_SERVER_ICON` | `server_icon` |
 | `GOCRAFT_MAX_PLAYERS` | `max_players` |
 | `GOCRAFT_WORLD_STORAGE` | `world_storage` |
 | `GOCRAFT_WORLD_DIR` | `world_dir` |

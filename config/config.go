@@ -179,6 +179,7 @@ type Config struct {
 
 	// Identity
 	MOTD            string `yaml:"motd"`
+	ServerIcon      string `yaml:"server_icon"`
 	MaxPlayers      int    `yaml:"max_players"`
 	VersionName     string `yaml:"version_name"`
 	ProtocolVersion int    `yaml:"protocol_version"`
@@ -245,6 +246,7 @@ func defaults() *Config {
 		Host:              "0.0.0.0",
 		Port:              25565,
 		MOTD:              "A GoCraft Server",
+		ServerIcon:        "server-icon.png",
 		MaxPlayers:        20,
 		VersionName:       "1.21.4",
 		ProtocolVersion:   769, // Minecraft Java Edition 1.21.4
@@ -444,6 +446,7 @@ func (c *Config) validate() error {
 //	GOCRAFT_JAVA_ENABLED      "true"/"false"              (default: true)
 //	GOCRAFT_ONLINE_MODE       Java auth required          (default: false)
 //	GOCRAFT_MOTD              Server MOTD string
+//	GOCRAFT_SERVER_ICON       Java server-list icon path
 //	GOCRAFT_MAX_PLAYERS       Max concurrent players
 //	GOCRAFT_WORLD_STORAGE     disk or memory              (default: disk)
 //	GOCRAFT_WORLD_DIR         Anvil world directory path
@@ -486,6 +489,9 @@ func (c *Config) ApplyEnvOverrides() error {
 	}
 	if v := os.Getenv("GOCRAFT_MOTD"); v != "" {
 		c.MOTD = v
+	}
+	if v := os.Getenv("GOCRAFT_SERVER_ICON"); v != "" {
+		c.ServerIcon = v
 	}
 	if v := os.Getenv("GOCRAFT_MAX_PLAYERS"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -606,6 +612,7 @@ func logEnvOverrides() {
 		{"GOCRAFT_JAVA_ENABLED", os.Getenv("GOCRAFT_JAVA_ENABLED")},
 		{"GOCRAFT_ONLINE_MODE", os.Getenv("GOCRAFT_ONLINE_MODE")},
 		{"GOCRAFT_MOTD", os.Getenv("GOCRAFT_MOTD")},
+		{"GOCRAFT_SERVER_ICON", os.Getenv("GOCRAFT_SERVER_ICON")},
 		{"GOCRAFT_MAX_PLAYERS", os.Getenv("GOCRAFT_MAX_PLAYERS")},
 		{"GOCRAFT_WORLD_STORAGE", os.Getenv("GOCRAFT_WORLD_STORAGE")},
 		{"GOCRAFT_WORLD_DIR", os.Getenv("GOCRAFT_WORLD_DIR")},

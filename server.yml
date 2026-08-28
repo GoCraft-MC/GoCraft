@@ -2,6 +2,7 @@ java_enabled: true
 host: 0.0.0.0
 port: 25565
 motd: A GoCraft Server
+server_icon: server-icon.png
 max_players: 20
 version_name: 1.21.4
 protocol_version: 769
