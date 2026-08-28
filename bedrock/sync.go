@@ -35,6 +35,7 @@ type bedrockPlayerView struct {
 	heldSlot  int
 	sleeping  bool
 	usingItem bool
+	airSupply int32
 	health    float32
 	dead      bool
 }
@@ -281,10 +282,11 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 				l.sendPlayerEquipment(viewer, p)
 			}
 			health, _, _, dead := p.HealthSnapshot()
-			viewer.knownPlayers[p.UUID] = bedrockPlayerView{entityID: p.EntityID, position: p.Position, rotation: p.Rotation, inventory: p.Inventory, heldSlot: p.HeldSlot, sleeping: p.Sleeping, health: health, dead: dead}
+			viewer.knownPlayers[p.UUID] = bedrockPlayerView{entityID: p.EntityID, position: p.Position, rotation: p.Rotation, inventory: p.Inventory, heldSlot: p.HeldSlot, sleeping: p.Sleeping, airSupply: p.AirSupplySnapshot(), health: health, dead: dead}
 			continue
 		}
 		health, _, _, dead := p.HealthSnapshot()
+		airSupply := p.AirSupplySnapshot()
 		if p.UUID != viewer.uuid && previous.dead && !dead {
 			_ = viewer.conn.WritePacket(&packet.RemoveActor{EntityUniqueID: int64(bedrockRemoteRuntimeID(p.EntityID))})
 			platform := int32(0)
@@ -326,14 +328,14 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 		if p.UUID != viewer.uuid && (previous.inventory != p.Inventory || previous.heldSlot != p.HeldSlot) {
 			l.sendPlayerEquipment(viewer, p)
 		}
-		if previous.sleeping != p.Sleeping || previous.usingItem != (p.UsingItemID != "") {
+		if previous.sleeping != p.Sleeping || previous.usingItem != (p.UsingItemID != "") || previous.airSupply != airSupply {
 			_ = viewer.conn.WritePacket(&packet.SetActorData{
 				EntityRuntimeID: playerRuntimeIDForViewer(viewer, p),
 				EntityMetadata:  bedrockPlayerMetadata(p),
 				Tick:            tick,
 			})
 		}
-		viewer.knownPlayers[p.UUID] = bedrockPlayerView{entityID: p.EntityID, position: p.Position, rotation: p.Rotation, inventory: p.Inventory, heldSlot: p.HeldSlot, sleeping: p.Sleeping, usingItem: p.UsingItemID != "", health: health, dead: dead}
+		viewer.knownPlayers[p.UUID] = bedrockPlayerView{entityID: p.EntityID, position: p.Position, rotation: p.Rotation, inventory: p.Inventory, heldSlot: p.HeldSlot, sleeping: p.Sleeping, usingItem: p.UsingItemID != "", airSupply: airSupply, health: health, dead: dead}
 	}
 
 	for id, previous := range viewer.knownPlayers {
@@ -483,8 +485,12 @@ func bedrockPlayerMetadata(p *player.Player) protocol.EntityMetadata {
 	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
 	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
 	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagBreathing)
-	metadata[protocol.EntityDataKeyAirSupply] = int16(300)
-	metadata[protocol.EntityDataKeyAirSupplyMax] = int16(300)
+	air := int16(player.MaxAirSupply)
+	if p != nil {
+		air = int16(p.AirSupplySnapshot())
+	}
+	metadata[protocol.EntityDataKeyAirSupply] = air
+	metadata[protocol.EntityDataKeyAirSupplyMax] = int16(player.MaxAirSupply)
 	if p != nil && p.Sleeping {
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLayingDown)
 		metadata[protocol.EntityDataKeyBedPosition] = protocol.BlockPos{p.SpawnPoint.X, p.SpawnPoint.Y, p.SpawnPoint.Z}

@@ -109,11 +109,12 @@ func TestBedrockRuntimeIDsReserveOneForSelf(t *testing.T) {
 	}
 }
 
-func TestBedrockPlayerMetadataStartsWithFullAir(t *testing.T) {
+func TestBedrockPlayerMetadataCarriesCurrentAir(t *testing.T) {
 	p := player.New([16]byte{1}, `air`, player.ClientEditionBedrock)
+	p.AirSupply = 42
 	metadata := bedrockPlayerMetadata(p)
-	if got := metadata[protocol.EntityDataKeyAirSupply]; got != int16(300) {
-		t.Fatalf(`air supply = %v, want 300`, got)
+	if got := metadata[protocol.EntityDataKeyAirSupply]; got != int16(42) {
+		t.Fatalf(`air supply = %v, want 42`, got)
 	}
 	if got := metadata[protocol.EntityDataKeyAirSupplyMax]; got != int16(300) {
 		t.Fatalf(`maximum air supply = %v, want 300`, got)
