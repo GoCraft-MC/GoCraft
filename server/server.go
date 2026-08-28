@@ -2635,6 +2635,12 @@ func (s *Server) tickEntities() {
 			deadIDs = append(deadIDs, e.EntityID)
 			continue
 		}
+		if e.Type == corentity.TypeExperienceOrb &&
+			(s.tryPickupExperienceOrb(e, dimensionOverworld) || e.AgeTicks >= 6000 || e.Position.Y < coreworld.WorldMinY-16) {
+			s.world.Entities.Remove(e.EntityID)
+			deadIDs = append(deadIDs, e.EntityID)
+			continue
+		}
 
 		// ── Primed TNT fuse countdown ────────────────────────────────────────
 		if e.Type == corentity.TypePrimedTNT {
@@ -2758,7 +2764,11 @@ func (s *Server) tickEntities() {
 		// ── Gravity ───────────────────────────────────────────────────────────
 		inWater := s.entityInWater(e)
 		if !e.OnGround && !inWater && !isFlyingMob(e.Type) {
-			e.VY += gravity
+			if e.Type == corentity.TypeExperienceOrb {
+				e.VY -= 0.03
+			} else {
+				e.VY += gravity
+			}
 		}
 
 		// ── Position integration with step-up ────────────────────────────────
@@ -3109,6 +3119,32 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool
 		}
 		if sess.Conn != nil {
 			_ = handler.SyncPlayerInventory(sess.Conn, p)
+		}
+		return true
+	}
+	return false
+}
+
+func (s *Server) tryPickupExperienceOrb(e *corentity.Entity, dimension int32) bool {
+	if e == nil || e.ExperienceAmount <= 0 {
+		return false
+	}
+	for _, sess := range s.allPlayerSessions() {
+		p := sess.Player
+		if p == nil || p.Dimension != dimension || p.Dead || p.GameMode == player.GameModeSpectator {
+			continue
+		}
+		dx := p.Position.X - e.Position.X
+		dy := p.Position.Y + 0.5 - e.Position.Y
+		dz := p.Position.Z - e.Position.Z
+		if dx*dx+dy*dy+dz*dz > 2.25 || !p.TryPickupExperience(e.ExperienceAmount, s.worldAge) {
+			continue
+		}
+		handler.SyncPlayerExperience(p, s.sessions)
+		handler.BroadcastSoundAtDimension(s.sessions, dimension, "minecraft:entity.experience_orb.pickup",
+			handler.SoundCategoryPlayers, e.Position.X, e.Position.Y, e.Position.Z, 0.1, 1)
+		if s.bedrockListener != nil {
+			s.bedrockListener.BroadcastExperienceOrbPickup(dimension, e.Position)
 		}
 		return true
 	}
