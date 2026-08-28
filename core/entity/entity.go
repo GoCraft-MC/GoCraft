@@ -256,6 +256,12 @@ type Entity struct {
 	ItemID     string
 	ItemCount  int
 	ItemDamage int
+	// ExperienceAmount is the number of points carried by an experience orb.
+	// ExperienceKillerUUID records the player whose damage caused a living
+	// entity's death so the simulation can apply player-kill XP rewards.
+	ExperienceAmount     int32
+	ExperienceKillerUUID [16]byte
+	HasExperienceKiller  bool
 
 	// Age and animal interaction state. BabyAgeTicks counts upward from zero
 	// until BabyGrowUpTicks. Love/cooldown values count down once per tick.
