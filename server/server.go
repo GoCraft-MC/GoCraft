@@ -3237,6 +3237,28 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				entity.VX *= 0.98
 				entity.VZ *= 0.98
 				moved = append(moved, entity)
+			case entity.Type == corentity.TypeExperienceOrb:
+				if simulation.tryPickupExperienceOrb(entity, dimension) || entity.AgeTicks >= 6000 || entity.Position.Y < coreworld.WorldMinY-16 {
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+					continue
+				}
+				if !entity.OnGround {
+					entity.VY -= 0.03
+				}
+				entity.Position.X += entity.VX
+				entity.Position.Y += entity.VY
+				entity.Position.Z += entity.VZ
+				x, z := int(math.Floor(entity.Position.X)), int(math.Floor(entity.Position.Z))
+				groundY := float64(dimensionWorld.GroundYAtOrBelow(x, z, int(math.Floor(entity.Position.Y))) + 1)
+				if entity.Position.Y <= groundY {
+					entity.Position.Y, entity.VY, entity.OnGround = groundY, 0, true
+				} else {
+					entity.OnGround = false
+				}
+				entity.VX *= 0.98
+				entity.VZ *= 0.98
+				moved = append(moved, entity)
 			case corentity.IsProjectile(entity.Type):
 				if simulation.tickProjectile(entity) || entity.Position.Y < coreworld.WorldMinY-16 {
 					dimensionWorld.Entities.Remove(entity.EntityID)
