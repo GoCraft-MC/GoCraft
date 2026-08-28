@@ -9,6 +9,10 @@
   Java Edition 1.21.4 · Bedrock Edition 1.26.40 · Cross-play · No JVM
 </p>
 
+<p align="center">
+  <a href="https://discord.gg/Her3JEWWdj"><img src="https://img.shields.io/badge/Discord-Join%20our%20server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+</p>
+
 > [!WARNING]
 > GoCraft is early experimental software. It is **not production-ready** and should not be exposed as a public server. Expect breaking changes during development.
 
