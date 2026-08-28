@@ -861,6 +861,7 @@ func (s *Server) safeTick() {
 	s.tickEntities()
 	s.tickAuxiliaryDimensionItems()
 	s.tickStationaryLavaDamage()
+	s.tickPlayerBreathing()
 	s.tickPlayerHunger()
 	s.tickIdleTimeout()
 	s.tickWeather()
@@ -1494,18 +1495,6 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousPosition s
 	x, y, z := int(math.Floor(p.Position.X)), int(math.Floor(p.Position.Y)), int(math.Floor(p.Position.Z))
 	feetBlock := playerWorld.GetBlock(x, y, z)
 	feet := feetBlock.ResourceLocation()
-	head := playerWorld.GetBlock(x, int(math.Floor(p.Position.Y+1.62)), z).ResourceLocation()
-	if head == "minecraft:water" || head == "minecraft:bubble_column" {
-		if p.UnderwaterSince.IsZero() {
-			p.UnderwaterSince = now
-		}
-		if now.Sub(p.UnderwaterSince) >= 15*time.Second && now.Sub(p.LastEnvironmentDamage) >= time.Second {
-			p.LastEnvironmentDamage = now
-			handler.DamagePlayer(target, 2, "drowned", s.sessions)
-		}
-	} else {
-		p.UnderwaterSince = time.Time{}
-	}
 	if now.Sub(p.LastEnvironmentDamage) < 500*time.Millisecond {
 		return
 	}
@@ -1526,6 +1515,34 @@ func (s *Server) applyBedrockMovementDamage(p *player.Player, previousPosition s
 			handler.DamagePlayer(target, 1, "was pricked to death", s.sessions)
 		}
 	}
+}
+
+func (s *Server) tickPlayerBreathing() {
+	if s.game == nil {
+		return
+	}
+	s.game.OnlinePlayers(func(p *player.Player) {
+		world := s.worldForPlayer(p)
+		underwater := false
+		if world != nil {
+			x := int(math.Floor(p.Position.X))
+			y := int(math.Floor(p.Position.Y + 1.62))
+			z := int(math.Floor(p.Position.Z))
+			head := world.GetBlock(x, y, z).ResourceLocation()
+			underwater = head == "minecraft:water" || head == "minecraft:bubble_column"
+		}
+		_, changed, drown := p.TickBreathing(underwater)
+		if changed {
+			handler.SyncPlayerAirSupply(p, s.sessions)
+		}
+		if drown {
+			target := &session.Session{Player: p}
+			if current, ok := s.sessions.Get(p.UUID); ok {
+				target = current
+			}
+			handler.DamagePlayer(target, 2, "drowned", s.sessions)
+		}
+	})
 }
 
 // applyChat broadcasts a chat message to all active Java sessions.
