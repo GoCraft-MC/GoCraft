@@ -16,6 +16,7 @@ type Registry struct {
 	provisioner Provisioner
 	runtimes    map[string]Runtime
 	instances   map[string]Instance
+	loadOrder   []Instance
 	started     []Runtime
 }
 
