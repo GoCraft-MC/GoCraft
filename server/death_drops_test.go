@@ -25,6 +25,25 @@ func TestCowDropsVanillaFood(t *testing.T) {
 	}
 }
 
+func TestPlayerKilledMobDropsPumpkinExperience(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	s := &Server{game: game.New(), world: w}
+	zombie := corentity.New(12, [16]byte{}, corentity.TypeZombie, 2, 64, 3)
+	zombie.HasExperienceKiller = true
+	orbs := s.spawnMobExperience(zombie)
+	var total int32
+	for _, orb := range orbs {
+		total += orb.ExperienceAmount
+	}
+	if total != 5 {
+		t.Fatalf("zombie experience = %d, want Pumpkin reward 5", total)
+	}
+	zombie.IsBaby = true
+	if got := s.spawnMobExperience(zombie); len(got) != 0 {
+		t.Fatalf("baby zombie dropped %d experience orbs", len(got))
+	}
+}
+
 func TestSurvivalDeathDropsAndClearsInventory(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	s := &Server{game: game.New(), world: w, sessions: session.NewManager()}
