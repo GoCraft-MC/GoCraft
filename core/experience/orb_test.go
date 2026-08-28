@@ -24,7 +24,7 @@ func TestSpawnOrbsPreservesTotal(t *testing.T) {
 	for _, orb := range orbs {
 		total += orb.ExperienceAmount
 	}
-	if total != 2500 || len(orbs) != 3 {
-		t.Fatalf("spawned %d orbs carrying %d XP, want 3 carrying 2500", len(orbs), total)
+	if total != 2500 || len(orbs) != 4 {
+		t.Fatalf("spawned %d orbs carrying %d XP, want 4 carrying 2500", len(orbs), total)
 	}
 }
