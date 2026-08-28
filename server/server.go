@@ -3086,10 +3086,17 @@ func (s *Server) dropPlayerInventory(p *player.Player) {
 	p.OpenContainerKind = ""
 
 	for index, stack := range stacks {
-		if dropped := s.newDroppedItemForPlayer(p, stack, p.Position, index); dropped != nil && p.Dimension == dimensionOverworld {
-			handler.BroadcastSpawnMob(dropped, s.sessions)
+		if dropped := s.newDroppedItemForPlayer(p, stack, p.Position, index); dropped != nil {
+			handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
 		}
 	}
+	level, _, _ := p.ExperienceSnapshot()
+	reward := min(level*7, 100)
+	for _, orb := range coreexperience.SpawnOrbs(s.worldForPlayer(p), s.game.NextEntityID, p.Position, reward) {
+		handler.BroadcastSpawnMobInDimension(orb, s.sessions, p.Dimension)
+	}
+	p.SetTotalExperience(0)
+	handler.SyncPlayerExperience(p, s.sessions)
 	if sess, ok := s.sessions.Get(p.UUID); ok {
 		_ = handler.SyncPlayerInventory(sess.Conn, p)
 	}
