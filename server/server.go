@@ -1648,13 +1648,13 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		if p.GameMode != player.GameModeCreative {
 			for _, item := range containerItems {
 				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
-				if !p.GiveItem(stack) {
-					s.newDroppedItemForPlayer(p, stack, p.Position, item.Slot+1)
+				if dropped := s.newDroppedItemForPlayer(p, stack, center, item.Slot+1); dropped != nil {
+					handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
 				}
 			}
-			for _, drop := range drops {
-				if !p.GiveItem(drop) {
-					s.newDroppedItemForPlayer(p, drop, p.Position, 0)
+			for index, drop := range drops {
+				if dropped := s.newDroppedItemForPlayer(p, drop, center, len(containerItems)+index); dropped != nil {
+					handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
 				}
 			}
 			for _, orb := range coreexperience.SpawnOrbs(actionWorld, s.game.NextEntityID, center, blockloot.Experience(lootContext)) {

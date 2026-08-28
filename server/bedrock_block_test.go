@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
@@ -121,7 +122,7 @@ func TestBedrockPlayerStateAcceptsCreativeFlight(t *testing.T) {
 	}
 }
 
-func TestBedrockBreakingLogAwardsLog(t *testing.T) {
+func TestBedrockBreakingLogDropsItemEntity(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer w.Close()
 	g := game.New()
@@ -141,12 +142,9 @@ func TestBedrockBreakingLogAwardsLog(t *testing.T) {
 	if got := w.GetBlock(1, 64, 0); !got.IsAir() {
 		t.Fatalf("log remained as %q", got.ResourceLocation())
 	}
-	for _, stack := range p.Inventory {
-		if stack.ItemID == "minecraft:oak_log" && stack.Count == 1 {
-			return
-		}
+	if !worldHasDroppedItem(w, "minecraft:oak_log", 1) {
+		t.Fatal("broken oak log did not become a dropped item")
 	}
-	t.Fatal("broken oak log was not awarded to Bedrock inventory")
 }
 
 func TestBedrockStoneUsesVanillaLootAndHarvestTool(t *testing.T) {
@@ -178,12 +176,9 @@ func TestBedrockStoneUsesVanillaLootAndHarvestTool(t *testing.T) {
 				Action:     intent.BlockActionBreak,
 				Position:   spatial.BlockPos{X: 1, Y: 64, Z: 0},
 			})
-			got := false
-			for _, stack := range p.Inventory {
-				got = got || stack.ItemID == "minecraft:cobblestone" && stack.Count == 1
-			}
+			got := worldHasDroppedItem(w, "minecraft:cobblestone", 1)
 			if got != test.wantDrop {
-				t.Fatalf("cobblestone present = %v, want %v", got, test.wantDrop)
+				t.Fatalf("cobblestone entity present = %v, want %v", got, test.wantDrop)
 			}
 		})
 	}
@@ -238,12 +233,18 @@ func TestBedrockCreativeToolWorksAfterSwitchingToSurvival(t *testing.T) {
 	if tool.ItemID != "minecraft:iron_pickaxe" || tool.Damage != 1 {
 		t.Fatalf("creative pickaxe after mining = %+v, want iron pickaxe with one damage", tool)
 	}
-	for _, stack := range p.Inventory {
-		if stack.ItemID == "minecraft:raw_iron" && stack.Count == 1 {
-			return
+	if !worldHasDroppedItem(w, "minecraft:raw_iron", 1) {
+		t.Fatal("creative iron pickaxe did not drop raw iron after switching to Survival")
+	}
+}
+
+func worldHasDroppedItem(w *coreworld.World, itemID string, count int) bool {
+	for _, entity := range w.Entities.Snapshot() {
+		if entity.Type == corentity.TypeItem && entity.ItemID == itemID && entity.ItemCount == count {
+			return true
 		}
 	}
-	t.Fatal("creative iron pickaxe did not harvest raw iron after switching to Survival")
+	return false
 }
 
 func TestBedrockBreakPreservesSelectedToolAndDamagesIt(t *testing.T) {
