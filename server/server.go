@@ -2618,6 +2618,7 @@ func (s *Server) tickEntities() {
 				s.dismountEntityPassengers(e)
 				deathIDs = append(deathIDs, e.EntityID)
 				spawned = append(spawned, s.spawnMobDrops(e)...)
+				spawned = append(spawned, s.spawnMobExperience(e)...)
 				debuglog.Info(debuglog.EntityEvents, "entity died", "type", e.Type, "id", e.EntityID)
 			}
 			e.DeathTicks++
@@ -2932,6 +2933,13 @@ func (s *Server) spawnMobDrops(e *corentity.Entity) []*corentity.Entity {
 	return spawned
 }
 
+func (s *Server) spawnMobExperience(e *corentity.Entity) []*corentity.Entity {
+	if e == nil || e.IsBaby || !e.HasExperienceKiller {
+		return nil
+	}
+	return coreexperience.SpawnOrbs(s.world, s.game.NextEntityID, e.Position, pumpkinExperienceRewardByType[string(e.Type)])
+}
+
 func mobDrops(entityType corentity.EntityType, rng *rand.Rand) []player.ItemStack {
 	between := func(minimum, maximum int) int {
 		if maximum <= minimum {
@@ -3157,6 +3165,7 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 					simulation.dismountEntityPassengers(entity)
 					deathIDs = append(deathIDs, entity.EntityID)
 					spawned = append(spawned, simulation.spawnMobDrops(entity)...)
+					spawned = append(spawned, simulation.spawnMobExperience(entity)...)
 				}
 				entity.DeathTicks++
 				if entity.DeathTicks >= 20 {
