@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"GoCraft/core/intent"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -73,7 +74,8 @@ func sendFurnaceContainerContent(conn *network.ClientConn, p *player.Player) err
 	return conn.WritePacket(b.Build())
 }
 
-func handleFurnaceClick(p *player.Player, w *coreworld.World, slot int, button byte, mode int32) {
+func handleFurnaceClick(p *player.Player, w *coreworld.World, slot int, button byte, mode int32, bus *intent.Bus) {
+	outputBefore := p.ContainerSlots[2]
 	switch mode {
 	case 0:
 		clickFurnaceSlot(p, slot, button)
@@ -82,6 +84,11 @@ func handleFurnaceClick(p *player.Player, w *coreworld.World, slot int, button b
 	}
 	p.ContainerStateID++
 	persistFurnaceContents(p, w)
+	if bus != nil && !outputBefore.IsEmpty() && p.ContainerSlots[2].Count < outputBefore.Count {
+		bus.PostFurnaceOutputTaken(intent.FurnaceOutputTakenIntent{
+			PlayerUUID: p.UUID, Dimension: p.Dimension, Position: p.OpenContainerPos,
+		})
+	}
 }
 
 func clickFurnaceSlot(p *player.Player, slot int, button byte) {

@@ -116,6 +116,26 @@ func TestBedrockTakingFurnaceOutputAwardsAccumulatedExperience(t *testing.T) {
 	}
 }
 
+func TestJavaFurnaceTakeIntentAwardsAccumulatedExperience(t *testing.T) {
+	s, pos := newFurnaceTestServer(t, "minecraft:furnace")
+	p := player.New([16]byte{64}, "java-smelter", player.ClientEditionJava)
+	if err := s.game.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	state := s.furnaceStateFor(pos)
+	state.recordRecipe(handler.CookingRecipeDescription{Name: "minecraft:copper_ingot", Experience: 0.7})
+	state.recordRecipe(handler.CookingRecipeDescription{Name: "minecraft:copper_ingot", Experience: 0.7})
+	s.intentBus = intent.NewBus(1, 1)
+	s.intentBus.PostFurnaceOutputTaken(intent.FurnaceOutputTakenIntent{
+		PlayerUUID: p.UUID, Dimension: dimensionOverworld, Position: pos,
+	})
+	s.tickIntents()
+
+	if _, total, _ := p.ExperienceSnapshot(); total != 1 {
+		t.Fatalf("Java furnace take awarded %d XP, want 1", total)
+	}
+}
+
 func TestFurnaceConsumesFuelAndCooksJava1214Recipe(t *testing.T) {
 	s, pos := newFurnaceTestServer(t, "minecraft:furnace")
 	s.world.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), "minecraft:furnace", []coreworld.ContainerItem{

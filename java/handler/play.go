@@ -939,7 +939,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 		}
 		if pkt.ID == packetIDContainerClick || pkt.ID == packetIDContainerClose || pkt.ID == packetIDContainerButtonClick {
-			if err := handleContainerPacket(pkt, p, conn, w); err != nil {
+			if err := handleContainerPacket(pkt, p, conn, w, intentBus); err != nil {
 				slog.Warn("container error", "player", p.Username, "err", err)
 			}
 		}

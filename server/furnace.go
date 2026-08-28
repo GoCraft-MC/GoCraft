@@ -101,7 +101,14 @@ func (s *Server) awardFurnaceExperience(p *player.Player) {
 	if p == nil {
 		return
 	}
-	state := s.furnaces[furnaceKey{Dimension: p.Dimension, Position: p.OpenContainerPos}]
+	s.awardFurnaceExperienceAt(p, p.Dimension, p.OpenContainerPos)
+}
+
+func (s *Server) awardFurnaceExperienceAt(p *player.Player, dimension int32, pos spatial.BlockPos) {
+	if p == nil {
+		return
+	}
+	state := s.furnaces[furnaceKey{Dimension: dimension, Position: pos}]
 	if state == nil {
 		return
 	}

@@ -992,6 +992,10 @@ func (s *Server) tickIntents() {
 			s.applyBedrockInventory(i)
 		case intent.ContainerCloseIntent:
 			s.applyBedrockContainerClose(i)
+		case intent.FurnaceOutputTakenIntent:
+			if p := s.game.GetPlayer(i.PlayerUUID); p != nil {
+				s.awardFurnaceExperienceAt(p, i.Dimension, i.Position)
+			}
 		}
 	}
 }

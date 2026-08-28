@@ -258,23 +258,30 @@ type ContainerCloseIntent struct {
 	WindowID   byte
 }
 
+type FurnaceOutputTakenIntent struct {
+	PlayerUUID [16]byte
+	Dimension  int32
+	Position   spatial.BlockPos
+}
+
 // Implement sealed interfaces.
-func (JoinIntent) isLifecycle()          {}
-func (DisconnectIntent) isLifecycle()    {}
-func (ChatIntent) isGameplay()           {}
-func (TeleportIntent) isGameplay()       {}
-func (BlockInteractIntent) isGameplay()  {}
-func (ConsumeFoodIntent) isGameplay()    {}
-func (StartUseItemIntent) isGameplay()   {}
-func (ArmSwingIntent) isGameplay()       {}
-func (EntityInteractIntent) isGameplay() {}
-func (VehicleMoveIntent) isGameplay()    {}
-func (RespawnIntent) isGameplay()        {}
-func (WakeIntent) isGameplay()           {}
-func (HotbarIntent) isGameplay()         {}
-func (PlayerStateIntent) isGameplay()    {}
-func (InventoryIntent) isGameplay()      {}
-func (ContainerCloseIntent) isGameplay() {}
+func (JoinIntent) isLifecycle()              {}
+func (DisconnectIntent) isLifecycle()        {}
+func (ChatIntent) isGameplay()               {}
+func (TeleportIntent) isGameplay()           {}
+func (BlockInteractIntent) isGameplay()      {}
+func (ConsumeFoodIntent) isGameplay()        {}
+func (StartUseItemIntent) isGameplay()       {}
+func (ArmSwingIntent) isGameplay()           {}
+func (EntityInteractIntent) isGameplay()     {}
+func (VehicleMoveIntent) isGameplay()        {}
+func (RespawnIntent) isGameplay()            {}
+func (WakeIntent) isGameplay()               {}
+func (HotbarIntent) isGameplay()             {}
+func (PlayerStateIntent) isGameplay()        {}
+func (InventoryIntent) isGameplay()          {}
+func (ContainerCloseIntent) isGameplay()     {}
+func (FurnaceOutputTakenIntent) isGameplay() {}
 
 // ── Bus ───────────────────────────────────────────────────────────────────────
 
@@ -369,6 +376,9 @@ func (b *Bus) PostHotbar(i HotbarIntent) bool                 { return b.tryGame
 func (b *Bus) PostPlayerState(i PlayerStateIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostInventory(i InventoryIntent) bool           { return b.tryGameplay(i) }
 func (b *Bus) PostContainerClose(i ContainerCloseIntent) bool { return b.tryGameplay(i) }
+func (b *Bus) PostFurnaceOutputTaken(i FurnaceOutputTakenIntent) bool {
+	return b.tryGameplay(i)
+}
 
 func (b *Bus) tryGameplay(i GameplayIntent) bool {
 	select {

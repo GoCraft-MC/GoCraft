@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"GoCraft/core/intent"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -185,10 +186,10 @@ func addStackToInventory(inventory *[player.InventorySize]player.ItemStack, item
 	return remaining == 0
 }
 
-func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World) error {
+func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus) error {
 	switch pkt.ID {
 	case packetIDContainerClick:
-		return handleContainerClick(pkt, p, conn, w)
+		return handleContainerClick(pkt, p, conn, w, bus)
 	case packetIDContainerClose:
 		return handleContainerClose(pkt, p, conn, w)
 	case packetIDContainerButtonClick:
@@ -208,7 +209,7 @@ func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network
 	return nil
 }
 
-func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World) error {
+func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus) error {
 	r := pkt.Reader()
 	windowID, err := protocol.ReadVarInt(r)
 	if err != nil {
@@ -282,7 +283,7 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 		return sendChestContainerContent(conn, p)
 	}
 	if windowID == furnaceContainerID && p.OpenContainerID == windowID && IsFurnaceContainer(p.OpenContainerKind) {
-		handleFurnaceClick(p, w, int(slot), button, mode)
+		handleFurnaceClick(p, w, int(slot), button, mode, bus)
 		return sendFurnaceContainerContent(conn, p)
 	}
 	if windowID == workstationContainerID && p.OpenContainerID == windowID && IsWorkstation(p.OpenContainerKind) {
