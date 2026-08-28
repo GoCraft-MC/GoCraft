@@ -4564,6 +4564,13 @@ func (s *Server) resolveProjectileImpact(projectile *corentity.Entity, position 
 	case corentity.TypeExperienceBottle:
 		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.splash_potion.break", handler.SoundCategoryPlayers,
 			position.X, position.Y, position.Z, 1, 1)
+		reward := int32(3)
+		if s.spawnRNG != nil {
+			reward += int32(s.spawnRNG.Intn(5) + s.spawnRNG.Intn(5))
+		}
+		for _, orb := range coreexperience.SpawnOrbs(s.world, s.game.NextEntityID, position, reward) {
+			handler.BroadcastSpawnMobInDimension(orb, s.sessions, s.simulationDimension)
+		}
 	}
 }
 
