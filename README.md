@@ -63,6 +63,7 @@ Connect a Java 1.21.4 client to `localhost:25565`.
 
 - **No JVM** — pure Go, single binary, low memory footprint
 - **Java + Bedrock cross-play** — both editions share the same canonical world and entity simulation
+- **Server identity** — configurable MOTD and automatically resized Java server-list icon with an embedded default
 - **Custom items** — define items in YAML, GoCraft auto-generates Java resource packs and Bedrock behavior packs at startup
 - **Permission editor** — browser-based group editor via bytebin relay, no inbound port needed
 - **MiniMessage** — full gradient, hex color, and glyph support in chat, prefixes, and item names
