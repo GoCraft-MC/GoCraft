@@ -677,6 +677,12 @@ func containsEntityID(ids []int32, wanted int32) bool {
 
 func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Entity) packet.Packet {
 	metadata := l.bedrockEntityMetadata(viewer, entity)
+	if entity.Type == corentity.TypeExperienceOrb {
+		return &packet.SpawnExperienceOrb{
+			Position:         vec32(entity.Position),
+			ExperienceAmount: entity.ExperienceAmount,
+		}
+	}
 
 	if entity.Type == corentity.TypeItem {
 		item := l.itemInstance(player.ItemStack{ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage}, 1)
@@ -1047,6 +1053,26 @@ func (l *Listener) BroadcastWindChargeSound(position spatial.Vec3, burst bool) {
 	sessions := make([]*bedrockSession, 0, len(l.sessions))
 	for _, current := range l.sessions {
 		sessions = append(sessions, current)
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(event)
+	}
+}
+
+// BroadcastExperienceOrbPickup sends Bedrock's native pickup sound to viewers
+// in the dimension where the canonical orb was collected.
+func (l *Listener) BroadcastExperienceOrbPickup(dimension int32, position spatial.Vec3) {
+	if l == nil {
+		return
+	}
+	event := &packet.LevelEvent{EventType: packet.LevelEventSoundExperienceOrbPickup, Position: vec32(position)}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		if current.dimension.Load() == dimension {
+			sessions = append(sessions, current)
+		}
 	}
 	l.sessionsMu.RUnlock()
 	for _, current := range sessions {
