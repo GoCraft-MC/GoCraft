@@ -46,6 +46,12 @@ type persistedPlayerData struct {
 	Dimension     int32                                  `json:"dimension"`
 }
 
+func persistedPlayerWasDead(data persistedPlayerData) bool {
+	// Player data written before the Dead field existed recorded a death as
+	// health zero. Preserve compatibility instead of reviving at one health.
+	return data.Dead || data.Health <= 0
+}
+
 func newPlayerDataStore(directory string) *playerDataStore {
 	return &playerDataStore{directory: directory}
 }
@@ -171,7 +177,7 @@ func applyPersistedPlayerData(p *player.Player, data persistedPlayerData) error 
 	p.Position = data.Position
 	p.Rotation = data.Rotation
 	p.GameMode = data.GameMode
-	if data.Dead {
+	if persistedPlayerWasDead(data) {
 		p.Health = 0
 		p.Dead = true
 	} else {
@@ -222,7 +228,7 @@ func (s *Server) loadPlayerData(p *player.Player) {
 	// A client may leave from the death screen without sending the respawn
 	// command. Persist that state explicitly and complete the normal respawn on
 	// the next join instead of silently clamping zero health to one heart.
-	if data.Dead {
+	if persistedPlayerWasDead(data) {
 		p.Dimension = dimensionOverworld
 		p.Revive()
 		if bedSpawn, ok := handler.ResolveBedRespawn(p, s.world); ok {

@@ -100,6 +100,29 @@ func TestReconnectFromDeathScreenRespawnsAtFullHealth(t *testing.T) {
 	}
 }
 
+func TestLegacyZeroHealthReconnectRespawnsAtFullHealth(t *testing.T) {
+	store := newPlayerDataStore(t.TempDir())
+	uuid := [16]byte{0xfa, 0xce}
+	legacy := snapshotPlayerData(player.New(uuid, "legacy-dead", player.ClientEditionJava))
+	legacy.Health = 0
+	legacy.Dead = false
+	if err := store.save(uuid, legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	restored := player.New(uuid, "legacy-dead", player.ClientEditionJava)
+	restored.WorldSpawn = spatial.Vec3{X: 0.5, Y: 65, Z: 0.5}
+	s := &Server{world: w, playerStore: store}
+	s.loadPlayerData(restored)
+
+	health, food, saturation, dead := restored.HealthSnapshot()
+	if dead || health != 20 || food != 20 || saturation != 5 {
+		t.Fatalf("legacy death restored as health %.1f food %d saturation %.1f dead %t", health, food, saturation, dead)
+	}
+}
+
 func TestPlayerDataStoreMissingPlayer(t *testing.T) {
 	store := newPlayerDataStore(t.TempDir())
 	_, found, err := store.load([16]byte{1})
