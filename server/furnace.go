@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"strings"
 
 	"GoCraft/core/player"
@@ -16,6 +17,31 @@ type furnaceState struct {
 	BurnDuration int
 	CookTime     int
 	CookDuration int
+	RecipesUsed  map[string]furnaceRecipeUse
+}
+
+type furnaceRecipeUse struct {
+	Count      int
+	Experience float32
+}
+
+func (state *furnaceState) recordRecipe(recipe handler.CookingRecipeDescription) {
+	if state.RecipesUsed == nil {
+		state.RecipesUsed = make(map[string]furnaceRecipeUse)
+	}
+	used := state.RecipesUsed[recipe.Name]
+	used.Count++
+	used.Experience = recipe.Experience
+	state.RecipesUsed[recipe.Name] = used
+}
+
+func (state *furnaceState) extractExperience() int32 {
+	var total float32
+	for _, used := range state.RecipesUsed {
+		total += used.Experience * float32(used.Count)
+	}
+	clear(state.RecipesUsed)
+	return int32(math.Floor(float64(total)))
 }
 
 type furnaceKey struct {
@@ -154,6 +180,7 @@ func (s *Server) tickFurnaces() {
 				} else {
 					slots[2].Count += recipe.Result.Count
 				}
+				state.recordRecipe(recipe)
 				state.CookTime = 0
 			}
 		} else if state.CookTime > 0 {

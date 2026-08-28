@@ -130,6 +130,20 @@ func TestFurnaceConsumesFuelAndCooksJava1214Recipe(t *testing.T) {
 	}
 }
 
+func TestFurnaceTracksPumpkinRecipeExperience(t *testing.T) {
+	state := &furnaceState{}
+	recipe := handler.CookingRecipeDescription{Name: "minecraft:iron_ingot", Experience: 0.7}
+	state.recordRecipe(recipe)
+	state.recordRecipe(recipe)
+
+	if got := state.extractExperience(); got != 1 {
+		t.Fatalf("two iron smelts yielded %d XP, want floor(1.4) = 1", got)
+	}
+	if got := state.extractExperience(); got != 0 {
+		t.Fatalf("extracted recipes yielded XP twice: %d", got)
+	}
+}
+
 func TestBlastFurnaceBurnsFuelAtDoubleRate(t *testing.T) {
 	s, pos := newFurnaceTestServer(t, "minecraft:blast_furnace")
 	s.world.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), "minecraft:blast_furnace", []coreworld.ContainerItem{
