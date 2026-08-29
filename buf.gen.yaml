@@ -4,10 +4,11 @@
 # protoc-gen-go to build the server. `make proto` regenerates them; CI can
 # verify that doing so leaves no diff.
 #
-# Only the envelope is generated. commands.proto describes a file format the
-# host reads and never writes, and core/command decodes it by hand into its own
-# neutral tree — generating it as well would leave two Go representations of the
-# same command IR.
+# Every schema here is generated. A schema that is parsed by hand somewhere else
+# is a second definition of the same format, free to drift from this one without
+# anything noticing — which is the failure `buf breaking` exists to prevent.
+# Generated types stay at the wire boundary: packages convert them into their
+# own neutral types rather than passing them around.
 version: v2
 
 plugins:
