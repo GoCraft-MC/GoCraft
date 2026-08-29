@@ -21,6 +21,11 @@ jobs:
           cache: true
       - name: Apply parity patch
         run: |
+          # Start from the branch's last known-good redstone implementation.
+          # The finishing patch below then adds only the ordinary-full-block
+          # conduction changes required by this parity fix.
+          git show ff47237e973dfdc55d3fbf22911a3b7c18726104:core/world/redstone.go > core/world/redstone.go
+
           python3 - <<'PY'
           from pathlib import Path
 
@@ -36,29 +41,44 @@ jobs:
                   raise SystemExit('could not find Java support-break helper')
               java.write_text(java_text.replace(declaration, declaration + attachment, 1))
 
-          # Redstone was already replaced directly on this branch. Prevent the
-          # older finishing patch from partially rewriting that newer version.
+          # Fix a pre-existing missing closing brace in the Java-edition
+          # furnace container sync branch so the full repository can compile.
+          furnace = Path('server/furnace.go')
+          furnace_text = furnace.read_text()
+          bad = '''\t\t\tif p.Edition == player.ClientEditionJava {\n\t\t\t\tif sess, ok := s.sessions.Get(p.UUID); ok {\n\t\t\t\t\t_ = handler.SyncFurnaceContainer(sess.Conn, p, state.CookTime, state.BurnTime, state.BurnDuration, state.CookDuration)\n\t\t\t\t}\n\t\t})\n'''
+          good = '''\t\t\tif p.Edition == player.ClientEditionJava {\n\t\t\t\tif sess, ok := s.sessions.Get(p.UUID); ok {\n\t\t\t\t\t_ = handler.SyncFurnaceContainer(sess.Conn, p, state.CookTime, state.BurnTime, state.BurnDuration, state.CookDuration)\n\t\t\t\t}\n\t\t\t}\n\t\t})\n'''
+          if bad in furnace_text:
+              furnace.write_text(furnace_text.replace(bad, good, 1))
+
+          # The old observer test assumed detection powered the observer in the
+          # same mutation. Vanilla schedules detection two game ticks later;
+          # keep its directional-output coverage while the new parity tests
+          # below cover the scheduled detection timing.
+          tests = Path('core/world/redstone_test.go')
+          test_text = tests.read_text()
+          start = test_text.find('func TestObserverPulsesAwayFromObservedFace')
+          end = test_text.find('func TestRedstonePowerTravelsUpAndDownSteps', start)
+          if start >= 0 and end > start:
+              replacement = '''func TestObserverPowersOnlyAwayFromObservedFace(t *testing.T) {\n\tw := New(&FlatGenerator{}, nil, false)\n\tdefer w.Close()\n\tw.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "observer", Properties: map[string]string{\n\t\t"facing": "east", "powered": "true",\n\t}})\n\tw.SetBlock(-1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})\n\tw.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})\n\tw.Redstone.FlushUpdates()\n\tif got := w.GetBlock(-1, 64, 0).Properties["lit"]; got != "true" {\n\t\tt.Fatalf("lamp behind observer lit = %q, want true", got)\n\t}\n\tif got := w.GetBlock(0, 64, 1).Properties["lit"]; got != "false" {\n\t\tt.Fatalf("lamp beside observer lit = %q, want false", got)\n\t}\n}\n\n'''
+              tests.write_text(test_text[:start] + replacement + test_text[end:])
+
           path = Path('.github/scripts/finish_vanilla_parity.py')
           text = path.read_text()
-          marker = '''def replace_exact(path, old, new, count=1):\n    p = Path(path)\n'''
-          replacement = '''def replace_exact(path, old, new, count=1):\n    if str(path) == "core/world/redstone.go":\n        return\n    p = Path(path)\n'''
-          if marker not in text:
-              raise SystemExit('could not update parity patch redstone guard')
-          text = text.replace(marker, replacement, 1)
 
-          # The current Java helper has additional vanilla plant-support logic;
-          # its older whole-function replacement is intentionally skipped after
-          # the attachment pass above has been inserted.
+          # The current Java helper has additional plant-support logic; its old
+          # whole-function replacement is intentionally skipped after the
+          # attachment pass above has already been inserted.
           old = '''    if actual < count:\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
           new = '''    if actual < count:\n        if str(path) == "java/handler/block.go":\n            return\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
           if old not in text:
               raise SystemExit('could not update parity patch Java guard')
           path.write_text(text.replace(old, new, 1))
           PY
+
           python3 .github/scripts/finish_vanilla_parity.py
       - name: Format
         run: |
-          gofmt -w core/world/world.go core/world/redstone.go core/blockloot/loot.go core/blockloot/loot_test.go core/world/vanilla_interaction_test.go java/handler/block.go java/handler/vanilla_parity_test.go server/server.go server/bedrock_actions.go server/projectile_parity_test.go
+          gofmt -w core/world/world.go core/world/redstone.go core/world/redstone_test.go core/blockloot/loot.go core/blockloot/loot_test.go core/world/vanilla_interaction_test.go java/handler/block.go java/handler/vanilla_parity_test.go server/server.go server/furnace.go server/bedrock_actions.go server/projectile_parity_test.go
       - name: Tidy check
         run: go mod tidy
       - name: Test
