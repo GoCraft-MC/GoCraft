@@ -1,6 +1,9 @@
 package command
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 func sourceKey(source Source) (string, error) {
 	if source.Kind == SourceCore {
@@ -27,6 +30,18 @@ func collectExecutors(nodes []Node, out map[ExecID]struct{}) {
 			collectExecutors(typed.Children, out)
 		}
 	}
+}
+
+// Executors returns each non-zero local executor in stable order.
+func Executors(root Root) []ExecID {
+	unique := make(map[ExecID]struct{})
+	collectExecutors(root.Children, unique)
+	executors := make([]ExecID, 0, len(unique))
+	for executor := range unique {
+		executors = append(executors, executor)
+	}
+	sort.Slice(executors, func(i, j int) bool { return executors[i] < executors[j] })
+	return executors
 }
 
 func rootConflict(left, right []Node) string {
