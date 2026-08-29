@@ -155,3 +155,27 @@ func TestObserverOnlyWatchesItsFront(t *testing.T) {
 		t.Fatalf("front fire change did not trigger: %+v", due)
 	}
 }
+
+func TestDoorHingeCursorSidesAllFacings(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	tests := []struct {
+		facing           string
+		firstX, firstZ   float32
+		secondX, secondZ float32
+	}{
+		{facing: "north", firstX: 0.25, firstZ: 0.5, secondX: 0.75, secondZ: 0.5},
+		{facing: "south", firstX: 0.25, firstZ: 0.5, secondX: 0.75, secondZ: 0.5},
+		{facing: "east", firstX: 0.5, firstZ: 0.25, secondX: 0.5, secondZ: 0.75},
+		{facing: "west", firstX: 0.5, firstZ: 0.25, secondX: 0.5, secondZ: 0.75},
+	}
+	for _, test := range tests {
+		t.Run(test.facing, func(t *testing.T) {
+			first := DoorHinge(w, 0, 64, 0, test.facing, test.firstX, test.firstZ)
+			second := DoorHinge(w, 0, 64, 0, test.facing, test.secondX, test.secondZ)
+			if first == second {
+				t.Fatalf("hinge did not change across cursor halves for %s: %q", test.facing, first)
+			}
+		})
+	}
+}

@@ -1655,6 +1655,10 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		lootBlock := block
+		potDecorations := [4]string{}
+		if block.ResourceLocation() == "minecraft:decorated_pot" {
+			potDecorations = actionWorld.DecoratedPotDecorations(x, y, z)
+		}
 		if block.ResourceLocation() == "minecraft:decorated_pot" && held.EnchantmentLevel("minecraft:silk_touch") == 0 && blockloot.BreaksDecoratedPot(held.ItemID) {
 			lootBlock = bedrockCopyBlock(block)
 			lootBlock.Properties["cracked"] = "true"
@@ -1664,9 +1668,10 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			enchantments[enchantment.ID] = enchantment.Level
 		}
 		lootContext := blockloot.Context{
-			Block:        lootBlock,
-			Tool:         held,
-			Enchantments: enchantments,
+			Block:          lootBlock,
+			Tool:           held,
+			Enchantments:   enchantments,
+			PotDecorations: potDecorations,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return actionWorld.GetBlock(x+dx, y+dy, z+dz)
 			},
@@ -1697,7 +1702,9 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		}
 		if p.GameMode != player.GameModeCreative {
 			for _, item := range containerItems {
-				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
+				stack := player.ItemStack{
+					ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations,
+				}
 				if dropped := s.newDroppedItemForPlayer(p, stack, center, item.Slot+1); dropped != nil {
 					handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
 				}
@@ -3103,6 +3110,7 @@ func (s *Server) newDroppedItemInWorld(dimensionWorld *coreworld.World, stack pl
 	dropped.ItemID = stack.ItemID
 	dropped.ItemCount = stack.Count
 	dropped.ItemDamage = stack.Damage
+	dropped.ItemPotDecorations = stack.PotDecorations
 	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
 	dropped.VX = math.Cos(angle) * 0.1
 	dropped.VY = 0.2
@@ -3174,7 +3182,9 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool
 		if dx*dx+dy*dy+dz*dz > 2.25 {
 			continue
 		}
-		stack := player.ItemStack{ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage}
+		stack := player.ItemStack{
+			ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage, PotDecorations: e.ItemPotDecorations,
+		}
 		if !p.GiveItem(stack) {
 			continue
 		}

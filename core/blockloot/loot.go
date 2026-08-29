@@ -34,12 +34,13 @@ type database struct {
 // Context contains the state that vanilla loot conditions may inspect.
 // Enchantments is optional until GoCraft stores enchantments on ItemStack.
 type Context struct {
-	Block        coreworld.Block
-	Tool         player.ItemStack
-	Enchantments map[string]int
-	Explosion    float64
-	Random       *rand.Rand
-	BlockAt      func(dx, dy, dz int) coreworld.Block
+	Block          coreworld.Block
+	Tool           player.ItemStack
+	Enchantments   map[string]int
+	Explosion      float64
+	Random         *rand.Rand
+	BlockAt        func(dx, dy, dz int) coreworld.Block
+	PotDecorations [4]string
 }
 
 var (
@@ -238,7 +239,12 @@ func evaluateReadyEntry(entry map[string]any, ctx Context, db *database) ([]play
 		return nil, false
 	case "minecraft:dynamic":
 		if ctx.Block.ResourceLocation() == "minecraft:decorated_pot" {
-			return []player.ItemStack{{ItemID: "minecraft:brick", Count: 4}}, true
+			decorations := player.NormalizePotDecorations(ctx.PotDecorations)
+			stacks := make([]player.ItemStack, 0, len(decorations))
+			for _, decoration := range decorations {
+				stacks = append(stacks, player.ItemStack{ItemID: decoration, Count: 1})
+			}
+			return stacks, true
 		}
 		// Other dynamic container contents are handled by the world container store.
 		return nil, true
@@ -416,9 +422,16 @@ func applyFunctions(stacks []player.ItemStack, functions []any, ctx Context, db 
 					}
 				}
 			}
-		case "minecraft:copy_components", "minecraft:copy_state":
-			// ItemStack currently stores identity/count/damage only. These
-			// functions do not alter which item or how many items are dropped.
+		case "minecraft:copy_components":
+			if ctx.Block.ResourceLocation() == "minecraft:decorated_pot" {
+				for index := range stacks {
+					if stacks[index].ItemID == "minecraft:decorated_pot" {
+						stacks[index].PotDecorations = player.NormalizePotDecorations(ctx.PotDecorations)
+					}
+				}
+			}
+		case "minecraft:copy_state":
+			// Block-state copying does not currently affect a canonical ItemStack.
 		}
 	}
 	return stacks

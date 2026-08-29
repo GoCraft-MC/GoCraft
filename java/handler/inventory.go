@@ -479,13 +479,17 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 	if maxDamage <= 0 {
 		componentCount := int32(0)
 		if len(enchantments) > 0 {
-			componentCount = 1
+			componentCount++
+		}
+		if item.ItemID == "minecraft:decorated_pot" {
+			componentCount++
 		}
 		b.VarInt(int32(item.Count)).
 			VarInt(id).
 			VarInt(componentCount).
 			VarInt(0) // components_to_remove
 		encodeSlotEnchantments(b, enchantments)
+		encodeSlotPotDecorations(b, item)
 		return
 	}
 	damage := item.Damage
@@ -639,5 +643,16 @@ func DamagePlayerArmor(p *player.Player, conn *network.ClientConn, amount int) {
 		if conn != nil {
 			_ = sendArmorAttributes(conn, p)
 		}
+	}
+}
+
+func encodeSlotPotDecorations(b *protocol.Builder, item player.ItemStack) {
+	if item.ItemID != "minecraft:decorated_pot" {
+		return
+	}
+	decorations := item.NormalizedPotDecorations()
+	b.VarInt(61).VarInt(int32(len(decorations)))
+	for _, decoration := range decorations {
+		b.VarInt(javaworld.ItemID(decoration))
 	}
 }

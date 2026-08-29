@@ -1330,3 +1330,69 @@ func (w *World) RequestTimeSkip() { w.requestTimeSkip.Store(true) }
 // DrainTimeSkip returns true once and resets the flag if a time skip was
 // requested since the last call. Called by the server tick goroutine.
 func (w *World) DrainTimeSkip() bool { return w.requestTimeSkip.Swap(false) }
+
+// DecoratedPotDecorations returns all four vanilla side decorations stored by
+// the decorated-pot block entity. Missing entries represent bricks in vanilla.
+func (w *World) DecoratedPotDecorations(x, y, z int) [4]string {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	w.containerMu.RLock()
+	defer w.containerMu.RUnlock()
+	for _, entity := range c.BlockEntities {
+		if entity.X == x && entity.Y == y && entity.Z == z {
+			return normalizeDecoratedPotDecorations(entity.PotDecorations)
+		}
+	}
+	return normalizeDecoratedPotDecorations([4]string{})
+}
+
+// SetDecoratedPotDecorations updates only the decoration component and keeps
+// the pot's stored item and opaque block-entity data intact.
+func (w *World) SetDecoratedPotDecorations(x, y, z int, decorations [4]string) {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	decorations = normalizeDecoratedPotDecorations(decorations)
+
+	w.containerMu.Lock()
+	updated := false
+	for index := range c.BlockEntities {
+		entity := &c.BlockEntities[index]
+		if entity.X != x || entity.Y != y || entity.Z != z {
+			continue
+		}
+		if entity.Type == "" {
+			entity.Type = "minecraft:decorated_pot"
+		}
+		if len(entity.Data) < 2 {
+			entity.Data = []byte{10, 0}
+		}
+		entity.PotDecorations = decorations
+		updated = true
+		break
+	}
+	if !updated {
+		c.BlockEntities = append(c.BlockEntities, BlockEntity{
+			X: x, Y: y, Z: z, Type: "minecraft:decorated_pot", Data: []byte{10, 0},
+			PotDecorations: decorations,
+		})
+	}
+	w.containerMu.Unlock()
+
+	w.mu.Lock()
+	key := [2]int32{cx, cz}
+	w.chunks[key] = c
+	w.touchChunkLocked(key)
+	w.dirty[key] = struct{}{}
+	w.mu.Unlock()
+}
+
+func normalizeDecoratedPotDecorations(decorations [4]string) [4]string {
+	for index := range decorations {
+		if decorations[index] == "" {
+			decorations[index] = "minecraft:brick"
+		}
+	}
+	return decorations
+}

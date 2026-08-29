@@ -35,7 +35,7 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: item, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments})
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: item, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations})
 				s.bedrockWorld().SetContainerItems(x, y, z, name, items)
 				s.consumeBedrockHeldItem(p, 1)
 				return true
@@ -340,7 +340,7 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments}
+			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations}
 		} else {
 			stored.Count++
 		}
@@ -570,6 +570,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	if isBedrockGenericContainer(name) || name == "minecraft:decorated_pot" {
 		s.bedrockWorld().SetContainerItems(px, py, pz, name, nil)
 	}
+	if name == "minecraft:decorated_pot" {
+		s.bedrockWorld().SetDecoratedPotDecorations(px, py, pz, held.NormalizedPotDecorations())
+	}
 	s.consumeBedrockHeldItem(p, 1)
 	return true
 }
@@ -699,6 +702,8 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		props = map[string]string{"layers": "1"}
 	case name == "minecraft:light":
 		props = bedrockCopyProperties(block.Properties)
+	case name == "minecraft:decorated_pot":
+		props = map[string]string{"facing": frontFacing, "cracked": "false", "waterlogged": "false"}
 	case name == "minecraft:redstone_lamp":
 		props = map[string]string{"lit": "false"}
 	case name == "minecraft:daylight_detector":

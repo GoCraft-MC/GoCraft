@@ -253,9 +253,10 @@ type Entity struct {
 
 	// Dropped-item fields. These are used only when Type == TypeItem and are
 	// encoded as the ItemEntity's tracked ItemStack at metadata index 8.
-	ItemID     string
-	ItemCount  int
-	ItemDamage int
+	ItemID             string
+	ItemCount          int
+	ItemDamage         int
+	ItemPotDecorations [4]string
 	// ExperienceAmount is the number of points carried by an experience orb.
 	// ExperienceKillerUUID records the player whose damage caused a living
 	// entity's death so the simulation can apply player-kill XP rewards.

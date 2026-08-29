@@ -714,7 +714,9 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 	}
 
 	if entity.Type == corentity.TypeItem {
-		item := l.itemInstance(player.ItemStack{ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage}, 1)
+		item := l.itemInstance(player.ItemStack{
+			ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage, PotDecorations: entity.ItemPotDecorations,
+		}, 1)
 		if item.Stack.NetworkID == 0 {
 			return nil
 		}
@@ -1938,6 +1940,15 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 	}
 	if enchantments := bedrockEnchantments(stack); len(enchantments) > 0 {
 		nbtData["ench"] = enchantments
+	}
+	if stack.ItemID == "minecraft:decorated_pot" {
+		decorations := stack.NormalizedPotDecorations()
+		sherds := make([]any, 0, len(decorations))
+		for _, decoration := range decorations {
+			sherds = append(sherds, decoration)
+		}
+		nbtData["id"] = "DecoratedPot"
+		nbtData["sherds"] = sherds
 	}
 	if len(nbtData) == 0 {
 		nbtData = nil
