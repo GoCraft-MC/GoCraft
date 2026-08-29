@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadAllPreparesPluginData(t *testing.T) {
+func TestLoadDirectoryPreparesPluginData(t *testing.T) {
 	directory := t.TempDir()
 	writeBundle(t, directory, "protect.gcpkg", `
 id = "dev.example.protect"
@@ -19,17 +19,13 @@ runtime = "recording"
 		"config/lang/messages.yml": "denied: Protected area\n",
 		"payload/plugin":           "not extracted",
 	})
-	bundle, err := OpenBundle(filepath.Join(directory, "protect.gcpkg"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var order []string
 	var loaded []Bundle
 	registry := NewRegistry(context.Background(), 0, nil, nil)
 	if err := registry.RegisterRuntime(&recordingRuntime{order: &order, loaded: &loaded}); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.LoadAll(context.Background(), []Bundle{bundle}); err != nil {
+	if err := registry.LoadDirectory(context.Background(), directory); err != nil {
 		t.Fatal(err)
 	}
 	wantDirectory := filepath.Join(directory, "dev.example.protect")
