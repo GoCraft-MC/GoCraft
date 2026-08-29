@@ -2,3 +2,15 @@
 gocraft-linux-amd64
 gocraft-windows-amd64.exe
 *.exe
+
+# Worlds and state written by a running server
+world/
+world_nether/
+world_end/
+logs/latest.log
+logs/*.log.gz
+ops.json
+permissions.json
+whitelist.json
+banned-players.json
+banned-ips.json
