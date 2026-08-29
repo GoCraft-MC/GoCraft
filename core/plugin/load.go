@@ -45,6 +45,11 @@ func (r *Registry) LoadAll(ctx context.Context, bundles []Bundle) error {
 		if err := ctx.Err(); err != nil {
 			return rollback(err, nil)
 		}
+		prepared, err := prepareBundleData(bundle)
+		if err != nil {
+			return rollback(err, nil)
+		}
+		bundle = prepared
 		runtime, _ := r.Runtime(bundle.Manifest.Runtime)
 		instance, err := runtime.Load(ctx, bundle)
 		if err != nil {
