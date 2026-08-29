@@ -280,13 +280,32 @@ func alternateBlockNames(name string) []string {
 	case "minecraft:short_grass":
 		return []string{"minecraft:tallgrass"}
 	}
+	if strings.HasSuffix(name, "_wall_banner") {
+		return []string{"minecraft:wall_banner"}
+	}
+	if strings.HasSuffix(name, "_banner") {
+		return []string{"minecraft:standing_banner"}
+	}
 	if strings.HasSuffix(name, "_wall_sign") {
-		return []string{strings.TrimSuffix(name, "_wall_sign") + "_wall_sign"}
+		wood := strings.TrimSuffix(strings.TrimPrefix(name, "minecraft:"), "_wall_sign")
+		return []string{"minecraft:" + bedrockSignWood(wood) + "wall_sign"}
 	}
 	if strings.HasSuffix(name, "_sign") {
-		return []string{strings.TrimSuffix(name, "_sign") + "_standing_sign"}
+		wood := strings.TrimSuffix(strings.TrimPrefix(name, "minecraft:"), "_sign")
+		return []string{"minecraft:" + bedrockSignWood(wood) + "standing_sign"}
 	}
 	return nil
+}
+
+func bedrockSignWood(wood string) string {
+	switch wood {
+	case "oak":
+		return ""
+	case "dark_oak":
+		return "darkoak_"
+	default:
+		return wood + "_"
+	}
 }
 
 func translateBlockProperties(block coreworld.Block) map[string]any {
@@ -317,6 +336,8 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 			}
 			if raw == "up" {
 				out["torch_facing_direction"] = "top"
+			} else if isBedrockWallTorch(block) {
+				out["torch_facing_direction"] = oppositeCardinal(raw)
 			} else {
 				out["torch_facing_direction"] = raw
 			}
@@ -438,6 +459,27 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 		out["wall_post_bit"] = boolByte(properties["up"] == "true")
 	}
 	return out
+}
+
+func isBedrockWallTorch(block coreworld.Block) bool {
+	name := block.ResourceLocation()
+	return name == "minecraft:wall_torch" || strings.HasSuffix(name, "_wall_torch") ||
+		(name == "minecraft:unlit_redstone_torch" && block.Properties["facing"] != "")
+}
+
+func oppositeCardinal(facing string) string {
+	switch facing {
+	case "north":
+		return "south"
+	case "south":
+		return "north"
+	case "west":
+		return "east"
+	case "east":
+		return "west"
+	default:
+		return facing
+	}
 }
 
 func rotateCardinalRight(facing string) string {
