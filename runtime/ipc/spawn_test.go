@@ -57,6 +57,14 @@ func runFakeRuntime(behaviour, socket string) {
 	if behaviour == "abi" {
 		abi = 99
 	}
+	if behaviour == "quit" {
+		// Greets, then leaves on its own a moment later. The loop below never
+		// returns, so this cannot be a defer.
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			os.Exit(7)
+		}()
+	}
 	codec.Send(&wire.Envelope{Body: &wire.Envelope_Hello{
 		Hello: &wire.Hello{Abi: abi, Runtime: "fake 1.0"},
 	}})
@@ -66,6 +74,9 @@ func runFakeRuntime(behaviour, socket string) {
 		if err != nil {
 			os.Exit(0)
 		}
+		if behaviour == "deaf" {
+			continue // reads everything, answers nothing
+		}
 		switch envelope.GetBody().(type) {
 		case *wire.Envelope_Shutdown:
 			if behaviour == "stubborn" {
@@ -73,6 +84,12 @@ func runFakeRuntime(behaviour, socket string) {
 			}
 			os.Exit(0)
 		case *wire.Envelope_Ping:
+			if behaviour == "rude" {
+				codec.Send(&wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Fail{
+					Fail: &wire.Fail{PluginId: "?", Reason: "not a pong"},
+				}})
+				continue
+			}
 			codec.Send(&wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}})
 		case *wire.Envelope_Load:
 			codec.Send(&wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Loaded{
