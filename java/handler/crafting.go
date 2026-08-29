@@ -374,6 +374,8 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	damage := int32(0)
 	enchantments := ""
 	var potDecorations [4]string
+	var fireworks player.FireworkData
+	hasFireworks := false
 	for i := int32(0); i < added; i++ {
 		componentType, err := protocol.ReadVarInt(r)
 		if err != nil {
@@ -458,6 +460,25 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 			if _, readErr = protocol.ReadBool(r); readErr != nil {
 				return player.ItemStack{}, readErr
 			}
+		case 56: // fireworks: flight duration and bounded explosion list
+			flight, readErr := protocol.ReadVarInt(r)
+			if readErr != nil || flight < 0 || flight > 255 {
+				return player.ItemStack{}, fmt.Errorf("invalid firework flight %d: %w", flight, readErr)
+			}
+			length, readErr := protocol.ReadVarInt(r)
+			if readErr != nil || length < 0 || length > player.MaxFireworkExplosions {
+				return player.ItemStack{}, fmt.Errorf("invalid firework explosion count %d: %w", length, readErr)
+			}
+			fireworks.Flight = uint8(flight)
+			fireworks.ExplosionCount = uint8(length)
+			for explosionIndex := int32(0); explosionIndex < length; explosionIndex++ {
+				explosion, readErr := readJavaFireworkExplosion(r)
+				if readErr != nil {
+					return player.ItemStack{}, readErr
+				}
+				fireworks.Explosions[explosionIndex] = explosion
+			}
+			hasFireworks = true
 		default:
 			return player.ItemStack{}, fmt.Errorf("unsupported item component %d", componentType)
 		}
@@ -476,7 +497,47 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	}
 	return player.ItemStack{
 		ItemID: name, Count: int(count), Damage: int(damage), Enchantments: enchantments, PotDecorations: potDecorations,
+		HasFireworks: hasFireworks, Fireworks: fireworks,
 	}, nil
+}
+
+func readJavaFireworkExplosion(r *bytes.Reader) (player.FireworkExplosion, error) {
+	var explosion player.FireworkExplosion
+	shape, err := protocol.ReadVarInt(r)
+	if err != nil || shape < 0 || shape > 4 {
+		return explosion, fmt.Errorf("invalid firework shape %d: %w", shape, err)
+	}
+	explosion.Shape = uint8(shape)
+	colors, err := protocol.ReadVarInt(r)
+	if err != nil || colors < 0 || colors > player.MaxFireworkColors {
+		return explosion, fmt.Errorf("invalid firework color count %d: %w", colors, err)
+	}
+	explosion.ColorCount = uint8(colors)
+	for index := int32(0); index < colors; index++ {
+		color, readErr := protocol.ReadInt(r)
+		if readErr != nil {
+			return explosion, readErr
+		}
+		explosion.Colors[index] = color
+	}
+	fades, err := protocol.ReadVarInt(r)
+	if err != nil || fades < 0 || fades > player.MaxFireworkColors {
+		return explosion, fmt.Errorf("invalid firework fade count %d: %w", fades, err)
+	}
+	explosion.FadeColorCount = uint8(fades)
+	for index := int32(0); index < fades; index++ {
+		color, readErr := protocol.ReadInt(r)
+		if readErr != nil {
+			return explosion, readErr
+		}
+		explosion.FadeColors[index] = color
+	}
+	explosion.Trail, err = protocol.ReadBool(r)
+	if err != nil {
+		return explosion, err
+	}
+	explosion.Twinkle, err = protocol.ReadBool(r)
+	return explosion, err
 }
 
 func skipNetworkNBT(r *bytes.Reader) error {
