@@ -611,6 +611,10 @@ func (s *Server) Run(ctx context.Context) error {
 	}()
 	ctx = runCtx
 	go s.runConsole(ctx)
+	if err := s.loadPlugins(ctx); err != nil {
+		slog.Error("plugins: startup aborted", "err", err)
+		return err
+	}
 	if s.cfg.JavaEnabled {
 		slog.Info("java listener enabled",
 			"addr", s.cfg.Addr(),
