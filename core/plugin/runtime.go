@@ -4,6 +4,7 @@ import (
 	"context"
 
 	abi "GoCraft/abi/v1"
+	"GoCraft/core/command"
 )
 
 // Host is the only mutation path exposed to a plugin runtime.
@@ -40,4 +41,9 @@ type Instance interface {
 	Manifest() Manifest
 	Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict, error)
 	Unload(ctx context.Context) error
+}
+
+// CommandInstance is implemented by runtimes that loaded a command tree.
+type CommandInstance interface {
+	InvokeCommand(context.Context, command.ExecID, command.Sender, command.Values) error
 }
