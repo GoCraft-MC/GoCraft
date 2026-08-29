@@ -6,15 +6,18 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"GoCraft/core/player"
 )
 
 const defaultEventBudget = 2 * time.Millisecond
 
 type subscriber struct {
-	id       string
-	priority Priority
-	instance Instance
-	health   *healthTracker
+	id          string
+	priority    Priority
+	instance    Instance
+	health      *healthTracker
+	permissions []string
 }
 
 // Bus routes events to subscriptions declared before plugin code starts.
@@ -23,9 +26,10 @@ type Bus struct {
 	budget time.Duration
 	host   Host
 
-	mu     sync.RWMutex
-	subs   map[string][]*subscriber
-	health map[string]*healthTracker
+	mu                 sync.RWMutex
+	subs               map[string][]*subscriber
+	health             map[string]*healthTracker
+	permissionResolver func(*player.Player, string) bool
 }
 
 func NewBus(ctx context.Context, budget time.Duration) *Bus {
@@ -78,7 +82,10 @@ func (b *Bus) Attach(instance Instance) error {
 		b.health[manifest.ID] = tracker
 	}
 	for _, declared := range manifest.Subscriptions {
-		sub := &subscriber{id: manifest.ID, priority: declared.Priority, instance: instance, health: tracker}
+		sub := &subscriber{
+			id: manifest.ID, priority: declared.Priority, instance: instance, health: tracker,
+			permissions: append([]string(nil), manifest.Permissions...),
+		}
 		b.subs[declared.Event] = append(b.subs[declared.Event], sub)
 		sort.Slice(b.subs[declared.Event], func(i, j int) bool {
 			left, right := b.subs[declared.Event][i], b.subs[declared.Event][j]
@@ -89,6 +96,12 @@ func (b *Bus) Attach(instance Instance) error {
 		})
 	}
 	return nil
+}
+
+func (b *Bus) SetPermissionResolver(resolve func(*player.Player, string) bool) {
+	b.mu.Lock()
+	b.permissionResolver = resolve
+	b.mu.Unlock()
 }
 
 func (b *Bus) Detach(pluginID string) {
