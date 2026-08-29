@@ -3,6 +3,7 @@ package plugin
 import (
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -23,6 +24,9 @@ type manifestFile struct {
 		Events      []string `toml:"events"`
 		Permissions []string `toml:"perms"`
 	} `toml:"subscribe"`
+	Commands struct {
+		Tree string `toml:"tree"`
+	} `toml:"commands"`
 }
 
 func decodeManifest(reader io.Reader) (Manifest, error) {
@@ -41,7 +45,7 @@ func decodeManifest(reader io.Reader) (Manifest, error) {
 	}
 	manifest := Manifest{
 		ID: file.ID, Version: file.Version, APIVersion: file.APIVersion,
-		Runtime: file.Runtime, Entry: file.Entry,
+		Runtime: file.Runtime, Entry: file.Entry, CommandTree: file.Commands.Tree,
 		Permissions: append([]string(nil), file.Subscribe.Permissions...),
 	}
 	for _, event := range file.Subscribe.Events {
@@ -66,6 +70,9 @@ func validateManifest(manifest Manifest) error {
 	if strings.TrimSpace(manifest.Runtime) == "" {
 		return fmt.Errorf("plugin %s: runtime is required", manifest.ID)
 	}
+	if manifest.CommandTree != "" && !validBundleReference(manifest.CommandTree) {
+		return fmt.Errorf("plugin %s: invalid command tree path %q", manifest.ID, manifest.CommandTree)
+	}
 	permissions := make(map[string]struct{}, len(manifest.Permissions))
 	for _, permission := range manifest.Permissions {
 		if strings.TrimSpace(permission) == "" {
@@ -87,6 +94,14 @@ func validateManifest(manifest Manifest) error {
 		seen[subscription.Event] = struct{}{}
 	}
 	return nil
+}
+
+func validBundleReference(reference string) bool {
+	if strings.Contains(reference, `\`) || path.IsAbs(reference) {
+		return false
+	}
+	cleaned := path.Clean(reference)
+	return cleaned == reference && cleaned != "." && cleaned != ".." && !strings.HasPrefix(cleaned, "../")
 }
 
 func validPluginID(id string) bool {
