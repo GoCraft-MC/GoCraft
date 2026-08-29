@@ -123,6 +123,23 @@ type BlockInteractIntent struct {
 	ClickZ     float32
 }
 
+// BellRingIntent asks the simulation to validate and ring one canonical bell.
+// Java posts this instead of mutating the world from its connection goroutine.
+type BellRingIntent struct {
+	PlayerUUID [16]byte
+	Position   spatial.BlockPos
+	Face       int32
+	HitY       float32
+}
+
+// FireworkUseIntent asks the simulation to launch the rocket from the
+// action-time hotbar stack at the exact clicked position.
+type FireworkUseIntent struct {
+	PlayerUUID [16]byte
+	HotbarSlot int32
+	Position   spatial.Vec3
+}
+
 // ConsumeFoodIntent requests consumption from the Bedrock hotbar slot captured
 // when the client completed its use-item animation. It does not change the
 // player's newer persistent selection.
@@ -270,6 +287,8 @@ func (DisconnectIntent) isLifecycle()        {}
 func (ChatIntent) isGameplay()               {}
 func (TeleportIntent) isGameplay()           {}
 func (BlockInteractIntent) isGameplay()      {}
+func (BellRingIntent) isGameplay()           {}
+func (FireworkUseIntent) isGameplay()        {}
 func (ConsumeFoodIntent) isGameplay()        {}
 func (StartUseItemIntent) isGameplay()       {}
 func (ArmSwingIntent) isGameplay()           {}
@@ -365,6 +384,8 @@ func (b *Bus) PostTeleport(i TeleportIntent) bool {
 }
 
 func (b *Bus) PostBlockInteract(i BlockInteractIntent) bool   { return b.tryGameplay(i) }
+func (b *Bus) PostBellRing(i BellRingIntent) bool             { return b.tryGameplay(i) }
+func (b *Bus) PostFireworkUse(i FireworkUseIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostConsumeFood(i ConsumeFoodIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostStartUseItem(i StartUseItemIntent) bool     { return b.tryGameplay(i) }
 func (b *Bus) PostArmSwing(i ArmSwingIntent) bool             { return b.tryGameplay(i) }

@@ -23,6 +23,17 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	if held.IsEmpty() {
 		return false
 	}
+	if held.ItemID == "minecraft:firework_rocket" && p.GameMode != player.GameModeSpectator {
+		return s.applyFireworkUse(intent.FireworkUseIntent{
+			PlayerUUID: p.UUID,
+			HotbarSlot: int32(p.HeldSlot),
+			Position: spatial.Vec3{
+				X: float64(i.Position.X) + float64(i.ClickX),
+				Y: float64(i.Position.Y) + float64(i.ClickY),
+				Z: float64(i.Position.Z) + float64(i.ClickZ),
+			},
+		}) != nil
+	}
 	x, y, z := int(i.Position.X), int(i.Position.Y), int(i.Position.Z)
 	name, item := target.ResourceLocation(), held.ItemID
 	if (name == "minecraft:campfire" || name == "minecraft:soul_campfire") && target.Properties["lit"] != "false" {
@@ -573,6 +584,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	}
 	if name == "minecraft:decorated_pot" {
 		s.bedrockWorld().SetDecoratedPotDecorations(px, py, pz, held.NormalizedPotDecorations())
+	}
+	if blockEntityType, ok := coreworld.PlacementBlockEntityType(placed.ResourceLocation()); ok {
+		s.bedrockWorld().SetBlockEntity(px, py, pz, blockEntityType, []byte{10, 0})
 	}
 	s.consumeBedrockHeldItem(p, 1)
 	return true
