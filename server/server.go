@@ -1008,6 +1008,10 @@ func (s *Server) tickIntents() {
 			s.applyChat(i)
 		case intent.BlockInteractIntent:
 			s.applyBedrockBlockInteract(i)
+		case intent.BellRingIntent:
+			s.applyBellRing(i)
+		case intent.FireworkUseIntent:
+			s.applyFireworkUse(i)
 		case intent.ConsumeFoodIntent:
 			s.applyBedrockConsumeFood(i)
 		case intent.StartUseItemIntent:
@@ -1766,6 +1770,12 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		bypassActivation := p.Sneaking && !held.IsEmpty()
+		if !bypassActivation && clicked.ResourceLocation() == "minecraft:bell" {
+			if direction, valid := coreworld.BellRingDirection(clicked, i.Face, i.ClickY); valid {
+				s.ringBell(actionWorld, p.Dimension, i.Position, direction)
+				return
+			}
+		}
 		if !bypassActivation && s.applyBedrockBlockActivation(p, i.Position, clicked) {
 			return
 		}
@@ -2737,6 +2747,15 @@ func (s *Server) tickEntities() {
 			deadIDs = append(deadIDs, e.EntityID)
 			continue
 		}
+		if e.Type == corentity.TypeFireworkRocket {
+			if s.tickFireworkRocket(e) {
+				s.world.Entities.Remove(e.EntityID)
+				deadIDs = append(deadIDs, e.EntityID)
+				continue
+			}
+			moved = append(moved, e)
+			continue
+		}
 
 		// ── Primed TNT fuse countdown ────────────────────────────────────────
 		if e.Type == corentity.TypePrimedTNT {
@@ -2949,7 +2968,7 @@ func (s *Server) tickEntities() {
 	// DispatchTickBroadcast reads entity fields here (tick goroutine, sole
 	// writer) to build immutable packets before spawning the send goroutine.
 	endBcast := s.timings.measure(sectionBroadcast)
-	handler.DispatchTickBroadcast(moved, hurtEntities, deathIDs, deadIDs, spawned, s.sessions)
+	handler.DispatchTickBroadcastInDimension(moved, hurtEntities, deathIDs, deadIDs, spawned, s.sessions, dimensionOverworld)
 	endBcast()
 
 	// Publish time-of-day for handler code (e.g. bed sleep check).
@@ -3367,6 +3386,13 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				entity.VX *= 0.98
 				entity.VZ *= 0.98
 				moved = append(moved, entity)
+			case entity.Type == corentity.TypeFireworkRocket:
+				if simulation.tickFireworkRocket(entity) {
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+					continue
+				}
+				moved = append(moved, entity)
 			case corentity.IsProjectile(entity.Type):
 				if simulation.tickProjectile(entity) || entity.Position.Y < coreworld.WorldMinY-16 {
 					dimensionWorld.Entities.Remove(entity.EntityID)
@@ -3414,7 +3440,7 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				}
 			}
 		}
-		handler.DispatchTickBroadcast(moved, hurtEntities, deathIDs, deadIDs, spawned, simulation.sessions)
+		handler.DispatchTickBroadcastInDimension(moved, hurtEntities, deathIDs, deadIDs, spawned, s.sessions, dimension)
 	}
 }
 
@@ -4471,6 +4497,15 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 		z := start.Z + (projectile.Position.Z-start.Z)*t
 		block := s.world.GetBlock(int(math.Floor(x)), int(math.Floor(y)), int(math.Floor(z)))
 		if coreworld.IsEntitySupportBlock(block.ResourceLocation()) {
+			if block.ResourceLocation() == "minecraft:bell" {
+				face := coreworld.BellProjectileFace(
+					projectile.Position.X-start.X, projectile.Position.Y-start.Y, projectile.Position.Z-start.Z,
+				)
+				if direction, valid := coreworld.BellRingDirection(block, face, float32(y-math.Floor(y))); valid {
+					position := spatial.BlockPos{X: int32(math.Floor(x)), Y: int32(math.Floor(y)), Z: int32(math.Floor(z))}
+					s.ringBell(s.world, s.simulationDimension, position, direction)
+				}
+			}
 			if projectile.Type == corentity.TypeWindCharge {
 				s.explodeWindCharge(projectile, spatial.Vec3{X: x, Y: y, Z: z})
 			}
@@ -5002,6 +5037,9 @@ func (s *Server) tickBlockPhysicsWorld() {
 			s.activateDropperOrDispenser(s.world, s.simulationDimension, pos[0], pos[1], pos[2], block.ResourceLocation(), &blockChanges)
 		case "minecraft:crafter":
 			s.activateCrafter(s.world, s.simulationDimension, pos[0], pos[1], pos[2])
+		case "minecraft:bell":
+			position := spatial.BlockPos{X: int32(pos[0]), Y: int32(pos[1]), Z: int32(pos[2])}
+			s.ringBell(s.world, s.simulationDimension, position, coreworld.BellFacingDirection(block))
 		case "minecraft:piston", "minecraft:sticky_piston":
 			blockChanges = append(blockChanges, s.world.ApplyPistonPower(pos[0], pos[1], pos[2], true)...)
 		}
