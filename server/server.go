@@ -697,6 +697,10 @@ func (s *Server) Run(ctx context.Context) error {
 	// ctx is now done: wait for entity tick and Bedrock listener to finish.
 	wg.Wait()
 
+	// Unload plugins while world storage is still open, so a runtime that
+	// persists on shutdown can still write.
+	s.unloadPlugins()
+
 	// Flush world to disk regardless of shutdown cause.
 	s.saveAllPlayerData()
 	for dimension, dimensionWorld := range map[string]*coreworld.World{"overworld": s.world, "nether": s.netherWorld, "end": s.endWorld} {

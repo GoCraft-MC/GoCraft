@@ -53,3 +53,17 @@ func TestLoadPluginsRefusesToBootOnAnUnreadableBundle(t *testing.T) {
 		t.Fatal("loadPlugins() accepted an unreadable bundle")
 	}
 }
+
+func TestUnloadPluginsToleratesAnEmptyRegistry(t *testing.T) {
+	s := pluginServer(filepath.Join(t.TempDir(), "plugins"), true)
+	if err := s.loadPlugins(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s.unloadPlugins()
+	s.unloadPlugins()
+}
+
+func TestUnloadPluginsToleratesAServerWithoutARegistry(t *testing.T) {
+	s := &Server{}
+	s.unloadPlugins()
+}
