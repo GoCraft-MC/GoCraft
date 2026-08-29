@@ -760,8 +760,10 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 
 func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corentity.Entity) protocol.EntityMetadata {
 	metadata := protocol.NewEntityMetadata()
-	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
-	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
+	if entity == nil || entity.Type != corentity.TypeFireworkRocket {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
+	}
 	if entity == nil {
 		return metadata
 	}
@@ -817,6 +819,9 @@ func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corenti
 	if entity.Type == corentity.TypeFallingBlock && entity.FallingBlockName != "" && l != nil && l.encoder != nil {
 		block := splitBlockName(entity.FallingBlockName)
 		metadata[protocol.EntityDataKeyVariant] = int32(l.encoder.BlockNetworkID(block))
+	}
+	if entity.Type == corentity.TypeFireworkRocket {
+		metadata[protocol.EntityDataKeyDisplayFirework] = bedrockFireworkNBT(entity.FireworkData)
 	}
 	return metadata
 }
@@ -1785,6 +1790,8 @@ func bedrockEntityType(entityType corentity.EntityType) string {
 		return "minecraft:bamboo_raft"
 	case corentity.TypeBambooChestRaft:
 		return "minecraft:bamboo_chest_raft"
+	case corentity.TypeFireworkRocket:
+		return "minecraft:fireworks_rocket"
 	default:
 		return string(entityType)
 	}
@@ -1950,6 +1957,11 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 		nbtData["id"] = "DecoratedPot"
 		nbtData["sherds"] = sherds
 	}
+	if stack.ItemID == "minecraft:firework_rocket" {
+		for key, value := range bedrockFireworkNBT(stack.EffectiveFireworks()) {
+			nbtData[key] = value
+		}
+	}
 	if len(nbtData) == 0 {
 		nbtData = nil
 	}
@@ -2057,17 +2069,20 @@ func armSizeToUint8(s string) uint8 {
 	return protocol.ArmSizeWide
 }
 
-// BroadcastBlockEntityData mirrors canonical decorated-pot block actor data to
+// BroadcastBlockEntityData translates canonical block-entity state for
 // Bedrock viewers in the affected dimension.
 func (l *Listener) BroadcastBlockEntityData(dimension int32, entity coreworld.BlockEntity) {
-	if l == nil || (entity.Type != "minecraft:decorated_pot" && entity.Type != "decorated_pot") {
+	if l == nil {
 		return
 	}
-	decorations := player.NormalizePotDecorations(entity.PotDecorations)
-	data := map[string]any{
-		"id": "DecoratedPot",
-		"x":  int32(entity.X), "y": int32(entity.Y), "z": int32(entity.Z),
-		"sherds": []string{decorations[0], decorations[1], decorations[2], decorations[3]},
+	dimensionWorld := l.worldForDimension(dimension)
+	if dimensionWorld == nil {
+		return
+	}
+	block := dimensionWorld.GetBlock(entity.X, entity.Y, entity.Z)
+	data := bedrockBlockEntityData(entity, block)
+	if data == nil {
+		return
 	}
 	l.sessionsMu.RLock()
 	sessions := make([]*bedrockSession, 0, len(l.sessions))
@@ -2083,4 +2098,49 @@ func (l *Listener) BroadcastBlockEntityData(dimension int32, entity coreworld.Bl
 			NBTData:  data,
 		})
 	}
+}
+
+func bedrockBlockEntityData(entity coreworld.BlockEntity, block coreworld.Block) map[string]any {
+	position := map[string]any{"x": int32(entity.X), "y": int32(entity.Y), "z": int32(entity.Z)}
+	switch strings.TrimPrefix(entity.Type, "minecraft:") {
+	case "decorated_pot":
+		decorations := player.NormalizePotDecorations(entity.PotDecorations)
+		position["id"] = "DecoratedPot"
+		position["sherds"] = []string{decorations[0], decorations[1], decorations[2], decorations[3]}
+	case "sign", "hanging_sign":
+		position["id"] = "Sign"
+		position["IsWaxed"] = uint8(0)
+		position["FrontText"] = emptyBedrockSignSide()
+		position["BackText"] = emptyBedrockSignSide()
+	case "banner":
+		position["id"] = "Banner"
+		position["Base"] = bedrockBannerBase(block.ResourceLocation())
+		position["Patterns"] = []any{}
+		position["Type"] = int32(0)
+	default:
+		return nil
+	}
+	return position
+}
+
+func emptyBedrockSignSide() map[string]any {
+	return map[string]any{
+		"SignTextColor": int32(-16777216), "IgnoreLighting": uint8(0),
+		"Text": "", "TextOwner": "", "PersistFormatting": uint8(1),
+	}
+}
+
+func bedrockBannerBase(name string) int32 {
+	colours := []string{
+		"white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray",
+		"light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black",
+	}
+	base := strings.TrimPrefix(name, "minecraft:")
+	base = strings.TrimSuffix(strings.TrimSuffix(base, "_wall_banner"), "_banner")
+	for index, colour := range colours {
+		if base == colour {
+			return int32(index ^ 15)
+		}
+	}
+	return 15
 }
