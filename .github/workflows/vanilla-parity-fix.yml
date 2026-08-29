@@ -36,12 +36,23 @@ jobs:
                   raise SystemExit('could not find Java support-break helper')
               java.write_text(java_text.replace(declaration, declaration + attachment, 1))
 
+          # Redstone was already replaced directly on this branch. Prevent the
+          # older finishing patch from partially rewriting that newer version.
           path = Path('.github/scripts/finish_vanilla_parity.py')
           text = path.read_text()
+          marker = '''def replace_exact(path, old, new, count=1):\n    p = Path(path)\n'''
+          replacement = '''def replace_exact(path, old, new, count=1):\n    if str(path) == "core/world/redstone.go":\n        return\n    p = Path(path)\n'''
+          if marker not in text:
+              raise SystemExit('could not update parity patch redstone guard')
+          text = text.replace(marker, replacement, 1)
+
+          # The current Java helper has additional vanilla plant-support logic;
+          # its older whole-function replacement is intentionally skipped after
+          # the attachment pass above has been inserted.
           old = '''    if actual < count:\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
-          new = '''    if actual < count:\n        if str(path) in {"core/world/redstone.go", "java/handler/block.go"}:\n            return\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
+          new = '''    if actual < count:\n        if str(path) == "java/handler/block.go":\n            return\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
           if old not in text:
-              raise SystemExit('could not update parity patch guard')
+              raise SystemExit('could not update parity patch Java guard')
           path.write_text(text.replace(old, new, 1))
           PY
           python3 .github/scripts/finish_vanilla_parity.py
