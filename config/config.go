@@ -137,6 +137,22 @@ type PermissionEditorConfig struct {
 	BytebinURL string `yaml:"bytebin_url"`
 }
 
+// PluginsConfig controls the plugin subsystem. Bundles are scanned and loaded
+// before the listeners open, so a slow or failing plugin delays the port rather
+// than letting players join a partially configured server.
+type PluginsConfig struct {
+	// Enabled controls whether the plugins directory is scanned at all.
+	Enabled bool `yaml:"enabled"`
+
+	// Directory holds the .gcpkg bundles to load, relative to the working
+	// directory. A missing directory is not an error.
+	Directory string `yaml:"directory"`
+
+	// EventBudgetMillis bounds how long one cancellable event may spend across
+	// all of its subscribers before the host stops waiting for verdicts.
+	EventBudgetMillis int `yaml:"event_budget_ms"`
+}
+
 // DebugConfig controls verbose diagnostic log categories. All switches default
 // to false so routine console and latest.log output remain concise.
 type DebugConfig struct {
@@ -226,6 +242,7 @@ type Config struct {
 	ResourcePack     ResourcePackConfig     `yaml:"resource_pack"`
 	CustomItems      CustomItemsConfig      `yaml:"custom_items"`
 	PermissionEditor PermissionEditorConfig `yaml:"permission_editor"`
+	Plugins          PluginsConfig          `yaml:"plugins"`
 	Debug            DebugConfig            `yaml:"debug"`
 
 	// Combat timing and knockback settings.
@@ -280,6 +297,11 @@ func defaults() *Config {
 			Enabled:    true,
 			EditorURL:  "https://el211.github.io/GoCraft/editor",
 			BytebinURL: "https://bytebin.lucko.me",
+		},
+		Plugins: PluginsConfig{
+			Enabled:           true,
+			Directory:         "plugins",
+			EventBudgetMillis: 2,
 		},
 		Combat: CombatConfig{
 			AttackCooldown:      false,
@@ -429,6 +451,15 @@ func (c *Config) validate() error {
 		}
 		if parsed, err := url.ParseRequestURI(c.PermissionEditor.BytebinURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("permission_editor.bytebin_url %q must be a valid http/https URL", c.PermissionEditor.BytebinURL)
+		}
+	}
+	if c.Plugins.Enabled {
+		c.Plugins.Directory = strings.TrimSpace(c.Plugins.Directory)
+		if c.Plugins.Directory == "" {
+			return errors.New("plugins.directory must not be empty when plugins are enabled")
+		}
+		if c.Plugins.EventBudgetMillis < 1 || c.Plugins.EventBudgetMillis > 1000 {
+			return fmt.Errorf("plugins.event_budget_ms %d must be between 1 and 1000", c.Plugins.EventBudgetMillis)
 		}
 	}
 	return nil
