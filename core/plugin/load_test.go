@@ -34,6 +34,7 @@ type recordingRuntime struct {
 	order   *[]string
 	failID  string
 	onStart func()
+	loaded  *[]Bundle
 }
 
 type noCommandRuntime struct{ recordingRuntime }
@@ -105,6 +106,9 @@ func TestLoadAllRejectsRuntimeWithoutCommandSupport(t *testing.T) {
 }
 func (r *recordingRuntime) Load(_ context.Context, bundle Bundle) (Instance, error) {
 	*r.order = append(*r.order, "load:"+bundle.Manifest.ID)
+	if r.loaded != nil {
+		*r.loaded = append(*r.loaded, bundle)
+	}
 	if bundle.Manifest.ID == r.failID {
 		return nil, errors.New("load failed")
 	}
