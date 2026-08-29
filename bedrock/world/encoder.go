@@ -230,6 +230,12 @@ func bedrockVisualBlock(block coreworld.Block) coreworld.Block {
 		if block.Properties["lit"] == "false" {
 			block.Name = "unlit_redstone_torch"
 		}
+	case "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker":
+		// Java stores the burning state as a lit property, while Bedrock uses
+		// separate block identifiers for the burning furnace variants.
+		if block.Properties["lit"] == "true" {
+			block.Name = "lit_" + block.Name
+		}
 	case "minecraft:beetroots":
 		// Bedrock uses the singular identifier for the same canonical crop.
 		block.Name = "beetroot"
