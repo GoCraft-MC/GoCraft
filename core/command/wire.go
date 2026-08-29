@@ -3,56 +3,39 @@ package command
 import (
 	"fmt"
 
-	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+
+	abi "GoCraft/abi/v1"
 )
 
 const CommandWireVersion = 1
 
 // DecodeTree validates and decodes the generated commands.pb payload.
+//
+// Parsing is the generated codec's job; this package only turns the wire
+// message into the neutral tree the rest of the server uses. Generated types
+// never leave this file and wire_convert.go.
+//
+// Size is bounded before this point: a bundle entry is read under a 4 MiB cap,
+// and the protobuf runtime refuses deeply nested messages on its own. The node
+// and depth limits below are enforced again during conversion, because those
+// are the server's limits rather than the format's.
 func DecodeTree(data []byte) (Root, error) {
-	var root Root
-	version, versionSeen := uint64(0), false
-	nodeCount := 0
-	for len(data) != 0 {
-		number, wireType, tagSize := protowire.ConsumeTag(data)
-		if tagSize < 0 {
-			return Root{}, protowire.ParseError(tagSize)
-		}
-		data = data[tagSize:]
-		switch number {
-		case 1:
-			if wireType != protowire.VarintType || versionSeen {
-				return Root{}, fmt.Errorf("command tree: invalid version field")
-			}
-			value, size := protowire.ConsumeVarint(data)
-			if size < 0 {
-				return Root{}, protowire.ParseError(size)
-			}
-			version, versionSeen, data = value, true, data[size:]
-		case 2:
-			if wireType != protowire.BytesType {
-				return Root{}, fmt.Errorf("command tree: invalid child field")
-			}
-			encoded, size := protowire.ConsumeBytes(data)
-			if size < 0 {
-				return Root{}, protowire.ParseError(size)
-			}
-			node, err := decodeNode(encoded, 1, &nodeCount)
-			if err != nil {
-				return Root{}, err
-			}
-			root.Children = append(root.Children, node)
-			data = data[size:]
-		default:
-			size := protowire.ConsumeFieldValue(number, wireType, data)
-			if size < 0 {
-				return Root{}, protowire.ParseError(size)
-			}
-			data = data[size:]
-		}
+	var tree abi.CommandTree
+	if err := proto.Unmarshal(data, &tree); err != nil {
+		return Root{}, fmt.Errorf("command tree: %w", err)
 	}
-	if !versionSeen || version != CommandWireVersion {
-		return Root{}, fmt.Errorf("command tree: wire version %d is unsupported", version)
+	if tree.GetVersion() != CommandWireVersion {
+		return Root{}, fmt.Errorf("command tree: wire version %d is unsupported", tree.GetVersion())
+	}
+	root := Root{}
+	nodeCount := 0
+	for _, child := range tree.GetChildren() {
+		node, err := convertNode(child, 1, &nodeCount)
+		if err != nil {
+			return Root{}, err
+		}
+		root.Children = append(root.Children, node)
 	}
 	if err := Validate(&root); err != nil {
 		return Root{}, err
