@@ -52,4 +52,5 @@ type Mutation struct {
 type Verdict struct {
 	Cancelled bool
 	Mutations []Mutation
+	Effects   []HostCall
 }
