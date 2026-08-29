@@ -35,7 +35,8 @@ type Manifest struct {
 
 // Bundle is one validated .gcpkg archive and its generated manifest.
 type Bundle struct {
-	Path     string
-	Manifest Manifest
-	Commands *command.Root
+	Path          string
+	DataDirectory string
+	Manifest      Manifest
+	Commands      *command.Root
 }
