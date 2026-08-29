@@ -195,6 +195,9 @@ type bedrockRecentBlockUse struct {
 // New creates a Server with the given configuration.
 // It initialises the game core and generates the RSA keypair for online-mode auth.
 func New(cfg *config.Config) (*Server, error) {
+	if err := coreplugin.EnsureDirectory(coreplugin.DefaultDirectory); err != nil {
+		return nil, err
+	}
 	handler.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
