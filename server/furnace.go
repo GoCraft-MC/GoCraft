@@ -2,6 +2,7 @@ package server
 
 import (
 	"math"
+	"math/rand"
 	"strings"
 
 	"GoCraft/core/player"
@@ -11,6 +12,8 @@ import (
 )
 
 const furnaceSlotCount = 3
+
+var furnaceExperienceRoll = rand.Float32
 
 type furnaceState struct {
 	BurnTime     int
@@ -36,12 +39,18 @@ func (state *furnaceState) recordRecipe(recipe handler.CookingRecipeDescription)
 }
 
 func (state *furnaceState) extractExperience() int32 {
-	var total float32
+	var total int32
 	for _, used := range state.RecipesUsed {
-		total += used.Experience * float32(used.Count)
+		raw := used.Experience * float32(used.Count)
+		points := int32(math.Floor(float64(raw)))
+		fraction := raw - float32(points)
+		if fraction > 0 && furnaceExperienceRoll() < fraction {
+			points++
+		}
+		total += points
 	}
 	clear(state.RecipesUsed)
-	return int32(math.Floor(float64(total)))
+	return total
 }
 
 type furnaceKey struct {
@@ -251,7 +260,6 @@ func (s *Server) tickFurnaces() {
 				if sess, ok := s.sessions.Get(p.UUID); ok {
 					_ = handler.SyncFurnaceContainer(sess.Conn, p, state.CookTime, state.BurnTime, state.BurnDuration, state.CookDuration)
 				}
-			}
 		})
 	}
 }
