@@ -203,3 +203,23 @@ func count(stacks []player.ItemStack, item string) int {
 	}
 	return total
 }
+
+func TestDecoratedPotVanillaBreakRules(t *testing.T) {
+	intact := Drops(Context{Block: block("decorated_pot", map[string]string{"cracked": "false"}), Tool: player.ItemStack{}, Random: rand.New(rand.NewSource(1))})
+	wantDrop(t, intact, "minecraft:decorated_pot", 1)
+
+	silk := Drops(Context{Block: block("decorated_pot", map[string]string{"cracked": "false"}), Tool: player.ItemStack{ItemID: "minecraft:diamond_pickaxe", Count: 1}, Enchantments: map[string]int{"minecraft:silk_touch": 1}, Random: rand.New(rand.NewSource(1))})
+	wantDrop(t, silk, "minecraft:decorated_pot", 1)
+
+	cracked := Drops(Context{Block: block("decorated_pot", map[string]string{"cracked": "true"}), Tool: player.ItemStack{ItemID: "minecraft:diamond_pickaxe", Count: 1}, Random: rand.New(rand.NewSource(1))})
+	if count(cracked, "minecraft:brick") != 4 {
+		t.Fatalf("cracked pot drops=%+v, want four bricks", cracked)
+	}
+
+	if !BreaksDecoratedPot("minecraft:diamond_pickaxe") {
+		t.Fatal("diamond pickaxe missing breaks_decorated_pots tag")
+	}
+	if BreaksDecoratedPot("") {
+		t.Fatal("empty hand incorrectly shatters pot")
+	}
+}

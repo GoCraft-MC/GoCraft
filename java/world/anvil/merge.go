@@ -158,6 +158,9 @@ func blockEntitiesTag(entities []coreworld.BlockEntity) Tag {
 		if entity.Items != nil {
 			compound["Items"] = containerItemsTag(entity.Items)
 		}
+		if entity.Type == "minecraft:decorated_pot" || entity.Type == "DecoratedPot" {
+			compound["sherds"] = potDecorationsTag(entity.PotDecorations)
+		}
 		entries = append(entries, Tag{typ: tagCompound, compound: compound})
 	}
 	return Tag{typ: tagList, listElem: tagCompound, listV: entries}
@@ -180,6 +183,9 @@ func containerItemsTag(items []coreworld.ContainerItem) Tag {
 		if enchantments := encodeItemEnchantments(item.Enchantments); enchantments.typ != tagEnd {
 			components["minecraft:enchantments"] = enchantments
 		}
+		if item.ItemID == "minecraft:decorated_pot" {
+			components["minecraft:pot_decorations"] = potDecorationsTag(item.PotDecorations)
+		}
 		if len(components) != 0 {
 			compound["components"] = Tag{typ: tagCompound, compound: components}
 		}
@@ -199,4 +205,13 @@ func encodeItemEnchantments(encoded string) Tag {
 	return Tag{typ: tagCompound, compound: map[string]Tag{
 		"levels": {typ: tagCompound, compound: levels},
 	}}
+}
+
+func potDecorationsTag(decorations [4]string) Tag {
+	decorations = player.NormalizePotDecorations(decorations)
+	values := make([]Tag, 0, len(decorations))
+	for _, decoration := range decorations {
+		values = append(values, Tag{typ: tagString, strV: decoration})
+	}
+	return Tag{typ: tagList, listElem: tagString, listV: values}
 }

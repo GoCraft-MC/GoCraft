@@ -1,6 +1,7 @@
 package world
 
 import (
+	"bytes"
 	"testing"
 
 	coreworld "GoCraft/core/world"
@@ -21,5 +22,21 @@ func TestBlockEntityModelsRetainOutdoorSkylight(t *testing.T) {
 	defer releaseSkyLightLevels(levels)
 	if got := levels[skyCellIndex(1, 64, 1)]; got != 15 {
 		t.Fatalf("outdoor chest skylight = %d, want 15", got)
+	}
+}
+
+func TestDecoratedPotNetworkDataUsesCanonicalSherds(t *testing.T) {
+	entity := coreworld.BlockEntity{
+		Type: "minecraft:decorated_pot",
+		PotDecorations: [4]string{
+			"minecraft:angler_pottery_sherd", "minecraft:brick",
+			"minecraft:flow_pottery_sherd", "minecraft:miner_pottery_sherd",
+		},
+	}
+	data := BlockEntityNetworkData(entity)
+	for _, decoration := range entity.PotDecorations {
+		if !bytes.Contains(data, []byte(decoration)) {
+			t.Fatalf("network NBT does not contain %q: %x", decoration, data)
+		}
 	}
 }

@@ -714,7 +714,9 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 	}
 
 	if entity.Type == corentity.TypeItem {
-		item := l.itemInstance(player.ItemStack{ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage}, 1)
+		item := l.itemInstance(player.ItemStack{
+			ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage, PotDecorations: entity.ItemPotDecorations,
+		}, 1)
 		if item.Stack.NetworkID == 0 {
 			return nil
 		}
@@ -1939,6 +1941,15 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 	if enchantments := bedrockEnchantments(stack); len(enchantments) > 0 {
 		nbtData["ench"] = enchantments
 	}
+	if stack.ItemID == "minecraft:decorated_pot" {
+		decorations := stack.NormalizedPotDecorations()
+		sherds := make([]any, 0, len(decorations))
+		for _, decoration := range decorations {
+			sherds = append(sherds, decoration)
+		}
+		nbtData["id"] = "DecoratedPot"
+		nbtData["sherds"] = sherds
+	}
 	if len(nbtData) == 0 {
 		nbtData = nil
 	}
@@ -2044,4 +2055,32 @@ func armSizeToUint8(s string) uint8 {
 		return protocol.ArmSizeSlim
 	}
 	return protocol.ArmSizeWide
+}
+
+// BroadcastBlockEntityData mirrors canonical decorated-pot block actor data to
+// Bedrock viewers in the affected dimension.
+func (l *Listener) BroadcastBlockEntityData(dimension int32, entity coreworld.BlockEntity) {
+	if l == nil || (entity.Type != "minecraft:decorated_pot" && entity.Type != "decorated_pot") {
+		return
+	}
+	decorations := player.NormalizePotDecorations(entity.PotDecorations)
+	data := map[string]any{
+		"id": "DecoratedPot",
+		"x":  int32(entity.X), "y": int32(entity.Y), "z": int32(entity.Z),
+		"sherds": []string{decorations[0], decorations[1], decorations[2], decorations[3]},
+	}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		if current.dimension.Load() == dimension {
+			sessions = append(sessions, current)
+		}
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(&packet.BlockActorData{
+			Position: protocol.BlockPos{int32(entity.X), int32(entity.Y), int32(entity.Z)},
+			NBTData:  data,
+		})
+	}
 }

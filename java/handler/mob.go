@@ -92,7 +92,9 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			VarInt(e.EntityID).
 			Byte(8).  // ItemEntity DATA_ITEM metadata index
 			VarInt(7) // ItemStack metadata serializer
-		encodeSlot(b, player.ItemStack{ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage})
+		encodeSlot(b, player.ItemStack{
+			ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage, PotDecorations: e.ItemPotDecorations,
+		})
 		return b.Byte(0xff).Build()
 	}
 	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)

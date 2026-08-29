@@ -145,9 +145,25 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
+		lootBlock := broken
+		potDecorations := [4]string{}
+		if broken.ResourceLocation() == "minecraft:decorated_pot" {
+			potDecorations = w.DecoratedPotDecorations(int(bx), int(by), int(bz))
+		}
+		containerItems := w.ContainerItems(int(bx), int(by), int(bz))
+		if broken.ResourceLocation() == "minecraft:decorated_pot" && held.EnchantmentLevel("minecraft:silk_touch") == 0 && blockloot.BreaksDecoratedPot(held.ItemID) {
+			lootBlock = copyBlockProperties(broken)
+			lootBlock.Properties["cracked"] = "true"
+		}
+		enchantments := make(map[string]int)
+		for _, enchantment := range held.EnchantmentLevels() {
+			enchantments[enchantment.ID] = enchantment.Level
+		}
 		lootContext := blockloot.Context{
-			Block: broken,
-			Tool:  held,
+			Block:          lootBlock,
+			Tool:           held,
+			Enchantments:   enchantments,
+			PotDecorations: potDecorations,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return w.GetBlock(int(bx)+dx, int(by)+dy, int(bz)+dz)
 			},
@@ -162,7 +178,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		breakLinkedBedHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		breakLinkedDoorHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		unlinkChestPartner(int(bx), int(by), int(bz), broken, w, mgr)
-		breakUnsupportedBlocksAbove(int(bx), int(by), int(bz), w, mgr)
+		breakUnsupportedBlocksAboveWithDrops(int(bx), int(by), int(bz), w, mgr, nextEntityID, p.Dimension)
 		broadcastSoundAt(mgr, blockBreakSound(broken.ResourceLocation()), soundCategoryBlocks,
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 		w.EmitVibration(int(bx), int(by), int(bz))
@@ -173,10 +189,10 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 			dropPosition := spatial.Vec3{X: float64(bx) + 0.5, Y: float64(by) + 0.5, Z: float64(bz) + 0.5}
 			ordinal := 0
 			if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) {
-				for _, item := range w.ContainerItems(int(bx), int(by), int(bz)) {
+				for _, item := range containerItems {
 					if item.ItemID != "" && item.Count > 0 {
 						spawnBlockDrop(w, nextEntityID, dropPosition,
-							player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}, ordinal, mgr, p.Dimension)
+							player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}, ordinal, mgr, p.Dimension)
 						ordinal++
 					}
 				}
@@ -233,6 +249,7 @@ func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spat
 	entityUUID[8] = (entityUUID[8] & 0x3f) | 0x80
 	dropped := corentity.New(id, entityUUID, corentity.TypeItem, position.X, position.Y+0.25, position.Z)
 	dropped.ItemID, dropped.ItemCount, dropped.ItemDamage = stack.ItemID, stack.Count, stack.Damage
+	dropped.ItemPotDecorations = stack.PotDecorations
 	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
 	dropped.VX, dropped.VY, dropped.VZ = math.Cos(angle)*0.1, 0.2, math.Sin(angle)*0.1
 	w.Entities.Add(dropped)
@@ -251,6 +268,26 @@ func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.Worl
 }
 
 func breakUnsupportedBlocksAbove(x, y, z int, w *coreworld.World, mgr *session.Manager) {
+	breakUnsupportedBlocksAboveWithDrops(x, y, z, w, mgr, nil, 0)
+}
+
+func breakUnsupportedBlocksAboveWithDrops(x, y, z int, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32, dimension int32) {
+	for updateIndex, update := range w.ApplyAttachmentSupportUpdatesAround(x, y, z) {
+		if mgr != nil {
+			BroadcastBlockChange(update.Change, mgr)
+		}
+		if !update.Removed {
+			continue
+		}
+		dropPosition := spatial.Vec3{
+			X: float64(update.Change.X) + 0.5,
+			Y: float64(update.Change.Y) + 0.5,
+			Z: float64(update.Change.Z) + 0.5,
+		}
+		for dropIndex, drop := range blockloot.Drops(blockloot.Context{Block: update.Previous}) {
+			spawnBlockDrop(w, nextEntityID, dropPosition, drop, updateIndex*16+dropIndex, mgr, dimension)
+		}
+	}
 	for _, change := range w.BreakUnsupportedCropsAbove(x, y, z) {
 		if mgr != nil {
 			BroadcastBlockChange(change, mgr)
@@ -813,6 +850,13 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	slog.Info("block place", "player", p.Username,
 		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
 	switch {
+	case coreworld.IsAttachmentPlacementItem(block.ResourceLocation()):
+		placed, _, ok := coreworld.AttachmentPlacementState(w, block, px, py, pz, face, javaAttachmentRotation(p.Rotation.Yaw), placingInWater)
+		if !ok {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		applyBlockChange(px, py, pz, placed, w, mgr)
 	case block.ResourceLocation() == "minecraft:chest" || block.ResourceLocation() == "minecraft:trapped_chest":
 		placeChestBlock(p, px, py, pz, block.ResourceLocation(), w, mgr)
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
@@ -958,8 +1002,13 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		applyBlockChange(px, py, pz, block, w, mgr)
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
 	case block.ResourceLocation() == "minecraft:decorated_pot":
+		block.Properties = map[string]string{
+			"facing": chestFacingFromYaw(p.Rotation.Yaw), "cracked": "false",
+			"waterlogged": strconv.FormatBool(placingInWater),
+		}
 		applyBlockChange(px, py, pz, block, w, mgr)
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
+		w.SetDecoratedPotDecorations(px, py, pz, held.NormalizedPotDecorations())
 	case block.ResourceLocation() == "minecraft:grindstone":
 		block.Properties = javaGrindstonePlacementState(face, p.Rotation.Yaw)
 		applyBlockChange(px, py, pz, block, w, mgr)
@@ -1147,7 +1196,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments})
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations})
 				w.SetContainerItems(x, y, z, target.ResourceLocation(), items)
 				if p.GameMode != player.GameModeCreative {
 					inventorySlot := player.HotbarStart + p.HeldSlot
@@ -1210,7 +1259,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments}
+			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations}
 		} else {
 			stored.Count++
 		}
@@ -1758,7 +1807,7 @@ func placeDoorBlock(p *player.Player, x, y, z int, kind string, clickX, clickZ f
 	ns, name, _ := strings.Cut(kind, ":")
 	facing := bedFacingFromYaw(p.Rotation.Yaw)
 	lower := coreworld.Block{Namespace: ns, Name: name, Properties: map[string]string{
-		"facing": facing, "half": "lower", "hinge": doorHinge(facing, clickX, clickZ),
+		"facing": facing, "half": "lower", "hinge": coreworld.DoorHinge(w, x, y, z, facing, clickX, clickZ),
 		"open": "false", "powered": "false",
 	}}
 	upper := copyBlockProperties(lower)

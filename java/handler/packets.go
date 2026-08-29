@@ -47,10 +47,10 @@ var (
 
 var (
 	// Serverbound
-	packetIDClientInformation      = protocoldata.MustSB("configuration", "minecraft:client_information")
-	packetIDServerboundKnownPacks  = protocoldata.MustSB("configuration", "minecraft:select_known_packs")
-	packetIDAcknowledgeFinish      = protocoldata.MustSB("configuration", "minecraft:finish_configuration")
-	packetIDResourcePackResponse   = protocoldata.MustSB("configuration", "minecraft:resource_pack")
+	packetIDClientInformation     = protocoldata.MustSB("configuration", "minecraft:client_information")
+	packetIDServerboundKnownPacks = protocoldata.MustSB("configuration", "minecraft:select_known_packs")
+	packetIDAcknowledgeFinish     = protocoldata.MustSB("configuration", "minecraft:finish_configuration")
+	packetIDResourcePackResponse  = protocoldata.MustSB("configuration", "minecraft:resource_pack")
 
 	// Clientbound
 	packetIDConfigPluginMessage   = protocoldata.MustCB("configuration", "minecraft:custom_payload")
@@ -89,6 +89,7 @@ var (
 	packetIDSetHeadRotation        = protocoldata.MustCB("play", "minecraft:rotate_head")
 	packetIDTeleportEntity         = protocoldata.MustCB("play", "minecraft:entity_position_sync")
 	packetIDMoveVehicleSC          = protocoldata.MustCB("play", "minecraft:move_vehicle")
+	packetIDBlockEntityData        = protocoldata.MustCB("play", "minecraft:block_entity_data")
 	packetIDBlockUpdate            = protocoldata.MustCB("play", "minecraft:block_update")
 	packetIDAcknowledgeBlockChange = protocoldata.MustCB("play", "minecraft:acknowledge_block_change")
 	packetIDSetContainerContent    = protocoldata.MustCB("play", "minecraft:set_container_content")

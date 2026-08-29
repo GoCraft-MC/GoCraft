@@ -168,6 +168,14 @@ func skipSlotDisplay(t *testing.T, reader *bytes.Reader) {
 						t.Fatalf("skip lore component: %v", err)
 					}
 				}
+			case 61: // pot_decorations
+				decorations := mustReadRecipeVarInt(t, reader)
+				if decorations < 0 || decorations > 64 {
+					t.Fatalf("invalid pot decoration count %d", decorations)
+				}
+				for decoration := int32(0); decoration < decorations; decoration++ {
+					_ = mustReadRecipeVarInt(t, reader)
+				}
 			case 13:
 				attributes := mustReadRecipeVarInt(t, reader)
 				for attribute := int32(0); attribute < attributes; attribute++ {
