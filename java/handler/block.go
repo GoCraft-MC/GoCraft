@@ -21,6 +21,7 @@ import (
 	"GoCraft/core/blockloot"
 	corentity "GoCraft/core/entity"
 	coreexperience "GoCraft/core/experience"
+	coreintent "GoCraft/core/intent"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
@@ -76,12 +77,12 @@ const (
 
 // handleBlockPacket dispatches an incoming block-interaction packet.
 // Called from the play loop for packets that need the world and session manager.
-func handleBlockPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, plugins *coreplugin.Bus) error {
+func handleBlockPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, plugins *coreplugin.Bus, intents *coreintent.Bus) error {
 	switch pkt.ID {
 	case packetIDPlayerAction:
 		return handlePlayerActionWithContext(pkt, p, w, mgr, conn, nextEntityID, plugins)
 	case packetIDUseItemOn:
-		return handleUseItemOn(pkt, p, w, mgr, conn, nextEntityID)
+		return handleUseItemOnWithIntents(pkt, p, w, mgr, conn, nextEntityID, intents)
 	}
 	return nil
 }
@@ -511,6 +512,10 @@ func blockDropItem(blockName string) (string, int) {
 //	Bool      world_border_hit
 //	VarInt    sequence
 func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32) error {
+	return handleUseItemOnWithIntents(pkt, p, w, mgr, conn, nextEntityID, nil)
+}
+
+func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, intents *coreintent.Bus) error {
 	r := pkt.Reader()
 
 	hand, err := protocol.ReadVarInt(r)
@@ -551,6 +556,22 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	// Tool and seed interactions run before generic block/container handling.
 	targetBlock := w.GetBlock(int(bx), int(by), int(bz))
 	held := p.HeldItem()
+	if hand == 0 && held.ItemID == "minecraft:firework_rocket" &&
+		p.GameMode != player.GameModeSpectator {
+		if intents != nil {
+			intents.PostFireworkUse(coreintent.FireworkUseIntent{
+				PlayerUUID: p.UUID,
+				HotbarSlot: int32(p.HeldSlot),
+				Position: spatial.Vec3{
+					X: float64(bx) + float64(cursorX),
+					Y: float64(by) + float64(cursorY),
+					Z: float64(bz) + float64(cursorZ),
+				},
+			})
+		}
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
 	if targetBlock.ResourceLocation() == "minecraft:sweet_berry_bush" &&
 		(held.ItemID != "minecraft:bone_meal" || coreworld.CropAge(targetBlock) >= 3) {
 		if count, changes, harvested := w.HarvestSweetBerryBush(int(bx), int(by), int(bz), rand.Uint64()); harvested {
@@ -586,6 +607,20 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	// Sneaking with an item bypasses block activation so a block can be placed
 	// against doors, containers, workstations, composters, and other UIs.
 	bypassActivation := p.Sneaking && !held.IsEmpty()
+	if !bypassActivation && p.GameMode != player.GameModeSpectator && targetBlock.ResourceLocation() == "minecraft:bell" {
+		if _, valid := coreworld.BellRingDirection(targetBlock, face, cursorY); valid {
+			if intents != nil {
+				intents.PostBellRing(coreintent.BellRingIntent{
+					PlayerUUID: p.UUID,
+					Position:   spatial.BlockPos{X: bx, Y: by, Z: bz},
+					Face:       face,
+					HitY:       cursorY,
+				})
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 	if !bypassActivation && toggleTrapdoor(int(bx), int(by), int(bz), targetBlock, w, mgr) {
 		sound := "minecraft:block.wooden_trapdoor.open"
 		if targetBlock.Properties["open"] == "true" {
@@ -1020,6 +1055,9 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 		applyBlockChange(px, py, pz, block, w, mgr)
 	default:
 		applyBlockChange(px, py, pz, block, w, mgr)
+	}
+	if blockEntityType, ok := coreworld.PlacementBlockEntityType(block.ResourceLocation()); ok {
+		w.SetBlockEntity(px, py, pz, blockEntityType, []byte{10, 0})
 	}
 	if p.GameMode == player.GameModeSurvival {
 		slot := player.HotbarStart + p.HeldSlot

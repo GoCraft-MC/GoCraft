@@ -172,6 +172,7 @@ func loadRegistries() {
 	validateVersion(raw, "registries.json")
 
 	itemIDs, itemNames = loadItemRegistry()
+	blockTypeIDs, _ = loadRegistry(raw, "minecraft:block", "registries.json")
 	etMap, _ := loadRegistry(raw, "minecraft:entity_type", "registries.json")
 	entityTypeIDs = etMap
 	// Dynamic biome IDs are assigned by the ordered Registry Data snapshot sent
