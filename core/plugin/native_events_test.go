@@ -15,7 +15,10 @@ func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {
 	bus := NewBus(context.Background(), time.Second)
 	var received *abi.Event
 	instance := &fakeInstance{
-		manifest: Manifest{ID: "protect", Subscriptions: []Subscription{{Event: EventBlockBreak}}},
+		manifest: Manifest{
+			ID: "protect", Permissions: []string{"zone.trusted", "zone.build"},
+			Subscriptions: []Subscription{{Event: EventBlockBreak}},
+		},
 		dispatch: func(_ context.Context, event *abi.Event) (abi.Verdict, error) {
 			received = event
 			return abi.Verdict{Cancelled: true}, nil
@@ -24,6 +27,7 @@ func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {
 	if err := bus.Attach(instance); err != nil {
 		t.Fatal(err)
 	}
+	bus.SetPermissionResolver(func(_ *player.Player, node string) bool { return node == "zone.build" })
 	identity := [16]byte{1, 2, 3}
 	p := player.New(identity, "Alex", player.ClientEditionBedrock)
 	block := coreworld.Block{Namespace: "minecraft", Name: "oak_log", Properties: map[string]string{
@@ -55,5 +59,13 @@ func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {
 	}
 	if received.Fields[3].String != "minecraft:iron_axe" {
 		t.Fatalf("tool = %q", received.Fields[3].String)
+	}
+	permissions := received.Fields[4].List
+	if len(permissions) != 2 {
+		t.Fatalf("permissions = %+v", permissions)
+	}
+	build, trusted := permissions[0].List, permissions[1].List
+	if build[0].String != "zone.build" || !build[1].Bool || trusted[0].String != "zone.trusted" || trusted[1].Bool {
+		t.Fatalf("resolved permissions = %+v", permissions)
 	}
 }
