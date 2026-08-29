@@ -26,6 +26,13 @@ func TestValidateRejectsInvalidTrees(t *testing.T) {
 		want string
 	}{
 		{
+			name: "argument at root",
+			root: &Root{Children: []Node{
+				Argument{Name: "target", Type: ArgPlayer, Exec: 1},
+			}},
+			want: "root commands must be literals",
+		},
+		{
 			name: "duplicate literal",
 			root: &Root{Children: []Node{
 				Literal{Name: "shop", Exec: 1}, Literal{Name: "shop", Exec: 2},

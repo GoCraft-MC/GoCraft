@@ -12,6 +12,11 @@ func Validate(root *Root) error {
 	if len(root.Children) == 0 {
 		return fmt.Errorf("command tree: root has no commands")
 	}
+	for _, child := range root.Children {
+		if _, ok := child.(Literal); !ok {
+			return fmt.Errorf("command tree: root commands must be literals")
+		}
+	}
 	return validateChildren("/", root.Children)
 }
 
