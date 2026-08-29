@@ -3,7 +3,7 @@ package command
 import (
 	"fmt"
 
-	abi "GoCraft/abi/v1"
+	wire "GoCraft/abi/v1/wire"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 // The schema cannot express those rules — protobuf has no way to say "field 4
 // is only valid when field 1 is COMMAND_NODE_KIND_ARGUMENT" — so they are
 // checked here, on the way in, and never trusted from the bundle.
-func convertNode(node *abi.CommandNode, depth int, count *int) (Node, error) {
+func convertNode(node *wire.CommandNode, depth int, count *int) (Node, error) {
 	*count++
 	if *count > maximumCommandNodes || depth > maximumCommandDepth {
 		return nil, fmt.Errorf("command tree: size limit exceeded")
@@ -36,8 +36,8 @@ func convertNode(node *abi.CommandNode, depth int, count *int) (Node, error) {
 	}
 	name := node.GetName()
 	switch node.GetKind() {
-	case abi.CommandNodeKind_COMMAND_NODE_KIND_LITERAL:
-		if node.GetArgumentType() != abi.CommandArgumentType_COMMAND_ARGUMENT_TYPE_UNSPECIFIED ||
+	case wire.CommandNodeKind_COMMAND_NODE_KIND_LITERAL:
+		if node.GetArgumentType() != wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_UNSPECIFIED ||
 			len(node.GetEnumValues()) != 0 || node.GetCustomType() != "" ||
 			node.IntegerMin != nil || node.IntegerMax != nil ||
 			node.DecimalMin != nil || node.DecimalMax != nil {
@@ -47,12 +47,12 @@ func convertNode(node *abi.CommandNode, depth int, count *int) (Node, error) {
 			Name: name, Permission: node.GetPermission(),
 			Children: children, Exec: ExecID(node.GetExecutor()),
 		}, nil
-	case abi.CommandNodeKind_COMMAND_NODE_KIND_ARGUMENT:
+	case wire.CommandNodeKind_COMMAND_NODE_KIND_ARGUMENT:
 		if node.GetPermission() != "" {
 			return nil, fmt.Errorf("command argument %q contains a permission", name)
 		}
 		argumentType := node.GetArgumentType()
-		if argumentType > abi.CommandArgumentType(ArgCustom) {
+		if argumentType > wire.CommandArgumentType(ArgCustom) {
 			return nil, fmt.Errorf("command argument %q has invalid type %d", name, argumentType)
 		}
 		return Argument{

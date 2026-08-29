@@ -7,15 +7,15 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 
-	abi "GoCraft/abi/v1"
+	wire "GoCraft/abi/v1/wire"
 )
 
 // The payloads below are assembled byte by byte rather than with the generated
 // marshaller: decoding must be verified against the wire format itself, not
 // against a round trip through the encoder that shares its assumptions.
 const (
-	wireNodeLiteral  = uint64(abi.CommandNodeKind_COMMAND_NODE_KIND_LITERAL)
-	wireNodeArgument = uint64(abi.CommandNodeKind_COMMAND_NODE_KIND_ARGUMENT)
+	wireNodeLiteral  = uint64(wire.CommandNodeKind_COMMAND_NODE_KIND_LITERAL)
+	wireNodeArgument = uint64(wire.CommandNodeKind_COMMAND_NODE_KIND_ARGUMENT)
 )
 
 func appendVarintField(data []byte, field protowire.Number, value uint64) []byte {

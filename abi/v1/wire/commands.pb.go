@@ -4,7 +4,7 @@
 // 	protoc        (unknown)
 // source: abi/v1/commands.proto
 
-package abi
+package wire
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -385,7 +385,7 @@ const file_abi_v1_commands_proto_rawDesc = "" +
 	"\x1eCOMMAND_ARGUMENT_TYPE_DURATION\x10\t\x12\x1e\n" +
 	"\x1aCOMMAND_ARGUMENT_TYPE_ENUM\x10\n" +
 	"\x12 \n" +
-	"\x1cCOMMAND_ARGUMENT_TYPE_CUSTOM\x10\vB\x14Z\x12GoCraft/abi/v1;abib\x06proto3"
+	"\x1cCOMMAND_ARGUMENT_TYPE_CUSTOM\x10\vB\x1aZ\x18GoCraft/abi/v1/wire;wireb\x06proto3"
 
 var (
 	file_abi_v1_commands_proto_rawDescOnce sync.Once

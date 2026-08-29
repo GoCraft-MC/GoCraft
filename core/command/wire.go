@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	abi "GoCraft/abi/v1"
+	wire "GoCraft/abi/v1/wire"
 )
 
 const CommandWireVersion = 1
@@ -21,7 +21,7 @@ const CommandWireVersion = 1
 // and depth limits below are enforced again during conversion, because those
 // are the server's limits rather than the format's.
 func DecodeTree(data []byte) (Root, error) {
-	var tree abi.CommandTree
+	var tree wire.CommandTree
 	if err := proto.Unmarshal(data, &tree); err != nil {
 		return Root{}, fmt.Errorf("command tree: %w", err)
 	}

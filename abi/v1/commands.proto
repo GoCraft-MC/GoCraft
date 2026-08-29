@@ -2,7 +2,11 @@ syntax = "proto3";
 
 package gocraft.abi.v1;
 
-option go_package = "GoCraft/abi/v1;abi";
+// Generated Go code lives in its own package. abi/v1 holds the hand-written
+// domain types the bus, the mutation queue and the in-process runtimes use on
+// the hot path; wire types stay at the transport boundary and are converted in,
+// never passed around.
+option go_package = "GoCraft/abi/v1/wire;wire";
 
 message CommandTree {
   uint32 version = 1;
