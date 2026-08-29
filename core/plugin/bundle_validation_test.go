@@ -50,3 +50,25 @@ func TestOpenBundleRejectsUnsupportedAPI(t *testing.T) {
 		t.Fatalf("OpenBundle() error = %v", err)
 	}
 }
+
+func TestOpenBundleRejectsInvalidPermissionLists(t *testing.T) {
+	tests := []struct {
+		name        string
+		permissions string
+		want        string
+	}{
+		{name: "empty", permissions: `[""]`, want: "empty subscribed permission"},
+		{name: "duplicate", permissions: `["shop.use", "shop.use"]`, want: "duplicate subscribed permission"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			directory := t.TempDir()
+			manifest := validTestManifest + "[subscribe]\nperms = " + tc.permissions + "\n"
+			writeBundle(t, directory, "invalid.gcpkg", manifest, nil)
+			_, err := OpenBundle(filepath.Join(directory, "invalid.gcpkg"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("OpenBundle() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
