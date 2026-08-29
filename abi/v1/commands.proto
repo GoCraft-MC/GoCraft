@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package gocraft.abi.v1;
+
+option go_package = "GoCraft/abi/v1;abi";
+
+message CommandTree {
+  uint32 version = 1;
+  repeated CommandNode children = 2;
+}
+
+message CommandNode {
+  CommandNodeKind kind = 1;
+  string name = 2;
+  string permission = 3;
+  CommandArgumentType argument_type = 4;
+  repeated string enum_values = 5;
+  uint32 executor = 6;
+  repeated CommandNode children = 7;
+  string custom_type = 8;
+  optional sint64 integer_min = 9;
+  optional sint64 integer_max = 10;
+  optional double decimal_min = 11;
+  optional double decimal_max = 12;
+}
+
+enum CommandNodeKind {
+  COMMAND_NODE_UNSPECIFIED = 0;
+  COMMAND_LITERAL = 1;
+  COMMAND_ARGUMENT = 2;
+}
+
+enum CommandArgumentType {
+  COMMAND_ARGUMENT_UNSPECIFIED = 0;
+  COMMAND_INTEGER = 1;
+  COMMAND_DECIMAL = 2;
+  COMMAND_STRING = 3;
+  COMMAND_GREEDY = 4;
+  COMMAND_PLAYER = 5;
+  COMMAND_BLOCK_POS = 6;
+  COMMAND_BLOCK_STATE = 7;
+  COMMAND_ITEM = 8;
+  COMMAND_DURATION = 9;
+  COMMAND_ENUM = 10;
+  COMMAND_CUSTOM = 11;
+}
