@@ -99,3 +99,37 @@ func TestEventDeadlineStopsRemainingSubscribers(t *testing.T) {
 		t.Fatalf("late plugin health = %+v", lateHealth)
 	}
 }
+
+func TestEventVerdictQueuesBatchedEffects(t *testing.T) {
+	queue := NewMutationQueue()
+	bus := newBus(context.Background(), time.Second, queue)
+	instance := &fakeInstance{
+		manifest: Manifest{ID: "protect", Subscriptions: []Subscription{{Event: "block.break"}}},
+		dispatch: func(context.Context, *abi.Event) (abi.Verdict, error) {
+			return abi.Verdict{
+				Cancelled: true,
+				Effects: []abi.HostCall{
+					{Type: "message", Fields: []abi.Value{abi.String("Protected area.")}},
+					{Type: "sound", Fields: []abi.Value{abi.String("deny")}},
+				},
+			}, nil
+		},
+	}
+	if err := bus.Attach(instance); err != nil {
+		t.Fatal(err)
+	}
+	if bus.EmitCancellable(&abi.Event{Type: "block.break"}) {
+		t.Fatal("cancelled event was allowed")
+	}
+	var effects []string
+	count, err := queue.Drain(func(call abi.HostCall) error {
+		effects = append(effects, call.Type)
+		return nil
+	})
+	if err != nil || count != 2 {
+		t.Fatalf("Drain() = %d, %v", count, err)
+	}
+	if want := []string{"message", "sound"}; !reflect.DeepEqual(effects, want) {
+		t.Fatalf("effects = %v, want %v", effects, want)
+	}
+}
