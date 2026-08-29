@@ -1,15 +1,21 @@
 package world
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
+
+	"GoCraft/core/player"
+	coreworld "GoCraft/core/world"
 )
 
 // NBT tag type constants used in the chunk heightmaps compound.
 const (
 	nbtTagEnd      byte = 0x00
-	nbtTagLongArr  byte = 0x0C
+	nbtTagString   byte = 0x08
+	nbtTagList     byte = 0x09
 	nbtTagCompound byte = 0x0A
+	nbtTagLongArr  byte = 0x0C
 )
 
 // writeNetworkNBTCompound writes an NBT compound in the "network NBT" format
@@ -96,4 +102,39 @@ func packHeightmapValues(surfaceYs [256]int) []int64 {
 		longs[longIndex] |= value << bitOffset
 	}
 	return longs
+}
+
+// BlockEntityNetworkData returns the network-NBT payload for a canonical block
+// entity. Decorated-pot sherds are generated from canonical state so pots placed
+// during this server session render correctly before the chunk is persisted.
+func BlockEntityNetworkData(entity coreworld.BlockEntity) []byte {
+	if entity.Type != "minecraft:decorated_pot" && entity.Type != "decorated_pot" {
+		return entity.Data
+	}
+	decorations := player.NormalizePotDecorations(entity.PotDecorations)
+	var buf bytes.Buffer
+	writeNetworkNBTCompound(&buf, func(w io.Writer) {
+		writeNBTStringList(w, "sherds", decorations[:])
+	})
+	return buf.Bytes()
+}
+
+func writeNBTStringList(w io.Writer, name string, values []string) {
+	_, _ = w.Write([]byte{nbtTagList})
+	writeNBTStringPayload(w, name)
+	_, _ = w.Write([]byte{nbtTagString})
+	var length [4]byte
+	binary.BigEndian.PutUint32(length[:], uint32(len(values)))
+	_, _ = w.Write(length[:])
+	for _, value := range values {
+		writeNBTStringPayload(w, value)
+	}
+}
+
+func writeNBTStringPayload(w io.Writer, value string) {
+	data := []byte(value)
+	var length [2]byte
+	binary.BigEndian.PutUint16(length[:], uint16(len(data)))
+	_, _ = w.Write(length[:])
+	_, _ = w.Write(data)
 }

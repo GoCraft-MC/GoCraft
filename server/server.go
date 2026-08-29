@@ -554,6 +554,19 @@ func New(cfg *config.Config) (*Server, error) {
 		netherWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(1))
 		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
 	}
+	for dimension, dimensionWorld := range map[int32]*coreworld.World{
+		dimensionOverworld: worldInstance,
+		dimensionNether:    netherWorld,
+		dimensionEnd:       endWorld,
+	} {
+		dimension := dimension
+		dimensionWorld.SetBlockEntityObserver(func(entity coreworld.BlockEntity) {
+			handler.BroadcastBlockEntityDataInDimension(entity, s.sessions, dimension)
+			if s.bedrockListener != nil {
+				s.bedrockListener.BroadcastBlockEntityData(dimension, entity)
+			}
+		})
+	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
 	cmds.SetPlayerDisconnector(s.disconnectPlayer)
 	return s, nil

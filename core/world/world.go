@@ -37,10 +37,12 @@ type World struct {
 	accessClock     uint64
 	maxCachedChunks int
 
-	blockObserverMu sync.RWMutex
-	blockObserver   func(BlockChange)
-	vibrationMu     sync.Mutex
-	vibrations      map[[3]int]struct{}
+	blockObserverMu       sync.RWMutex
+	blockObserver         func(BlockChange)
+	blockEntityObserverMu sync.RWMutex
+	blockEntityObserver   func(BlockEntity)
+	vibrationMu           sync.Mutex
+	vibrations            map[[3]int]struct{}
 
 	pregenQueue  chan [2]int32
 	pregenQueued map[[2]int32]struct{}
@@ -109,6 +111,27 @@ func (w *World) notifyBlockObserver(x, y, z int, block Block) {
 	if observer != nil {
 		observer(BlockChange{X: x, Y: y, Z: z, Block: block})
 	}
+}
+
+// SetBlockEntityObserver installs an adapter-neutral notification invoked after
+// canonical block-entity data changes. The snapshot passed to the observer owns
+// its Data and Items slices and may safely outlive the world mutation.
+func (w *World) SetBlockEntityObserver(observer func(BlockEntity)) {
+	w.blockEntityObserverMu.Lock()
+	w.blockEntityObserver = observer
+	w.blockEntityObserverMu.Unlock()
+}
+
+func (w *World) notifyBlockEntityObserver(entity BlockEntity) {
+	w.blockEntityObserverMu.RLock()
+	observer := w.blockEntityObserver
+	w.blockEntityObserverMu.RUnlock()
+	if observer == nil {
+		return
+	}
+	entity.Data = append([]byte(nil), entity.Data...)
+	entity.Items = append([]ContainerItem(nil), entity.Items...)
+	observer(entity)
 }
 
 // EntityDamage is a simulation-thread damage event. Source coordinates are
@@ -1357,6 +1380,7 @@ func (w *World) SetDecoratedPotDecorations(x, y, z int, decorations [4]string) {
 
 	w.containerMu.Lock()
 	updated := false
+	var snapshot BlockEntity
 	for index := range c.BlockEntities {
 		entity := &c.BlockEntities[index]
 		if entity.X != x || entity.Y != y || entity.Z != z {
@@ -1369,14 +1393,16 @@ func (w *World) SetDecoratedPotDecorations(x, y, z int, decorations [4]string) {
 			entity.Data = []byte{10, 0}
 		}
 		entity.PotDecorations = decorations
+		snapshot = *entity
 		updated = true
 		break
 	}
 	if !updated {
-		c.BlockEntities = append(c.BlockEntities, BlockEntity{
+		snapshot = BlockEntity{
 			X: x, Y: y, Z: z, Type: "minecraft:decorated_pot", Data: []byte{10, 0},
 			PotDecorations: decorations,
-		})
+		}
+		c.BlockEntities = append(c.BlockEntities, snapshot)
 	}
 	w.containerMu.Unlock()
 
@@ -1386,6 +1412,7 @@ func (w *World) SetDecoratedPotDecorations(x, y, z int, decorations [4]string) {
 	w.touchChunkLocked(key)
 	w.dirty[key] = struct{}{}
 	w.mu.Unlock()
+	w.notifyBlockEntityObserver(snapshot)
 }
 
 func normalizeDecoratedPotDecorations(decorations [4]string) [4]string {

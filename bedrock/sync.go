@@ -2056,3 +2056,31 @@ func armSizeToUint8(s string) uint8 {
 	}
 	return protocol.ArmSizeWide
 }
+
+// BroadcastBlockEntityData mirrors canonical decorated-pot block actor data to
+// Bedrock viewers in the affected dimension.
+func (l *Listener) BroadcastBlockEntityData(dimension int32, entity coreworld.BlockEntity) {
+	if l == nil || (entity.Type != "minecraft:decorated_pot" && entity.Type != "decorated_pot") {
+		return
+	}
+	decorations := player.NormalizePotDecorations(entity.PotDecorations)
+	data := map[string]any{
+		"id": "DecoratedPot",
+		"x":  int32(entity.X), "y": int32(entity.Y), "z": int32(entity.Z),
+		"sherds": []string{decorations[0], decorations[1], decorations[2], decorations[3]},
+	}
+	l.sessionsMu.RLock()
+	sessions := make([]*bedrockSession, 0, len(l.sessions))
+	for _, current := range l.sessions {
+		if current.dimension.Load() == dimension {
+			sessions = append(sessions, current)
+		}
+	}
+	l.sessionsMu.RUnlock()
+	for _, current := range sessions {
+		_ = current.conn.WritePacket(&packet.BlockActorData{
+			Position: protocol.BlockPos{int32(entity.X), int32(entity.Y), int32(entity.Z)},
+			NBTData:  data,
+		})
+	}
+}

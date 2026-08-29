@@ -192,7 +192,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 				for _, item := range containerItems {
 					if item.ItemID != "" && item.Count > 0 {
 						spawnBlockDrop(w, nextEntityID, dropPosition,
-							player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}, ordinal, mgr, p.Dimension)
+							player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}, ordinal, mgr, p.Dimension)
 						ordinal++
 					}
 				}
