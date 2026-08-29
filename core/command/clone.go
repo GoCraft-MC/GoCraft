@@ -14,13 +14,34 @@ func remapNodes(nodes []Node, allocate func() ExecID, remapped map[ExecID]ExecID
 			typed.Exec = remapExecutor(typed.Exec, allocate, remapped)
 			cloned = append(cloned, typed)
 		case Argument:
-			typed.Enum = append([]string(nil), typed.Enum...)
+			typed = cloneArgument(typed)
 			typed.Children = remapNodes(typed.Children, allocate, remapped)
 			typed.Exec = remapExecutor(typed.Exec, allocate, remapped)
 			cloned = append(cloned, typed)
 		}
 	}
 	return cloned
+}
+
+func cloneArgument(argument Argument) Argument {
+	argument.Enum = append([]string(nil), argument.Enum...)
+	if argument.IntegerMin != nil {
+		value := *argument.IntegerMin
+		argument.IntegerMin = &value
+	}
+	if argument.IntegerMax != nil {
+		value := *argument.IntegerMax
+		argument.IntegerMax = &value
+	}
+	if argument.DecimalMin != nil {
+		value := *argument.DecimalMin
+		argument.DecimalMin = &value
+	}
+	if argument.DecimalMax != nil {
+		value := *argument.DecimalMax
+		argument.DecimalMax = &value
+	}
+	return argument
 }
 
 func remapExecutor(executor ExecID, allocate func() ExecID, remapped map[ExecID]ExecID) ExecID {

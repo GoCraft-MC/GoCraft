@@ -63,7 +63,7 @@ func visibleNode(node Node, sender Sender) (Node, bool) {
 		}
 		return typed, true
 	case Argument:
-		typed.Enum = append([]string(nil), typed.Enum...)
+		typed = cloneArgument(typed)
 		typed.Children = visibleNodes(typed.Children, sender)
 		if typed.Exec == 0 && len(typed.Children) == 0 {
 			return nil, false

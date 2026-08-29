@@ -49,11 +49,16 @@ type Literal struct {
 func (Literal) isNode() {}
 
 type Argument struct {
-	Name     string
-	Type     ArgType
-	Enum     []string
-	Children []Node
-	Exec     ExecID
+	Name       string
+	Type       ArgType
+	Enum       []string
+	CustomType string
+	IntegerMin *int64
+	IntegerMax *int64
+	DecimalMin *float64
+	DecimalMax *float64
+	Children   []Node
+	Exec       ExecID
 }
 
 func (Argument) isNode() {}
