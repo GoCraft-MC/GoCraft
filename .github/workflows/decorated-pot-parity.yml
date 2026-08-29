@@ -1,0 +1,52 @@
+name: Decorated pot parity validation
+
+on:
+  push:
+    branches: ["fix/vanilla-interaction-parity"]
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vanilla-interaction-parity
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply decorated-pot parity patch
+        run: |
+          python3 .github/scripts/finalize_decorated_pot_parity.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('server/decorated_pot_parity_test.go')
+          s = p.read_text()
+          s = s.replace('"GoCraft/core/game"\n', 'corentity "GoCraft/core/entity"\n\t"GoCraft/core/game"\n')
+          s = s.replace('pig := testPassiveEntity(991, "minecraft:pig")', 'pig := corentity.New(991, [16]byte{9, 9, 1}, corentity.TypePig, 0, 64, 0)')
+          p.write_text(s)
+          PY
+      - name: Format
+        run: |
+          files=$(git diff --name-only -- '*.go')
+          if [ -n "$files" ]; then gofmt -w $files; fi
+      - name: Tidy
+        run: go mod tidy
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Commit validated parity fix
+        run: |
+          rm .github/scripts/finalize_decorated_pot_parity.py .github/workflows/decorated-pot-parity.yml
+          git config user.name "Elias"
+          git config user.email "86126606+el211@users.noreply.github.com"
+          git add -A
+          git commit -m "Preserve decorated pot data"
+          git push origin HEAD:fix/vanilla-interaction-parity
