@@ -111,7 +111,12 @@ type Server struct {
 	// Both Java (M14.1+) and Bedrock handlers post intents here; the tick
 	// goroutine drains and applies them once per tick.
 	intentBus *intent.Bus
-	plugins   *coreplugin.Bus
+
+	// pluginRegistry owns the plugin runtimes and the loaded instances.
+	// plugins is the event bus it exposes, handed down to the edition handlers
+	// so they can emit native events without knowing about runtimes.
+	pluginRegistry *coreplugin.Registry
+	plugins        *coreplugin.Bus
 
 	// connCount tracks the number of active TCP connections (Java).
 	connCount atomic.Int64
@@ -355,7 +360,9 @@ func New(cfg *config.Config) (*Server, error) {
 	handler.RegisterBuiltins(cmds)
 
 	bus := intent.NewBus(64, 512)
-	plugins := coreplugin.NewBus(context.Background(), 0)
+	eventBudget := time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond
+	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, nil, nil)
+	plugins := pluginRegistry.Bus()
 	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
 		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
 	})
@@ -395,6 +402,7 @@ func New(cfg *config.Config) (*Server, error) {
 		permissions:             permissionManager,
 		customItems:             customItemsMgr,
 		intentBus:               bus,
+		pluginRegistry:          pluginRegistry,
 		plugins:                 plugins,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
