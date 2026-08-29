@@ -1,0 +1,42 @@
+name: Vanilla parity validation
+
+on:
+  push:
+    branches: ["fix/vanilla-interaction-parity"]
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vanilla-interaction-parity
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply parity patch
+        run: python3 .github/scripts/finish_vanilla_parity.py
+      - name: Format
+        run: |
+          gofmt -w core/world/world.go core/world/redstone.go core/blockloot/loot.go core/blockloot/loot_test.go core/world/vanilla_interaction_test.go java/handler/block.go java/handler/vanilla_parity_test.go server/server.go server/bedrock_actions.go server/projectile_parity_test.go
+      - name: Tidy check
+        run: go mod tidy
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Commit validated fix
+        run: |
+          rm .github/scripts/finish_vanilla_parity.py .github/workflows/vanilla-parity-fix.yml
+          git config user.name "Elias"
+          git config user.email "86126606+el211@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix vanilla interaction parity"
+          git push origin HEAD:fix/vanilla-interaction-parity
