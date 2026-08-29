@@ -65,6 +65,16 @@ func (c *Codec) Send(envelope *wire.Envelope) error {
 	return nil
 }
 
+// Close closes the underlying stream when it can be closed, which is what
+// unblocks a read loop parked in Receive. A stream with nothing to close — a
+// buffer in a test — is not an error.
+func (c *Codec) Close() error {
+	if closer, ok := c.writer.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 // Receive reads the next envelope.
 //
 // A clean io.EOF means the peer closed between frames, which is how an orderly
