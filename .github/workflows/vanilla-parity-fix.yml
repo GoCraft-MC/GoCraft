@@ -23,10 +23,23 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
+          # The Java support-break helper grew since this patch was drafted.
+          # Add the shared attachment pass to the current function before the
+          # remaining exact replacements run.
+          java = Path('java/handler/block.go')
+          java_text = java.read_text()
+          declaration = 'func breakUnsupportedBlocksAbove(x, y, z int, w *coreworld.World, mgr *session.Manager) {\n'
+          attachment = '''\tfor _, change := range w.BreakUnsupportedAttachmentsAround(x, y, z) {\n\t\tif mgr != nil {\n\t\t\tBroadcastBlockChange(change, mgr)\n\t\t}\n\t}\n'''
+          if 'BreakUnsupportedAttachmentsAround(x, y, z)' not in java_text:
+              if declaration not in java_text:
+                  raise SystemExit('could not find Java support-break helper')
+              java.write_text(java_text.replace(declaration, declaration + attachment, 1))
+
           path = Path('.github/scripts/finish_vanilla_parity.py')
           text = path.read_text()
           old = '''    if actual < count:\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
-          new = '''    if actual < count:\n        if str(path) == "core/world/redstone.go":\n            return\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
+          new = '''    if actual < count:\n        if str(path) in {"core/world/redstone.go", "java/handler/block.go"}:\n            return\n        raise SystemExit(f"{path}: expected at least {count} occurrences, found {actual}: {old[:100]!r}")\n'''
           if old not in text:
               raise SystemExit('could not update parity patch guard')
           path.write_text(text.replace(old, new, 1))
