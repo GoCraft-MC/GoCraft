@@ -65,3 +65,42 @@ func TestRegistryRequiresOneHandlerPerExecutor(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 }
+
+func TestRegistryRemapsLocalExecutorIDs(t *testing.T) {
+	registry := NewRegistry()
+	for _, id := range []string{"one", "two"} {
+		err := registry.Register(Source{Kind: SourcePlugin, PluginID: id}, commandRoot(id, 1), commandHandlers(1))
+		if err != nil {
+			t.Fatalf("Register(%s): %v", id, err)
+		}
+	}
+	one := registry.entries["one"].root.Children[0].(Literal).Exec
+	two := registry.entries["two"].root.Children[0].(Literal).Exec
+	if one == 0 || two == 0 || one == two {
+		t.Fatalf("global executors = %d, %d", one, two)
+	}
+	if registry.handlers[one].source.PluginID != "one" || registry.handlers[two].source.PluginID != "two" {
+		t.Fatal("global handlers were assigned to the wrong sources")
+	}
+	registry.RevokeAll("one")
+	if _, ok := registry.handlers[one]; ok {
+		t.Fatal("revoked plugin handler remains registered")
+	}
+	if _, ok := registry.handlers[two]; !ok {
+		t.Fatal("another plugin handler was revoked")
+	}
+}
+
+func TestRegistryDoesNotRevokeCoreAsPlugin(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(Source{Kind: SourceCore}, commandRoot("list", 1), commandHandlers(1)); err != nil {
+		t.Fatal(err)
+	}
+	registry.RevokeAll("core")
+	if _, ok := registry.entries["core"]; !ok {
+		t.Fatal("core command source was revoked")
+	}
+	if registry.Version() != 1 {
+		t.Fatalf("version = %d, want 1", registry.Version())
+	}
+}
