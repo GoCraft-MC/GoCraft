@@ -10,6 +10,10 @@ import (
 )
 
 const (
+	// ManifestFileName is the manifest at the root of a bundle, and of the
+	// source directory a bundle is built from.
+	ManifestFileName = "plugin.toml"
+
 	CurrentAPIVersion   = 1
 	maximumManifestSize = 1 << 20
 )
@@ -29,19 +33,23 @@ type manifestFile struct {
 	} `toml:"commands"`
 }
 
-func decodeManifest(reader io.Reader) (Manifest, error) {
+// DecodeManifest reads and validates one plugin.toml. It is the only manifest
+// parser in the project: the host calls it when opening a bundle and the CLI
+// calls it when building one, so build-time and load-time validation cannot
+// drift apart.
+func DecodeManifest(reader io.Reader) (Manifest, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, maximumManifestSize+1))
 	if err != nil {
-		return Manifest{}, fmt.Errorf("read plugin.toml: %w", err)
+		return Manifest{}, fmt.Errorf("read %s: %w", ManifestFileName, err)
 	}
 	if len(data) > maximumManifestSize {
-		return Manifest{}, fmt.Errorf("plugin.toml exceeds %d bytes", maximumManifestSize)
+		return Manifest{}, fmt.Errorf("%s exceeds %d bytes", ManifestFileName, maximumManifestSize)
 	}
 	var file manifestFile
 	decoder := toml.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&file); err != nil {
-		return Manifest{}, fmt.Errorf("decode plugin.toml: %w", err)
+		return Manifest{}, fmt.Errorf("decode %s: %w", ManifestFileName, err)
 	}
 	manifest := Manifest{
 		ID: file.ID, Version: file.Version, APIVersion: file.APIVersion,

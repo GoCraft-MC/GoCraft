@@ -57,7 +57,7 @@ func OpenBundle(bundlePath string) (Bundle, error) {
 		if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
 			return Bundle{}, fmt.Errorf("plugin bundle %s contains unsafe path %q", bundlePath, file.Name)
 		}
-		if clean != "plugin.toml" {
+		if clean != ManifestFileName {
 			continue
 		}
 		if manifestFile != nil {
@@ -75,7 +75,7 @@ func OpenBundle(bundlePath string) (Bundle, error) {
 	if err != nil {
 		return Bundle{}, fmt.Errorf("open %s plugin.toml: %w", bundlePath, err)
 	}
-	manifest, decodeErr := decodeManifest(reader)
+	manifest, decodeErr := DecodeManifest(reader)
 	closeErr := reader.Close()
 	if decodeErr != nil {
 		return Bundle{}, fmt.Errorf("plugin bundle %s: %w", bundlePath, decodeErr)
