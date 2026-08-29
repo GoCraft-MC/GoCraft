@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"GoCraft/core/command"
 )
 
 // ScanBundles reads manifests without starting any plugin runtime.
@@ -81,9 +83,21 @@ func OpenBundle(bundlePath string) (Bundle, error) {
 	if closeErr != nil {
 		return Bundle{}, fmt.Errorf("close %s plugin.toml: %w", bundlePath, closeErr)
 	}
+	var commands *command.Root
+	if manifest.CommandTree != "" {
+		encoded, err := readBundleEntry(archive.File, manifest.CommandTree, maximumCommandTreeSize)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("plugin bundle %s: %w", bundlePath, err)
+		}
+		tree, err := command.DecodeTree(encoded)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("plugin bundle %s command tree: %w", bundlePath, err)
+		}
+		commands = &tree
+	}
 	absolutePath, err := filepath.Abs(bundlePath)
 	if err != nil {
 		return Bundle{}, fmt.Errorf("resolve plugin bundle %s: %w", bundlePath, err)
 	}
-	return Bundle{Path: absolutePath, Manifest: manifest}, nil
+	return Bundle{Path: absolutePath, Manifest: manifest, Commands: commands}, nil
 }
