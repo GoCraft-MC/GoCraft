@@ -25,7 +25,7 @@ func NewRegistry(ctx context.Context, budget time.Duration, host Host, provision
 		host = NewMutationQueue()
 	}
 	return &Registry{
-		bus: NewBus(ctx, budget), host: host, provisioner: provisioner,
+		bus: newBus(ctx, budget, host), host: host, provisioner: provisioner,
 		runtimes: make(map[string]Runtime), instances: make(map[string]Instance),
 	}
 }

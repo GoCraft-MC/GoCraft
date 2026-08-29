@@ -21,6 +21,7 @@ type subscriber struct {
 type Bus struct {
 	ctx    context.Context
 	budget time.Duration
+	host   Host
 
 	mu     sync.RWMutex
 	subs   map[string][]*subscriber
@@ -28,13 +29,23 @@ type Bus struct {
 }
 
 func NewBus(ctx context.Context, budget time.Duration) *Bus {
+	return newBus(ctx, budget, nil)
+}
+
+func newBus(ctx context.Context, budget time.Duration, host Host) *Bus {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if budget <= 0 {
 		budget = defaultEventBudget
 	}
-	return &Bus{ctx: ctx, budget: budget, subs: make(map[string][]*subscriber), health: make(map[string]*healthTracker)}
+	if host == nil {
+		host = NewMutationQueue()
+	}
+	return &Bus{
+		ctx: ctx, budget: budget, host: host,
+		subs: make(map[string][]*subscriber), health: make(map[string]*healthTracker),
+	}
 }
 
 func (b *Bus) Attach(instance Instance) error {
