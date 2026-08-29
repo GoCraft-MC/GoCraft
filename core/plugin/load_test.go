@@ -3,10 +3,12 @@ package plugin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
 	abi "GoCraft/abi/v1"
+	"GoCraft/core/command"
 )
 
 type recordingInstance struct {
@@ -18,21 +20,62 @@ func (i *recordingInstance) Manifest() Manifest { return i.manifest }
 func (i *recordingInstance) Dispatch(context.Context, *abi.Event) (abi.Verdict, error) {
 	return abi.Verdict{}, nil
 }
+func (i *recordingInstance) InvokeCommand(_ context.Context, executor command.ExecID, _ command.Sender, _ command.Values) error {
+	*i.order = append(*i.order, fmt.Sprintf("command:%d", executor))
+	return nil
+}
 func (i *recordingInstance) Unload(context.Context) error {
 	*i.order = append(*i.order, "unload:"+i.manifest.ID)
 	return nil
 }
 
 type recordingRuntime struct {
-	order  *[]string
-	failID string
+	order   *[]string
+	failID  string
+	onStart func()
 }
 
 func (r *recordingRuntime) Name() string                                 { return "recording" }
 func (r *recordingRuntime) Provision(context.Context, Provisioner) error { return nil }
 func (r *recordingRuntime) Start(context.Context, Host) error {
 	*r.order = append(*r.order, "start")
+	if r.onStart != nil {
+		r.onStart()
+	}
 	return nil
+}
+
+func TestLoadAllRegistersAndRevokesPluginCommands(t *testing.T) {
+	var order []string
+	registry := NewRegistry(context.Background(), 0, nil, nil)
+	runtime := &recordingRuntime{order: &order, onStart: func() {
+		if got := registry.Commands().Snapshot(nil).Root.Children; len(got) != 1 {
+			t.Fatalf("commands at runtime start = %#v", got)
+		}
+	}}
+	if err := registry.RegisterRuntime(runtime); err != nil {
+		t.Fatal(err)
+	}
+	bundle := testBundle("shop")
+	tree := command.Root{Children: []command.Node{command.Literal{Name: "shop", Exec: 7}}}
+	bundle.Commands = &tree
+	if err := registry.LoadAll(context.Background(), []Bundle{bundle}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.Commands().Snapshot(nil)
+	executor := snapshot.Root.Children[0].(command.Literal).Exec
+	if err := registry.Commands().Invoke(context.Background(), executor, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if order[len(order)-1] != "command:7" {
+		t.Fatalf("command callback order = %v", order)
+	}
+	if err := registry.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.Commands().Snapshot(nil).Root.Children; len(got) != 0 {
+		t.Fatalf("commands remain after stop: %#v", got)
+	}
 }
 func (r *recordingRuntime) Load(_ context.Context, bundle Bundle) (Instance, error) {
 	*r.order = append(*r.order, "load:"+bundle.Manifest.ID)
