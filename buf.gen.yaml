@@ -1,0 +1,16 @@
+# Code generation for the plugin ABI.
+#
+# Generated files are committed, so neither CI nor a contributor needs buf or
+# protoc-gen-go to build the server. `make proto` regenerates them; CI can
+# verify that doing so leaves no diff.
+#
+# Only the envelope is generated. commands.proto describes a file format the
+# host reads and never writes, and core/command decodes it by hand into its own
+# neutral tree — generating it as well would leave two Go representations of the
+# same command IR.
+version: v2
+
+plugins:
+  - local: protoc-gen-go
+    out: .
+    opt: module=GoCraft
