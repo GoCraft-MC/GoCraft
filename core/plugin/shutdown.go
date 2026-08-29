@@ -34,6 +34,7 @@ func (r *Registry) Stop(ctx context.Context) error {
 	for index := len(instances) - 1; index >= 0; index-- {
 		manifest := instances[index].Manifest()
 		r.bus.Detach(manifest.ID)
+		r.commands.RevokeAll(manifest.ID)
 		if err := instances[index].Unload(ctx); err != nil {
 			joined = errors.Join(joined, fmt.Errorf("unload plugin %s: %w", manifest.ID, err))
 		}

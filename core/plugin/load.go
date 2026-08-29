@@ -24,7 +24,11 @@ func (r *Registry) LoadAll(ctx context.Context, bundles []Bundle) error {
 		}
 		seen[bundle.Manifest.ID] = struct{}{}
 	}
+	if err := r.registerBundleCommands(ordered); err != nil {
+		return err
+	}
 	if err := r.startRuntimes(ctx, ordered); err != nil {
+		r.revokeBundleCommands(ordered)
 		return err
 	}
 	rollback := func(cause error, discard Instance) error {
@@ -34,6 +38,7 @@ func (r *Registry) LoadAll(ctx context.Context, bundles []Bundle) error {
 		if discard != nil {
 			unloadErr = discard.Unload(stopCtx)
 		}
+		r.revokeBundleCommands(ordered)
 		return errors.Join(cause, unloadErr, r.Stop(stopCtx))
 	}
 	for _, bundle := range ordered {
@@ -49,6 +54,12 @@ func (r *Registry) LoadAll(ctx context.Context, bundles []Bundle) error {
 		if actual.ID != bundle.Manifest.ID {
 			mismatch := fmt.Errorf("plugin %s loaded as %q", bundle.Manifest.ID, actual.ID)
 			return rollback(mismatch, instance)
+		}
+		if bundle.Commands != nil {
+			if _, ok := instance.(CommandInstance); !ok {
+				unsupported := fmt.Errorf("plugin %s runtime does not support commands", actual.ID)
+				return rollback(unsupported, instance)
+			}
 		}
 		if err := r.bus.Attach(instance); err != nil {
 			return rollback(err, instance)
