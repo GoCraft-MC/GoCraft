@@ -186,7 +186,8 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		return re.powerFromSource(x, y, z, block)
 
 	case "minecraft:redstone_wire":
-		// Dust gets max(neighbor_power - 1) from all 6 faces.
+		// Dust gets max(neighbor_power - 1) from adjacent dust and the full
+		// signal from direct sources or a powered solid conductor.
 		best := 0
 		for _, nb := range neighbors6(x, y, z) {
 			nbBlock := re.world.GetBlock(nb[0], nb[1], nb[2])
@@ -201,7 +202,7 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 				if p > best {
 					best = p
 				}
-			} else if IsRedstoneConductor(nbName) {
+			} else if IsRedstoneConductor(nbName) || isRedstonePowerConductor(nbBlock) {
 				p := re.powerFromConductorToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z})
 				if p > best {
 					best = p
@@ -243,7 +244,8 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
 		ix, iy, iz := x+dx, y, z+dz
 		input := re.world.GetBlock(ix, iy, iz)
-		if re.powerFromSourceToward(ix, iy, iz, input, [3]int{x, y, z}) > 0 || re.PowerAt(ix, iy, iz) > 0 {
+		if re.powerFromSourceToward(ix, iy, iz, input, [3]int{x, y, z}) > 0 ||
+			re.inputPowerAt(ix, iy, iz, [3]int{x, y, z}) > 0 {
 			return 15
 		}
 		return 0
@@ -284,10 +286,12 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		return 0
 
 	default:
-		// Loads and solid blocks accept both direct source power and power
-		// carried by dust/repeaters. Without the conductor branch, a lamp next
-		// to powered wire would never light even though the wire state changed.
+		// Full solid blocks receive direct redstone power but do not relay power
+		// from another full solid block. Loads may then read a powered adjacent
+		// solid. This models vanilla's one-block conduction without letting power
+		// chain through an arbitrary line of stone.
 		best := 0
+		currentIsFullConductor := isRedstonePowerConductor(block) && !IsRedstoneConductor(name)
 		for _, nb := range neighbors6(x, y, z) {
 			nbBlock := re.world.GetBlock(nb[0], nb[1], nb[2])
 			nbName := nbBlock.ResourceLocation()
@@ -302,6 +306,10 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 				}
 			} else if IsRedstoneConductor(nbName) {
 				if p := re.powerFromConductorToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z}); p > best {
+					best = p
+				}
+			} else if !currentIsFullConductor && isRedstonePowerConductor(nbBlock) {
+				if p := re.PowerAt(nb[0], nb[1], nb[2]); p > best {
 					best = p
 				}
 			}
@@ -372,7 +380,7 @@ func (re *RedstoneEngine) railNetworkPowered(x, y, z int, railName string) bool 
 				[3]int{current.x, current.y, current.z}) > 0 {
 				return true
 			}
-			if IsRedstoneConductor(block.ResourceLocation()) &&
+			if (IsRedstoneConductor(block.ResourceLocation()) || isRedstonePowerConductor(block)) &&
 				re.powerFromConductorToward(neighbor[0], neighbor[1], neighbor[2], block,
 					[3]int{current.x, current.y, current.z}) > 0 {
 				return true
@@ -448,7 +456,7 @@ func (re *RedstoneEngine) powerReceivedExcluding(x, y, z int, excluded [3]int) i
 		if power := re.powerFromSource(nb[0], nb[1], nb[2], block); power > best {
 			best = power
 		}
-		if IsRedstoneConductor(block.ResourceLocation()) {
+		if IsRedstoneConductor(block.ResourceLocation()) || isRedstonePowerConductor(block) {
 			if power := re.PowerAt(nb[0], nb[1], nb[2]); power > best {
 				best = power
 			}
@@ -460,7 +468,7 @@ func (re *RedstoneEngine) powerReceivedExcluding(x, y, z int, excluded [3]int) i
 func (re *RedstoneEngine) inputPowerAt(x, y, z int, target [3]int) int {
 	block := re.world.GetBlock(x, y, z)
 	power := re.powerFromSourceToward(x, y, z, block, target)
-	if IsRedstoneConductor(block.ResourceLocation()) {
+	if IsRedstoneConductor(block.ResourceLocation()) || isRedstonePowerConductor(block) {
 		if conductor := re.powerFromConductorToward(x, y, z, block, target); conductor > power {
 			power = conductor
 		}
