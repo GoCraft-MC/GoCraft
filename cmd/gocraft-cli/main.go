@@ -22,8 +22,9 @@ var version = "dev"
 // Exit codes are distinct so a build script can tell a bad invocation from a
 // plugin that genuinely failed.
 const (
-	exitOK    = 0
-	exitUsage = 2
+	exitOK      = 0
+	exitFailure = 1
+	exitUsage   = 2
 )
 
 func main() {
@@ -39,6 +40,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch args[0] {
+	case "validate":
+		return validateCommand(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "gocraft-cli", version)
 		return exitOK
@@ -59,7 +62,8 @@ Usage:
   gocraft-cli <command> [arguments]
 
 Commands:
-  version   Print the tool version
-  help      Print this message
+  validate <dir>   Check the plugin.toml of a plugin source directory
+  version          Print the tool version
+  help             Print this message
 `)
 }
