@@ -52,8 +52,8 @@ func validateNode(parent string, node Node) error {
 		if typed.Type < ArgInteger || typed.Type > ArgCustom {
 			return fmt.Errorf("command tree %s: invalid argument type %d", path, typed.Type)
 		}
-		if typed.Type == ArgEnum && len(typed.Enum) == 0 {
-			return fmt.Errorf("command tree %s: enum has no values", path)
+		if err := validateArgument(typed); err != nil {
+			return fmt.Errorf("command tree %s: %w", path, err)
 		}
 		if typed.Type == ArgGreedy && len(children) != 0 {
 			return fmt.Errorf("command tree %s: greedy argument must be last", path)
