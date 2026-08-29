@@ -42,4 +42,4 @@ require (
 	golang.org/x/time v0.10.0 // indirect
 )
 
-replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20260804190447-1f617284845c
+replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6

@@ -2,6 +2,8 @@
 
 GoCraft includes a native Bedrock adapter backed by the same canonical simulation as Java Edition. Both editions share the same world, entities, players, chat, combat, block changes, and time — with no external proxy required.
 
+Current network compatibility target: **Minecraft Bedrock Edition 1.26.45 (protocol 2169)**.
+
 ## Enabling Bedrock
 
 ```yaml
