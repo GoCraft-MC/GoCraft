@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -49,7 +50,7 @@ func DecodeManifest(reader io.Reader) (Manifest, error) {
 	decoder := toml.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&file); err != nil {
-		return Manifest{}, fmt.Errorf("decode %s: %w", ManifestFileName, err)
+		return Manifest{}, decodeFailure(err)
 	}
 	manifest := Manifest{
 		ID: file.ID, Version: file.Version, APIVersion: file.APIVersion,
@@ -63,6 +64,28 @@ func DecodeManifest(reader io.Reader) (Manifest, error) {
 		return Manifest{}, err
 	}
 	return manifest, nil
+}
+
+// decodeFailure names the offending key and the line it sits on. The library's
+// own text for an unknown field — "fields in the document are missing in the
+// target struct" — tells a plugin author nothing about what to fix.
+func decodeFailure(err error) error {
+	var missing *toml.StrictMissingError
+	if errors.As(err, &missing) {
+		reported := make([]string, 0, len(missing.Errors))
+		for index := range missing.Errors {
+			field := &missing.Errors[index]
+			line, _ := field.Position()
+			reported = append(reported, fmt.Sprintf("%s:%d: unknown field %q", ManifestFileName, line, strings.Join(field.Key(), ".")))
+		}
+		return errors.New(strings.Join(reported, "; "))
+	}
+	var decode *toml.DecodeError
+	if errors.As(err, &decode) {
+		line, column := decode.Position()
+		return fmt.Errorf("%s:%d:%d: %s", ManifestFileName, line, column, decode.Error())
+	}
+	return fmt.Errorf("decode %s: %w", ManifestFileName, err)
 }
 
 func validateManifest(manifest Manifest) error {
