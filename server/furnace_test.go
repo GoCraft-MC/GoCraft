@@ -12,6 +12,13 @@ import (
 	"GoCraft/java/session"
 )
 
+func setFurnaceExperienceRoll(t *testing.T, roll float32) {
+	t.Helper()
+	previous := furnaceExperienceRoll
+	furnaceExperienceRoll = func() float32 { return roll }
+	t.Cleanup(func() { furnaceExperienceRoll = previous })
+}
+
 func newFurnaceTestServer(t *testing.T, blockID string) (*Server, spatial.BlockPos) {
 	t.Helper()
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
@@ -90,6 +97,7 @@ func TestBedrockFurnaceTransactionsAcceptInputAndFuelButProtectOutput(t *testing
 }
 
 func TestBedrockTakingFurnaceOutputAwardsAccumulatedExperience(t *testing.T) {
+	setFurnaceExperienceRoll(t, 0.5)
 	s, pos := newFurnaceTestServer(t, "minecraft:furnace")
 	p := player.New([16]byte{63}, "smelter", player.ClientEditionBedrock)
 	p.OpenContainerID = 1
@@ -117,6 +125,7 @@ func TestBedrockTakingFurnaceOutputAwardsAccumulatedExperience(t *testing.T) {
 }
 
 func TestJavaFurnaceTakeIntentAwardsAccumulatedExperience(t *testing.T) {
+	setFurnaceExperienceRoll(t, 0.5)
 	s, pos := newFurnaceTestServer(t, "minecraft:furnace")
 	p := player.New([16]byte{64}, "java-smelter", player.ClientEditionJava)
 	if err := s.game.AddPlayer(p); err != nil {
@@ -177,17 +186,56 @@ func TestFurnaceConsumesFuelAndCooksJava1214Recipe(t *testing.T) {
 	}
 }
 
-func TestFurnaceTracksPumpkinRecipeExperience(t *testing.T) {
-	state := &furnaceState{}
-	recipe := handler.CookingRecipeDescription{Name: "minecraft:iron_ingot", Experience: 0.7}
-	state.recordRecipe(recipe)
-	state.recordRecipe(recipe)
+func TestFurnaceRoundsFractionalRecipeExperienceLikeVanilla(t *testing.T) {
+	previous := furnaceExperienceRoll
+	t.Cleanup(func() { furnaceExperienceRoll = previous })
 
+	recipe := handler.CookingRecipeDescription{Name: "minecraft:iron_ingot", Experience: 0.7}
+
+	state := &furnaceState{}
+	state.recordRecipe(recipe)
+	furnaceExperienceRoll = func() float32 { return 0.2 }
 	if got := state.extractExperience(); got != 1 {
-		t.Fatalf("two iron smelts yielded %d XP, want floor(1.4) = 1", got)
+		t.Fatalf("one iron smelt with roll 0.2 yielded %d XP, want 1", got)
 	}
+
+	state.recordRecipe(recipe)
+	furnaceExperienceRoll = func() float32 { return 0.8 }
+	if got := state.extractExperience(); got != 0 {
+		t.Fatalf("one iron smelt with roll 0.8 yielded %d XP, want 0", got)
+	}
+
+	state.recordRecipe(recipe)
+	state.recordRecipe(recipe)
+	furnaceExperienceRoll = func() float32 { return 0.5 }
+	if got := state.extractExperience(); got != 1 {
+		t.Fatalf("two iron smelts with roll 0.5 yielded %d XP, want 1", got)
+	}
+
+	state.recordRecipe(recipe)
+	state.recordRecipe(recipe)
+	furnaceExperienceRoll = func() float32 { return 0.2 }
+	if got := state.extractExperience(); got != 2 {
+		t.Fatalf("two iron smelts with roll 0.2 yielded %d XP, want 2", got)
+	}
+
 	if got := state.extractExperience(); got != 0 {
 		t.Fatalf("extracted recipes yielded XP twice: %d", got)
+	}
+}
+
+func TestFurnaceExperienceUsesRecipeValuesForDifferentItems(t *testing.T) {
+	previous := furnaceExperienceRoll
+	t.Cleanup(func() { furnaceExperienceRoll = previous })
+	furnaceExperienceRoll = func() float32 { return 0.2 }
+
+	state := &furnaceState{}
+	state.recordRecipe(handler.CookingRecipeDescription{Name: "minecraft:iron_ingot", Experience: 0.7})
+	state.recordRecipe(handler.CookingRecipeDescription{Name: "minecraft:copper_ingot", Experience: 0.7})
+	state.recordRecipe(handler.CookingRecipeDescription{Name: "minecraft:netherite_scrap", Experience: 2.0})
+
+	if got := state.extractExperience(); got != 4 {
+		t.Fatalf("mixed furnace recipes yielded %d XP, want 4", got)
 	}
 }
 
