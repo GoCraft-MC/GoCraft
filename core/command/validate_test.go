@@ -1,6 +1,7 @@
 package command
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,8 @@ func TestValidateAcceptsTypedCommandTree(t *testing.T) {
 }
 
 func TestValidateRejectsInvalidTrees(t *testing.T) {
+	integerMin, integerMax := int64(10), int64(1)
+	nan := math.NaN()
 	tests := []struct {
 		name string
 		root *Root
@@ -64,6 +67,34 @@ func TestValidateRejectsInvalidTrees(t *testing.T) {
 				Argument{Name: "value", Type: ArgEnum, Exec: 1},
 			}}}},
 			want: "enum has no values",
+		},
+		{
+			name: "duplicate enum",
+			root: &Root{Children: []Node{Literal{Name: "mode", Children: []Node{
+				Argument{Name: "value", Type: ArgEnum, Enum: []string{"one", "one"}, Exec: 1},
+			}}}},
+			want: "duplicate value",
+		},
+		{
+			name: "reversed integer range",
+			root: &Root{Children: []Node{Literal{Name: "count", Children: []Node{
+				Argument{Name: "value", Type: ArgInteger, IntegerMin: &integerMin, IntegerMax: &integerMax, Exec: 1},
+			}}}},
+			want: "minimum exceeds maximum",
+		},
+		{
+			name: "nan decimal range",
+			root: &Root{Children: []Node{Literal{Name: "price", Children: []Node{
+				Argument{Name: "value", Type: ArgDecimal, DecimalMin: &nan, Exec: 1},
+			}}}},
+			want: "contains NaN",
+		},
+		{
+			name: "missing custom type",
+			root: &Root{Children: []Node{Literal{Name: "home", Children: []Node{
+				Argument{Name: "name", Type: ArgCustom, Exec: 1},
+			}}}},
+			want: "has no type id",
 		},
 	}
 	for _, tc := range tests {
