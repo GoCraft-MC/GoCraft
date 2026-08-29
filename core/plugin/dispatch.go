@@ -46,11 +46,20 @@ func (b *Bus) EmitCancellable(event *abi.Event) bool {
 			continue
 		}
 		sub.health.record(time.Now(), false, took)
+		b.enqueueEffects(sub, event.Type, verdict.Effects)
 		if verdict.Cancelled {
 			return false
 		}
 	}
 	return true
+}
+
+func (b *Bus) enqueueEffects(sub *subscriber, event string, effects []abi.HostCall) {
+	for _, effect := range effects {
+		if err := b.host.Enqueue(effect); err != nil {
+			slog.Error("queue plugin event effect", "plugin", sub.id, "event", event, "effect", effect.Type, "err", err)
+		}
+	}
 }
 
 func (b *Bus) recordStarved(subscribers []*subscriber, event string) {
