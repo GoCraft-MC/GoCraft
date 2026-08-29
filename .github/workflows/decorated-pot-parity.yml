@@ -46,11 +46,20 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
+
           p = Path('server/decorated_pot_parity_test.go')
           s = p.read_text()
           s = s.replace('"GoCraft/core/game"\n', 'corentity "GoCraft/core/entity"\n\t"GoCraft/core/game"\n')
           s = s.replace('pig := testPassiveEntity(991, "minecraft:pig")', 'pig := corentity.New(991, [16]byte{9, 9, 1}, corentity.TypePig, 0, 64, 0)')
           p.write_text(s)
+
+          p = Path('java/handler/recipes_test.go')
+          s = p.read_text()
+          needle = '''\t\t\tcase 13:\n\t\t\t\tattributes := mustReadRecipeVarInt(t, reader)\n'''
+          replacement = '''\t\t\tcase 61: // pot_decorations\n\t\t\t\tdecorations := mustReadRecipeVarInt(t, reader)\n\t\t\t\tif decorations < 0 || decorations > 64 {\n\t\t\t\t\tt.Fatalf("invalid pot decoration count %d", decorations)\n\t\t\t\t}\n\t\t\t\tfor decoration := int32(0); decoration < decorations; decoration++ {\n\t\t\t\t\t_ = mustReadRecipeVarInt(t, reader)\n\t\t\t\t}\n\t\t\tcase 13:\n\t\t\t\tattributes := mustReadRecipeVarInt(t, reader)\n'''
+          if needle not in s:
+              raise SystemExit('could not extend recipe component parser')
+          p.write_text(s.replace(needle, replacement, 1))
           PY
       - name: Format
         run: |
