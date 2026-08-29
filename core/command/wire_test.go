@@ -6,6 +6,16 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protowire"
+
+	wire "GoCraft/abi/v1/wire"
+)
+
+// The payloads below are assembled byte by byte rather than with the generated
+// marshaller: decoding must be verified against the wire format itself, not
+// against a round trip through the encoder that shares its assumptions.
+const (
+	wireNodeLiteral  = uint64(wire.CommandNodeKind_COMMAND_NODE_KIND_LITERAL)
+	wireNodeArgument = uint64(wire.CommandNodeKind_COMMAND_NODE_KIND_ARGUMENT)
 )
 
 func appendVarintField(data []byte, field protowire.Number, value uint64) []byte {
@@ -71,7 +81,7 @@ func TestDecodeTreeRejectsInvalidWirePayloads(t *testing.T) {
 	}{
 		{name: "missing version", data: validWireTree()[2:], want: "wire version"},
 		{name: "future version", data: appendVarintField(nil, 1, 2), want: "unsupported"},
-		{name: "truncated", data: []byte{0x12, 0x02, 0x08}, want: "unexpected EOF"},
+		{name: "truncated", data: []byte{0x12, 0x02, 0x08}, want: "cannot parse"},
 		{name: "literal argument fields", data: badLiteral, want: "contains argument fields"},
 	}
 	for _, tc := range tests {

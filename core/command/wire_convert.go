@@ -1,58 +1,68 @@
 package command
 
-import "fmt"
+import (
+	"fmt"
+
+	wire "GoCraft/abi/v1/wire"
+)
 
 const (
-	wireNodeLiteral     = 1
-	wireNodeArgument    = 2
 	maximumCommandNodes = 4096
 	maximumCommandDepth = 64
 )
 
-type wireNode struct {
-	kind         uint64
-	name         string
-	permission   string
-	argumentType uint64
-	enum         []string
-	executor     uint64
-	children     []Node
-	customType   string
-	integerMin   *int64
-	integerMax   *int64
-	decimalMin   *float64
-	decimalMax   *float64
-}
-
-func (decoded wireNode) commandNode() (Node, error) {
-	if decoded.executor > uint64(^uint32(0)) {
-		return nil, fmt.Errorf("command node %q: executor id overflows uint32", decoded.name)
+// convertNode turns one wire node into the neutral tree, rejecting anything the
+// schema allows but the server does not: a literal carrying argument fields, an
+// argument carrying a permission, an unknown argument type.
+//
+// The schema cannot express those rules — protobuf has no way to say "field 4
+// is only valid when field 1 is COMMAND_NODE_KIND_ARGUMENT" — so they are
+// checked here, on the way in, and never trusted from the bundle.
+func convertNode(node *wire.CommandNode, depth int, count *int) (Node, error) {
+	*count++
+	if *count > maximumCommandNodes || depth > maximumCommandDepth {
+		return nil, fmt.Errorf("command tree: size limit exceeded")
 	}
-	switch decoded.kind {
-	case wireNodeLiteral:
-		if decoded.argumentType != 0 || len(decoded.enum) != 0 || decoded.customType != "" ||
-			decoded.integerMin != nil || decoded.integerMax != nil ||
-			decoded.decimalMin != nil || decoded.decimalMax != nil {
-			return nil, fmt.Errorf("command literal %q contains argument fields", decoded.name)
+	children := make([]Node, 0, len(node.GetChildren()))
+	for _, child := range node.GetChildren() {
+		converted, err := convertNode(child, depth+1, count)
+		if err != nil {
+			return nil, err
+		}
+		children = append(children, converted)
+	}
+	if len(children) == 0 {
+		children = nil
+	}
+	name := node.GetName()
+	switch node.GetKind() {
+	case wire.CommandNodeKind_COMMAND_NODE_KIND_LITERAL:
+		if node.GetArgumentType() != wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_UNSPECIFIED ||
+			len(node.GetEnumValues()) != 0 || node.GetCustomType() != "" ||
+			node.IntegerMin != nil || node.IntegerMax != nil ||
+			node.DecimalMin != nil || node.DecimalMax != nil {
+			return nil, fmt.Errorf("command literal %q contains argument fields", name)
 		}
 		return Literal{
-			Name: decoded.name, Permission: decoded.permission,
-			Children: decoded.children, Exec: ExecID(decoded.executor),
+			Name: name, Permission: node.GetPermission(),
+			Children: children, Exec: ExecID(node.GetExecutor()),
 		}, nil
-	case wireNodeArgument:
-		if decoded.permission != "" {
-			return nil, fmt.Errorf("command argument %q contains a permission", decoded.name)
+	case wire.CommandNodeKind_COMMAND_NODE_KIND_ARGUMENT:
+		if node.GetPermission() != "" {
+			return nil, fmt.Errorf("command argument %q contains a permission", name)
 		}
-		if decoded.argumentType > uint64(ArgCustom) {
-			return nil, fmt.Errorf("command argument %q has invalid type %d", decoded.name, decoded.argumentType)
+		argumentType := node.GetArgumentType()
+		if argumentType > wire.CommandArgumentType(ArgCustom) {
+			return nil, fmt.Errorf("command argument %q has invalid type %d", name, argumentType)
 		}
 		return Argument{
-			Name: decoded.name, Type: ArgType(decoded.argumentType), Enum: decoded.enum,
-			CustomType: decoded.customType, IntegerMin: decoded.integerMin, IntegerMax: decoded.integerMax,
-			DecimalMin: decoded.decimalMin, DecimalMax: decoded.decimalMax,
-			Children: decoded.children, Exec: ExecID(decoded.executor),
+			Name: name, Type: ArgType(argumentType), Enum: node.GetEnumValues(),
+			CustomType: node.GetCustomType(),
+			IntegerMin: node.IntegerMin, IntegerMax: node.IntegerMax,
+			DecimalMin: node.DecimalMin, DecimalMax: node.DecimalMax,
+			Children: children, Exec: ExecID(node.GetExecutor()),
 		}, nil
 	default:
-		return nil, fmt.Errorf("command node %q has invalid kind %d", decoded.name, decoded.kind)
+		return nil, fmt.Errorf("command node %q has invalid kind %d", name, node.GetKind())
 	}
 }

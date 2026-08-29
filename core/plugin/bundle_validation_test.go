@@ -36,8 +36,11 @@ func TestOpenBundleRejectsUnknownManifestField(t *testing.T) {
 	directory := t.TempDir()
 	writeBundle(t, directory, "unknown.gcpkg", validTestManifest+"unknown = true\n", nil)
 	_, err := OpenBundle(filepath.Join(directory, "unknown.gcpkg"))
-	if err == nil || !strings.Contains(err.Error(), "strict mode") {
+	if err == nil || !strings.Contains(err.Error(), `unknown field "unknown"`) {
 		t.Fatalf("OpenBundle() error = %v", err)
+	}
+	if !strings.Contains(err.Error(), ManifestFileName+":") {
+		t.Fatalf("OpenBundle() error = %v, want a %s line reference", err, ManifestFileName)
 	}
 }
 
