@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	abi "GoCraft/abi/v1"
@@ -33,6 +34,13 @@ type recordingRuntime struct {
 	order   *[]string
 	failID  string
 	onStart func()
+}
+
+type noCommandRuntime struct{ recordingRuntime }
+
+func (r *noCommandRuntime) Load(_ context.Context, bundle Bundle) (Instance, error) {
+	*r.order = append(*r.order, "load:"+bundle.Manifest.ID)
+	return &fakeInstance{manifest: bundle.Manifest}, nil
 }
 
 func (r *recordingRuntime) Name() string                                 { return "recording" }
@@ -75,6 +83,24 @@ func TestLoadAllRegistersAndRevokesPluginCommands(t *testing.T) {
 	}
 	if got := registry.Commands().Snapshot(nil).Root.Children; len(got) != 0 {
 		t.Fatalf("commands remain after stop: %#v", got)
+	}
+}
+
+func TestLoadAllRejectsRuntimeWithoutCommandSupport(t *testing.T) {
+	var order []string
+	registry := NewRegistry(context.Background(), 0, nil, nil)
+	if err := registry.RegisterRuntime(&noCommandRuntime{recordingRuntime{order: &order}}); err != nil {
+		t.Fatal(err)
+	}
+	bundle := testBundle("shop")
+	tree := command.Root{Children: []command.Node{command.Literal{Name: "shop", Exec: 1}}}
+	bundle.Commands = &tree
+	err := registry.LoadAll(context.Background(), []Bundle{bundle})
+	if err == nil || !strings.Contains(err.Error(), "does not support commands") {
+		t.Fatalf("LoadAll() error = %v", err)
+	}
+	if got := registry.Commands().Snapshot(nil).Root.Children; len(got) != 0 {
+		t.Fatalf("failed load left commands: %#v", got)
 	}
 }
 func (r *recordingRuntime) Load(_ context.Context, bundle Bundle) (Instance, error) {
