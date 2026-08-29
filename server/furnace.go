@@ -260,6 +260,7 @@ func (s *Server) tickFurnaces() {
 				if sess, ok := s.sessions.Get(p.UUID); ok {
 					_ = handler.SyncFurnaceContainer(sess.Conn, p, state.CookTime, state.BurnTime, state.BurnDuration, state.CookDuration)
 				}
+			}
 		})
 	}
 }

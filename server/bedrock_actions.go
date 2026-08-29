@@ -545,7 +545,7 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 			return true
 		}
 		facing := bedrockPlayerFacing(p.Rotation.Yaw)
-		hinge := bedrockDoorHinge(facing, i.ClickX, i.ClickZ)
+		hinge := coreworld.DoorHinge(s.bedrockWorld(), px, py, pz, facing, i.ClickX, i.ClickZ)
 		props := map[string]string{"facing": facing, "half": "lower", "hinge": hinge, "open": "false", "powered": "false"}
 		lower := bedrockBlock(block.Name, props)
 		upper := bedrockCopyBlock(lower)
@@ -968,6 +968,11 @@ func (s *Server) breakBedrockLinkedBlock(x, y, z int, block coreworld.Block) {
 // path also guarantees that the Bedrock UpdateBlock packets are ordered with
 // the original break instead of leaving vegetation floating client-side.
 func (s *Server) breakBedrockUnsupportedAbove(x, y, z int) {
+	for _, change := range s.bedrockWorld().BreakUnsupportedAttachmentsAround(x, y, z) {
+		if s.sessions != nil {
+			handler.BroadcastBlockChange(change, s.sessions)
+		}
+	}
 	world := s.bedrockWorld()
 	if world == nil {
 		return

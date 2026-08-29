@@ -1654,9 +1654,19 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			}
 			return
 		}
+		lootBlock := block
+		if block.ResourceLocation() == "minecraft:decorated_pot" && held.EnchantmentLevel("minecraft:silk_touch") == 0 && blockloot.BreaksDecoratedPot(held.ItemID) {
+			lootBlock = bedrockCopyBlock(block)
+			lootBlock.Properties["cracked"] = "true"
+		}
+		enchantments := make(map[string]int)
+		for _, enchantment := range held.EnchantmentLevels() {
+			enchantments[enchantment.ID] = enchantment.Level
+		}
 		lootContext := blockloot.Context{
-			Block: block,
-			Tool:  held,
+			Block:        lootBlock,
+			Tool:         held,
+			Enchantments: enchantments,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return actionWorld.GetBlock(x+dx, y+dy, z+dz)
 			},
@@ -4470,6 +4480,8 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 				} else {
 					s.world.QueueEntityDamageFrom(target.EntityID, damage, start.X, start.Z)
 				}
+			} else if projectile.Type == corentity.TypeSnowball {
+				s.world.QueueEntityImpactFrom(target.EntityID, start.X, start.Z)
 			}
 			s.resolveProjectileImpact(projectile, projectile.Position)
 			return true
@@ -4543,8 +4555,11 @@ func projectileDamageAgainst(projectile, target *corentity.Entity) float32 {
 	if projectile == nil || target == nil {
 		return 0
 	}
-	if projectile.Type == corentity.TypeSnowball && target.Type == corentity.TypeBlaze {
-		return 3
+	if projectile.Type == corentity.TypeSnowball {
+		if target.Type == corentity.TypeBlaze {
+			return 3
+		}
+		return 0
 	}
 	return projectile.ProjectileDamage
 }
@@ -4921,9 +4936,14 @@ func (s *Server) tickBlockPhysicsWorld() {
 			s.processSculkSensorUpdate(u.X, u.Y, u.Z, &blockChanges)
 		case coreworld.UpdateObserver:
 			observer := s.world.GetBlock(u.X, u.Y, u.Z)
-			if observer.ResourceLocation() == "minecraft:observer" && observer.Properties["powered"] == "true" {
+			if observer.ResourceLocation() == "minecraft:observer" {
 				observer = bedrockCopyBlock(observer)
-				observer.Properties["powered"] = "false"
+				if observer.Properties["powered"] == "true" {
+					observer.Properties["powered"] = "false"
+				} else {
+					observer.Properties["powered"] = "true"
+					s.world.BlockPhysics.ScheduleObserver(u.X, u.Y, u.Z, s.worldAge, 2)
+				}
 				s.world.SetBlock(u.X, u.Y, u.Z, observer)
 				blockChanges = append(blockChanges, coreworld.BlockChange{X: u.X, Y: u.Y, Z: u.Z, Block: observer})
 			}

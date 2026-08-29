@@ -24,19 +24,14 @@ type RedstoneEngine struct {
 	// power holds the computed strong-power at each position (0-15).
 	// Positions not in the map have power 0.
 	power map[[3]int]int
-	// Pistons are kept as watched loads so a normal neighboring solid block
-	// becoming/removing a conductor cannot leave a piston stale merely because
-	// that ordinary block is not itself a redstone component.
-	trackedPistons map[[3]int]struct{}
 }
 
 // newRedstoneEngine creates an engine wired to w.
 func newRedstoneEngine(w *World) *RedstoneEngine {
 	return &RedstoneEngine{
-		world:          w,
-		dirty:          make(map[[3]int]struct{}),
-		power:          make(map[[3]int]int),
-		trackedPistons: make(map[[3]int]struct{}),
+		world: w,
+		dirty: make(map[[3]int]struct{}),
+		power: make(map[[3]int]int),
 	}
 }
 
@@ -71,20 +66,11 @@ type RedstoneResult struct {
 // Must be called from the tick goroutine only.
 func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 	re.mu.Lock()
-	// A piston may be powered through an ordinary full block. Such a block does
-	// not carry a redstone block-state property, so keep the piston and its six
-	// input candidates warm. This makes placement/removal of that conductor
-	// visible on the very next game tick without waiting for an unrelated update.
-	for pos := range re.trackedPistons {
-		re.dirty[pos] = struct{}{}
-		for _, nb := range neighbors6(pos[0], pos[1], pos[2]) {
-			re.dirty[nb] = struct{}{}
-		}
-	}
 	if len(re.dirty) == 0 {
 		re.mu.Unlock()
 		return RedstoneResult{}
 	}
+	// Drain dirty set into a local slice.
 	positions := make([][3]int, 0, len(re.dirty))
 	for pos := range re.dirty {
 		positions = append(positions, pos)
@@ -92,6 +78,7 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 	re.dirty = make(map[[3]int]struct{})
 	re.mu.Unlock()
 
+	// BFS propagation: iterate until stable (no more changes).
 	var result RedstoneResult
 	queue := positions
 	processed := 0
@@ -104,33 +91,6 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 		x, y, z := pos[0], pos[1], pos[2]
 		block := re.world.GetBlock(x, y, z)
 		name := block.ResourceLocation()
-
-		re.mu.Lock()
-		if name == "minecraft:piston" || name == "minecraft:sticky_piston" {
-			re.trackedPistons[pos] = struct{}{}
-		} else {
-			delete(re.trackedPistons, pos)
-		}
-		re.mu.Unlock()
-
-		// Lever/button support is neighbor physics, not a rendering concern. A
-		// support removal already dirties the adjacent source, so remove an
-		// invalid attachment here and let SetBlock fan the change back through
-		// redstone, observers and both protocol adapters.
-		if name == "minecraft:lever" || strings.HasSuffix(name, "_button") {
-			if sx, sy, sz, ok := attachmentSupportPosition(x, y, z, block); ok &&
-				!IsSolidLandingSurface(re.world.GetBlock(sx, sy, sz).ResourceLocation()) {
-				re.world.SetBlock(x, y, z, Air)
-				re.mu.Lock()
-				delete(re.power, pos)
-				re.mu.Unlock()
-				result.Changes = append(result.Changes, BlockChange{X: x, Y: y, Z: z, Block: Air})
-				for _, nb := range neighbors6(x, y, z) {
-					queue = append(queue, nb)
-				}
-				continue
-			}
-		}
 
 		newPower := re.computePower(x, y, z, name, block)
 
@@ -146,14 +106,12 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 			}
 			re.mu.Unlock()
 
+			// Power changed — propagate to neighbors and apply visual state.
 			change, ok := re.applyPowerState(x, y, z, name, block, newPower > 0)
 			if ok {
 				result.Changes = append(result.Changes, change)
-				// Internal block-state transitions are observable in vanilla too.
-				// SetBlock already covers normal placement/removal; redstone writes
-				// use setBlockNoPhysics, so explicitly wake observers here.
-				re.world.triggerObservers(change.X, change.Y, change.Z)
 			}
+			// Track loads that just became powered (0 → >0).
 			if wasUnpowered && newPower > 0 && IsRedstoneLoad(name) {
 				result.PoweredLoads = append(result.PoweredLoads, pos)
 			}
@@ -165,11 +123,13 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 			}
 		} else {
 			re.mu.Unlock()
+			// Freshly loaded blocks may have a visual state that does not match
+			// the engine's zero-value power cache. Reconcile state even when the
+			// numeric signal itself did not transition.
 			if (name == "minecraft:redstone_torch" || name == "minecraft:redstone_wall_torch") &&
 				block.Properties["lit"] != boolStr(newPower > 0) {
 				if change, ok := re.applyPowerState(x, y, z, name, block, newPower > 0); ok {
 					result.Changes = append(result.Changes, change)
-					re.world.triggerObservers(change.X, change.Y, change.Z)
 					for _, nb := range neighbors6(x, y, z) {
 						queue = append(queue, nb)
 					}
@@ -178,7 +138,6 @@ func (re *RedstoneEngine) FlushUpdates() RedstoneResult {
 			if name == "minecraft:repeater" && block.Properties["locked"] != boolStr(re.repeaterLocked(x, y, z, block)) {
 				if change, ok := re.applyPowerState(x, y, z, name, block, newPower > 0); ok {
 					result.Changes = append(result.Changes, change)
-					re.world.triggerObservers(change.X, change.Y, change.Z)
 				}
 			}
 		}
@@ -193,8 +152,10 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		return 15
 
 	case "minecraft:redstone_torch", "minecraft:redstone_wall_torch":
+		// Torch emits 15 unless the block it sits on is powered.
+		// Determine attachment block direction from Properties.
 		facing := block.Properties["facing"]
-		ax, ay, az := x, y-1, z
+		ax, ay, az := x, y-1, z // default: sitting on block below
 		switch facing {
 		case "north":
 			ax, ay, az = x, y, z+1
@@ -205,8 +166,11 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		case "west":
 			ax, ay, az = x+1, y, z
 		}
+		// A torch observes power delivered to its attachment block, including
+		// power conducted into that block by dust. Exclude the torch itself so
+		// its output cannot feed back through its own support.
 		if re.powerReceivedExcluding(ax, ay, az, [3]int{x, y, z}) > 0 {
-			return 0
+			return 0 // inverted
 		}
 		return 15
 
@@ -222,6 +186,7 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		return re.powerFromSource(x, y, z, block)
 
 	case "minecraft:redstone_wire":
+		// Dust gets max(neighbor_power - 1) from all 6 faces.
 		best := 0
 		for _, nb := range neighbors6(x, y, z) {
 			nbBlock := re.world.GetBlock(nb[0], nb[1], nb[2])
@@ -236,13 +201,21 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 				if p > best {
 					best = p
 				}
-			} else if IsRedstoneConductor(nbName) || isRedstonePowerConductor(nbBlock) {
+			} else if IsRedstoneConductor(nbName) {
 				p := re.powerFromConductorToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z})
+				if p > best {
+					best = p
+				}
+			} else if isRedstonePowerConductor(nbBlock) {
+				p := re.strongPowerThroughBlock(nb[0], nb[1], nb[2], [3]int{x, y, z})
 				if p > best {
 					best = p
 				}
 			}
 		}
+		// Dust also follows one-block steps. It may climb a solid neighbor when
+		// the space above the current dust is clear, or descend beside a
+		// non-solid neighbor, matching Pumpkin's calculate_power scan.
 		for _, offset := range [4][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
 			nx, nz := x+offset[0], z+offset[1]
 			neighbor := re.world.GetBlock(nx, y, nz)
@@ -264,17 +237,18 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		return best
 
 	case "minecraft:repeater":
+		// Repeater outputs 15 if its input side has power > 0.
 		if re.repeaterLocked(x, y, z, block) && block.Properties["powered"] == "true" {
 			return 15
 		}
 		if re.repeaterLocked(x, y, z, block) {
 			return 0
 		}
+		// Check input direction.
 		dx, dz := redstoneFacingOffset(block.Properties["facing"])
 		ix, iy, iz := x+dx, y, z+dz
 		input := re.world.GetBlock(ix, iy, iz)
-		if re.powerFromSourceToward(ix, iy, iz, input, [3]int{x, y, z}) > 0 ||
-			re.inputPowerAt(ix, iy, iz, [3]int{x, y, z}) > 0 {
+		if re.powerFromSourceToward(ix, iy, iz, input, [3]int{x, y, z}) > 0 || re.PowerAt(ix, iy, iz) > 0 {
 			return 15
 		}
 		return 0
@@ -334,7 +308,7 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 					best = p
 				}
 			} else if !currentIsFullConductor && isRedstonePowerConductor(nbBlock) {
-				if p := re.PowerAt(nb[0], nb[1], nb[2]); p > best {
+				if p := re.strongPowerThroughBlock(nb[0], nb[1], nb[2], [3]int{x, y, z}); p > best {
 					best = p
 				}
 			}
@@ -405,7 +379,7 @@ func (re *RedstoneEngine) railNetworkPowered(x, y, z int, railName string) bool 
 				[3]int{current.x, current.y, current.z}) > 0 {
 				return true
 			}
-			if (IsRedstoneConductor(block.ResourceLocation()) || isRedstonePowerConductor(block)) &&
+			if IsRedstoneConductor(block.ResourceLocation()) &&
 				re.powerFromConductorToward(neighbor[0], neighbor[1], neighbor[2], block,
 					[3]int{current.x, current.y, current.z}) > 0 {
 				return true
@@ -481,7 +455,7 @@ func (re *RedstoneEngine) powerReceivedExcluding(x, y, z int, excluded [3]int) i
 		if power := re.powerFromSource(nb[0], nb[1], nb[2], block); power > best {
 			best = power
 		}
-		if IsRedstoneConductor(block.ResourceLocation()) || isRedstonePowerConductor(block) {
+		if IsRedstoneConductor(block.ResourceLocation()) {
 			if power := re.PowerAt(nb[0], nb[1], nb[2]); power > best {
 				best = power
 			}
@@ -493,14 +467,40 @@ func (re *RedstoneEngine) powerReceivedExcluding(x, y, z int, excluded [3]int) i
 func (re *RedstoneEngine) inputPowerAt(x, y, z int, target [3]int) int {
 	block := re.world.GetBlock(x, y, z)
 	power := re.powerFromSourceToward(x, y, z, block, target)
-	if IsRedstoneConductor(block.ResourceLocation()) || isRedstonePowerConductor(block) {
+	if IsRedstoneConductor(block.ResourceLocation()) {
 		if conductor := re.powerFromConductorToward(x, y, z, block, target); conductor > power {
+			power = conductor
+		}
+	} else if isRedstonePowerConductor(block) {
+		if conductor := re.strongPowerThroughBlock(x, y, z, target); conductor > power {
 			power = conductor
 		}
 	}
 	return power
 }
 
+func (re *RedstoneEngine) strongPowerThroughBlock(x, y, z int, excluded [3]int) int {
+	best := 0
+	for _, nb := range neighbors6(x, y, z) {
+		if nb == excluded {
+			continue
+		}
+		source := re.world.GetBlock(nb[0], nb[1], nb[2])
+		if p := re.powerFromSourceToward(nb[0], nb[1], nb[2], source, [3]int{x, y, z}); p > best {
+			best = p
+		}
+		// Dust strongly powers the full block directly underneath it. Side
+		// dust remains a weak input and must not be reflected into another dust.
+		if source.ResourceLocation() == "minecraft:redstone_wire" && nb[1] == y+1 {
+			if p := re.PowerAt(nb[0], nb[1], nb[2]); p > best {
+				best = p
+			}
+		}
+	}
+	return best
+}
+
+// powerFromSource returns power emitted by block if it is a source, else 0.
 func (re *RedstoneEngine) powerFromSource(x, y, z int, block Block) int {
 	name := block.ResourceLocation()
 	switch name {
@@ -597,6 +597,8 @@ func redstoneFacingOffset(facing string) (int, int) {
 	}
 }
 
+// applyPowerState updates the visual/functional block state when power changes.
+// Returns (BlockChange, true) if the block visually changed.
 func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block, powered bool) (BlockChange, bool) {
 	if name == "minecraft:trapdoor" || strings.HasSuffix(name, "_trapdoor") {
 		newBlock := block
@@ -645,24 +647,37 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 	}
 	switch name {
 	case "minecraft:redstone_lamp":
-		newBlock := Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": boolStr(powered)}}
-		if block.Equal(newBlock) {
-			return BlockChange{}, false
+		var newName string
+		if powered {
+			newName = "minecraft:redstone_lamp" // stays same name, "lit" property
 		}
+		newBlock := Block{
+			Namespace: "minecraft",
+			Name:      "redstone_lamp",
+			Properties: map[string]string{
+				"lit": boolStr(powered),
+			},
+		}
+		_ = newName
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 
 	case "minecraft:redstone_wire":
+		// Update power property on dust.
 		p := 0
 		if powered {
 			p = re.power[[3]int{x, y, z}]
 		}
-		newBlock := Block{Namespace: "minecraft", Name: "redstone_wire", Properties: map[string]string{
-			"power": itoa(p), "north": block.Properties["north"], "south": block.Properties["south"],
-			"east": block.Properties["east"], "west": block.Properties["west"],
-		}}
-		if block.Equal(newBlock) {
-			return BlockChange{}, false
+		newBlock := Block{
+			Namespace: "minecraft",
+			Name:      "redstone_wire",
+			Properties: map[string]string{
+				"power": itoa(p),
+				"north": block.Properties["north"],
+				"south": block.Properties["south"],
+				"east":  block.Properties["east"],
+				"west":  block.Properties["west"],
+			},
 		}
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
@@ -671,15 +686,26 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 		if block.Properties["lit"] == boolStr(powered) {
 			return BlockChange{}, false
 		}
-		newBlock := redstoneBlockWith(block, "lit", boolStr(powered))
+		newBlock := block
+		newBlock.Properties = make(map[string]string, len(block.Properties)+1)
+		for key, value := range block.Properties {
+			newBlock.Properties[key] = value
+		}
+		newBlock.Properties["lit"] = boolStr(powered)
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 
 	case "minecraft:repeater":
-		newBlock := Block{Namespace: "minecraft", Name: "repeater", Properties: map[string]string{
-			"delay": orDefault(block.Properties["delay"], "1"), "facing": orDefault(block.Properties["facing"], "north"),
-			"locked": boolStr(re.repeaterLocked(x, y, z, block)), "powered": boolStr(powered),
-		}}
+		newBlock := Block{
+			Namespace: "minecraft",
+			Name:      "repeater",
+			Properties: map[string]string{
+				"delay":   orDefault(block.Properties["delay"], "1"),
+				"facing":  orDefault(block.Properties["facing"], "north"),
+				"locked":  boolStr(re.repeaterLocked(x, y, z, block)),
+				"powered": boolStr(powered),
+			},
+		}
 		if block.Equal(newBlock) {
 			return BlockChange{}, false
 		}
@@ -687,8 +713,13 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 
 	case "minecraft:comparator":
-		newBlock := redstoneBlockWith(block, "powered", boolStr(powered))
-		if block.Equal(newBlock) {
+		newBlock := block
+		newBlock.Properties = make(map[string]string, len(block.Properties)+1)
+		for key, value := range block.Properties {
+			newBlock.Properties[key] = value
+		}
+		newBlock.Properties["powered"] = boolStr(powered)
+		if block.Properties["powered"] == newBlock.Properties["powered"] {
 			return BlockChange{}, false
 		}
 		re.world.setBlockNoPhysics(x, y, z, newBlock)
@@ -741,8 +772,13 @@ func redstoneBlockWith(block Block, properties ...string) Block {
 	return updated
 }
 
+// neighbors6 returns the 6 face-adjacent positions of (x,y,z).
 func neighbors6(x, y, z int) [6][3]int {
-	return [6][3]int{{x + 1, y, z}, {x - 1, y, z}, {x, y + 1, z}, {x, y - 1, z}, {x, y, z + 1}, {x, y, z - 1}}
+	return [6][3]int{
+		{x + 1, y, z}, {x - 1, y, z},
+		{x, y + 1, z}, {x, y - 1, z},
+		{x, y, z + 1}, {x, y, z - 1},
+	}
 }
 
 func boolStr(b bool) string {

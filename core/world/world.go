@@ -425,6 +425,19 @@ func (w *World) QueueEntityDamageFrom(entityID int32, amount float32, sourceX, s
 	return w.queueEntityDamage(entityID, amount, sourceX, sourceZ, true, [16]byte{}, false)
 }
 
+// QueueEntityImpactFrom records a zero-health-damage hit with a source. It is
+// used by projectiles such as snowballs that still trigger the vanilla hurt
+// reaction and knockback without reducing ordinary entity health.
+func (w *World) QueueEntityImpactFrom(entityID int32, sourceX, sourceZ float64) bool {
+	if _, ok := w.Entities.Get(entityID); !ok {
+		return false
+	}
+	w.damageMu.Lock()
+	w.pendingDamage[entityID] = EntityDamage{Amount: 0, SourceX: sourceX, SourceZ: sourceZ, HasSource: true}
+	w.damageMu.Unlock()
+	return true
+}
+
 // QueueEntityDamageFromPlayer queues player-caused damage. The UUID is kept in
 // the edition-neutral event so Java and Bedrock kills award identical XP.
 func (w *World) QueueEntityDamageFromPlayer(entityID int32, amount float32, sourceX, sourceZ float64, playerUUID [16]byte) bool {
@@ -1032,7 +1045,9 @@ func (w *World) SetBlock(x, y, z int, block Block) {
 	// worldAge 0 = "fire next tick" (drainDue uses <= comparison).
 	w.scheduleBlockNeighborUpdates(x, y, z, oldBlock, block)
 	w.notifyBlockObserver(x, y, z, block)
-	w.triggerObservers(x, y, z)
+	if !oldBlock.Equal(block) {
+		w.triggerObservers(x, y, z)
+	}
 	if IsRailBlock(oldBlock.ResourceLocation()) || IsRailBlock(block.ResourceLocation()) {
 		w.UpdateRailShapesAround(x, y, z)
 	}
@@ -1048,9 +1063,8 @@ func (w *World) triggerObservers(x, y, z int) {
 		if [3]int{pos[0] + dx, pos[1] + dy, pos[2] + dz} != [3]int{x, y, z} {
 			continue
 		}
-		updated := redstoneBlockWith(observer, "powered", "true")
-		w.setBlockNoPhysics(pos[0], pos[1], pos[2], updated)
-		w.Redstone.NotifyChange(pos[0], pos[1], pos[2])
+		// Vanilla observers schedule detection two game ticks after the watched
+		// block changes. The scheduled tick starts the two-tick output pulse.
 		w.BlockPhysics.ScheduleObserver(pos[0], pos[1], pos[2], w.PhysicsTime(), 2)
 	}
 }
@@ -1072,6 +1086,7 @@ func (w *World) setBlockNoPhysics(x, y, z int, block Block) {
 	if c.Sections[sIdx] == nil {
 		c.Sections[sIdx] = NewSection()
 	}
+	oldBlock := c.Sections[sIdx].At(lx, ly, lz)
 	c.Sections[sIdx].Set(lx, ly, lz, block)
 	w.mu.Lock()
 	key := [2]int32{cx, cz}
@@ -1081,6 +1096,9 @@ func (w *World) setBlockNoPhysics(x, y, z int, block Block) {
 	w.trimChunksLocked()
 	w.mu.Unlock()
 	w.notifyBlockObserver(x, y, z, block)
+	if !oldBlock.Equal(block) {
+		w.triggerObservers(x, y, z)
+	}
 }
 
 // scheduleBlockNeighborUpdates schedules physics ticks when a block is placed
@@ -1148,7 +1166,7 @@ func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
 	// 7. Notify redstone engine of any change near redstone components.
 	if IsRedstoneConductor(placedName) || IsRedstoneSource(placedName) || IsRedstoneLoad(placedName) ||
 		IsRedstoneConductor(oldName) || IsRedstoneSource(oldName) || IsRedstoneLoad(oldName) ||
-		placed.IsAir() {
+		isRedstonePowerConductor(placed) || isRedstonePowerConductor(old) || placed.IsAir() {
 		w.Redstone.NotifyChange(x, y, z)
 	}
 }

@@ -237,7 +237,10 @@ func evaluateReadyEntry(entry map[string]any, ctx Context, db *database) ([]play
 		}
 		return nil, false
 	case "minecraft:dynamic":
-		// Dynamic container contents are handled by the world container store.
+		if ctx.Block.ResourceLocation() == "minecraft:decorated_pot" {
+			return []player.ItemStack{{ItemID: "minecraft:brick", Count: 4}}, true
+		}
+		// Other dynamic container contents are handled by the world container store.
 		return nil, true
 	default:
 		return nil, false
@@ -530,4 +533,10 @@ func intValue(value any, fallback int) int {
 func boolValue(value any) bool {
 	result, _ := value.(bool)
 	return result
+}
+
+// BreaksDecoratedPot reports whether the item is in vanilla's
+// #minecraft:breaks_decorated_pots item tag.
+func BreaksDecoratedPot(itemID string) bool {
+	return data().itemTagSets["minecraft:breaks_decorated_pots"][itemID]
 }

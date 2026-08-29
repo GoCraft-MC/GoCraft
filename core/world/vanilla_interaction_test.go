@@ -119,3 +119,39 @@ func TestSolidBlocksDoNotRelayPowerIndefinitely(t *testing.T) {
 		t.Fatalf("power chained through two solid blocks: %d", got)
 	}
 }
+
+func TestObserverSchedulesTwoTickPulse(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetPhysicsTime(100)
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "observer", Properties: map[string]string{"facing": "east", "powered": "false"}})
+	// Ignore placement's own pending bookkeeping, then change the exact watched block.
+	w.BlockPhysics.DrainDue(100)
+	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "stone"})
+	if got := w.GetBlock(0, 64, 0).Properties["powered"]; got == "true" {
+		t.Fatal("observer powered before scheduled detection tick")
+	}
+	if due := w.BlockPhysics.DrainDue(101); len(due) != 0 {
+		t.Fatalf("observer fired early: %+v", due)
+	}
+	due := w.BlockPhysics.DrainDue(102)
+	if len(due) != 1 || due[0].Kind != UpdateObserver {
+		t.Fatalf("due=%+v, want one observer update", due)
+	}
+}
+
+func TestObserverOnlyWatchesItsFront(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetPhysicsTime(10)
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "observer", Properties: map[string]string{"facing": "east", "powered": "false"}})
+	w.BlockPhysics.DrainDue(10)
+	w.SetBlock(0, 64, -1, Block{Namespace: "minecraft", Name: "stone"})
+	if due := w.BlockPhysics.DrainDue(12); len(due) != 0 {
+		t.Fatalf("side change triggered observer: %+v", due)
+	}
+	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "fire"})
+	if due := w.BlockPhysics.DrainDue(12); len(due) != 1 || due[0].Kind != UpdateObserver {
+		t.Fatalf("front fire change did not trigger: %+v", due)
+	}
+}

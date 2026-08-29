@@ -145,9 +145,19 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
+		lootBlock := broken
+		if broken.ResourceLocation() == "minecraft:decorated_pot" && held.EnchantmentLevel("minecraft:silk_touch") == 0 && blockloot.BreaksDecoratedPot(held.ItemID) {
+			lootBlock = copyBlockProperties(broken)
+			lootBlock.Properties["cracked"] = "true"
+		}
+		enchantments := make(map[string]int)
+		for _, enchantment := range held.EnchantmentLevels() {
+			enchantments[enchantment.ID] = enchantment.Level
+		}
 		lootContext := blockloot.Context{
-			Block: broken,
-			Tool:  held,
+			Block:        lootBlock,
+			Tool:         held,
+			Enchantments: enchantments,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return w.GetBlock(int(bx)+dx, int(by)+dy, int(bz)+dz)
 			},
@@ -251,6 +261,11 @@ func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.Worl
 }
 
 func breakUnsupportedBlocksAbove(x, y, z int, w *coreworld.World, mgr *session.Manager) {
+	for _, change := range w.BreakUnsupportedAttachmentsAround(x, y, z) {
+		if mgr != nil {
+			BroadcastBlockChange(change, mgr)
+		}
+	}
 	for _, change := range w.BreakUnsupportedCropsAbove(x, y, z) {
 		if mgr != nil {
 			BroadcastBlockChange(change, mgr)
@@ -1758,7 +1773,7 @@ func placeDoorBlock(p *player.Player, x, y, z int, kind string, clickX, clickZ f
 	ns, name, _ := strings.Cut(kind, ":")
 	facing := bedFacingFromYaw(p.Rotation.Yaw)
 	lower := coreworld.Block{Namespace: ns, Name: name, Properties: map[string]string{
-		"facing": facing, "half": "lower", "hinge": doorHinge(facing, clickX, clickZ),
+		"facing": facing, "half": "lower", "hinge": coreworld.DoorHinge(w, x, y, z, facing, clickX, clickZ),
 		"open": "false", "powered": "false",
 	}}
 	upper := copyBlockProperties(lower)
