@@ -8,6 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 
