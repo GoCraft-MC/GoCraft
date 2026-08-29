@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"GoCraft/core/blockloot"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
@@ -583,6 +584,12 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 	playerFacing := bedrockPlayerFacing(p.Rotation.Yaw)
 	frontFacing := bedrockOppositeFacing(playerFacing)
 
+	if coreworld.IsAttachmentPlacementItem(name) {
+		placingInWater := s.bedrockWorld().GetBlock(x, y, z).ResourceLocation() == "minecraft:water"
+		placed, _, valid := coreworld.AttachmentPlacementState(s.bedrockWorld(), block, x, y, z, i.Face, bedrockSignRotation(p.Rotation.Yaw), placingInWater)
+		return placed, valid
+	}
+
 	if name == "minecraft:torch" || name == "minecraft:soul_torch" || name == "minecraft:redstone_torch" {
 		if i.Face == 1 && bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
 			block.Properties = map[string]string{}
@@ -972,15 +979,28 @@ func (s *Server) breakBedrockLinkedBlock(x, y, z int, block coreworld.Block) {
 // after a player removes a supporting block. Doing this in the interaction
 // path also guarantees that the Bedrock UpdateBlock packets are ordered with
 // the original break instead of leaving vegetation floating client-side.
-func (s *Server) breakBedrockUnsupportedAbove(x, y, z int) {
-	for _, change := range s.bedrockWorld().BreakUnsupportedAttachmentsAround(x, y, z) {
-		if s.sessions != nil {
-			handler.BroadcastBlockChange(change, s.sessions)
-		}
-	}
+func (s *Server) breakBedrockUnsupportedAbove(p *player.Player, x, y, z int) {
 	world := s.bedrockWorld()
 	if world == nil {
 		return
+	}
+	for updateIndex, update := range world.ApplyAttachmentSupportUpdatesAround(x, y, z) {
+		if s.sessions != nil {
+			handler.BroadcastBlockChange(update.Change, s.sessions)
+		}
+		if !update.Removed || p == nil {
+			continue
+		}
+		dropPosition := spatial.Vec3{
+			X: float64(update.Change.X) + 0.5,
+			Y: float64(update.Change.Y) + 0.5,
+			Z: float64(update.Change.Z) + 0.5,
+		}
+		for dropIndex, drop := range blockloot.Drops(blockloot.Context{Block: update.Previous}) {
+			if dropped := s.newDroppedItemForPlayer(p, drop, dropPosition, updateIndex*16+dropIndex); dropped != nil && s.sessions != nil {
+				handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
+			}
+		}
 	}
 	s.broadcastCanonicalCropChanges(world.BreakUnsupportedCropsAbove(x, y, z))
 	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {

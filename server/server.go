@@ -1709,7 +1709,7 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			s.setBedrockActionBlock(x, partnerY, z, coreworld.Air)
 		}
 		s.breakBedrockLinkedBlock(x, y, z, block)
-		s.breakBedrockUnsupportedAbove(x, y, z)
+		s.breakBedrockUnsupportedAbove(p, x, y, z)
 		if block.ResourceLocation() == "minecraft:redstone_wire" {
 			s.refreshBedrockWireConnections(x, y, z)
 		}

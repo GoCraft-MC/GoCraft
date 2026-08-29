@@ -178,7 +178,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		breakLinkedBedHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		breakLinkedDoorHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		unlinkChestPartner(int(bx), int(by), int(bz), broken, w, mgr)
-		breakUnsupportedBlocksAbove(int(bx), int(by), int(bz), w, mgr)
+		breakUnsupportedBlocksAboveWithDrops(int(bx), int(by), int(bz), w, mgr, nextEntityID, p.Dimension)
 		broadcastSoundAt(mgr, blockBreakSound(broken.ResourceLocation()), soundCategoryBlocks,
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 		w.EmitVibration(int(bx), int(by), int(bz))
@@ -268,9 +268,24 @@ func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.Worl
 }
 
 func breakUnsupportedBlocksAbove(x, y, z int, w *coreworld.World, mgr *session.Manager) {
-	for _, change := range w.BreakUnsupportedAttachmentsAround(x, y, z) {
+	breakUnsupportedBlocksAboveWithDrops(x, y, z, w, mgr, nil, 0)
+}
+
+func breakUnsupportedBlocksAboveWithDrops(x, y, z int, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32, dimension int32) {
+	for updateIndex, update := range w.ApplyAttachmentSupportUpdatesAround(x, y, z) {
 		if mgr != nil {
-			BroadcastBlockChange(change, mgr)
+			BroadcastBlockChange(update.Change, mgr)
+		}
+		if !update.Removed {
+			continue
+		}
+		dropPosition := spatial.Vec3{
+			X: float64(update.Change.X) + 0.5,
+			Y: float64(update.Change.Y) + 0.5,
+			Z: float64(update.Change.Z) + 0.5,
+		}
+		for dropIndex, drop := range blockloot.Drops(blockloot.Context{Block: update.Previous}) {
+			spawnBlockDrop(w, nextEntityID, dropPosition, drop, updateIndex*16+dropIndex, mgr, dimension)
 		}
 	}
 	for _, change := range w.BreakUnsupportedCropsAbove(x, y, z) {
@@ -835,6 +850,13 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	slog.Info("block place", "player", p.Username,
 		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
 	switch {
+	case coreworld.IsAttachmentPlacementItem(block.ResourceLocation()):
+		placed, _, ok := coreworld.AttachmentPlacementState(w, block, px, py, pz, face, javaAttachmentRotation(p.Rotation.Yaw), placingInWater)
+		if !ok {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		applyBlockChange(px, py, pz, placed, w, mgr)
 	case block.ResourceLocation() == "minecraft:chest" || block.ResourceLocation() == "minecraft:trapped_chest":
 		placeChestBlock(p, px, py, pz, block.ResourceLocation(), w, mgr)
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)

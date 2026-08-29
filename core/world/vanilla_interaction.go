@@ -86,13 +86,41 @@ func doorHingeFullBlock(block Block) bool {
 	return IsSolidLandingSurface(name)
 }
 
-// BreakUnsupportedAttachmentsAround removes blocks whose supporting block has
-// disappeared. It covers floor, ceiling, and wall redstone/decorative
-// attachments so both protocol adapters get the same neighbour physics.
-func (w *World) BreakUnsupportedAttachmentsAround(x, y, z int) []BlockChange {
-	changes := make([]BlockChange, 0, 4)
+// AttachmentSupportUpdate describes a neighbour update caused by a support
+// block changing. Previous is retained when a block is removed so adapters can
+// evaluate the same vanilla loot table after the world has already become air.
+type AttachmentSupportUpdate struct {
+	Change   BlockChange
+	Previous Block
+	Removed  bool
+}
+
+// ApplyAttachmentSupportUpdatesAround applies support-dependent neighbour
+// updates around a changed block. Bells may switch attachment state instead of
+// breaking; other unsupported attachments are removed.
+func (w *World) ApplyAttachmentSupportUpdatesAround(x, y, z int) []AttachmentSupportUpdate {
+	updates := make([]AttachmentSupportUpdate, 0, 4)
 	for _, pos := range neighbors6(x, y, z) {
 		block := w.GetBlock(pos[0], pos[1], pos[2])
+		if block.ResourceLocation() == "minecraft:bell" {
+			updated, survives := bellAttachmentNeighborState(w, pos[0], pos[1], pos[2], block)
+			if !survives {
+				w.SetBlock(pos[0], pos[1], pos[2], Air)
+				updates = append(updates, AttachmentSupportUpdate{
+					Change:   BlockChange{X: pos[0], Y: pos[1], Z: pos[2], Block: Air},
+					Previous: block,
+					Removed:  true,
+				})
+			} else if updated.Properties["attachment"] != block.Properties["attachment"] ||
+				updated.Properties["facing"] != block.Properties["facing"] {
+				w.SetBlock(pos[0], pos[1], pos[2], updated)
+				updates = append(updates, AttachmentSupportUpdate{
+					Change:   BlockChange{X: pos[0], Y: pos[1], Z: pos[2], Block: updated},
+					Previous: block,
+				})
+			}
+			continue
+		}
 		sx, sy, sz, ok := attachmentSupportPosition(pos[0], pos[1], pos[2], block)
 		if !ok || sx != x || sy != y || sz != z {
 			continue
@@ -101,37 +129,28 @@ func (w *World) BreakUnsupportedAttachmentsAround(x, y, z int) []BlockChange {
 			continue
 		}
 		w.SetBlock(pos[0], pos[1], pos[2], Air)
-		changes = append(changes, BlockChange{X: pos[0], Y: pos[1], Z: pos[2], Block: Air})
+		updates = append(updates, AttachmentSupportUpdate{
+			Change:   BlockChange{X: pos[0], Y: pos[1], Z: pos[2], Block: Air},
+			Previous: block,
+			Removed:  true,
+		})
+	}
+	return updates
+}
+
+// BreakUnsupportedAttachmentsAround keeps the original block-change API for
+// callers that only need world mutations and client updates.
+func (w *World) BreakUnsupportedAttachmentsAround(x, y, z int) []BlockChange {
+	updates := w.ApplyAttachmentSupportUpdatesAround(x, y, z)
+	changes := make([]BlockChange, 0, len(updates))
+	for _, update := range updates {
+		changes = append(changes, update.Change)
 	}
 	return changes
 }
 
 func attachmentSupportPosition(x, y, z int, block Block) (sx, sy, sz int, ok bool) {
-	name := block.ResourceLocation()
-	if name == "minecraft:lever" || strings.HasSuffix(name, "_button") {
-		switch block.Properties["face"] {
-		case "floor":
-			return x, y - 1, z, true
-		case "ceiling":
-			return x, y + 1, z, true
-		default:
-			dx, dz := attachmentWallSupportOffset(block.Properties["facing"])
-			return x + dx, y, z + dz, true
-		}
-	}
-
-	if name == "minecraft:redstone_wall_torch" || name == "minecraft:wall_torch" ||
-		name == "minecraft:soul_wall_torch" || name == "minecraft:tripwire_hook" {
-		dx, dz := attachmentWallSupportOffset(block.Properties["facing"])
-		return x + dx, y, z + dz, true
-	}
-
-	if name == "minecraft:torch" || name == "minecraft:soul_torch" || name == "minecraft:redstone_torch" ||
-		name == "minecraft:redstone_wire" || name == "minecraft:repeater" || name == "minecraft:comparator" ||
-		IsRailBlock(name) || strings.HasSuffix(name, "_pressure_plate") {
-		return x, y - 1, z, true
-	}
-	return 0, 0, 0, false
+	return AttachmentSupportPosition(x, y, z, block)
 }
 
 // Wall-facing attachments point away from the block they are attached to.
