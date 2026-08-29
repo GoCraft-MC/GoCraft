@@ -66,6 +66,16 @@ func validateManifest(manifest Manifest) error {
 	if strings.TrimSpace(manifest.Runtime) == "" {
 		return fmt.Errorf("plugin %s: runtime is required", manifest.ID)
 	}
+	permissions := make(map[string]struct{}, len(manifest.Permissions))
+	for _, permission := range manifest.Permissions {
+		if strings.TrimSpace(permission) == "" {
+			return fmt.Errorf("plugin %s: empty subscribed permission", manifest.ID)
+		}
+		if _, duplicate := permissions[permission]; duplicate {
+			return fmt.Errorf("plugin %s: duplicate subscribed permission %s", manifest.ID, permission)
+		}
+		permissions[permission] = struct{}{}
+	}
 	seen := make(map[string]struct{}, len(manifest.Subscriptions))
 	for _, subscription := range manifest.Subscriptions {
 		if strings.TrimSpace(subscription.Event) == "" {
