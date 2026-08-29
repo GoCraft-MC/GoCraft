@@ -646,6 +646,14 @@ func (re *RedstoneEngine) applyPowerState(x, y, z int, name string, block Block,
 		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
 	}
 	switch name {
+	case "minecraft:bell":
+		newBlock := redstoneBlockWith(block, "powered", boolStr(powered))
+		if block.Equal(newBlock) {
+			return BlockChange{}, false
+		}
+		re.world.setBlockNoPhysics(x, y, z, newBlock)
+		return BlockChange{X: x, Y: y, Z: z, Block: newBlock}, true
+
 	case "minecraft:redstone_lamp":
 		var newName string
 		if powered {
