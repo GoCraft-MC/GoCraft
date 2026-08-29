@@ -6,20 +6,30 @@ import (
 )
 
 type registration struct {
-	root     Root
-	source   Source
-	handlers map[ExecID]Handler
+	root      Root
+	source    Source
+	executors []ExecID
+}
+
+type registeredHandler struct {
+	source  Source
+	handler Handler
 }
 
 // Registry owns command trees and their executor callbacks by source.
 type Registry struct {
-	mu      sync.RWMutex
-	entries map[string]registration
-	version uint64
+	mu       sync.RWMutex
+	entries  map[string]registration
+	handlers map[ExecID]registeredHandler
+	nextExec ExecID
+	version  uint64
 }
 
 func NewRegistry() *Registry {
-	return &Registry{entries: make(map[string]registration)}
+	return &Registry{
+		entries:  make(map[string]registration),
+		handlers: make(map[ExecID]registeredHandler),
+	}
 }
 
 func (r *Registry) Register(source Source, root Root, handlers map[ExecID]Handler) error {
@@ -53,18 +63,27 @@ func (r *Registry) Register(source Source, root Root, handlers map[ExecID]Handle
 			return fmt.Errorf("command /%s conflicts with a core command", conflict)
 		}
 	}
-	copyHandlers := make(map[ExecID]Handler, len(handlers))
-	for executor, handler := range handlers {
-		copyHandlers[executor] = handler
+	root, remapped := remapRoot(root, func() ExecID {
+		r.nextExec++
+		return r.nextExec
+	})
+	globalIDs := make([]ExecID, 0, len(remapped))
+	for local, global := range remapped {
+		globalIDs = append(globalIDs, global)
+		r.handlers[global] = registeredHandler{source: source, handler: handlers[local]}
 	}
-	r.entries[key] = registration{root: root, source: source, handlers: copyHandlers}
+	r.entries[key] = registration{root: root, source: source, executors: globalIDs}
 	r.version++
 	return nil
 }
 
 func (r *Registry) RevokeAll(pluginID string) {
 	r.mu.Lock()
-	if _, exists := r.entries[pluginID]; exists {
+	entry, exists := r.entries[pluginID]
+	if exists && entry.source.Kind == SourcePlugin {
+		for _, executor := range entry.executors {
+			delete(r.handlers, executor)
+		}
 		delete(r.entries, pluginID)
 		r.version++
 	}
