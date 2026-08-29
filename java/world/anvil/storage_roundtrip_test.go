@@ -156,3 +156,10 @@ func TestWorldFlushPersistsGeneratedChunk(t *testing.T) {
 		t.Fatalf("autosave did not create region file: %v", err)
 	}
 }
+
+func TestDecoratedPotDecorationTagRoundTrip(t *testing.T) {
+	want := [4]string{"minecraft:angler_pottery_sherd", "minecraft:brick", "minecraft:skull_pottery_sherd", "minecraft:heart_pottery_sherd"}
+	if got := decodePotDecorations(potDecorationsTag(want)); got != want {
+		t.Fatalf("decorations = %#v, want %#v", got, want)
+	}
+}

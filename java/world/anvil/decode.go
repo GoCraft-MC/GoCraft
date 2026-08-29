@@ -105,6 +105,7 @@ func decodeBlockEntities(list Tag) []coreworld.BlockEntity {
 		entityType := data["id"].Str()
 		x, y, z := int(data["x"].Int()), int(data["y"].Int()), int(data["z"].Int())
 		items := decodeContainerItems(data["Items"])
+		potDecorations := decodePotDecorations(data["sherds"])
 		delete(data, "Items")
 		delete(data, "id")
 		delete(data, "x")
@@ -113,7 +114,9 @@ func decodeBlockEntities(list Tag) []coreworld.BlockEntity {
 		var payload bytes.Buffer
 		wByte(&payload, byte(tagCompound))
 		writeCompoundPayload(&payload, data)
-		entities = append(entities, coreworld.BlockEntity{X: x, Y: y, Z: z, Type: entityType, Data: payload.Bytes(), Items: items})
+		entities = append(entities, coreworld.BlockEntity{
+			X: x, Y: y, Z: z, Type: entityType, Data: payload.Bytes(), Items: items, PotDecorations: potDecorations,
+		})
 	}
 	return entities
 }
@@ -143,11 +146,15 @@ func decodeContainerItems(list Tag) []coreworld.ContainerItem {
 			continue
 		}
 		damage, enchantments := 0, ""
+		var potDecorations [4]string
 		if components := entry.compound["components"]; components.typ == tagCompound {
 			damage = numericTagValue(components.compound["minecraft:damage"])
 			enchantments = decodeItemEnchantments(components.compound["minecraft:enchantments"])
+			potDecorations = decodePotDecorations(components.compound["minecraft:pot_decorations"])
 		}
-		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: itemID, Count: count, Damage: damage, Enchantments: enchantments})
+		items = append(items, coreworld.ContainerItem{
+			Slot: slot, ItemID: itemID, Count: count, Damage: damage, Enchantments: enchantments, PotDecorations: potDecorations,
+		})
 	}
 	return items
 }
@@ -317,4 +324,20 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func decodePotDecorations(tag Tag) [4]string {
+	var decorations [4]string
+	if tag.typ != tagList {
+		return decorations
+	}
+	for index, entry := range tag.listV {
+		if index >= len(decorations) {
+			break
+		}
+		if entry.typ == tagString {
+			decorations[index] = entry.Str()
+		}
+	}
+	return decorations
 }

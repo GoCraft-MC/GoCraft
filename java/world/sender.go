@@ -74,11 +74,14 @@ func (s *Sender) SendChunk(conn *network.ClientConn, c *coreworld.Chunk) error {
 	type encodedBlockEntity struct {
 		entity coreworld.BlockEntity
 		typeID int32
+		data   []byte
 	}
 	blockEntities := make([]encodedBlockEntity, 0, len(c.BlockEntities))
 	for _, entity := range c.BlockEntities {
-		if typeID, ok := BlockEntityTypeID(entity.Type); ok && len(entity.Data) > 0 {
-			blockEntities = append(blockEntities, encodedBlockEntity{entity: entity, typeID: typeID})
+		typeID, ok := BlockEntityTypeID(entity.Type)
+		data := BlockEntityNetworkData(entity)
+		if ok && len(data) > 0 {
+			blockEntities = append(blockEntities, encodedBlockEntity{entity: entity, typeID: typeID, data: data})
 		}
 	}
 
@@ -92,7 +95,7 @@ func (s *Sender) SendChunk(conn *network.ClientConn, c *coreworld.Chunk) error {
 	for _, encoded := range blockEntities {
 		entity := encoded.entity
 		packedXZ := byte((entity.X&15)<<4 | (entity.Z & 15))
-		b.Byte(packedXZ).Short(int16(entity.Y)).VarInt(encoded.typeID).Bytes(entity.Data)
+		b.Byte(packedXZ).Short(int16(entity.Y)).VarInt(encoded.typeID).Bytes(encoded.data)
 	}
 	b.VarInt(1).Long(skyMask).
 		VarInt(0). // block light mask

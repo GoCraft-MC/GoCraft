@@ -6,7 +6,7 @@
 
 <p align="center">
   A native-Go Minecraft server built from scratch around an edition-agnostic core.<br>
-  Java Edition 1.21.4 · Bedrock Edition 1.26.40 · Cross-play · No JVM
+  Java Edition 1.21.4 · Bedrock Edition 1.26.45 · Cross-play · No JVM
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ Both Java and Bedrock clients connect to the same server, share the same world a
 | Client | Status |
 | --- | --- |
 | Minecraft: Java Edition 1.21.4 (protocol 769) | Active development target |
-| Minecraft: Bedrock Edition 1.26.40 (protocol 2168) | Beta — full cross-play support |
+| Minecraft: Bedrock Edition 1.26.45 (protocol 2169) | Beta — full cross-play support |
 | Other versions | Not supported |
 
 ## Quick start

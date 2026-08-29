@@ -41,6 +41,9 @@ type ItemStack struct {
 	// Enchantments stores sorted resource-location/level pairs as a compact,
 	// comparable canonical component string.
 	Enchantments string `json:",omitempty"`
+	// PotDecorations stores the four side decorations of a decorated-pot item.
+	// An array keeps ItemStack comparable, which is important for inventory diffing.
+	PotDecorations [4]string `json:",omitempty"`
 }
 
 type armorItemStats struct {
@@ -112,9 +115,29 @@ func (s ItemStack) IsEmpty() bool {
 	return s.Count <= 0 || s.ItemID == ""
 }
 
+// NormalizePotDecorations returns the complete four-side decoration list.
+// Vanilla treats absent entries as bricks.
+func NormalizePotDecorations(decorations [4]string) [4]string {
+	for index := range decorations {
+		if decorations[index] == "" {
+			decorations[index] = "minecraft:brick"
+		}
+	}
+	return decorations
+}
+
+// NormalizedPotDecorations returns the meaningful decorated-pot component.
+func (s ItemStack) NormalizedPotDecorations() [4]string {
+	if s.ItemID != "minecraft:decorated_pot" {
+		return [4]string{}
+	}
+	return NormalizePotDecorations(s.PotDecorations)
+}
+
 // SameItem reports whether two stacks may merge without losing components.
 func (s ItemStack) SameItem(other ItemStack) bool {
-	return s.ItemID == other.ItemID && s.Damage == other.Damage && s.Enchantments == other.Enchantments
+	return s.ItemID == other.ItemID && s.Damage == other.Damage && s.Enchantments == other.Enchantments &&
+		s.NormalizedPotDecorations() == other.NormalizedPotDecorations()
 }
 
 // MaxDurability returns Java Edition's vanilla maximum durability for the

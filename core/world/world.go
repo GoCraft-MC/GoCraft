@@ -37,10 +37,12 @@ type World struct {
 	accessClock     uint64
 	maxCachedChunks int
 
-	blockObserverMu sync.RWMutex
-	blockObserver   func(BlockChange)
-	vibrationMu     sync.Mutex
-	vibrations      map[[3]int]struct{}
+	blockObserverMu       sync.RWMutex
+	blockObserver         func(BlockChange)
+	blockEntityObserverMu sync.RWMutex
+	blockEntityObserver   func(BlockEntity)
+	vibrationMu           sync.Mutex
+	vibrations            map[[3]int]struct{}
 
 	pregenQueue  chan [2]int32
 	pregenQueued map[[2]int32]struct{}
@@ -109,6 +111,27 @@ func (w *World) notifyBlockObserver(x, y, z int, block Block) {
 	if observer != nil {
 		observer(BlockChange{X: x, Y: y, Z: z, Block: block})
 	}
+}
+
+// SetBlockEntityObserver installs an adapter-neutral notification invoked after
+// canonical block-entity data changes. The snapshot passed to the observer owns
+// its Data and Items slices and may safely outlive the world mutation.
+func (w *World) SetBlockEntityObserver(observer func(BlockEntity)) {
+	w.blockEntityObserverMu.Lock()
+	w.blockEntityObserver = observer
+	w.blockEntityObserverMu.Unlock()
+}
+
+func (w *World) notifyBlockEntityObserver(entity BlockEntity) {
+	w.blockEntityObserverMu.RLock()
+	observer := w.blockEntityObserver
+	w.blockEntityObserverMu.RUnlock()
+	if observer == nil {
+		return
+	}
+	entity.Data = append([]byte(nil), entity.Data...)
+	entity.Items = append([]ContainerItem(nil), entity.Items...)
+	observer(entity)
 }
 
 // EntityDamage is a simulation-thread damage event. Source coordinates are
@@ -423,6 +446,19 @@ func (w *World) QueueEntityDamage(entityID int32, amount float32) bool {
 // source, allowing passive mobs to panic away from the attacker.
 func (w *World) QueueEntityDamageFrom(entityID int32, amount float32, sourceX, sourceZ float64) bool {
 	return w.queueEntityDamage(entityID, amount, sourceX, sourceZ, true, [16]byte{}, false)
+}
+
+// QueueEntityImpactFrom records a zero-health-damage hit with a source. It is
+// used by projectiles such as snowballs that still trigger the vanilla hurt
+// reaction and knockback without reducing ordinary entity health.
+func (w *World) QueueEntityImpactFrom(entityID int32, sourceX, sourceZ float64) bool {
+	if _, ok := w.Entities.Get(entityID); !ok {
+		return false
+	}
+	w.damageMu.Lock()
+	w.pendingDamage[entityID] = EntityDamage{Amount: 0, SourceX: sourceX, SourceZ: sourceZ, HasSource: true}
+	w.damageMu.Unlock()
+	return true
 }
 
 // QueueEntityDamageFromPlayer queues player-caused damage. The UUID is kept in
@@ -1032,7 +1068,9 @@ func (w *World) SetBlock(x, y, z int, block Block) {
 	// worldAge 0 = "fire next tick" (drainDue uses <= comparison).
 	w.scheduleBlockNeighborUpdates(x, y, z, oldBlock, block)
 	w.notifyBlockObserver(x, y, z, block)
-	w.triggerObservers(x, y, z)
+	if !oldBlock.Equal(block) {
+		w.triggerObservers(x, y, z)
+	}
 	if IsRailBlock(oldBlock.ResourceLocation()) || IsRailBlock(block.ResourceLocation()) {
 		w.UpdateRailShapesAround(x, y, z)
 	}
@@ -1048,9 +1086,8 @@ func (w *World) triggerObservers(x, y, z int) {
 		if [3]int{pos[0] + dx, pos[1] + dy, pos[2] + dz} != [3]int{x, y, z} {
 			continue
 		}
-		updated := redstoneBlockWith(observer, "powered", "true")
-		w.setBlockNoPhysics(pos[0], pos[1], pos[2], updated)
-		w.Redstone.NotifyChange(pos[0], pos[1], pos[2])
+		// Vanilla observers schedule detection two game ticks after the watched
+		// block changes. The scheduled tick starts the two-tick output pulse.
 		w.BlockPhysics.ScheduleObserver(pos[0], pos[1], pos[2], w.PhysicsTime(), 2)
 	}
 }
@@ -1072,6 +1109,7 @@ func (w *World) setBlockNoPhysics(x, y, z int, block Block) {
 	if c.Sections[sIdx] == nil {
 		c.Sections[sIdx] = NewSection()
 	}
+	oldBlock := c.Sections[sIdx].At(lx, ly, lz)
 	c.Sections[sIdx].Set(lx, ly, lz, block)
 	w.mu.Lock()
 	key := [2]int32{cx, cz}
@@ -1081,6 +1119,9 @@ func (w *World) setBlockNoPhysics(x, y, z int, block Block) {
 	w.trimChunksLocked()
 	w.mu.Unlock()
 	w.notifyBlockObserver(x, y, z, block)
+	if !oldBlock.Equal(block) {
+		w.triggerObservers(x, y, z)
+	}
 }
 
 // scheduleBlockNeighborUpdates schedules physics ticks when a block is placed
@@ -1148,7 +1189,7 @@ func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
 	// 7. Notify redstone engine of any change near redstone components.
 	if IsRedstoneConductor(placedName) || IsRedstoneSource(placedName) || IsRedstoneLoad(placedName) ||
 		IsRedstoneConductor(oldName) || IsRedstoneSource(oldName) || IsRedstoneLoad(oldName) ||
-		placed.IsAir() {
+		isRedstonePowerConductor(placed) || isRedstonePowerConductor(old) || placed.IsAir() {
 		w.Redstone.NotifyChange(x, y, z)
 	}
 }
@@ -1312,3 +1353,73 @@ func (w *World) RequestTimeSkip() { w.requestTimeSkip.Store(true) }
 // DrainTimeSkip returns true once and resets the flag if a time skip was
 // requested since the last call. Called by the server tick goroutine.
 func (w *World) DrainTimeSkip() bool { return w.requestTimeSkip.Swap(false) }
+
+// DecoratedPotDecorations returns all four vanilla side decorations stored by
+// the decorated-pot block entity. Missing entries represent bricks in vanilla.
+func (w *World) DecoratedPotDecorations(x, y, z int) [4]string {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	w.containerMu.RLock()
+	defer w.containerMu.RUnlock()
+	for _, entity := range c.BlockEntities {
+		if entity.X == x && entity.Y == y && entity.Z == z {
+			return normalizeDecoratedPotDecorations(entity.PotDecorations)
+		}
+	}
+	return normalizeDecoratedPotDecorations([4]string{})
+}
+
+// SetDecoratedPotDecorations updates only the decoration component and keeps
+// the pot's stored item and opaque block-entity data intact.
+func (w *World) SetDecoratedPotDecorations(x, y, z int, decorations [4]string) {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	decorations = normalizeDecoratedPotDecorations(decorations)
+
+	w.containerMu.Lock()
+	updated := false
+	var snapshot BlockEntity
+	for index := range c.BlockEntities {
+		entity := &c.BlockEntities[index]
+		if entity.X != x || entity.Y != y || entity.Z != z {
+			continue
+		}
+		if entity.Type == "" {
+			entity.Type = "minecraft:decorated_pot"
+		}
+		if len(entity.Data) < 2 {
+			entity.Data = []byte{10, 0}
+		}
+		entity.PotDecorations = decorations
+		snapshot = *entity
+		updated = true
+		break
+	}
+	if !updated {
+		snapshot = BlockEntity{
+			X: x, Y: y, Z: z, Type: "minecraft:decorated_pot", Data: []byte{10, 0},
+			PotDecorations: decorations,
+		}
+		c.BlockEntities = append(c.BlockEntities, snapshot)
+	}
+	w.containerMu.Unlock()
+
+	w.mu.Lock()
+	key := [2]int32{cx, cz}
+	w.chunks[key] = c
+	w.touchChunkLocked(key)
+	w.dirty[key] = struct{}{}
+	w.mu.Unlock()
+	w.notifyBlockEntityObserver(snapshot)
+}
+
+func normalizeDecoratedPotDecorations(decorations [4]string) [4]string {
+	for index := range decorations {
+		if decorations[index] == "" {
+			decorations[index] = "minecraft:brick"
+		}
+	}
+	return decorations
+}

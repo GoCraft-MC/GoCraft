@@ -17,3 +17,5 @@ permissions.json
 whitelist.json
 banned-players.json
 banned-ips.json
+plugins/*
+!plugins/README.md

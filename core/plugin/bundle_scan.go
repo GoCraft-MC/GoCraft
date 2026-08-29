@@ -12,12 +12,22 @@ import (
 	"GoCraft/core/command"
 )
 
+const DefaultDirectory = "plugins"
+
+// EnsureDirectory creates the server's plugin drop directory when needed.
+func EnsureDirectory(directory string) error {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return fmt.Errorf("create plugins directory: %w", err)
+	}
+	return nil
+}
+
 // ScanBundles reads manifests without starting any plugin runtime.
 func ScanBundles(directory string) ([]Bundle, error) {
-	entries, err := os.ReadDir(directory)
-	if os.IsNotExist(err) {
-		return nil, nil
+	if err := EnsureDirectory(directory); err != nil {
+		return nil, err
 	}
+	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return nil, fmt.Errorf("scan plugins directory: %w", err)
 	}

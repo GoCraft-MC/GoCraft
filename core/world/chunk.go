@@ -40,20 +40,22 @@ type Chunk struct {
 // BlockEntity is a canonical positioned block entity. Data contains an
 // anonymous network-NBT compound when loaded from Java Anvil storage.
 type BlockEntity struct {
-	X, Y, Z int
-	Type    string
-	Data    []byte
-	Items   []ContainerItem
+	X, Y, Z        int
+	Type           string
+	Data           []byte
+	Items          []ContainerItem
+	PotDecorations [4]string
 }
 
 // ContainerItem is an edition-independent item stored in a block container.
 // Slot is the zero-based index inside the container (0-26 for a single chest).
 type ContainerItem struct {
-	Slot         int
-	ItemID       string
-	Count        int
-	Damage       int
-	Enchantments string
+	Slot           int
+	ItemID         string
+	Count          int
+	Damage         int
+	Enchantments   string
+	PotDecorations [4]string
 }
 
 // HighestBlockY returns the highest non-air block in the local x/z column.

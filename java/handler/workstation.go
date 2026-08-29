@@ -306,7 +306,7 @@ func closeWorkstation(p *player.Player, w *coreworld.World) {
 		items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots))
 		for slot, stack := range p.ContainerSlots {
 			if !stack.IsEmpty() {
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments})
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
 			}
 		}
 		w.SetContainerItems(int(p.OpenContainerPos.X), int(p.OpenContainerPos.Y), int(p.OpenContainerPos.Z), p.OpenContainerKind, items)

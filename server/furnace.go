@@ -2,6 +2,7 @@ package server
 
 import (
 	"math"
+	"math/rand"
 	"strings"
 
 	"GoCraft/core/player"
@@ -11,6 +12,8 @@ import (
 )
 
 const furnaceSlotCount = 3
+
+var furnaceExperienceRoll = rand.Float32
 
 type furnaceState struct {
 	BurnTime     int
@@ -36,12 +39,18 @@ func (state *furnaceState) recordRecipe(recipe handler.CookingRecipeDescription)
 }
 
 func (state *furnaceState) extractExperience() int32 {
-	var total float32
+	var total int32
 	for _, used := range state.RecipesUsed {
-		total += used.Experience * float32(used.Count)
+		raw := used.Experience * float32(used.Count)
+		points := int32(math.Floor(float64(raw)))
+		fraction := raw - float32(points)
+		if fraction > 0 && furnaceExperienceRoll() < fraction {
+			points++
+		}
+		total += points
 	}
 	clear(state.RecipesUsed)
-	return int32(math.Floor(float64(total)))
+	return total
 }
 
 type furnaceKey struct {
@@ -53,7 +62,7 @@ func loadFurnaceSlots(w *coreworld.World, pos spatial.BlockPos) []player.ItemSta
 	slots := make([]player.ItemStack, furnaceSlotCount)
 	for _, item := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 		if item.Slot >= 0 && item.Slot < furnaceSlotCount && item.ItemID != "" && item.Count > 0 {
-			slots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments}
+			slots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
 		}
 	}
 	return slots
@@ -64,7 +73,7 @@ func persistFurnaceSlots(w *coreworld.World, pos spatial.BlockPos, blockID strin
 	for slot := 0; slot < furnaceSlotCount && slot < len(slots); slot++ {
 		stack := slots[slot]
 		if !stack.IsEmpty() {
-			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments})
+			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
 		}
 	}
 	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), blockID, items)

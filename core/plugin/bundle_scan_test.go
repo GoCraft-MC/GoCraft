@@ -75,8 +75,12 @@ runtime = "go"
 }
 
 func TestScanBundlesAllowsMissingDirectory(t *testing.T) {
-	bundles, err := ScanBundles(filepath.Join(t.TempDir(), "missing"))
+	directory := filepath.Join(t.TempDir(), "missing")
+	bundles, err := ScanBundles(directory)
 	if err != nil || len(bundles) != 0 {
 		t.Fatalf("ScanBundles() = %v, %v", bundles, err)
+	}
+	if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+		t.Fatalf("plugin directory was not created: %v", err)
 	}
 }

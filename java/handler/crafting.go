@@ -373,6 +373,7 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	}
 	damage := int32(0)
 	enchantments := ""
+	var potDecorations [4]string
 	for i := int32(0); i < added; i++ {
 		componentType, err := protocol.ReadVarInt(r)
 		if err != nil {
@@ -414,6 +415,24 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 				stack.Enchant(name, int(level))
 			}
 			enchantments = stack.Enchantments
+		case 61: // pot_decorations: array of item registry IDs
+			length, readErr := protocol.ReadVarInt(r)
+			if readErr != nil || length < 0 || length > 64 {
+				return player.ItemStack{}, fmt.Errorf("invalid pot decoration count %d: %w", length, readErr)
+			}
+			for entry := int32(0); entry < length; entry++ {
+				decorationID, idErr := protocol.ReadVarInt(r)
+				if idErr != nil {
+					return player.ItemStack{}, idErr
+				}
+				decoration := javaworld.ItemName(decorationID)
+				if decoration == "" {
+					return player.ItemStack{}, fmt.Errorf("unknown pot decoration item ID %d", decorationID)
+				}
+				if entry < int32(len(potDecorations)) {
+					potDecorations[entry] = decoration
+				}
+			}
 		case 13: // attribute modifiers, including the final showTooltip flag
 			attributes, readErr := protocol.ReadVarInt(r)
 			if readErr != nil || attributes < 0 || attributes > 256 {
@@ -455,7 +474,9 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	if damage < 0 {
 		damage = 0
 	}
-	return player.ItemStack{ItemID: name, Count: int(count), Damage: int(damage), Enchantments: enchantments}, nil
+	return player.ItemStack{
+		ItemID: name, Count: int(count), Damage: int(damage), Enchantments: enchantments, PotDecorations: potDecorations,
+	}, nil
 }
 
 func skipNetworkNBT(r *bytes.Reader) error {

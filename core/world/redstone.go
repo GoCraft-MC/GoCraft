@@ -206,6 +206,11 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 				if p > best {
 					best = p
 				}
+			} else if isRedstonePowerConductor(nbBlock) {
+				p := re.strongPowerThroughBlock(nb[0], nb[1], nb[2], [3]int{x, y, z})
+				if p > best {
+					best = p
+				}
 			}
 		}
 		// Dust also follows one-block steps. It may climb a solid neighbor when
@@ -284,10 +289,8 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 		return 0
 
 	default:
-		// Loads and solid blocks accept both direct source power and power
-		// carried by dust/repeaters. Without the conductor branch, a lamp next
-		// to powered wire would never light even though the wire state changed.
 		best := 0
+		currentIsFullConductor := isRedstonePowerConductor(block) && !IsRedstoneConductor(name)
 		for _, nb := range neighbors6(x, y, z) {
 			nbBlock := re.world.GetBlock(nb[0], nb[1], nb[2])
 			nbName := nbBlock.ResourceLocation()
@@ -302,6 +305,10 @@ func (re *RedstoneEngine) computePower(x, y, z int, name string, block Block) in
 				}
 			} else if IsRedstoneConductor(nbName) {
 				if p := re.powerFromConductorToward(nb[0], nb[1], nb[2], nbBlock, [3]int{x, y, z}); p > best {
+					best = p
+				}
+			} else if !currentIsFullConductor && isRedstonePowerConductor(nbBlock) {
+				if p := re.strongPowerThroughBlock(nb[0], nb[1], nb[2], [3]int{x, y, z}); p > best {
 					best = p
 				}
 			}
@@ -464,8 +471,33 @@ func (re *RedstoneEngine) inputPowerAt(x, y, z int, target [3]int) int {
 		if conductor := re.powerFromConductorToward(x, y, z, block, target); conductor > power {
 			power = conductor
 		}
+	} else if isRedstonePowerConductor(block) {
+		if conductor := re.strongPowerThroughBlock(x, y, z, target); conductor > power {
+			power = conductor
+		}
 	}
 	return power
+}
+
+func (re *RedstoneEngine) strongPowerThroughBlock(x, y, z int, excluded [3]int) int {
+	best := 0
+	for _, nb := range neighbors6(x, y, z) {
+		if nb == excluded {
+			continue
+		}
+		source := re.world.GetBlock(nb[0], nb[1], nb[2])
+		if p := re.powerFromSourceToward(nb[0], nb[1], nb[2], source, [3]int{x, y, z}); p > best {
+			best = p
+		}
+		// Dust strongly powers the full block directly underneath it. Side
+		// dust remains a weak input and must not be reflected into another dust.
+		if source.ResourceLocation() == "minecraft:redstone_wire" && nb[1] == y+1 {
+			if p := re.PowerAt(nb[0], nb[1], nb[2]); p > best {
+				best = p
+			}
+		}
+	}
+	return best
 }
 
 // powerFromSource returns power emitted by block if it is a source, else 0.

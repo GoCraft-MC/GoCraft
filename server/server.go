@@ -200,6 +200,9 @@ type bedrockRecentBlockUse struct {
 // New creates a Server with the given configuration.
 // It initialises the game core and generates the RSA keypair for online-mode auth.
 func New(cfg *config.Config) (*Server, error) {
+	if err := coreplugin.EnsureDirectory(coreplugin.DefaultDirectory); err != nil {
+		return nil, err
+	}
 	handler.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
@@ -561,6 +564,19 @@ func New(cfg *config.Config) (*Server, error) {
 		worldInstance.SetBlockObserver(s.bedrockListener.BroadcastBlockChange)
 		netherWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(1))
 		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
+	}
+	for dimension, dimensionWorld := range map[int32]*coreworld.World{
+		dimensionOverworld: worldInstance,
+		dimensionNether:    netherWorld,
+		dimensionEnd:       endWorld,
+	} {
+		dimension := dimension
+		dimensionWorld.SetBlockEntityObserver(func(entity coreworld.BlockEntity) {
+			handler.BroadcastBlockEntityDataInDimension(entity, s.sessions, dimension)
+			if s.bedrockListener != nil {
+				s.bedrockListener.BroadcastBlockEntityData(dimension, entity)
+			}
+		})
 	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
 	cmds.SetPlayerDisconnector(s.disconnectPlayer)
@@ -1670,9 +1686,24 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			}
 			return
 		}
+		lootBlock := block
+		potDecorations := [4]string{}
+		if block.ResourceLocation() == "minecraft:decorated_pot" {
+			potDecorations = actionWorld.DecoratedPotDecorations(x, y, z)
+		}
+		if block.ResourceLocation() == "minecraft:decorated_pot" && held.EnchantmentLevel("minecraft:silk_touch") == 0 && blockloot.BreaksDecoratedPot(held.ItemID) {
+			lootBlock = bedrockCopyBlock(block)
+			lootBlock.Properties["cracked"] = "true"
+		}
+		enchantments := make(map[string]int)
+		for _, enchantment := range held.EnchantmentLevels() {
+			enchantments[enchantment.ID] = enchantment.Level
+		}
 		lootContext := blockloot.Context{
-			Block: block,
-			Tool:  held,
+			Block:          lootBlock,
+			Tool:           held,
+			Enchantments:   enchantments,
+			PotDecorations: potDecorations,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return actionWorld.GetBlock(x+dx, y+dy, z+dz)
 			},
@@ -1697,13 +1728,15 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			s.setBedrockActionBlock(x, partnerY, z, coreworld.Air)
 		}
 		s.breakBedrockLinkedBlock(x, y, z, block)
-		s.breakBedrockUnsupportedAbove(x, y, z)
+		s.breakBedrockUnsupportedAbove(p, x, y, z)
 		if block.ResourceLocation() == "minecraft:redstone_wire" {
 			s.refreshBedrockWireConnections(x, y, z)
 		}
 		if p.GameMode != player.GameModeCreative {
 			for _, item := range containerItems {
-				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
+				stack := player.ItemStack{
+					ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations,
+				}
 				if dropped := s.newDroppedItemForPlayer(p, stack, center, item.Slot+1); dropped != nil {
 					handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
 				}
@@ -3109,6 +3142,7 @@ func (s *Server) newDroppedItemInWorld(dimensionWorld *coreworld.World, stack pl
 	dropped.ItemID = stack.ItemID
 	dropped.ItemCount = stack.Count
 	dropped.ItemDamage = stack.Damage
+	dropped.ItemPotDecorations = stack.PotDecorations
 	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
 	dropped.VX = math.Cos(angle) * 0.1
 	dropped.VY = 0.2
@@ -3180,7 +3214,9 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool
 		if dx*dx+dy*dy+dz*dz > 2.25 {
 			continue
 		}
-		stack := player.ItemStack{ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage}
+		stack := player.ItemStack{
+			ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage, PotDecorations: e.ItemPotDecorations,
+		}
 		if !p.GiveItem(stack) {
 			continue
 		}
@@ -4486,6 +4522,8 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 				} else {
 					s.world.QueueEntityDamageFrom(target.EntityID, damage, start.X, start.Z)
 				}
+			} else if projectile.Type == corentity.TypeSnowball {
+				s.world.QueueEntityImpactFrom(target.EntityID, start.X, start.Z)
 			}
 			s.resolveProjectileImpact(projectile, projectile.Position)
 			return true
@@ -4559,8 +4597,11 @@ func projectileDamageAgainst(projectile, target *corentity.Entity) float32 {
 	if projectile == nil || target == nil {
 		return 0
 	}
-	if projectile.Type == corentity.TypeSnowball && target.Type == corentity.TypeBlaze {
-		return 3
+	if projectile.Type == corentity.TypeSnowball {
+		if target.Type == corentity.TypeBlaze {
+			return 3
+		}
+		return 0
 	}
 	return projectile.ProjectileDamage
 }
@@ -4937,9 +4978,14 @@ func (s *Server) tickBlockPhysicsWorld() {
 			s.processSculkSensorUpdate(u.X, u.Y, u.Z, &blockChanges)
 		case coreworld.UpdateObserver:
 			observer := s.world.GetBlock(u.X, u.Y, u.Z)
-			if observer.ResourceLocation() == "minecraft:observer" && observer.Properties["powered"] == "true" {
+			if observer.ResourceLocation() == "minecraft:observer" {
 				observer = bedrockCopyBlock(observer)
-				observer.Properties["powered"] = "false"
+				if observer.Properties["powered"] == "true" {
+					observer.Properties["powered"] = "false"
+				} else {
+					observer.Properties["powered"] = "true"
+					s.world.BlockPhysics.ScheduleObserver(u.X, u.Y, u.Z, s.worldAge, 2)
+				}
 				s.world.SetBlock(u.X, u.Y, u.Z, observer)
 				blockChanges = append(blockChanges, coreworld.BlockChange{X: u.X, Y: u.Y, Z: u.Z, Block: observer})
 			}

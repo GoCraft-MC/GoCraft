@@ -14,6 +14,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
+	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 )
 
@@ -229,6 +230,12 @@ func bedrockVisualBlock(block coreworld.Block) coreworld.Block {
 	case "minecraft:redstone_torch", "minecraft:redstone_wall_torch":
 		if block.Properties["lit"] == "false" {
 			block.Name = "unlit_redstone_torch"
+		}
+	case "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker":
+		// Java stores the burning state as a lit property, while Bedrock uses
+		// separate block identifiers for the burning furnace variants.
+		if block.Properties["lit"] == "true" {
+			block.Name = "lit_" + block.Name
 		}
 	case "minecraft:beetroots":
 		// Bedrock uses the singular identifier for the same canonical crop.
@@ -717,7 +724,31 @@ func (e *Encoder) EncodeFullChunkPayload(chunk *coreworld.Chunk) ([]byte, error)
 		buf.Write(e.encodeBiomeStorage(section))
 	}
 	buf.WriteByte(0x00) // border block count varint (0 = none)
+	if chunk != nil {
+		encoder := nbt.NewEncoderWithEncoding(&buf, nbt.NetworkLittleEndian)
+		for _, entity := range chunk.BlockEntities {
+			data, ok := bedrockBlockEntityData(entity)
+			if !ok {
+				continue
+			}
+			if err := encoder.Encode(data); err != nil {
+				return nil, fmt.Errorf("bedrock: encode block actor at %d,%d,%d: %w", entity.X, entity.Y, entity.Z, err)
+			}
+		}
+	}
 	return buf.Bytes(), nil
+}
+
+func bedrockBlockEntityData(entity coreworld.BlockEntity) (map[string]any, bool) {
+	if entity.Type != "minecraft:decorated_pot" && entity.Type != "decorated_pot" {
+		return nil, false
+	}
+	decorations := player.NormalizePotDecorations(entity.PotDecorations)
+	return map[string]any{
+		"id": "DecoratedPot",
+		"x":  int32(entity.X), "y": int32(entity.Y), "z": int32(entity.Z),
+		"sherds": []string{decorations[0], decorations[1], decorations[2], decorations[3]},
+	}, true
 }
 
 // encodeBiomeStorage converts a Java quart-resolution biome container to the
