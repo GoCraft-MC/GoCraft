@@ -356,6 +356,9 @@ func New(cfg *config.Config) (*Server, error) {
 
 	bus := intent.NewBus(64, 512)
 	plugins := coreplugin.NewBus(context.Background(), 0)
+	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
+		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
+	})
 
 	debuglog.Info(debuglog.WorldLoading, "server: world seed resolved", "seed", cfg.WorldSeed)
 	worldInstance := coreworld.New(coreworld.NewOverworldGenerator(cfg.WorldSeed), storage, cfg.Villagers)
