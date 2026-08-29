@@ -1,6 +1,8 @@
 // Package plugin owns plugin discovery, lifecycle, and event dispatch.
 package plugin
 
+import "GoCraft/core/command"
+
 // Priority orders subscribers from earliest to latest.
 type Priority int8
 
@@ -26,6 +28,7 @@ type Manifest struct {
 	APIVersion    uint32
 	Runtime       string
 	Entry         string
+	CommandTree   string
 	Permissions   []string
 	Subscriptions []Subscription
 }
@@ -34,4 +37,5 @@ type Manifest struct {
 type Bundle struct {
 	Path     string
 	Manifest Manifest
+	Commands *command.Root
 }
