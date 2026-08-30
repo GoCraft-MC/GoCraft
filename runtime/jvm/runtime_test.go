@@ -89,6 +89,9 @@ func TestSpawnBuildsTheDocumentedCommandLine(t *testing.T) {
 	}
 	want := []string{
 		filepath.FromSlash("/opt/jdk25/bin/java"),
+		// Not decoration: without it the JVM prints four sun.misc.Unsafe
+		// deprecation warnings, from protobuf, on every boot.
+		"--sun-misc-unsafe-memory-access=allow",
 		"-jar", filepath.FromSlash("/cache/rt.jar"),
 		"--sock", filepath.FromSlash("/tmp/gc-jvm-1.sock"),
 		"--abi", "1",

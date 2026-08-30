@@ -159,6 +159,13 @@ func (r *Runtime) Start(ctx context.Context, host plugin.Host) error {
 func (r *Runtime) spawn(java, jar string) ipc.Spawn {
 	return func(socket string) *exec.Cmd {
 		command := exec.Command(java,
+			// protobuf reaches for sun.misc.Unsafe, which Java 24 made a
+			// terminal deprecation: without this the JVM prints four warning
+			// lines into the server console and latest.log on every single
+			// boot. Silencing it is right because the call is protobuf's and
+			// not something an admin can act on — and a warning that appears
+			// unconditionally is one nobody reads when it matters.
+			"--sun-misc-unsafe-memory-access=allow",
 			"-jar", jar,
 			"--sock", socket,
 			"--abi", strconv.Itoa(abiVersion),
