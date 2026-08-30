@@ -155,7 +155,45 @@ func emitter(file *protogen.GeneratedFile, declared event) error {
 	}
 	file.P("}")
 	file.P()
+
+	if declared.Observational {
+		replay(file, declared, parameters, values)
+	}
 	return nil
+}
+
+// replay emits the targeted variant, for observational events only.
+//
+// A runtime that died and came back has plugins that missed everything while
+// they were down. The ones that never went away did not, and delivering it to
+// them too would have a Lua plugin count arrivals that never happened every
+// time the JVM crashes.
+//
+// Cancellable events get no such variant. Replaying a question the host already
+// answered would invite an answer nothing can act on.
+func replay(file *protogen.GeneratedFile, declared event, parameters, values []string) {
+	file.P(fmt.Sprintf("// %sTo replays %s to named plugins only.",
+		declared.EmitName(), declared.Type))
+	file.P("//")
+	file.P("// For a runtime that died and was brought back: its plugins missed what")
+	file.P("// happened while they were down, and the ones that stayed up did not.")
+	file.P(fmt.Sprintf("func (b *Bus) %sTo(plugins []string, %s) {",
+		declared.EmitName(), strings.Join(parameters, ", ")))
+	file.P("\tif len(plugins) == 0 {")
+	file.P("\t\treturn")
+	file.P("\t}")
+	file.P("\tevent := &abi.Event{")
+	file.P(fmt.Sprintf("\t\tType:      %s,", declared.ConstName()))
+	file.P(fmt.Sprintf("\t\tOnFailure: abi.Failure%s,", declared.OnFailure))
+	file.P("\t\tFields: []abi.Value{")
+	for _, value := range values {
+		file.P("\t\t\t" + value + ",")
+	}
+	file.P("\t\t},")
+	file.P("\t}")
+	file.P("\tb.EmitObservationalTo(event, plugins)")
+	file.P("}")
+	file.P()
 }
 
 // actorOr names the player a permission map is resolved against. An event with

@@ -61,3 +61,22 @@ func (b *Bus) EmitPlayerJoin(playerRef *player.Player) {
 	}
 	b.EmitObservational(event)
 }
+
+// EmitPlayerJoinTo replays player.join to named plugins only.
+//
+// For a runtime that died and was brought back: its plugins missed what
+// happened while they were down, and the ones that stayed up did not.
+func (b *Bus) EmitPlayerJoinTo(plugins []string, playerRef *player.Player) {
+	if len(plugins) == 0 {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerJoin,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			b.injectedPermissions(EventPlayerJoin, playerRef),
+		},
+	}
+	b.EmitObservationalTo(event, plugins)
+}
