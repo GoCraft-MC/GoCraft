@@ -202,6 +202,18 @@ func (l *Listener) syncLocalPlayerState(viewer *bedrockSession) {
 	l.sendLocalPlayerState(viewer, p)
 }
 
+// HasSession reports whether this player can be written to.
+//
+// The server asks before announcing a join to plugins: a greeting sent while
+// the client is still logging in has nowhere to go, and the plugin would look
+// like it did nothing.
+func (l *Listener) HasSession(uuid [16]byte) bool {
+	l.sessionsMu.RLock()
+	_, ok := l.sessions[uuid]
+	l.sessionsMu.RUnlock()
+	return ok
+}
+
 // RefreshPlayerAbilities immediately publishes flight, operator, god-mode,
 // and movement settings after a command changes canonical player state.
 func (l *Listener) RefreshPlayerAbilities(p *player.Player) {
