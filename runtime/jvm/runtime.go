@@ -60,6 +60,18 @@ type Config struct {
 	StartTimeout time.Duration
 	Liveness     ipc.Liveness
 
+	// Respawn decides what happens when the JVM dies while players are online.
+	Respawn Respawn
+
+	// OnRespawn is called after the runtime came back and its plugins were
+	// reloaded, with the ids that made it.
+	//
+	// The plugins missed everything that happened while they were down, and
+	// only the host knows what that was — §13 replays it as synthetic
+	// player.join events for everyone already connected. This runtime cannot:
+	// it does not know who is online.
+	OnRespawn func(restored []string)
+
 	// Stdout and Stderr receive the JVM's own output. Empty means the server's,
 	// so a stack trace from a plugin lands in the console and in latest.log
 	// beside everything else.
@@ -70,6 +82,12 @@ type Config struct {
 	// leaves it nil and gets `java -version`; a test supplies its own so the Go
 	// repository's suite never needs a JVM installed to run.
 	Probe func(ctx context.Context, java string) (int, error)
+
+	// Spawn replaces the command this runtime starts. Production leaves it nil
+	// and gets the java invocation below; the respawn tests supply a process
+	// that speaks the ABI and dies on demand, which is how a crash is exercised
+	// with no JDK anywhere near this repository's CI.
+	Spawn ipc.Spawn
 }
 
 // Runtime hosts every Java plugin in one child process.
@@ -78,12 +96,36 @@ type Config struct {
 // and core/plugin must not be imported here for the declaration's sake alone —
 // the dependency runs the other way.
 type Runtime struct {
-	config     Config
-	supervisor *ipc.Supervisor
+	config Config
 
-	mu   sync.RWMutex
-	java string
-	host plugin.Host
+	mu         sync.RWMutex
+	supervisor *ipc.Supervisor
+	java       string
+	host       plugin.Host
+
+	// loaded is what a respawn has to put back. The host loaded these once and
+	// will not do it again — it is not watching this process — so the runtime
+	// remembers them itself.
+	loaded []loadedBundle
+
+	// stopping tells the watcher a dead child was expected. Without it, Stop
+	// races the watcher and the runtime respawns a JVM it was just asked to
+	// shut down.
+	stopping bool
+	watching bool
+
+	// done is closed by Stop, so a watcher waiting out a backoff does not hold
+	// shutdown open for the length of it.
+	done     chan struct{}
+	stopOnce sync.Once
+}
+
+// loadedBundle is everything needed to bring one plugin back after a crash.
+type loadedBundle struct {
+	id     string
+	path   string
+	entry  string
+	events []string
 }
 
 // New prepares the runtime. Nothing is spawned and nothing is downloaded until
@@ -94,7 +136,7 @@ func New(config Config) *Runtime {
 	if config.StartTimeout <= 0 {
 		config.StartTimeout = 60 * time.Second
 	}
-	return &Runtime{config: config}
+	return &Runtime{config: config, done: make(chan struct{})}
 }
 
 func (r *Runtime) Name() string { return RuntimeName }
@@ -149,7 +191,13 @@ func (r *Runtime) Start(ctx context.Context, host plugin.Host) error {
 	}
 	r.mu.Lock()
 	r.supervisor = supervisor
+	r.stopping = false
+	started := !r.watching
+	r.watching = true
 	r.mu.Unlock()
+	if started {
+		go r.watch()
+	}
 	return nil
 }
 
@@ -157,6 +205,9 @@ func (r *Runtime) Start(ctx context.Context, host plugin.Host) error {
 // runtime/python or runtime/go would write differently. Everything else they
 // share through ipc.
 func (r *Runtime) spawn(java, jar string) ipc.Spawn {
+	if r.config.Spawn != nil {
+		return r.config.Spawn
+	}
 	return func(socket string) *exec.Cmd {
 		command := exec.Command(java,
 			// protobuf reaches for sun.misc.Unsafe, which Java 24 made a
@@ -220,7 +271,37 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 	}); err != nil {
 		return nil, err
 	}
-	return &Instance{supervisor: supervisor, manifest: bundle.Manifest}, nil
+	r.remember(loadedBundle{
+		id: bundle.Manifest.ID, path: bundle.Path,
+		entry: bundle.Manifest.Entry, events: events,
+	})
+	return &Instance{runtime: r, manifest: bundle.Manifest}, nil
+}
+
+// remember records a bundle so a respawn can put it back, replacing any earlier
+// record of the same plugin.
+func (r *Runtime) remember(bundle loadedBundle) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index, existing := range r.loaded {
+		if existing.id == bundle.id {
+			r.loaded[index] = bundle
+			return
+		}
+	}
+	r.loaded = append(r.loaded, bundle)
+}
+
+func (r *Runtime) forget(pluginID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.loaded[:0]
+	for _, existing := range r.loaded {
+		if existing.id != pluginID {
+			kept = append(kept, existing)
+		}
+	}
+	r.loaded = kept
 }
 
 // Ready ends the load phase. The host opens its listeners only after it.
@@ -238,7 +319,12 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	supervisor := r.supervisor
 	r.supervisor = nil
+	// Recorded before the child is touched, so the watcher reads a deliberate
+	// stop rather than racing it and respawning what we are shutting down.
+	r.stopping = true
+	r.loaded = nil
 	r.mu.Unlock()
+	r.stopOnce.Do(func() { close(r.done) })
 	if supervisor == nil {
 		return nil
 	}
@@ -270,19 +356,35 @@ func (r *Runtime) running() (*ipc.Supervisor, error) {
 // Instance is one Java plugin. Every method is a forward: the JVM holds the
 // plugin, this holds nothing but its name.
 type Instance struct {
-	supervisor *ipc.Supervisor
-	manifest   plugin.Manifest
+	runtime  *Runtime
+	manifest plugin.Manifest
 }
 
 func (i *Instance) Manifest() plugin.Manifest { return i.manifest }
 
+// Dispatch resolves the live supervisor rather than holding one.
+//
+// That indirection is what makes a respawn invisible to the host: after a crash
+// the process behind this instance is a different one, and an instance holding
+// the old supervisor would answer into a socket nobody is reading.
 func (i *Instance) Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict, error) {
-	return i.supervisor.Dispatch(ctx, i.manifest.ID, event)
+	supervisor, err := i.runtime.running()
+	if err != nil {
+		return abi.Verdict{}, err
+	}
+	return supervisor.Dispatch(ctx, i.manifest.ID, event)
 }
 
 // Unload drops the plugin. The context is unused because the schema carries no
 // acknowledgement for UNLOAD — there is nothing to wait for, and pretending
 // otherwise would put a timeout on a message that is already gone.
 func (i *Instance) Unload(context.Context) error {
-	return i.supervisor.Unload(i.manifest.ID)
+	i.runtime.forget(i.manifest.ID)
+	supervisor, err := i.runtime.running()
+	if err != nil {
+		// The process is already gone, which is a stronger unload than the
+		// message would have been.
+		return nil
+	}
+	return supervisor.Unload(i.manifest.ID)
 }
