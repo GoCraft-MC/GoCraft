@@ -114,6 +114,9 @@ func (r *Runtime) watch() {
 			return
 		}
 		if err := r.respawn(); err != nil {
+			if r.deliberate() {
+				return
+			}
 			slog.Error("jvm: respawn failed", "attempt", failure, "err", err)
 			continue
 		}
@@ -128,6 +131,9 @@ func (r *Runtime) watch() {
 // true: anything a plugin kept in a field is gone, and a plugin that stored
 // player data in a HashMap has just lost it.
 func (r *Runtime) respawn() error {
+	if r.deliberate() {
+		return fmt.Errorf("jvm: runtime is stopping")
+	}
 	java := r.Java()
 	if java == "" {
 		return fmt.Errorf("jvm: no JDK; respawn does not provision")
@@ -154,6 +160,12 @@ func (r *Runtime) respawn() error {
 	if err := supervisor.Start(ctx); err != nil {
 		return err
 	}
+	installed := false
+	defer func() {
+		if !installed {
+			_ = supervisor.Stop(ctx)
+		}
+	}()
 
 	// In the order they were loaded the first time, because load order comes
 	// from the dependency graph and a plugin may rely on an earlier one.
@@ -177,7 +189,12 @@ func (r *Runtime) respawn() error {
 	}
 
 	r.mu.Lock()
+	if r.stopping {
+		r.mu.Unlock()
+		return fmt.Errorf("jvm: runtime stopped during respawn")
+	}
 	r.supervisor = supervisor
+	installed = true
 	r.mu.Unlock()
 
 	slog.Info("jvm: runtime back up", "plugins", len(restored))

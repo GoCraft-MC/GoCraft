@@ -47,7 +47,7 @@ func runFakeJVM(behaviour, socket, livesFile string) {
 	// A file rather than a counter in memory: each life is a new process, so
 	// the only way one knows how many came before is to look.
 	lives := appendLife(livesFile)
-	if behaviour == "die-once" && lives == 1 {
+	if (behaviour == "die-once" || behaviour == "die-once-slow-load") && lives == 1 {
 		// Greets, then leaves. The host has a healthy runtime, then does not.
 		sendHello(codec)
 		time.Sleep(150 * time.Millisecond)
@@ -59,7 +59,7 @@ func runFakeJVM(behaviour, socket, livesFile string) {
 		os.Exit(9)
 	}
 	sendHello(codec)
-	serveFakeJVM(codec)
+	serveFakeJVM(codec, behaviour == "die-once-slow-load")
 }
 
 func TestRespawnBringsThePluginsBack(t *testing.T) {
@@ -208,6 +208,30 @@ func TestStopDoesNotRespawn(t *testing.T) {
 	}
 }
 
+func TestStopDuringRespawnDoesNotPublishReplacement(t *testing.T) {
+	lives := filepath.Join(t.TempDir(), "lives")
+	runtime := fakeRuntime(t, "die-once-slow-load", lives, nil)
+	runtime.remember(loadedBundle{id: "dev.example.slow", path: "slow.gcpkg"})
+
+	if err := runtime.Start(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for countLives(t, lives) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if countLives(t, lives) < 2 {
+		t.Fatal("replacement JVM never started")
+	}
+	if err := runtime.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop() = %v", err)
+	}
+	time.Sleep(750 * time.Millisecond)
+	if _, err := runtime.running(); err == nil {
+		t.Fatal("replacement JVM was published after Stop")
+	}
+}
+
 // ── Harness ───────────────────────────────────────────────────────────────────
 
 // fakeRuntime builds a runtime whose "JVM" is this test binary. Provision is
@@ -296,7 +320,7 @@ func sendHello(codec *ipc.Codec) {
 // serveFakeJVM answers what a respawn needs and nothing more: loads succeed,
 // pings are answered on the reader so silence means stuck rather than busy, and
 // shutdown ends the process.
-func serveFakeJVM(codec *ipc.Codec) {
+func serveFakeJVM(codec *ipc.Codec, slowLoad bool) {
 	for {
 		envelope, err := codec.Receive()
 		if err != nil {
@@ -304,6 +328,9 @@ func serveFakeJVM(codec *ipc.Codec) {
 		}
 		switch envelope.GetBody().(type) {
 		case *wire.Envelope_Load:
+			if slowLoad {
+				time.Sleep(500 * time.Millisecond)
+			}
 			codec.Send(&wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Loaded{
 				Loaded: &wire.Loaded{PluginId: envelope.GetLoad().GetPluginId()},
 			}})
