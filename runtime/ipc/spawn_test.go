@@ -92,11 +92,61 @@ func runFakeRuntime(behaviour, socket string) {
 			}
 			codec.Send(&wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}})
 		case *wire.Envelope_Load:
-			codec.Send(&wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Loaded{
-				Loaded: &wire.Loaded{PluginId: envelope.GetLoad().GetPluginId()},
-			}})
+			codec.Send(fakeLoadReply(behaviour, envelope))
+		case *wire.Envelope_Dispatch:
+			codec.Send(fakeDispatchReply(behaviour, envelope))
 		}
 	}
+}
+
+// fakeLoadReply covers the four answers a runtime may give to LOAD: the plugin
+// came up, it came up registering something it never declared, it refused with
+// a reason, or the runtime answered about a different plugin entirely.
+func fakeLoadReply(behaviour string, envelope *wire.Envelope) *wire.Envelope {
+	id := envelope.GetLoad().GetPluginId()
+	switch behaviour {
+	case "load-fails":
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Fail{
+			Fail: &wire.Fail{PluginId: id, Reason: "config.yml:12 taxRate < 0"},
+		}}
+	case "load-undeclared":
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Loaded{
+			Loaded: &wire.Loaded{PluginId: id, Events: []string{"block.break", "player.join"}},
+		}}
+	case "load-wrong-plugin":
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Loaded{
+			Loaded: &wire.Loaded{PluginId: "somebody.else"},
+		}}
+	case "load-nonsense":
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}}
+	default:
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Loaded{
+			Loaded: &wire.Loaded{PluginId: id, Events: []string{"block.break"}},
+		}}
+	}
+}
+
+// fakeDispatchReply echoes the event back as a mutation so the test can prove
+// the value survived the round trip in both directions, not merely that a
+// verdict came back.
+func fakeDispatchReply(behaviour string, envelope *wire.Envelope) *wire.Envelope {
+	if behaviour == "dispatch-nonsense" {
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}}
+	}
+	event := envelope.GetDispatch().GetEvent()
+	return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Verdict{
+		Verdict: &wire.Verdict{
+			Cancelled: event.GetType() == "block.break",
+			Mutations: []*wire.Mutation{{
+				Path:  []uint32{0},
+				Value: &wire.Value{Kind: &wire.Value_StringValue{StringValue: event.GetType()}},
+			}},
+			Effects: []*wire.HostCall{{
+				Type:   "chat.send",
+				Fields: []*wire.Value{{Kind: &wire.Value_Int64Value{Int64Value: int64(event.GetTypeId())}}},
+			}},
+		},
+	}}
 }
 
 func fakeSpawn(behaviour string) Spawn {
