@@ -119,6 +119,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("ipc: %s: already started", s.config.Runtime)
 	}
+	s.watchErr, s.protocolErr = nil, nil
 	s.mu.Unlock()
 
 	config := s.config
@@ -135,10 +136,13 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.cancelWatch = cancel
 	s.failed = make(chan struct{})
 	s.failClosed, s.stopping = false, false
-	s.watchErr, s.protocolErr = nil, nil
+	protocolBroken := s.protocolErr != nil
 	s.mu.Unlock()
 
 	go s.watch(watchCtx, child)
+	if protocolBroken {
+		go kill(child.command)
+	}
 	return nil
 }
 
@@ -363,8 +367,9 @@ func (s *Supervisor) watch(ctx context.Context, child *Child) {
 	}
 }
 
-// unsolicited runs on the read goroutine, so it records and returns rather than
-// acting: while it runs, nothing is being read off the socket.
+// unsolicited runs on the read goroutine, so it records the violation and
+// terminates the child asynchronously: while it runs, nothing is being read
+// off the socket.
 //
 // Every envelope the host expects is a reply to a request it made. Anything
 // else means the runtime is speaking a protocol this host does not, which does
@@ -372,9 +377,15 @@ func (s *Supervisor) watch(ctx context.Context, child *Child) {
 // cause is more useful than the count.
 func (s *Supervisor) unsolicited(envelope *wire.Envelope) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.protocolErr == nil {
-		s.protocolErr = fmt.Errorf("ipc: %s: %w: sent an unsolicited %T",
-			s.config.Runtime, ErrProtocol, envelope.GetBody())
+	if s.protocolErr != nil || s.stopping {
+		s.mu.Unlock()
+		return
+	}
+	s.protocolErr = fmt.Errorf("ipc: %s: %w: sent an unsolicited %T",
+		s.config.Runtime, ErrProtocol, envelope.GetBody())
+	child := s.child
+	s.mu.Unlock()
+	if child != nil {
+		go kill(child.command)
 	}
 }

@@ -246,6 +246,19 @@ func TestSupervisorReportsAnUnresponsiveRuntime(t *testing.T) {
 	}
 }
 
+func TestSupervisorStopsARuntimeThatBreaksTheProtocol(t *testing.T) {
+	supervisor := startedSupervisor(t, "unsolicited")
+
+	select {
+	case <-supervisor.Failed():
+	case <-time.After(10 * time.Second):
+		t.Fatal("Failed() never closed for an unsolicited envelope")
+	}
+	if err := supervisor.Err(); !errors.Is(err, ErrProtocol) {
+		t.Fatalf("Err() = %v, want ErrProtocol", err)
+	}
+}
+
 // A supervisor that cannot tell a deliberate stop from a dead runtime would
 // have its owner react to a shutdown it asked for — and, once respawn exists,
 // restart a process it just took down.

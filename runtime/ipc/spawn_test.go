@@ -68,6 +68,9 @@ func runFakeRuntime(behaviour, socket string) {
 	codec.Send(&wire.Envelope{Body: &wire.Envelope_Hello{
 		Hello: &wire.Hello{Abi: abi, Runtime: "fake 1.0"},
 	}})
+	if behaviour == "unsolicited" {
+		codec.Send(&wire.Envelope{Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}})
+	}
 
 	for {
 		envelope, err := codec.Receive()
