@@ -897,7 +897,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Block interaction needs both the world and the session manager.
 		if pkt.ID == packetIDPlayerAction || pkt.ID == packetIDUseItemOn {
-			if err := handleBlockPacket(pkt, p, w, mgr, conn, nextEntityID, plugins); err != nil {
+			if err := handleBlockPacket(pkt, p, w, mgr, conn, nextEntityID, plugins, intentBus); err != nil {
 				slog.Warn("block interaction error", "player", p.Username, "err", err)
 			}
 		}

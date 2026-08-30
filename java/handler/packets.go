@@ -90,6 +90,7 @@ var (
 	packetIDTeleportEntity         = protocoldata.MustCB("play", "minecraft:entity_position_sync")
 	packetIDMoveVehicleSC          = protocoldata.MustCB("play", "minecraft:move_vehicle")
 	packetIDBlockEntityData        = protocoldata.MustCB("play", "minecraft:block_entity_data")
+	packetIDBlockAction            = protocoldata.MustCB("play", "minecraft:block_action")
 	packetIDBlockUpdate            = protocoldata.MustCB("play", "minecraft:block_update")
 	packetIDAcknowledgeBlockChange = protocoldata.MustCB("play", "minecraft:acknowledge_block_change")
 	packetIDSetContainerContent    = protocoldata.MustCB("play", "minecraft:set_container_content")

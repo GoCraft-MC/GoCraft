@@ -316,6 +316,21 @@ func isStandingBannerName(name string) bool {
 	return strings.HasSuffix(name, "_banner") && !strings.HasSuffix(name, "_wall_banner")
 }
 func isWallBannerName(name string) bool { return strings.HasSuffix(name, "_wall_banner") }
+
+// PlacementBlockEntityType returns the canonical block-entity type created by
+// placing a sign or banner item.
+func PlacementBlockEntityType(name string) (string, bool) {
+	switch {
+	case isCeilingHangingSignName(name), isWallHangingSignName(name):
+		return "minecraft:hanging_sign", true
+	case isStandingSignName(name), isWallSignName(name):
+		return "minecraft:sign", true
+	case isStandingBannerName(name), isWallBannerName(name):
+		return "minecraft:banner", true
+	default:
+		return "", false
+	}
+}
 func isFloorCoralFan(name string) bool {
 	return strings.HasSuffix(name, "_coral_fan") && !strings.HasSuffix(name, "_coral_wall_fan")
 }

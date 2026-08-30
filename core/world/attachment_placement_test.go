@@ -81,6 +81,19 @@ func TestAttachmentPlacementFloorCeilingAndLantern(t *testing.T) {
 	}
 }
 
+func TestPlacementBlockEntityType(t *testing.T) {
+	for name, want := range map[string]string{
+		"minecraft:oak_sign":         "minecraft:sign",
+		"minecraft:oak_wall_sign":    "minecraft:sign",
+		"minecraft:oak_hanging_sign": "minecraft:hanging_sign",
+		"minecraft:red_wall_banner":  "minecraft:banner",
+	} {
+		if got, ok := PlacementBlockEntityType(name); !ok || got != want {
+			t.Errorf("PlacementBlockEntityType(%q) = %q, %v; want %q", name, got, ok, want)
+		}
+	}
+}
+
 func TestBreakUnsupportedDecorativeAttachments(t *testing.T) {
 	w := attachmentTestWorld(t)
 	stone := Block{Namespace: "minecraft", Name: "stone"}

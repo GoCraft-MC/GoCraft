@@ -506,7 +506,8 @@ func (p *Player) GiveItem(item ItemStack) bool {
 			if add > stackLimit {
 				add = stackLimit
 			}
-			*slot = ItemStack{ItemID: item.ItemID, Count: add, Damage: item.Damage}
+			*slot = item
+			slot.Count = add
 			remaining -= add
 		}
 	}

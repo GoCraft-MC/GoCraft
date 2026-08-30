@@ -19,8 +19,10 @@ import (
 // creativeKnownItem is the canonical identity associated with a creative
 // network ID. The simulation uses this when a Bedrock player selects an item.
 type creativeKnownItem struct {
-	name string
-	meta int16
+	name         string
+	meta         int16
+	hasFireworks bool
+	fireworks    player.FireworkData
 }
 
 type creativeBedrockIdentity struct {
@@ -185,7 +187,11 @@ func (l *Listener) initCreativeContent() {
 			GroupIndex:            entry.group,
 		})
 		canonicalName, canonicalMeta := canonicalCreativeIdentity(entry.name, entry.meta)
-		l.creativeNames[creativeNetworkID] = creativeKnownItem{name: canonicalName, meta: canonicalMeta}
+		known := creativeKnownItem{name: canonicalName, meta: canonicalMeta}
+		if canonicalName == "minecraft:firework_rocket" {
+			known.fireworks, known.hasFireworks = bedrockFireworkDataFromNBT(stack.NBTData)
+		}
+		l.creativeNames[creativeNetworkID] = known
 	}
 
 	debuglog.Info(debuglog.BedrockCatalogues,

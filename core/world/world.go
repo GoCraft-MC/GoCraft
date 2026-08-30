@@ -993,19 +993,22 @@ func (w *World) SetBlockEntity(x, y, z int, blockEntityType string, data []byte)
 
 	w.containerMu.Lock()
 	updated := false
+	var snapshot BlockEntity
 	for index := range c.BlockEntities {
 		entity := &c.BlockEntities[index]
 		if entity.X == x && entity.Y == y && entity.Z == z {
 			entity.Type = blockEntityType
 			entity.Data = append([]byte(nil), data...)
+			snapshot = *entity
 			updated = true
 			break
 		}
 	}
 	if !updated {
-		c.BlockEntities = append(c.BlockEntities, BlockEntity{
+		snapshot = BlockEntity{
 			X: x, Y: y, Z: z, Type: blockEntityType, Data: append([]byte(nil), data...),
-		})
+		}
+		c.BlockEntities = append(c.BlockEntities, snapshot)
 	}
 	w.containerMu.Unlock()
 
@@ -1015,6 +1018,7 @@ func (w *World) SetBlockEntity(x, y, z int, blockEntityType string, data []byte)
 	w.touchChunkLocked(key)
 	w.dirty[key] = struct{}{}
 	w.mu.Unlock()
+	w.notifyBlockEntityObserver(snapshot)
 }
 
 // SetBlock places block at absolute world coordinates (x, y, z).

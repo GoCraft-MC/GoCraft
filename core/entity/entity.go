@@ -4,7 +4,10 @@
 // packages; this package uses only canonical resource-location strings.
 package entity
 
-import "GoCraft/core/spatial"
+import (
+	"GoCraft/core/player"
+	"GoCraft/core/spatial"
+)
 
 // EntityType is the canonical resource location for a Minecraft entity type,
 // e.g. "minecraft:cow".
@@ -94,6 +97,7 @@ const (
 	TypeSmallFireball    EntityType = "minecraft:small_fireball"
 	TypeFireball         EntityType = "minecraft:fireball"
 	TypeEyeOfEnder       EntityType = "minecraft:eye_of_ender"
+	TypeFireworkRocket   EntityType = "minecraft:firework_rocket"
 	TypeWanderingTrader  EntityType = "minecraft:wandering_trader"
 
 	// ── Boats ────────────────────────────────────────────────────────────────
@@ -250,6 +254,10 @@ type Entity struct {
 	EyeTarget        spatial.Vec3
 	HasEyeTarget     bool
 	EyeSurvives      bool
+	// Firework fields hold the canonical component and server-side lifetime.
+	FireworkData      player.FireworkData
+	FireworkLifeTicks int32
+	FireworkLifetime  int32
 
 	// Dropped-item fields. These are used only when Type == TypeItem and are
 	// encoded as the ItemEntity's tracked ItemStack at metadata index 8.
@@ -480,7 +488,7 @@ func defaultMaxHealth(t EntityType) float32 {
 	// Villager
 	case TypeVillager:
 		return 20
-	case TypeItem, TypeExperienceOrb, TypeArrow, TypeSpectralArrow, TypeTrident, TypeWindCharge:
+	case TypeItem, TypeExperienceOrb, TypeArrow, TypeSpectralArrow, TypeTrident, TypeWindCharge, TypeFireworkRocket:
 		return 1
 
 	// Boats
@@ -553,7 +561,7 @@ func IsProjectile(t EntityType) bool {
 	switch t {
 	case TypeArrow, TypeSpectralArrow, TypeTrident, TypeWindCharge,
 		TypeSnowball, TypeEgg, TypeEnderPearl, TypeExperienceBottle,
-		TypePotion, TypeSmallFireball, TypeFireball, TypeEyeOfEnder:
+		TypePotion, TypeSmallFireball, TypeFireball, TypeEyeOfEnder, TypeFireworkRocket:
 		return true
 	}
 	return false

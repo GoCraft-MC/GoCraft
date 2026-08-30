@@ -23,6 +23,10 @@ import coreworld "GoCraft/core/world"
 // Populated at init time by registry.go from the embedded blocks.json.
 var javaStateIDs map[string]int32
 
+// blockTypeIDs maps block resource locations to registry IDs used by packets
+// such as Block Event. These IDs are distinct from global block-state IDs.
+var blockTypeIDs map[string]int32
+
 // biomeIDs maps canonical biome resource locations to their protocol IDs for
 // Minecraft Java Edition 1.21.4 (protocol 769).
 // Populated at init time by registry.go from the embedded registries.json.
@@ -64,6 +68,12 @@ func StateID(b coreworld.Block) int32 {
 // BlockEntityTypeID resolves a Java 1.21.4 block entity type.
 func BlockEntityTypeID(name string) (int32, bool) {
 	id, ok := blockEntityTypeIDs[name]
+	return id, ok
+}
+
+// BlockTypeID resolves a block's minecraft:block registry ID.
+func BlockTypeID(name string) (int32, bool) {
+	id, ok := blockTypeIDs[name]
 	return id, ok
 }
 func BiomeID(name string) int32 {
