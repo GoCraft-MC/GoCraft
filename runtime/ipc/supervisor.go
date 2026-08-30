@@ -69,6 +69,14 @@ type LoadRequest struct {
 	// none — §05 makes the main class optional.
 	Entry string
 
+	// DataDirectory is where this plugin's own files live: its configuration,
+	// seeded from the bundle on first load, and whatever it writes for itself.
+	//
+	// The host creates it and passes the path rather than letting each runtime
+	// derive one, because two runtimes deriving it separately would eventually
+	// derive it differently.
+	DataDirectory string
+
 	// Events are the subscriptions the manifest declared. What the runtime
 	// reports back is checked against them.
 	Events []string
@@ -148,9 +156,10 @@ func (s *Supervisor) Load(ctx context.Context, request LoadRequest) ([]string, e
 		return nil, err
 	}
 	reply, err := conn.Request(ctx, &wire.Envelope{Body: &wire.Envelope_Load{Load: &wire.Load{
-		PluginId:   request.ID,
-		BundlePath: request.BundlePath,
-		Entry:      request.Entry,
+		PluginId:      request.ID,
+		BundlePath:    request.BundlePath,
+		Entry:         request.Entry,
+		DataDirectory: request.DataDirectory,
 	}}})
 	if err != nil {
 		return nil, fmt.Errorf("ipc: %s: load %s: %w", s.config.Runtime, request.ID, err)
