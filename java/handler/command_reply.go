@@ -55,13 +55,10 @@ func linkReplyFor(
 // and every Java send helper silently ignores a nil one, so a command that did
 // would appear to work while telling that player nothing.
 func sendCommandMessage(ctx CommandContext, text string) error {
-	if ctx.Reply != nil {
-		return ctx.Reply(text)
+	if ctx.Reply == nil {
+		return nil
 	}
-	// Kept until every caller stops supplying a connection, so this commit
-	// changes what is available to a handler without changing what any of
-	// them currently do.
-	return sendSystemMessage(ctx.Conn, text)
+	return ctx.Reply(text)
 }
 
 // sendCommandMessageTo answers someone other than the issuer — the target of a

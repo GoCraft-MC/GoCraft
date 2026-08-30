@@ -77,7 +77,7 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 	// 1.19+ has a dedicated Chat Command packet. Handle both paths.
 	if strings.HasPrefix(msg, "/") {
 		slog.Info("command (via chat)", "player", p.Username, "input", msg)
-		cmds.Dispatch(msg, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr, TeleportTo: teleportTo, ChangeWorld: changeWorld})
+		cmds.Dispatch(msg, CommandContext{Player: p, World: w, Manager: mgr, TeleportTo: teleportTo, ChangeWorld: changeWorld})
 		return nil
 	}
 
@@ -105,7 +105,7 @@ func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 		return fmt.Errorf("reading chat command string: %w", err)
 	}
 	slog.Info("command", "player", p.Username, "command", cmd)
-	cmds.Dispatch(cmd, CommandContext{Player: p, Conn: conn, World: w, Manager: mgr, TeleportTo: teleportTo, ChangeWorld: changeWorld})
+	cmds.Dispatch(cmd, CommandContext{Player: p, World: w, Manager: mgr, TeleportTo: teleportTo, ChangeWorld: changeWorld})
 	return nil
 }
 

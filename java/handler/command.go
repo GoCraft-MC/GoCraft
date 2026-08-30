@@ -15,7 +15,6 @@ import (
 
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
-	"GoCraft/java/network"
 	"GoCraft/java/session"
 )
 
@@ -32,13 +31,7 @@ import (
 // so anything that merely needs canonical player state must use FindPlayer and
 // ListPlayers instead.
 type CommandContext struct {
-	Player *player.Player
-
-	// Conn is the issuing player's Java connection, and is on its way out: a
-	// Bedrock player has none. It survives only until the last handler stops
-	// reaching for it.
-	Conn *network.ClientConn
-
+	Player  *player.Player
 	Args    []string // tokens after the command name, split on whitespace
 	World   *coreworld.World
 	Manager *session.Manager
