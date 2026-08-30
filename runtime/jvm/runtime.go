@@ -125,6 +125,7 @@ type loadedBundle struct {
 	id     string
 	path   string
 	entry  string
+	data   string
 	events []string
 }
 
@@ -264,16 +265,17 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 		events = append(events, subscription.Event)
 	}
 	if _, err := supervisor.Load(ctx, ipc.LoadRequest{
-		ID:         bundle.Manifest.ID,
-		BundlePath: bundle.Path,
-		Entry:      bundle.Manifest.Entry,
-		Events:     events,
+		ID:            bundle.Manifest.ID,
+		BundlePath:    bundle.Path,
+		Entry:         bundle.Manifest.Entry,
+		DataDirectory: bundle.DataDirectory,
+		Events:        events,
 	}); err != nil {
 		return nil, err
 	}
 	r.remember(loadedBundle{
 		id: bundle.Manifest.ID, path: bundle.Path,
-		entry: bundle.Manifest.Entry, events: events,
+		entry: bundle.Manifest.Entry, data: bundle.DataDirectory, events: events,
 	})
 	return &Instance{runtime: r, manifest: bundle.Manifest}, nil
 }
