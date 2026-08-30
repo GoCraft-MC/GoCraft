@@ -72,9 +72,13 @@ type Config struct {
 	// it does not know who is online.
 	OnRespawn func(restored []string)
 
-	// Stdout and Stderr receive the JVM's own output. Empty means the server's,
-	// so a stack trace from a plugin lands in the console and in latest.log
-	// beside everything else.
+	// Stdout and Stderr receive the JVM's own output. Empty routes it through
+	// the server's logger, which is not the same as inheriting the server's
+	// streams: slog writes to stdout and latest.log both, while a child writing
+	// to the descriptor reaches only the console. A plugin's message would be
+	// there while an admin watched and gone when they went looking.
+	//
+	// Set them to capture the output instead — a test does.
 	Stdout io.Writer
 	Stderr io.Writer
 
@@ -222,13 +226,7 @@ func (r *Runtime) spawn(java, jar string) ipc.Spawn {
 			"--sock", socket,
 			"--abi", strconv.Itoa(abiVersion),
 		)
-		command.Stdout, command.Stderr = r.config.Stdout, r.config.Stderr
-		if command.Stdout == nil {
-			command.Stdout = os.Stdout
-		}
-		if command.Stderr == nil {
-			command.Stderr = os.Stderr
-		}
+		command.Stdout, command.Stderr = r.outputs()
 		return command
 	}
 }

@@ -104,10 +104,14 @@ func TestSpawnBuildsTheDocumentedCommandLine(t *testing.T) {
 			t.Fatalf("spawn() args[%d] = %q, want %q", index, spawned.Args[index], argument)
 		}
 	}
-	// Where a runtime's own logs go is its business, and by default that is the
-	// server console, which is already teed into latest.log.
-	if spawned.Stdout != os.Stdout || spawned.Stderr != os.Stderr {
-		t.Fatal("spawn() left the JVM's output unrouted")
+	// Not the server's own streams: inheriting those would reach the console
+	// and never latest.log, because slog tees to the file while a child writes
+	// to the descriptor underneath it.
+	if _, ok := spawned.Stdout.(*logWriter); !ok {
+		t.Fatalf("spawn() stdout = %T, want it routed through the server log", spawned.Stdout)
+	}
+	if _, ok := spawned.Stderr.(*logWriter); !ok {
+		t.Fatalf("spawn() stderr = %T, want it routed through the server log", spawned.Stderr)
 	}
 }
 
