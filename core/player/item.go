@@ -23,6 +23,31 @@ const HotbarStart = 36
 // them appear stuck or desynchronised in the client UI.
 const OffhandSlot = 45
 
+const (
+	MaxFireworkExplosions = 7
+	MaxFireworkColors     = 8
+)
+
+// FireworkExplosion is a bounded, comparable representation of one vanilla
+// firework explosion component. Shape uses the vanilla 0-4 shape IDs.
+type FireworkExplosion struct {
+	Shape          uint8
+	Colors         [MaxFireworkColors]int32
+	ColorCount     uint8
+	FadeColors     [MaxFireworkColors]int32
+	FadeColorCount uint8
+	Trail          bool
+	Twinkle        bool
+}
+
+// FireworkData is the canonical minecraft:fireworks component shared by both
+// protocol adapters and the server-side rocket entity.
+type FireworkData struct {
+	Flight         uint8
+	ExplosionCount uint8
+	Explosions     [MaxFireworkExplosions]FireworkExplosion
+}
+
 // ItemStack is a quantity of one item type occupying a single inventory slot.
 // A zero-value ItemStack (or one with Count ≤ 0) represents an empty slot.
 //
@@ -41,6 +66,13 @@ type ItemStack struct {
 	// Enchantments stores sorted resource-location/level pairs as a compact,
 	// comparable canonical component string.
 	Enchantments string `json:",omitempty"`
+	// PotDecorations stores the four side decorations of a decorated-pot item.
+	// An array keeps ItemStack comparable, which is important for inventory diffing.
+	PotDecorations [4]string `json:",omitempty"`
+	// HasFireworks distinguishes a decoded component from an absent one. The
+	// effective vanilla default for a rocket is flight duration one.
+	HasFireworks bool         `json:",omitempty"`
+	Fireworks    FireworkData `json:",omitempty"`
 }
 
 type armorItemStats struct {
@@ -112,9 +144,57 @@ func (s ItemStack) IsEmpty() bool {
 	return s.Count <= 0 || s.ItemID == ""
 }
 
+// NormalizePotDecorations returns the complete four-side decoration list.
+// Vanilla treats absent entries as bricks.
+func NormalizePotDecorations(decorations [4]string) [4]string {
+	for index := range decorations {
+		if decorations[index] == "" {
+			decorations[index] = "minecraft:brick"
+		}
+	}
+	return decorations
+}
+
+// NormalizedPotDecorations returns the meaningful decorated-pot component.
+func (s ItemStack) NormalizedPotDecorations() [4]string {
+	if s.ItemID != "minecraft:decorated_pot" {
+		return [4]string{}
+	}
+	return NormalizePotDecorations(s.PotDecorations)
+}
+
 // SameItem reports whether two stacks may merge without losing components.
 func (s ItemStack) SameItem(other ItemStack) bool {
-	return s.ItemID == other.ItemID && s.Damage == other.Damage && s.Enchantments == other.Enchantments
+	return s.ItemID == other.ItemID && s.Damage == other.Damage && s.Enchantments == other.Enchantments &&
+		s.NormalizedPotDecorations() == other.NormalizedPotDecorations() &&
+		s.EffectiveFireworks() == other.EffectiveFireworks()
+}
+
+// EffectiveFireworks returns a validated component. Vanilla rockets without
+// an explicit override inherit flight duration one and no explosions.
+func (s ItemStack) EffectiveFireworks() FireworkData {
+	if s.ItemID != "minecraft:firework_rocket" {
+		return FireworkData{}
+	}
+	data := s.Fireworks
+	if !s.HasFireworks {
+		data.Flight = 1
+	}
+	if data.ExplosionCount > MaxFireworkExplosions {
+		data.ExplosionCount = MaxFireworkExplosions
+	}
+	for index := range int(data.ExplosionCount) {
+		if data.Explosions[index].Shape > 4 {
+			data.Explosions[index].Shape = 0
+		}
+		if data.Explosions[index].ColorCount > MaxFireworkColors {
+			data.Explosions[index].ColorCount = MaxFireworkColors
+		}
+		if data.Explosions[index].FadeColorCount > MaxFireworkColors {
+			data.Explosions[index].FadeColorCount = MaxFireworkColors
+		}
+	}
+	return data
 }
 
 // MaxDurability returns Java Edition's vanilla maximum durability for the

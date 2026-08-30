@@ -384,7 +384,7 @@ func IsRedstoneLoad(name string) bool {
 		"minecraft:note_block", "minecraft:redstone_lamp",
 		"minecraft:tnt",
 		"minecraft:powered_rail", "minecraft:activator_rail",
-		"minecraft:hopper":
+		"minecraft:hopper", "minecraft:bell":
 		return true
 	}
 	return false

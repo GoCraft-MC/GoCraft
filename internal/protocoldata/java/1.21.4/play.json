@@ -8,6 +8,8 @@
     "minecraft:spawn_entity": 1,
 	"minecraft:animate": 3,
     "minecraft:acknowledge_block_change": 5,
+    "minecraft:block_entity_data": 7,
+	"minecraft:block_action": 8,
     "minecraft:block_update": 9,
     "minecraft:chunk_batch_finished": 12,
     "minecraft:chunk_batch_start": 13,

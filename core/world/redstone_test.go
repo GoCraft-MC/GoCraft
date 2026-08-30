@@ -155,20 +155,18 @@ func TestRedstoneUpdatesMechanismStates(t *testing.T) {
 	}
 }
 
-func TestObserverPulsesAwayFromObservedFace(t *testing.T) {
+func TestObserverPowersOnlyAwayFromObservedFace(t *testing.T) {
 	w := New(&FlatGenerator{}, nil, false)
 	defer w.Close()
-	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "observer", Properties: map[string]string{
-		"facing": "east", "powered": "false",
-	}})
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "observer", Properties: map[string]string{"facing": "east", "powered": "true"}})
 	w.SetBlock(-1, 64, 0, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
-	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "stone"})
+	w.SetBlock(0, 64, 1, Block{Namespace: "minecraft", Name: "redstone_lamp", Properties: map[string]string{"lit": "false"}})
 	w.Redstone.FlushUpdates()
-	if got := w.GetBlock(0, 64, 0).Properties["powered"]; got != "true" {
-		t.Fatalf("observer powered = %q, want true", got)
-	}
 	if got := w.GetBlock(-1, 64, 0).Properties["lit"]; got != "true" {
 		t.Fatalf("lamp behind observer lit = %q, want true", got)
+	}
+	if got := w.GetBlock(0, 64, 1).Properties["lit"]; got != "false" {
+		t.Fatalf("lamp beside observer lit = %q, want false", got)
 	}
 }
 

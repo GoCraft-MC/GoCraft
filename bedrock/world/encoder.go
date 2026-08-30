@@ -14,6 +14,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
+	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 )
 
@@ -230,6 +231,12 @@ func bedrockVisualBlock(block coreworld.Block) coreworld.Block {
 		if block.Properties["lit"] == "false" {
 			block.Name = "unlit_redstone_torch"
 		}
+	case "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker":
+		// Java stores the burning state as a lit property, while Bedrock uses
+		// separate block identifiers for the burning furnace variants.
+		if block.Properties["lit"] == "true" {
+			block.Name = "lit_" + block.Name
+		}
 	case "minecraft:beetroots":
 		// Bedrock uses the singular identifier for the same canonical crop.
 		block.Name = "beetroot"
@@ -273,13 +280,32 @@ func alternateBlockNames(name string) []string {
 	case "minecraft:short_grass":
 		return []string{"minecraft:tallgrass"}
 	}
+	if strings.HasSuffix(name, "_wall_banner") {
+		return []string{"minecraft:wall_banner"}
+	}
+	if strings.HasSuffix(name, "_banner") {
+		return []string{"minecraft:standing_banner"}
+	}
 	if strings.HasSuffix(name, "_wall_sign") {
-		return []string{strings.TrimSuffix(name, "_wall_sign") + "_wall_sign"}
+		wood := strings.TrimSuffix(strings.TrimPrefix(name, "minecraft:"), "_wall_sign")
+		return []string{"minecraft:" + bedrockSignWood(wood) + "wall_sign"}
 	}
 	if strings.HasSuffix(name, "_sign") {
-		return []string{strings.TrimSuffix(name, "_sign") + "_standing_sign"}
+		wood := strings.TrimSuffix(strings.TrimPrefix(name, "minecraft:"), "_sign")
+		return []string{"minecraft:" + bedrockSignWood(wood) + "standing_sign"}
 	}
 	return nil
+}
+
+func bedrockSignWood(wood string) string {
+	switch wood {
+	case "oak":
+		return ""
+	case "dark_oak":
+		return "darkoak_"
+	default:
+		return wood + "_"
+	}
 }
 
 func translateBlockProperties(block coreworld.Block) map[string]any {
@@ -310,6 +336,8 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 			}
 			if raw == "up" {
 				out["torch_facing_direction"] = "top"
+			} else if isBedrockWallTorch(block) {
+				out["torch_facing_direction"] = oppositeCardinal(raw)
 			} else {
 				out["torch_facing_direction"] = raw
 			}
@@ -431,6 +459,27 @@ func translateBlockProperties(block coreworld.Block) map[string]any {
 		out["wall_post_bit"] = boolByte(properties["up"] == "true")
 	}
 	return out
+}
+
+func isBedrockWallTorch(block coreworld.Block) bool {
+	name := block.ResourceLocation()
+	return name == "minecraft:wall_torch" || strings.HasSuffix(name, "_wall_torch") ||
+		(name == "minecraft:unlit_redstone_torch" && block.Properties["facing"] != "")
+}
+
+func oppositeCardinal(facing string) string {
+	switch facing {
+	case "north":
+		return "south"
+	case "south":
+		return "north"
+	case "west":
+		return "east"
+	case "east":
+		return "west"
+	default:
+		return facing
+	}
 }
 
 func rotateCardinalRight(facing string) string {
@@ -717,7 +766,31 @@ func (e *Encoder) EncodeFullChunkPayload(chunk *coreworld.Chunk) ([]byte, error)
 		buf.Write(e.encodeBiomeStorage(section))
 	}
 	buf.WriteByte(0x00) // border block count varint (0 = none)
+	if chunk != nil {
+		encoder := nbt.NewEncoderWithEncoding(&buf, nbt.NetworkLittleEndian)
+		for _, entity := range chunk.BlockEntities {
+			data, ok := bedrockBlockEntityData(entity)
+			if !ok {
+				continue
+			}
+			if err := encoder.Encode(data); err != nil {
+				return nil, fmt.Errorf("bedrock: encode block actor at %d,%d,%d: %w", entity.X, entity.Y, entity.Z, err)
+			}
+		}
+	}
 	return buf.Bytes(), nil
+}
+
+func bedrockBlockEntityData(entity coreworld.BlockEntity) (map[string]any, bool) {
+	if entity.Type != "minecraft:decorated_pot" && entity.Type != "decorated_pot" {
+		return nil, false
+	}
+	decorations := player.NormalizePotDecorations(entity.PotDecorations)
+	return map[string]any{
+		"id": "DecoratedPot",
+		"x":  int32(entity.X), "y": int32(entity.Y), "z": int32(entity.Z),
+		"sherds": []string{decorations[0], decorations[1], decorations[2], decorations[3]},
+	}, true
 }
 
 // encodeBiomeStorage converts a Java quart-resolution biome container to the

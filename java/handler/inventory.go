@@ -479,13 +479,21 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 	if maxDamage <= 0 {
 		componentCount := int32(0)
 		if len(enchantments) > 0 {
-			componentCount = 1
+			componentCount++
+		}
+		if item.ItemID == "minecraft:decorated_pot" {
+			componentCount++
+		}
+		if item.ItemID == "minecraft:firework_rocket" {
+			componentCount++
 		}
 		b.VarInt(int32(item.Count)).
 			VarInt(id).
 			VarInt(componentCount).
 			VarInt(0) // components_to_remove
 		encodeSlotEnchantments(b, enchantments)
+		encodeSlotPotDecorations(b, item)
+		encodeSlotFireworks(b, item)
 		return
 	}
 	damage := item.Damage
@@ -639,5 +647,36 @@ func DamagePlayerArmor(p *player.Player, conn *network.ClientConn, amount int) {
 		if conn != nil {
 			_ = sendArmorAttributes(conn, p)
 		}
+	}
+}
+
+func encodeSlotPotDecorations(b *protocol.Builder, item player.ItemStack) {
+	if item.ItemID != "minecraft:decorated_pot" {
+		return
+	}
+	decorations := item.NormalizedPotDecorations()
+	b.VarInt(61).VarInt(int32(len(decorations)))
+	for _, decoration := range decorations {
+		b.VarInt(javaworld.ItemID(decoration))
+	}
+}
+
+func encodeSlotFireworks(b *protocol.Builder, item player.ItemStack) {
+	if item.ItemID != "minecraft:firework_rocket" {
+		return
+	}
+	data := item.EffectiveFireworks()
+	b.VarInt(56).VarInt(int32(data.Flight)).VarInt(int32(data.ExplosionCount))
+	for index := range int(data.ExplosionCount) {
+		explosion := data.Explosions[index]
+		b.VarInt(int32(explosion.Shape)).VarInt(int32(explosion.ColorCount))
+		for color := range int(explosion.ColorCount) {
+			b.Int(explosion.Colors[color])
+		}
+		b.VarInt(int32(explosion.FadeColorCount))
+		for color := range int(explosion.FadeColorCount) {
+			b.Int(explosion.FadeColors[color])
+		}
+		b.Bool(explosion.Trail).Bool(explosion.Twinkle)
 	}
 }

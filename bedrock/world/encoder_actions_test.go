@@ -22,7 +22,23 @@ func TestActionBlockStatesTranslateToBedrockPalette(t *testing.T) {
 		},
 		{
 			name: "wall torch", block: coreworld.Block{Namespace: "minecraft", Name: "wall_torch", Properties: map[string]string{"facing": "north"}},
-			wantName: "minecraft:torch", wantState: "torch_facing_direction", wantValue: "north",
+			wantName: "minecraft:torch", wantState: "torch_facing_direction", wantValue: "south",
+		},
+		{
+			name: "oak wall sign", block: coreworld.Block{Namespace: "minecraft", Name: "oak_wall_sign", Properties: map[string]string{"facing": "north"}},
+			wantName: "minecraft:wall_sign", wantState: "facing_direction", wantValue: int32(2),
+		},
+		{
+			name: "dark oak standing sign", block: coreworld.Block{Namespace: "minecraft", Name: "dark_oak_sign", Properties: map[string]string{"rotation": "7"}},
+			wantName: "minecraft:darkoak_standing_sign", wantState: "ground_sign_direction", wantValue: int32(7),
+		},
+		{
+			name: "standing banner", block: coreworld.Block{Namespace: "minecraft", Name: "white_banner", Properties: map[string]string{"rotation": "3"}},
+			wantName: "minecraft:standing_banner", wantState: "ground_sign_direction", wantValue: int32(3),
+		},
+		{
+			name: "wall banner", block: coreworld.Block{Namespace: "minecraft", Name: "red_wall_banner", Properties: map[string]string{"facing": "east"}},
+			wantName: "minecraft:wall_banner", wantState: "facing_direction", wantValue: int32(5),
 		},
 		{
 			name: "powered lever", block: coreworld.Block{Namespace: "minecraft", Name: "lever", Properties: map[string]string{"face": "wall", "facing": "north", "powered": "true"}},

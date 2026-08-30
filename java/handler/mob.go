@@ -60,7 +60,7 @@ func buildSpawnMob(e *corentity.Entity) (*protocol.Packet, bool) {
 	data := int32(0)
 	if e.Type == corentity.TypeFallingBlock {
 		data = e.FallingBlockStateID
-	} else if corentity.IsProjectile(e.Type) && e.OwnerEntityID != 0 {
+	} else if corentity.IsProjectile(e.Type) && e.Type != corentity.TypeFireworkRocket && e.OwnerEntityID != 0 {
 		data = e.OwnerEntityID + 1
 	}
 	return protocol.NewBuilder(packetIDSpawnEntity).
@@ -92,7 +92,19 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			VarInt(e.EntityID).
 			Byte(8).  // ItemEntity DATA_ITEM metadata index
 			VarInt(7) // ItemStack metadata serializer
-		encodeSlot(b, player.ItemStack{ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage})
+		encodeSlot(b, player.ItemStack{
+			ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage, PotDecorations: e.ItemPotDecorations,
+		})
+		return b.Byte(0xff).Build()
+	}
+	if e.Type == corentity.TypeFireworkRocket {
+		b := protocol.NewBuilder(packetIDSetEntityData).
+			VarInt(e.EntityID).
+			Byte(8).
+			VarInt(7)
+		encodeSlot(b, player.ItemStack{
+			ItemID: "minecraft:firework_rocket", Count: 1, HasFireworks: true, Fireworks: e.FireworkData,
+		})
 		return b.Byte(0xff).Build()
 	}
 	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)
@@ -292,6 +304,20 @@ func BroadcastEntityStatus(entityID int32, status byte, mgr *session.Manager) {
 	pkt := buildEntityEvent(entityID, status)
 	for _, s := range mgr.SnapshotAll() {
 		_ = s.Conn.WritePacket(pkt)
+	}
+}
+
+// BroadcastEntityStatusInDimension emits a transient entity event only to
+// viewers of the canonical world that owns the entity.
+func BroadcastEntityStatusInDimension(entityID int32, status byte, mgr *session.Manager, dimension int32) {
+	if mgr == nil {
+		return
+	}
+	pkt := buildEntityEvent(entityID, status)
+	for _, current := range mgr.SnapshotAll() {
+		if current.Player != nil && current.Player.Dimension == dimension {
+			_ = current.Conn.WritePacket(pkt)
+		}
 	}
 }
 
@@ -731,6 +757,19 @@ func DispatchWorldTime(age, dayTime int64, mgr *session.Manager) {
 // The goroutine therefore only reads from immutable []byte packet buffers —
 // it never touches entity fields, so there is no data race with the next tick.
 func DispatchTickBroadcast(moved []*corentity.Entity, hurtEntities []*corentity.Entity, deathIDs, deadIDs []int32, spawned []*corentity.Entity, mgr *session.Manager) {
+	dispatchTickBroadcast(moved, hurtEntities, deathIDs, deadIDs, spawned, mgr, nil)
+}
+
+// DispatchTickBroadcastInDimension keeps entity movement and removal inside
+// the canonical world that owns it.
+func DispatchTickBroadcastInDimension(moved []*corentity.Entity, hurtEntities []*corentity.Entity, deathIDs, deadIDs []int32, spawned []*corentity.Entity, mgr *session.Manager, dimension int32) {
+	dispatchTickBroadcast(moved, hurtEntities, deathIDs, deadIDs, spawned, mgr, &dimension)
+}
+
+func dispatchTickBroadcast(moved []*corentity.Entity, hurtEntities []*corentity.Entity, deathIDs, deadIDs []int32, spawned []*corentity.Entity, mgr *session.Manager, dimension *int32) {
+	if mgr == nil {
+		return
+	}
 	pkts := make([]*protocol.Packet, 0, len(moved)+len(hurtEntities)+len(deathIDs)+len(deadIDs)+len(spawned)*2)
 	for _, e := range spawned {
 		if spawn, ok := buildSpawnMob(e); ok {
@@ -765,6 +804,9 @@ func DispatchTickBroadcast(moved []*corentity.Entity, hurtEntities []*corentity.
 	// cannot stall the simulation tick.
 	go func() {
 		for _, s := range mgr.SnapshotAll() {
+			if dimension != nil && (s.Player == nil || s.Player.Dimension != *dimension) {
+				continue
+			}
 			for _, pkt := range pkts {
 				_ = s.Conn.WritePacket(pkt)
 			}

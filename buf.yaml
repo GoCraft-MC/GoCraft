@@ -1,0 +1,31 @@
+# Schema tooling for the plugin ABI.
+#
+# The ABI is the contract between the Go host and every out-of-process runtime.
+# A one-sided change to it breaks the other side silently, which is why
+# `buf breaking` is configured here and not left to review alone.
+version: v2
+
+# The module root is the repository root, not abi/v1, so a schema is addressed
+# by the path it actually has: import "abi/v1/envelope.proto". Rooting the
+# module at abi/v1 would shorten imports to "envelope.proto" and lose the
+# version from them, and would make every comparison against a pre-buf revision
+# report the files as deleted and re-added.
+modules:
+  - path: .
+
+lint:
+  use:
+    - STANDARD
+  except:
+    # STANDARD expects gocraft/abi/v1/*.proto to match package gocraft.abi.v1.
+    # The layout is abi/v1 because deliverable 01 names it so, and the Go import
+    # path (GoCraft/abi/v1) already mirrors the package. Moving the tree would
+    # buy nothing.
+    - PACKAGE_DIRECTORY_MATCH
+
+breaking:
+  use:
+    # FILE is the strictest set. Beyond wire compatibility it also rejects
+    # source-breaking edits such as renaming an enum value, which matters once
+    # generated Java code refers to these names.
+    - FILE

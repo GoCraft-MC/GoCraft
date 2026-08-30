@@ -13,6 +13,7 @@ const (
 	soundCategoryBlocks  int32 = 4
 	soundCategoryNeutral int32 = 6
 	soundCategoryPlayers int32 = 7
+	soundCategoryAmbient int32 = 8
 )
 
 // soundHolderID encodes a registry reference in the 1.21.4 Holder format.
@@ -68,6 +69,9 @@ const SoundCategoryPlayers int32 = soundCategoryPlayers
 
 // SoundCategoryNeutral is the sound category for passive and neutral mobs.
 const SoundCategoryNeutral int32 = soundCategoryNeutral
+
+// SoundCategoryAmbient is the category vanilla uses for launched fireworks.
+const SoundCategoryAmbient int32 = soundCategoryAmbient
 
 // BroadcastSoundAt plays a positioned sound event to all connected players.
 func BroadcastSoundAt(mgr *session.Manager, name string, category int32, x, y, z float64, volume, pitch float32) {

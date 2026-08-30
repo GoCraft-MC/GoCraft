@@ -1644,9 +1644,11 @@ func (l *Listener) canonicalInventoryActions(
 				Destination: intent.InventoryCursorSlot,
 				Count:       count,
 				Item: player.ItemStack{
-					ItemID: ki.name,
-					Count:  count,
-					Damage: int(ki.meta),
+					ItemID:       ki.name,
+					Count:        count,
+					Damage:       int(ki.meta),
+					HasFireworks: ki.hasFireworks,
+					Fireworks:    ki.fireworks,
 				},
 			})
 			creativeSelected = true

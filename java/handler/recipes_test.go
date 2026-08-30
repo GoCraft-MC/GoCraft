@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"GoCraft/core/player"
 	"GoCraft/java/protocol"
 )
 
@@ -166,6 +167,37 @@ func skipSlotDisplay(t *testing.T, reader *bytes.Reader) {
 				for line := int32(0); line < lines; line++ {
 					if err := skipNetworkNBT(reader); err != nil {
 						t.Fatalf("skip lore component: %v", err)
+					}
+				}
+			case 61: // pot_decorations
+				decorations := mustReadRecipeVarInt(t, reader)
+				if decorations < 0 || decorations > 64 {
+					t.Fatalf("invalid pot decoration count %d", decorations)
+				}
+				for decoration := int32(0); decoration < decorations; decoration++ {
+					_ = mustReadRecipeVarInt(t, reader)
+				}
+			case 56: // fireworks
+				_ = mustReadRecipeVarInt(t, reader) // flight duration
+				explosions := mustReadRecipeVarInt(t, reader)
+				if explosions < 0 || explosions > player.MaxFireworkExplosions {
+					t.Fatalf("invalid firework explosion count %d", explosions)
+				}
+				for explosion := int32(0); explosion < explosions; explosion++ {
+					_ = mustReadRecipeVarInt(t, reader) // shape
+					for colourSet := 0; colourSet < 2; colourSet++ {
+						colours := mustReadRecipeVarInt(t, reader)
+						for colour := int32(0); colour < colours; colour++ {
+							if _, err := protocol.ReadInt(reader); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					if _, err := protocol.ReadBool(reader); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := protocol.ReadBool(reader); err != nil {
+						t.Fatal(err)
 					}
 				}
 			case 13:

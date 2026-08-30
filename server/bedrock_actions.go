@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"GoCraft/core/blockloot"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
@@ -22,6 +23,17 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	if held.IsEmpty() {
 		return false
 	}
+	if held.ItemID == "minecraft:firework_rocket" && p.GameMode != player.GameModeSpectator {
+		return s.applyFireworkUse(intent.FireworkUseIntent{
+			PlayerUUID: p.UUID,
+			HotbarSlot: int32(p.HeldSlot),
+			Position: spatial.Vec3{
+				X: float64(i.Position.X) + float64(i.ClickX),
+				Y: float64(i.Position.Y) + float64(i.ClickY),
+				Z: float64(i.Position.Z) + float64(i.ClickZ),
+			},
+		}) != nil
+	}
 	x, y, z := int(i.Position.X), int(i.Position.Y), int(i.Position.Z)
 	name, item := target.ResourceLocation(), held.ItemID
 	if (name == "minecraft:campfire" || name == "minecraft:soul_campfire") && target.Properties["lit"] != "false" {
@@ -35,7 +47,7 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: item, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments})
+				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: item, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations})
 				s.bedrockWorld().SetContainerItems(x, y, z, name, items)
 				s.consumeBedrockHeldItem(p, 1)
 				return true
@@ -340,7 +352,7 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments}
+			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations}
 		} else {
 			stored.Count++
 		}
@@ -545,7 +557,7 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 			return true
 		}
 		facing := bedrockPlayerFacing(p.Rotation.Yaw)
-		hinge := bedrockDoorHinge(facing, i.ClickX, i.ClickZ)
+		hinge := coreworld.DoorHinge(s.bedrockWorld(), px, py, pz, facing, i.ClickX, i.ClickZ)
 		props := map[string]string{"facing": facing, "half": "lower", "hinge": hinge, "open": "false", "powered": "false"}
 		lower := bedrockBlock(block.Name, props)
 		upper := bedrockCopyBlock(lower)
@@ -570,6 +582,12 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	if isBedrockGenericContainer(name) || name == "minecraft:decorated_pot" {
 		s.bedrockWorld().SetContainerItems(px, py, pz, name, nil)
 	}
+	if name == "minecraft:decorated_pot" {
+		s.bedrockWorld().SetDecoratedPotDecorations(px, py, pz, held.NormalizedPotDecorations())
+	}
+	if blockEntityType, ok := coreworld.PlacementBlockEntityType(placed.ResourceLocation()); ok {
+		s.bedrockWorld().SetBlockEntity(px, py, pz, blockEntityType, []byte{10, 0})
+	}
 	s.consumeBedrockHeldItem(p, 1)
 	return true
 }
@@ -579,6 +597,12 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 	props := map[string]string{}
 	playerFacing := bedrockPlayerFacing(p.Rotation.Yaw)
 	frontFacing := bedrockOppositeFacing(playerFacing)
+
+	if coreworld.IsAttachmentPlacementItem(name) {
+		placingInWater := s.bedrockWorld().GetBlock(x, y, z).ResourceLocation() == "minecraft:water"
+		placed, _, valid := coreworld.AttachmentPlacementState(s.bedrockWorld(), block, x, y, z, i.Face, bedrockSignRotation(p.Rotation.Yaw), placingInWater)
+		return placed, valid
+	}
 
 	if name == "minecraft:torch" || name == "minecraft:soul_torch" || name == "minecraft:redstone_torch" {
 		if i.Face == 1 && bedrockSolidSupport(s.bedrockWorld().GetBlock(x, y-1, z)) {
@@ -699,6 +723,8 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		props = map[string]string{"layers": "1"}
 	case name == "minecraft:light":
 		props = bedrockCopyProperties(block.Properties)
+	case name == "minecraft:decorated_pot":
+		props = map[string]string{"facing": frontFacing, "cracked": "false", "waterlogged": "false"}
 	case name == "minecraft:redstone_lamp":
 		props = map[string]string{"lit": "false"}
 	case name == "minecraft:daylight_detector":
@@ -967,10 +993,28 @@ func (s *Server) breakBedrockLinkedBlock(x, y, z int, block coreworld.Block) {
 // after a player removes a supporting block. Doing this in the interaction
 // path also guarantees that the Bedrock UpdateBlock packets are ordered with
 // the original break instead of leaving vegetation floating client-side.
-func (s *Server) breakBedrockUnsupportedAbove(x, y, z int) {
+func (s *Server) breakBedrockUnsupportedAbove(p *player.Player, x, y, z int) {
 	world := s.bedrockWorld()
 	if world == nil {
 		return
+	}
+	for updateIndex, update := range world.ApplyAttachmentSupportUpdatesAround(x, y, z) {
+		if s.sessions != nil {
+			handler.BroadcastBlockChange(update.Change, s.sessions)
+		}
+		if !update.Removed || p == nil {
+			continue
+		}
+		dropPosition := spatial.Vec3{
+			X: float64(update.Change.X) + 0.5,
+			Y: float64(update.Change.Y) + 0.5,
+			Z: float64(update.Change.Z) + 0.5,
+		}
+		for dropIndex, drop := range blockloot.Drops(blockloot.Context{Block: update.Previous}) {
+			if dropped := s.newDroppedItemForPlayer(p, drop, dropPosition, updateIndex*16+dropIndex); dropped != nil && s.sessions != nil {
+				handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
+			}
+		}
 	}
 	s.broadcastCanonicalCropChanges(world.BreakUnsupportedCropsAbove(x, y, z))
 	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {

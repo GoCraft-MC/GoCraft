@@ -46,6 +46,7 @@ import (
 	"GoCraft/core/intent"
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/customitems"
@@ -110,6 +111,12 @@ type Server struct {
 	// Both Java (M14.1+) and Bedrock handlers post intents here; the tick
 	// goroutine drains and applies them once per tick.
 	intentBus *intent.Bus
+
+	// pluginRegistry owns the plugin runtimes and the loaded instances.
+	// plugins is the event bus it exposes, handed down to the edition handlers
+	// so they can emit native events without knowing about runtimes.
+	pluginRegistry *coreplugin.Registry
+	plugins        *coreplugin.Bus
 
 	// connCount tracks the number of active TCP connections (Java).
 	connCount atomic.Int64
@@ -193,6 +200,9 @@ type bedrockRecentBlockUse struct {
 // New creates a Server with the given configuration.
 // It initialises the game core and generates the RSA keypair for online-mode auth.
 func New(cfg *config.Config) (*Server, error) {
+	if err := coreplugin.EnsureDirectory(coreplugin.DefaultDirectory); err != nil {
+		return nil, err
+	}
 	handler.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
@@ -353,6 +363,12 @@ func New(cfg *config.Config) (*Server, error) {
 	handler.RegisterBuiltins(cmds)
 
 	bus := intent.NewBus(64, 512)
+	eventBudget := time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond
+	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, nil, nil)
+	plugins := pluginRegistry.Bus()
+	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
+		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
+	})
 
 	debuglog.Info(debuglog.WorldLoading, "server: world seed resolved", "seed", cfg.WorldSeed)
 	worldInstance := coreworld.New(coreworld.NewOverworldGenerator(cfg.WorldSeed), storage, cfg.Villagers)
@@ -389,6 +405,8 @@ func New(cfg *config.Config) (*Server, error) {
 		permissions:             permissionManager,
 		customItems:             customItemsMgr,
 		intentBus:               bus,
+		pluginRegistry:          pluginRegistry,
+		plugins:                 plugins,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
 		creaturePopulatedChunks: make(map[[2]int32]struct{}),
@@ -547,6 +565,19 @@ func New(cfg *config.Config) (*Server, error) {
 		netherWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(1))
 		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
 	}
+	for dimension, dimensionWorld := range map[int32]*coreworld.World{
+		dimensionOverworld: worldInstance,
+		dimensionNether:    netherWorld,
+		dimensionEnd:       endWorld,
+	} {
+		dimension := dimension
+		dimensionWorld.SetBlockEntityObserver(func(entity coreworld.BlockEntity) {
+			handler.BroadcastBlockEntityDataInDimension(entity, s.sessions, dimension)
+			if s.bedrockListener != nil {
+				s.bedrockListener.BroadcastBlockEntityData(dimension, entity)
+			}
+		})
+	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
 	cmds.SetPlayerDisconnector(s.disconnectPlayer)
 	return s, nil
@@ -596,6 +627,10 @@ func (s *Server) Run(ctx context.Context) error {
 	}()
 	ctx = runCtx
 	go s.runConsole(ctx)
+	if err := s.loadPlugins(ctx); err != nil {
+		slog.Error("plugins: startup aborted", "err", err)
+		return err
+	}
 	if s.cfg.JavaEnabled {
 		slog.Info("java listener enabled",
 			"addr", s.cfg.Addr(),
@@ -677,6 +712,10 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// ctx is now done: wait for entity tick and Bedrock listener to finish.
 	wg.Wait()
+
+	// Unload plugins while world storage is still open, so a runtime that
+	// persists on shutdown can still write.
+	s.unloadPlugins()
 
 	// Flush world to disk regardless of shutdown cause.
 	s.saveAllPlayerData()
@@ -969,6 +1008,10 @@ func (s *Server) tickIntents() {
 			s.applyChat(i)
 		case intent.BlockInteractIntent:
 			s.applyBedrockBlockInteract(i)
+		case intent.BellRingIntent:
+			s.applyBellRing(i)
+		case intent.FireworkUseIntent:
+			s.applyFireworkUse(i)
 		case intent.ConsumeFoodIntent:
 			s.applyBedrockConsumeFood(i)
 		case intent.StartUseItemIntent:
@@ -1641,9 +1684,30 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		held := p.HeldItem()
+		if s.plugins != nil && !s.plugins.EmitBlockBreak(p, i.Position, block, held) {
+			if s.bedrockListener != nil {
+				s.bedrockListener.DimensionBlockObserver(p.Dimension)(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block})
+			}
+			return
+		}
+		lootBlock := block
+		potDecorations := [4]string{}
+		if block.ResourceLocation() == "minecraft:decorated_pot" {
+			potDecorations = actionWorld.DecoratedPotDecorations(x, y, z)
+		}
+		if block.ResourceLocation() == "minecraft:decorated_pot" && held.EnchantmentLevel("minecraft:silk_touch") == 0 && blockloot.BreaksDecoratedPot(held.ItemID) {
+			lootBlock = bedrockCopyBlock(block)
+			lootBlock.Properties["cracked"] = "true"
+		}
+		enchantments := make(map[string]int)
+		for _, enchantment := range held.EnchantmentLevels() {
+			enchantments[enchantment.ID] = enchantment.Level
+		}
 		lootContext := blockloot.Context{
-			Block: block,
-			Tool:  held,
+			Block:          lootBlock,
+			Tool:           held,
+			Enchantments:   enchantments,
+			PotDecorations: potDecorations,
 			BlockAt: func(dx, dy, dz int) coreworld.Block {
 				return actionWorld.GetBlock(x+dx, y+dy, z+dz)
 			},
@@ -1668,13 +1732,15 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			s.setBedrockActionBlock(x, partnerY, z, coreworld.Air)
 		}
 		s.breakBedrockLinkedBlock(x, y, z, block)
-		s.breakBedrockUnsupportedAbove(x, y, z)
+		s.breakBedrockUnsupportedAbove(p, x, y, z)
 		if block.ResourceLocation() == "minecraft:redstone_wire" {
 			s.refreshBedrockWireConnections(x, y, z)
 		}
 		if p.GameMode != player.GameModeCreative {
 			for _, item := range containerItems {
-				stack := player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage}
+				stack := player.ItemStack{
+					ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations,
+				}
 				if dropped := s.newDroppedItemForPlayer(p, stack, center, item.Slot+1); dropped != nil {
 					handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
 				}
@@ -1704,6 +1770,12 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		bypassActivation := p.Sneaking && !held.IsEmpty()
+		if !bypassActivation && clicked.ResourceLocation() == "minecraft:bell" {
+			if direction, valid := coreworld.BellRingDirection(clicked, i.Face, i.ClickY); valid {
+				s.ringBell(actionWorld, p.Dimension, i.Position, direction)
+				return
+			}
+		}
 		if !bypassActivation && s.applyBedrockBlockActivation(p, i.Position, clicked) {
 			return
 		}
@@ -2675,6 +2747,15 @@ func (s *Server) tickEntities() {
 			deadIDs = append(deadIDs, e.EntityID)
 			continue
 		}
+		if e.Type == corentity.TypeFireworkRocket {
+			if s.tickFireworkRocket(e) {
+				s.world.Entities.Remove(e.EntityID)
+				deadIDs = append(deadIDs, e.EntityID)
+				continue
+			}
+			moved = append(moved, e)
+			continue
+		}
 
 		// ── Primed TNT fuse countdown ────────────────────────────────────────
 		if e.Type == corentity.TypePrimedTNT {
@@ -2887,7 +2968,7 @@ func (s *Server) tickEntities() {
 	// DispatchTickBroadcast reads entity fields here (tick goroutine, sole
 	// writer) to build immutable packets before spawning the send goroutine.
 	endBcast := s.timings.measure(sectionBroadcast)
-	handler.DispatchTickBroadcast(moved, hurtEntities, deathIDs, deadIDs, spawned, s.sessions)
+	handler.DispatchTickBroadcastInDimension(moved, hurtEntities, deathIDs, deadIDs, spawned, s.sessions, dimensionOverworld)
 	endBcast()
 
 	// Publish time-of-day for handler code (e.g. bed sleep check).
@@ -3080,6 +3161,7 @@ func (s *Server) newDroppedItemInWorld(dimensionWorld *coreworld.World, stack pl
 	dropped.ItemID = stack.ItemID
 	dropped.ItemCount = stack.Count
 	dropped.ItemDamage = stack.Damage
+	dropped.ItemPotDecorations = stack.PotDecorations
 	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
 	dropped.VX = math.Cos(angle) * 0.1
 	dropped.VY = 0.2
@@ -3151,7 +3233,9 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool
 		if dx*dx+dy*dy+dz*dz > 2.25 {
 			continue
 		}
-		stack := player.ItemStack{ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage}
+		stack := player.ItemStack{
+			ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage, PotDecorations: e.ItemPotDecorations,
+		}
 		if !p.GiveItem(stack) {
 			continue
 		}
@@ -3302,6 +3386,13 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				entity.VX *= 0.98
 				entity.VZ *= 0.98
 				moved = append(moved, entity)
+			case entity.Type == corentity.TypeFireworkRocket:
+				if simulation.tickFireworkRocket(entity) {
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+					continue
+				}
+				moved = append(moved, entity)
 			case corentity.IsProjectile(entity.Type):
 				if simulation.tickProjectile(entity) || entity.Position.Y < coreworld.WorldMinY-16 {
 					dimensionWorld.Entities.Remove(entity.EntityID)
@@ -3349,7 +3440,7 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				}
 			}
 		}
-		handler.DispatchTickBroadcast(moved, hurtEntities, deathIDs, deadIDs, spawned, simulation.sessions)
+		handler.DispatchTickBroadcastInDimension(moved, hurtEntities, deathIDs, deadIDs, spawned, s.sessions, dimension)
 	}
 }
 
@@ -4406,6 +4497,15 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 		z := start.Z + (projectile.Position.Z-start.Z)*t
 		block := s.world.GetBlock(int(math.Floor(x)), int(math.Floor(y)), int(math.Floor(z)))
 		if coreworld.IsEntitySupportBlock(block.ResourceLocation()) {
+			if block.ResourceLocation() == "minecraft:bell" {
+				face := coreworld.BellProjectileFace(
+					projectile.Position.X-start.X, projectile.Position.Y-start.Y, projectile.Position.Z-start.Z,
+				)
+				if direction, valid := coreworld.BellRingDirection(block, face, float32(y-math.Floor(y))); valid {
+					position := spatial.BlockPos{X: int32(math.Floor(x)), Y: int32(math.Floor(y)), Z: int32(math.Floor(z))}
+					s.ringBell(s.world, s.simulationDimension, position, direction)
+				}
+			}
 			if projectile.Type == corentity.TypeWindCharge {
 				s.explodeWindCharge(projectile, spatial.Vec3{X: x, Y: y, Z: z})
 			}
@@ -4457,6 +4557,8 @@ func (s *Server) tickProjectile(projectile *corentity.Entity) bool {
 				} else {
 					s.world.QueueEntityDamageFrom(target.EntityID, damage, start.X, start.Z)
 				}
+			} else if projectile.Type == corentity.TypeSnowball {
+				s.world.QueueEntityImpactFrom(target.EntityID, start.X, start.Z)
 			}
 			s.resolveProjectileImpact(projectile, projectile.Position)
 			return true
@@ -4530,8 +4632,11 @@ func projectileDamageAgainst(projectile, target *corentity.Entity) float32 {
 	if projectile == nil || target == nil {
 		return 0
 	}
-	if projectile.Type == corentity.TypeSnowball && target.Type == corentity.TypeBlaze {
-		return 3
+	if projectile.Type == corentity.TypeSnowball {
+		if target.Type == corentity.TypeBlaze {
+			return 3
+		}
+		return 0
 	}
 	return projectile.ProjectileDamage
 }
@@ -4751,7 +4856,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 			handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 		}()
 
-		if err := handler.HandlePlay(conn, p, s.world, s.worldForDimension, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus); err != nil {
+		if err := handler.HandlePlay(conn, p, s.world, s.worldForDimension, s.chunkSender, s.sessions, s.cmds, s.regProvider, s.cfg.WorldSeed, func() int64 { return s.worldAge }, int32(s.cfg.ViewDistance), int32(s.cfg.PreGenerateRadius), s.game.NextEntityID, s.intentBus, s.plugins); err != nil {
 			slog.Debug("play error", "remote", remote, "err", err)
 		}
 
@@ -4908,9 +5013,14 @@ func (s *Server) tickBlockPhysicsWorld() {
 			s.processSculkSensorUpdate(u.X, u.Y, u.Z, &blockChanges)
 		case coreworld.UpdateObserver:
 			observer := s.world.GetBlock(u.X, u.Y, u.Z)
-			if observer.ResourceLocation() == "minecraft:observer" && observer.Properties["powered"] == "true" {
+			if observer.ResourceLocation() == "minecraft:observer" {
 				observer = bedrockCopyBlock(observer)
-				observer.Properties["powered"] = "false"
+				if observer.Properties["powered"] == "true" {
+					observer.Properties["powered"] = "false"
+				} else {
+					observer.Properties["powered"] = "true"
+					s.world.BlockPhysics.ScheduleObserver(u.X, u.Y, u.Z, s.worldAge, 2)
+				}
 				s.world.SetBlock(u.X, u.Y, u.Z, observer)
 				blockChanges = append(blockChanges, coreworld.BlockChange{X: u.X, Y: u.Y, Z: u.Z, Block: observer})
 			}
@@ -4927,6 +5037,9 @@ func (s *Server) tickBlockPhysicsWorld() {
 			s.activateDropperOrDispenser(s.world, s.simulationDimension, pos[0], pos[1], pos[2], block.ResourceLocation(), &blockChanges)
 		case "minecraft:crafter":
 			s.activateCrafter(s.world, s.simulationDimension, pos[0], pos[1], pos[2])
+		case "minecraft:bell":
+			position := spatial.BlockPos{X: int32(pos[0]), Y: int32(pos[1]), Z: int32(pos[2])}
+			s.ringBell(s.world, s.simulationDimension, position, coreworld.BellFacingDirection(block))
 		case "minecraft:piston", "minecraft:sticky_piston":
 			blockChanges = append(blockChanges, s.world.ApplyPistonPower(pos[0], pos[1], pos[2], true)...)
 		}

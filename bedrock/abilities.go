@@ -20,7 +20,7 @@ func bedrockGameType(mode player.GameMode) int32 {
 	case player.GameModeAdventure:
 		return packet.GameTypeAdventure
 	case player.GameModeSpectator:
-		return packet.GameTypeSurvivalSpectator
+		return packet.GameTypeSpectator
 	default:
 		return packet.GameTypeSurvival
 	}

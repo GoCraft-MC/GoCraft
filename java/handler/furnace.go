@@ -23,7 +23,7 @@ func openFurnace(p *player.Player, conn *network.ClientConn, w *coreworld.World,
 	p.ContainerSlots = make([]player.ItemStack, 3)
 	for _, item := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 		if item.Slot >= 0 && item.Slot < 3 && item.ItemID != "" && item.Count > 0 {
-			p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments}
+			p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
 		}
 	}
 	p.ContainerStateID++
@@ -199,7 +199,7 @@ func persistFurnaceContents(p *player.Player, w *coreworld.World) {
 	items := make([]coreworld.ContainerItem, 0, 3)
 	for slot := 0; slot < 3 && slot < len(p.ContainerSlots); slot++ {
 		if stack := p.ContainerSlots[slot]; !stack.IsEmpty() {
-			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments})
+			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
 		}
 	}
 	pos := p.OpenContainerPos

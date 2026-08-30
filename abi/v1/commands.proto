@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package gocraft.abi.v1;
+
+// Generated Go code lives in its own package. abi/v1 holds the hand-written
+// domain types the bus, the mutation queue and the in-process runtimes use on
+// the hot path; wire types stay at the transport boundary and are converted in,
+// never passed around.
+option go_package = "GoCraft/abi/v1/wire;wire";
+
+message CommandTree {
+  uint32 version = 1;
+  repeated CommandNode children = 2;
+}
+
+message CommandNode {
+  CommandNodeKind kind = 1;
+  string name = 2;
+  string permission = 3;
+  CommandArgumentType argument_type = 4;
+  repeated string enum_values = 5;
+  uint32 executor = 6;
+  repeated CommandNode children = 7;
+  string custom_type = 8;
+  optional sint64 integer_min = 9;
+  optional sint64 integer_max = 10;
+  optional double decimal_min = 11;
+  optional double decimal_max = 12;
+}
+
+// Enum values are prefixed with their enum name because proto3 scopes them to
+// the enclosing package, not to the enum: without the prefix, two enums in this
+// file could not both declare an UNSPECIFIED value. Only the numbers are the
+// contract, so renaming a value is wire-compatible.
+enum CommandNodeKind {
+  COMMAND_NODE_KIND_UNSPECIFIED = 0;
+  COMMAND_NODE_KIND_LITERAL = 1;
+  COMMAND_NODE_KIND_ARGUMENT = 2;
+}
+
+enum CommandArgumentType {
+  COMMAND_ARGUMENT_TYPE_UNSPECIFIED = 0;
+  COMMAND_ARGUMENT_TYPE_INTEGER = 1;
+  COMMAND_ARGUMENT_TYPE_DECIMAL = 2;
+  COMMAND_ARGUMENT_TYPE_STRING = 3;
+  COMMAND_ARGUMENT_TYPE_GREEDY = 4;
+  COMMAND_ARGUMENT_TYPE_PLAYER = 5;
+  COMMAND_ARGUMENT_TYPE_BLOCK_POS = 6;
+  COMMAND_ARGUMENT_TYPE_BLOCK_STATE = 7;
+  COMMAND_ARGUMENT_TYPE_ITEM = 8;
+  COMMAND_ARGUMENT_TYPE_DURATION = 9;
+  COMMAND_ARGUMENT_TYPE_ENUM = 10;
+  COMMAND_ARGUMENT_TYPE_CUSTOM = 11;
+}
