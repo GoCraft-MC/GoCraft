@@ -274,10 +274,10 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 		}
 		if p.OnDeath != nil {
 			p.OnDeath(p)
-			BroadcastSystemMessage(mgr, cause)
 		}
 		if mgr != nil {
 			BroadcastDeathAnimation(p.EntityID, mgr)
+			BroadcastSystemMessage(mgr, fmt.Sprintf("%v %v", target.Player.Username, cause))
 		}
 		message := fmt.Sprintf("%s %s", p.Username, cause)
 		if target.Conn != nil {
