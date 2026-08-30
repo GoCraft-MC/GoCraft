@@ -12,9 +12,13 @@ import (
 	"GoCraft/core/command"
 )
 
-const DefaultDirectory = "plugins"
-
-// EnsureDirectory creates the server's plugin drop directory when needed.
+// EnsureDirectory creates the plugin drop directory when needed.
+//
+// There is deliberately no default directory constant here. The default lives
+// once, in config.PluginsConfig, and callers pass what the admin configured:
+// a constant in this package would be a second copy of that value, free to
+// drift, and it is what let the server create a hardcoded "plugins" while
+// scanning somewhere else entirely.
 func EnsureDirectory(directory string) error {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return fmt.Errorf("create plugins directory: %w", err)
