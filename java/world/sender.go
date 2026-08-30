@@ -14,6 +14,7 @@ import (
 // packetIDLevelChunkWithLight is the server-to-client Play packet ID for
 // "Level Chunk With Light", resolved from the embedded protocol data at init.
 var packetIDLevelChunkWithLight = protocoldata.MustCB("play", "minecraft:level_chunk_with_light")
+var packetIDUpdateLight = protocoldata.MustCB("play", "minecraft:update_light")
 
 // Sender converts canonical chunks into Java chunk packets. Heightmaps are
 // derived from each chunk's actual block columns.
@@ -57,19 +58,31 @@ func releaseSkyLightPages(pages [][]byte) {
 //	VarInt     Block entity count, followed by encoded block entities
 //	-- Light update fields --
 //	BitSet     Sky Light Mask (only sections containing sky light)
-//	BitSet     Block Light Mask (empty)
+//	BitSet     Block Light Mask
 //	BitSet     Empty Sky Light Mask (sections with zero sky light)
-//	BitSet     Empty Block Light Mask (all 26 sections)
+//	BitSet     Empty Block Light Mask
 //	VarInt     Sky Light array count
 //	ByteArray  One 2048-byte nibble array per non-empty sky section
-//	VarInt     Block Light array count (0)
+//	VarInt     Block Light array count and 2048-byte nibble arrays
 func (s *Sender) SendChunk(conn *network.ClientConn, c *coreworld.Chunk) error {
+	return s.sendChunk(conn, c, localBlockLightRegion(c))
+}
+
+// SendChunkFromWorld includes emitters from neighbouring chunks so light may
+// cross chunk borders exactly as the canonical block layout permits.
+func (s *Sender) SendChunkFromWorld(conn *network.ClientConn, w *coreworld.World, c *coreworld.Chunk) error {
+	return s.sendChunk(conn, c, worldBlockLightRegion(w, c))
+}
+
+func (s *Sender) sendChunk(conn *network.ClientConn, c *coreworld.Chunk, region blockLightRegion) error {
 	heightmapNBT := EncodeChunkHeightmaps(c)
 	chunkBuffer := acquireChunkBuffer()
 	defer releaseChunkBuffer(chunkBuffer)
 	encodeChunkTo(chunkBuffer, c)
 	skyMask, emptySkyMask, skyArrays := buildSkyLight(c)
 	defer releaseSkyLightPages(skyArrays)
+	blockMask, emptyBlockMask, blockArrays := buildBlockLight(region)
+	defer releaseSkyLightPages(blockArrays)
 
 	type encodedBlockEntity struct {
 		entity coreworld.BlockEntity
@@ -85,7 +98,6 @@ func (s *Sender) SendChunk(conn *network.ClientConn, c *coreworld.Chunk) error {
 		}
 	}
 
-	const allSectionsMask = int64((int64(1) << 26) - 1)
 	b := protocol.NewBuilder(packetIDLevelChunkWithLight).
 		Int(c.X).
 		Int(c.Z).
@@ -98,15 +110,41 @@ func (s *Sender) SendChunk(conn *network.ClientConn, c *coreworld.Chunk) error {
 		b.Byte(packedXZ).Short(int16(entity.Y)).VarInt(encoded.typeID).Bytes(encoded.data)
 	}
 	b.VarInt(1).Long(skyMask).
-		VarInt(0). // block light mask
+		VarInt(1).Long(blockMask).
 		VarInt(1).Long(emptySkyMask).
-		VarInt(1).Long(allSectionsMask). // empty block light mask
+		VarInt(1).Long(emptyBlockMask).
 		VarInt(int32(len(skyArrays)))
 	for _, light := range skyArrays {
 		b.ByteArray(light)
 	}
-	b.VarInt(0) // no block-light arrays
+	b.VarInt(int32(len(blockArrays)))
+	for _, light := range blockArrays {
+		b.ByteArray(light)
+	}
 	return conn.WritePacket(b.Build())
+}
+
+// BuildBlockLightUpdate constructs a standalone Java light update for a chunk.
+// Sky-light masks are untouched; only canonical block-light sections are sent.
+func BuildBlockLightUpdate(w *coreworld.World, c *coreworld.Chunk) *protocol.Packet {
+	if c == nil {
+		return nil
+	}
+	blockMask, emptyBlockMask, blockArrays := buildBlockLight(worldBlockLightRegion(w, c))
+	defer releaseSkyLightPages(blockArrays)
+	b := protocol.NewBuilder(packetIDUpdateLight).
+		VarInt(c.X).
+		VarInt(c.Z).
+		VarInt(0).
+		VarInt(1).Long(blockMask).
+		VarInt(0).
+		VarInt(1).Long(emptyBlockMask).
+		VarInt(0).
+		VarInt(int32(len(blockArrays)))
+	for _, light := range blockArrays {
+		b.ByteArray(light)
+	}
+	return b.Build()
 }
 
 // buildSkyLight returns protocol masks and 2048-byte nibble arrays for the 24
@@ -347,7 +385,7 @@ func (s *Sender) SendChunksAround(conn *network.ClientConn, w *coreworld.World, 
 	for dx := -r; dx <= r; dx++ {
 		for dz := -r; dz <= r; dz++ {
 			c := w.Chunk(cx+int32(dx), cz+int32(dz))
-			if err := s.SendChunk(conn, c); err != nil {
+			if err := s.SendChunkFromWorld(conn, w, c); err != nil {
 				return fmt.Errorf("sending chunk (%d,%d): %w", cx+dx, cz+dz, err)
 			}
 		}

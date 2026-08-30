@@ -20,6 +20,7 @@
     "minecraft:game_event": 35,
     "minecraft:keep_alive": 39,
     "minecraft:level_chunk_with_light": 40,
+    "minecraft:update_light": 43,
     "minecraft:disconnect": 29,
 	"minecraft:entity_event": 31,
     "minecraft:death_combat_event": 62,
