@@ -451,7 +451,7 @@ func New(cfg *config.Config) (*Server, error) {
 		if ctx.Reply != nil {
 			return ctx.Reply(report)
 		}
-		return handler.SendSystemMessage(ctx.Conn, report)
+		return commandReply(ctx, report)
 	})
 	cmds.Register("tps", func(ctx handler.CommandContext) error {
 		tps, avgMs := timings.TPS()
@@ -466,7 +466,7 @@ func New(cfg *config.Config) (*Server, error) {
 		if ctx.Reply != nil {
 			return ctx.Reply(message)
 		}
-		return handler.SendSystemMessage(ctx.Conn, message)
+		return commandReply(ctx, message)
 	})
 	cmds.Register("mspt", func(ctx handler.CommandContext) error {
 		return commandReply(ctx, timings.MSPT())
@@ -474,7 +474,7 @@ func New(cfg *config.Config) (*Server, error) {
 	cmds.Register("time", func(ctx handler.CommandContext) error {
 		if len(ctx.Args) == 0 {
 			tod := s.worldAge % 24000
-			return handler.SendSystemMessage(ctx.Conn,
+			return commandReply(ctx,
 				fmt.Sprintf("Time of day: %d (world age: %d)", tod, s.worldAge))
 		}
 		switch strings.ToLower(ctx.Args[0]) {
@@ -512,7 +512,7 @@ func New(cfg *config.Config) (*Server, error) {
 			return fmt.Errorf("usage: /time <day|night|set <0-23999>>")
 		}
 		handler.DispatchWorldTime(s.worldAge, s.worldAge%24000, s.sessions)
-		return handler.SendSystemMessage(ctx.Conn,
+		return commandReply(ctx,
 			fmt.Sprintf("Time set to %d", s.worldAge%24000))
 	})
 	cmds.RequireOperator(`timings`, `tps`, `mspt`, `time`)
@@ -585,6 +585,13 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
 	cmds.SetPlayerDisconnector(s.disconnectPlayer)
+	// The command context used to carry a *network.ClientConn, which a Bedrock
+	// player does not have, so roughly twenty commands ran and told that player
+	// nothing. These three bridges are what replaced it: only the server sees
+	// both adapters, so only the server can write them.
+	cmds.SetMessenger(s.sendPlayerMessage)
+	cmds.SetLinkMessenger(s.sendPlayerLink)
+	cmds.SetAbilitySync(s.syncPlayerAbilities)
 	return s, nil
 }
 
@@ -1615,12 +1622,14 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 			World:   s.worldForPlayer(p),
 			Manager: s.sessions,
 		}
+		// Reply and SyncAbilities are not set here. Dispatch fills them from
+		// the bridges, which route by edition, so this path and the Java one in
+		// chat.go now answer through the same code — the two used to diverge,
+		// which is how commands ended up working on one edition only.
+		//
+		// Teleport and dimension change stay: they move this player through
+		// this adapter, which is not something a shared bridge can do.
 		if s.bedrockListener != nil && p.Edition == player.ClientEditionBedrock {
-			ctx.Reply = func(message string) error {
-				s.bedrockListener.SendMessage(p.UUID, message)
-				return nil
-			}
-			ctx.SyncAbilities = s.bedrockListener.RefreshPlayerAbilities
 			ctx.TeleportTo = func(x, y, z float64) error {
 				p.Position = spatial.Vec3{X: x, Y: y, Z: z}
 				p.FallDistance = 0
