@@ -118,6 +118,17 @@ type Server struct {
 	pluginRegistry *coreplugin.Registry
 	plugins        *coreplugin.Bus
 
+	// pluginEffects holds what plugins asked the server to do. Writes never
+	// originate from a plugin: a verdict carries them here and the tick applies
+	// them, which is what keeps a handler on another thread from touching world
+	// state while the simulation is reading it.
+	pluginEffects *coreplugin.MutationQueue
+
+	// pendingJoins holds players who have joined but cannot yet be written to.
+	// See announceJoinWhenReachable.
+	pendingJoinsMu sync.Mutex
+	pendingJoins   map[[16]byte]int
+
 	// connCount tracks the number of active TCP connections (Java).
 	connCount atomic.Int64
 
@@ -366,7 +377,10 @@ func New(cfg *config.Config) (*Server, error) {
 
 	bus := intent.NewBus(64, 512)
 	eventBudget := time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond
-	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, nil, nil)
+	// The queue is built here rather than left to the registry, because the
+	// tick has to drain it and only something holding it can.
+	pluginEffects := coreplugin.NewMutationQueue()
+	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, pluginEffects, nil)
 	plugins := pluginRegistry.Bus()
 	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
 		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
@@ -408,6 +422,7 @@ func New(cfg *config.Config) (*Server, error) {
 		customItems:             customItemsMgr,
 		intentBus:               bus,
 		pluginRegistry:          pluginRegistry,
+		pluginEffects:           pluginEffects,
 		plugins:                 plugins,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
@@ -1002,6 +1017,8 @@ func (s *Server) tickPlayerHunger() {
 // tickIntents drains the intent bus and applies each intent to world/player state.
 // This is the sole point of mutating player state from adapter goroutines.
 func (s *Server) tickIntents() {
+	s.announceReachableJoins()
+	s.applyPluginEffects()
 	dr := s.intentBus.Drain()
 
 	for _, l := range dr.Lifecycle {
@@ -1161,6 +1178,7 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	}
 
 	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
+	s.announceJoinWhenReachable(p)
 	slog.Info("player joined via intent",
 		"name", p.Username, "uuid", p.UUID,
 		"edition", i.Edition, "trusted", i.TrustedIdentity,
@@ -4904,6 +4922,7 @@ func (s *Server) registerPlayer(result *handler.LoginResult, remoteAddress strin
 		// Duplicate UUID — extremely rare; log and continue with assigned ID.
 		slog.Warn("duplicate player UUID", "name", p.Username, "uuid", p.UUID, "err", err)
 	}
+	s.announceJoinWhenReachable(p)
 
 	// Update the status-ping online count.
 	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
