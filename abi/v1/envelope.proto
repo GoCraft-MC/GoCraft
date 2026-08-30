@@ -8,6 +8,14 @@ package gocraft.abi.v1;
 // never passed around.
 option go_package = "GoCraft/abi/v1/wire;wire";
 
+// Java options are set before any Java code exists. They decide the package and
+// the outer class of the generated sources, so choosing them later would rename
+// every type the runtime imports — source-breaking for a consumer that would by
+// then exist. The wire format does not depend on any of them.
+option java_package = "fr.gocraft.abi.v1";
+option java_outer_classname = "EnvelopeProto";
+option java_multiple_files = true;
+
 // Envelope is every message exchanged between the host and an out-of-process
 // runtime. One frame carries exactly one envelope.
 //

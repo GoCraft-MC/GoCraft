@@ -1396,7 +1396,8 @@ const file_abi_v1_envelope_proto_rawDesc = "" +
 	"\rFailurePolicy\x12\x1e\n" +
 	"\x1aFAILURE_POLICY_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14FAILURE_POLICY_ALLOW\x10\x01\x12\x17\n" +
-	"\x13FAILURE_POLICY_DENY\x10\x02B\x1aZ\x18GoCraft/abi/v1/wire;wireb\x06proto3"
+	"\x13FAILURE_POLICY_DENY\x10\x02B>\n" +
+	"\x11fr.gocraft.abi.v1B\rEnvelopeProtoP\x01Z\x18GoCraft/abi/v1/wire;wireb\x06proto3"
 
 var (
 	file_abi_v1_envelope_proto_rawDescOnce sync.Once
