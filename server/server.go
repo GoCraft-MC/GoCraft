@@ -561,9 +561,6 @@ func New(cfg *config.Config) (*Server, error) {
 		s.sessions.SetExternalKnockbackHandler(func(p *player.Player, sourceX, sourceZ, horizontal, vertical float64) {
 			s.sendLegacyPlayerKnockback(&session.Session{Player: p}, sourceX, sourceZ, horizontal, vertical)
 		})
-		worldInstance.SetBlockObserver(s.bedrockListener.BroadcastBlockChange)
-		netherWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(1))
-		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
 	}
 	for dimension, dimensionWorld := range map[int32]*coreworld.World{
 		dimensionOverworld: worldInstance,
@@ -571,6 +568,17 @@ func New(cfg *config.Config) (*Server, error) {
 		dimensionEnd:       endWorld,
 	} {
 		dimension := dimension
+		dimensionWorld := dimensionWorld
+		var bedrockObserver func(coreworld.BlockChange)
+		if s.bedrockListener != nil {
+			bedrockObserver = s.bedrockListener.DimensionBlockObserver(dimension)
+		}
+		dimensionWorld.SetBlockObserver(func(change coreworld.BlockChange) {
+			if bedrockObserver != nil {
+				bedrockObserver(change)
+			}
+			handler.BroadcastBlockLightUpdatesInDimension(dimensionWorld, change, s.sessions, dimension)
+		})
 		dimensionWorld.SetBlockEntityObserver(func(entity coreworld.BlockEntity) {
 			handler.BroadcastBlockEntityDataInDimension(entity, s.sessions, dimension)
 			if s.bedrockListener != nil {
