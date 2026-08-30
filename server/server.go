@@ -1698,7 +1698,7 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		held := p.HeldItem()
-		if s.plugins != nil && !s.plugins.EmitBlockBreak(p, i.Position, block, held) {
+		if s.plugins != nil && !s.plugins.EmitBlockBreak(p, i.Position, block, held.ItemID) {
 			if s.bedrockListener != nil {
 				s.bedrockListener.DimensionBlockObserver(p.Dimension)(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block})
 			}

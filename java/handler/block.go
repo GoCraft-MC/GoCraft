@@ -141,7 +141,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		heldSlot := player.HotbarStart + p.HeldSlot
 		held := p.Inventory[heldSlot]
 		position := spatial.BlockPos{X: bx, Y: by, Z: bz}
-		if plugins != nil && !plugins.EmitBlockBreak(p, position, broken, held) {
+		if plugins != nil && !plugins.EmitBlockBreak(p, position, broken, held.ItemID) {
 			BroadcastBlockChange(coreworld.BlockChange{X: int(bx), Y: int(by), Z: int(bz), Block: broken}, mgr)
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil

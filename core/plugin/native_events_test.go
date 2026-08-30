@@ -33,8 +33,11 @@ func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {
 	block := coreworld.Block{Namespace: "minecraft", Name: "oak_log", Properties: map[string]string{
 		"waterlogged": "false", "axis": "y",
 	}}
+	// The tool is the item id, not an ItemStack: the schema declares a string,
+	// because nothing downstream reads a count or durability off it and a
+	// vocabulary type nobody uses is one more thing every runtime must model.
 	allowed := bus.EmitBlockBreak(p, spatial.BlockPos{X: 4, Y: 64, Z: -2}, block,
-		player.ItemStack{ItemID: "minecraft:iron_axe"})
+		"minecraft:iron_axe")
 	if allowed || received == nil {
 		t.Fatalf("allowed = %v, event = %v", allowed, received)
 	}
