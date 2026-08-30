@@ -199,10 +199,12 @@ type bedrockRecentBlockUse struct {
 
 // New creates a Server with the given configuration.
 // It initialises the game core and generates the RSA keypair for online-mode auth.
+// The plugin drop directory is not created here. It was, against a hardcoded
+// "plugins" that ignored plugins.directory: an admin who configured another
+// name got an empty directory they never asked for and a scan somewhere else.
+// loadPlugins creates the configured one through ScanBundles, and only when the
+// subsystem is enabled.
 func New(cfg *config.Config) (*Server, error) {
-	if err := coreplugin.EnsureDirectory(coreplugin.DefaultDirectory); err != nil {
-		return nil, err
-	}
 	handler.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
