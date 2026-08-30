@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"GoCraft/config"
+	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
 	"GoCraft/runtime/jvm"
 )
@@ -27,15 +28,42 @@ const pluginTickRate = 20
 // a scanned manifest that asks for it by name. That is what keeps "a server
 // with no Java plugin never touches Java" true rather than aspirational, and it
 // is why this runs unconditionally rather than behind a config switch.
-func registerPluginRuntimes(registry *coreplugin.Registry, cfg *config.Config) error {
+func (s *Server) registerPluginRuntimes(cfg *config.Config) error {
 	java := cfg.Plugins.Runtimes.JVM
-	return registry.RegisterRuntime(jvm.New(jvm.Config{
+	return s.pluginRegistry.RegisterRuntime(jvm.New(jvm.Config{
 		JavaPath:     java.JavaPath,
 		PreferSystem: java.PreferSystem,
 		JarPath:      java.JarPath,
 		TickRate:     pluginTickRate,
 		EventBudget:  time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond,
+		OnRespawn:    s.replayJoins,
 	}))
+}
+
+// replayJoins tells plugins that just came back who is already here.
+//
+// A runtime that died and was restarted has plugins with empty memory and no
+// idea anyone is online: they never saw those players connect. §13 calls the
+// fix synthetic player.join events, and this is it — the host makes up what
+// they missed, because it is the only thing that knows.
+//
+// Only the restored plugins receive them. A Lua plugin, or a Java one in
+// another runtime, never went away and saw the real joins; sending them again
+// would have it count arrivals that never happened.
+//
+// It runs on the runtime's respawn goroutine rather than the tick. player.join
+// is observational, so nothing waits on it and there is no tick to hold.
+func (s *Server) replayJoins(restored []string) {
+	if len(restored) == 0 || s.game == nil || s.plugins == nil {
+		return
+	}
+	replayed := 0
+	s.game.OnlinePlayers(func(online *player.Player) {
+		s.plugins.EmitPlayerJoinTo(restored, online)
+		replayed++
+	})
+	slog.Info("plugins: replayed joins to a restarted runtime",
+		"plugins", len(restored), "players", replayed)
 }
 
 // loadPlugins scans the bundle directory, provisions every runtime the scanned

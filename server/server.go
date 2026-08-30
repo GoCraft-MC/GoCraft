@@ -367,9 +367,6 @@ func New(cfg *config.Config) (*Server, error) {
 	bus := intent.NewBus(64, 512)
 	eventBudget := time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond
 	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, nil, nil)
-	if err := registerPluginRuntimes(pluginRegistry, cfg); err != nil {
-		return nil, err
-	}
 	plugins := pluginRegistry.Bus()
 	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
 		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
@@ -592,6 +589,12 @@ func New(cfg *config.Config) (*Server, error) {
 	cmds.SetMessenger(s.sendPlayerMessage)
 	cmds.SetLinkMessenger(s.sendPlayerLink)
 	cmds.SetAbilitySync(s.syncPlayerAbilities)
+	// Registered here rather than beside the registry, because a runtime that
+	// can come back from a crash needs to tell the server it did — and only the
+	// server knows who is online to replay it to.
+	if err := s.registerPluginRuntimes(cfg); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 

@@ -69,16 +69,17 @@ func TestUnloadPluginsToleratesAServerWithoutARegistry(t *testing.T) {
 }
 
 func TestRegisterPluginRuntimesMakesTheJVMAvailable(t *testing.T) {
-	registry := coreplugin.NewRegistry(context.Background(), 2*time.Millisecond, nil, nil)
-	cfg := &config.Config{Plugins: config.PluginsConfig{
-		Enabled:           true,
-		EventBudgetMillis: 2,
-		Runtimes:          config.RuntimesConfig{JVM: config.JVMRuntimeConfig{PreferSystem: true}},
-	}}
-	if err := registerPluginRuntimes(registry, cfg); err != nil {
+	// A method on the server rather than a free function: a runtime that can
+	// come back from a crash has to tell the server it did, and only the server
+	// knows who is online to replay the joins to.
+	s := pluginServer(filepath.Join(t.TempDir(), "plugins"), true)
+	s.cfg.Plugins.Runtimes = config.RuntimesConfig{
+		JVM: config.JVMRuntimeConfig{PreferSystem: true},
+	}
+	if err := s.registerPluginRuntimes(s.cfg); err != nil {
 		t.Fatalf("registerPluginRuntimes() = %v", err)
 	}
-	runtime, ok := registry.Runtime("jvm")
+	runtime, ok := s.pluginRegistry.Runtime("jvm")
 	if !ok {
 		t.Fatal("registerPluginRuntimes() left the jvm runtime unavailable")
 	}
@@ -97,7 +98,7 @@ func TestABootWithNoPluginsNeverLooksForJava(t *testing.T) {
 	t.Setenv("PATH", "")
 
 	s := pluginServer(filepath.Join(t.TempDir(), "plugins"), true)
-	if err := registerPluginRuntimes(s.pluginRegistry, s.cfg); err != nil {
+	if err := s.registerPluginRuntimes(s.cfg); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.loadPlugins(context.Background()); err != nil {
