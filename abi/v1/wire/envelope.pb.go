@@ -458,10 +458,21 @@ func (x *Welcome) GetEventBudgetMs() uint32 {
 // bundle. The host has read the manifest; the runtime is told where the bundle
 // is, not asked to discover it.
 type Load struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PluginId      string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
-	BundlePath    string                 `protobuf:"bytes,2,opt,name=bundle_path,json=bundlePath,proto3" json:"bundle_path,omitempty"`
-	Entry         string                 `protobuf:"bytes,3,opt,name=entry,proto3" json:"entry,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	PluginId   string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	BundlePath string                 `protobuf:"bytes,2,opt,name=bundle_path,json=bundlePath,proto3" json:"bundle_path,omitempty"`
+	Entry      string                 `protobuf:"bytes,3,opt,name=entry,proto3" json:"entry,omitempty"`
+	// Where this plugin's own files live: its configuration, unpacked from the
+	// bundle's config/ on first load, and anything it writes for itself.
+	//
+	// The host owns it. It creates the directory, seeds the defaults and never
+	// overwrites what an admin edited, so a runtime is told the path rather than
+	// deriving one — two runtimes deriving it separately would eventually derive
+	// it differently.
+	//
+	// Added in ABI 1 after the fact: a runtime built before this reads an empty
+	// string, which is why nothing may assume it is set.
+	DataDirectory string `protobuf:"bytes,4,opt,name=data_directory,json=dataDirectory,proto3" json:"data_directory,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -513,6 +524,13 @@ func (x *Load) GetBundlePath() string {
 func (x *Load) GetEntry() string {
 	if x != nil {
 		return x.Entry
+	}
+	return ""
+}
+
+func (x *Load) GetDataDirectory() string {
+	if x != nil {
+		return x.DataDirectory
 	}
 	return ""
 }
@@ -1341,12 +1359,13 @@ const file_abi_v1_envelope_proto_rawDesc = "" +
 	"\aWelcome\x12\x10\n" +
 	"\x03abi\x18\x01 \x01(\rR\x03abi\x12\x1b\n" +
 	"\ttick_rate\x18\x02 \x01(\rR\btickRate\x12&\n" +
-	"\x0fevent_budget_ms\x18\x03 \x01(\rR\reventBudgetMs\"Z\n" +
+	"\x0fevent_budget_ms\x18\x03 \x01(\rR\reventBudgetMs\"\x81\x01\n" +
 	"\x04Load\x12\x1b\n" +
 	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x1f\n" +
 	"\vbundle_path\x18\x02 \x01(\tR\n" +
 	"bundlePath\x12\x14\n" +
-	"\x05entry\x18\x03 \x01(\tR\x05entry\"=\n" +
+	"\x05entry\x18\x03 \x01(\tR\x05entry\x12%\n" +
+	"\x0edata_directory\x18\x04 \x01(\tR\rdataDirectory\"=\n" +
 	"\x06Loaded\x12\x1b\n" +
 	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x16\n" +
 	"\x06events\x18\x02 \x03(\tR\x06events\";\n" +

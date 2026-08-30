@@ -80,6 +80,18 @@ message Load {
   string plugin_id = 1;
   string bundle_path = 2;
   string entry = 3;
+
+  // Where this plugin's own files live: its configuration, unpacked from the
+  // bundle's config/ on first load, and anything it writes for itself.
+  //
+  // The host owns it. It creates the directory, seeds the defaults and never
+  // overwrites what an admin edited, so a runtime is told the path rather than
+  // deriving one — two runtimes deriving it separately would eventually derive
+  // it differently.
+  //
+  // Added in ABI 1 after the fact: a runtime built before this reads an empty
+  // string, which is why nothing may assume it is set.
+  string data_directory = 4;
 }
 
 // Loaded reports what the plugin actually registered, which the host checks
