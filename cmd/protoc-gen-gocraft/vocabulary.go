@@ -113,8 +113,14 @@ type effect struct {
 	JavaParams string
 	// HostCall is the type the host dispatches on when it drains the queue.
 	HostCall string
-	// Values are the abi values the effect carries, as Java expressions.
+	// Values are the abi values the effect carries, as Java expressions. %d is
+	// the index of the event's PlayerRef when NeedsActor is set.
 	Values string
+	// NeedsActor marks an effect that has to say who it is for. Without it the
+	// host drains a "send this message" with no recipient and can do nothing
+	// with it — which is worse than the effect not existing, because the plugin
+	// looks like it worked.
+	NeedsActor bool
 }
 
 var effects = map[string]effect{
@@ -122,7 +128,11 @@ var effects = map[string]effect{
 		JavaMethod: "sendMessage",
 		JavaParams: "String message",
 		HostCall:   "chat.message",
-		Values:     "Values.text(message)",
+		// The whole PlayerRef, not just the uuid: the host already knows how to
+		// read one, and passing the same vocabulary value the event carried
+		// means the effect and the event cannot disagree about who acted.
+		Values:     "field(%d), Values.text(message)",
+		NeedsActor: true,
 	},
 }
 

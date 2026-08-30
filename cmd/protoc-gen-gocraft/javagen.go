@@ -85,6 +85,17 @@ type javaEvent struct {
 	PermissionsIndex int
 }
 
+// actorIndex is where the event carries the player it is about, which is who an
+// effect is delivered to.
+func actorIndex(declared event) (int, bool) {
+	for _, f := range declared.Fields {
+		if f.Kind == "PlayerRef" {
+			return f.Index, true
+		}
+	}
+	return 0, false
+}
+
 func javaModel(declared event) (javaEvent, error) {
 	model := javaEvent{
 		Package:     javaPackage,
@@ -115,11 +126,21 @@ func javaModel(declared event) (javaEvent, error) {
 		if err != nil {
 			return javaEvent{}, fmt.Errorf("%s: %w", declared.Type, err)
 		}
+		values := bound.Values
+		if bound.NeedsActor {
+			actor, found := actorIndex(declared)
+			if !found {
+				return javaEvent{}, fmt.Errorf(
+					"%s declares the %q effect but carries no PlayerRef; there is nobody "+
+						"for the host to deliver it to", declared.Type, name)
+			}
+			values = fmt.Sprintf(values, actor)
+		}
 		model.Effects = append(model.Effects, javaEffect{
 			Method: bound.JavaMethod,
 			Params: bound.JavaParams,
 			Call:   bound.HostCall,
-			Values: bound.Values,
+			Values: values,
 		})
 	}
 	model.Imports = javaImports(model)
