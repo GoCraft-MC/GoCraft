@@ -367,6 +367,9 @@ func New(cfg *config.Config) (*Server, error) {
 	bus := intent.NewBus(64, 512)
 	eventBudget := time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond
 	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, nil, nil)
+	if err := registerPluginRuntimes(pluginRegistry, cfg); err != nil {
+		return nil, err
+	}
 	plugins := pluginRegistry.Bus()
 	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
 		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)

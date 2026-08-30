@@ -6,12 +6,37 @@ import (
 	"log/slog"
 	"time"
 
+	"GoCraft/config"
 	coreplugin "GoCraft/core/plugin"
+	"GoCraft/runtime/jvm"
 )
 
 // pluginShutdownTimeout bounds how long unloading may take in total, matching
 // the window LoadAll gives its own rollback path.
 const pluginShutdownTimeout = 5 * time.Second
+
+// pluginTickRate is the simulation rate published to every runtime in WELCOME,
+// matching the 50ms ticker in Run. A runtime cannot enforce anything with it;
+// it is what lets a plugin convert ticks to seconds without guessing.
+const pluginTickRate = 20
+
+// registerPluginRuntimes makes the language backends available to the registry.
+//
+// Registering one costs nothing. It is constructed, not started: no process is
+// spawned, no JDK is looked for and nothing is downloaded until Preflight finds
+// a scanned manifest that asks for it by name. That is what keeps "a server
+// with no Java plugin never touches Java" true rather than aspirational, and it
+// is why this runs unconditionally rather than behind a config switch.
+func registerPluginRuntimes(registry *coreplugin.Registry, cfg *config.Config) error {
+	java := cfg.Plugins.Runtimes.JVM
+	return registry.RegisterRuntime(jvm.New(jvm.Config{
+		JavaPath:     java.JavaPath,
+		PreferSystem: java.PreferSystem,
+		JarPath:      java.JarPath,
+		TickRate:     pluginTickRate,
+		EventBudget:  time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond,
+	}))
+}
 
 // loadPlugins scans the bundle directory, provisions every runtime the scanned
 // manifests require, and loads the plugins. It runs before any listener opens:
