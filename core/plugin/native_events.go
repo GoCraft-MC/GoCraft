@@ -101,3 +101,32 @@ func blockValue(block coreworld.Block) abi.Value {
 	}
 	return abi.List(abi.String(block.ResourceLocation()), abi.List(properties...))
 }
+
+// PlayerUUIDFrom reads the uuid out of a PlayerRef value.
+//
+// The inverse of playerReference, and it lives beside it so the two shapes
+// cannot drift: an effect carries the same PlayerRef the event did, and the
+// host has to read back exactly what it wrote.
+//
+// It reports false for the empty list an absent player serialises to, which is
+// not an error — a block broken by a piston has nobody to send a message to.
+func PlayerUUIDFrom(value abi.Value) ([16]byte, bool) {
+	var uuid [16]byte
+	if value.Kind != abi.ValueList || len(value.List) == 0 {
+		return uuid, false
+	}
+	raw := value.List[0]
+	if raw.Kind != abi.ValueBytes || len(raw.Bytes) != len(uuid) {
+		return uuid, false
+	}
+	copy(uuid[:], raw.Bytes)
+	return uuid, true
+}
+
+// TextFrom reads a string carried by a host call.
+func TextFrom(value abi.Value) (string, bool) {
+	if value.Kind != abi.ValueString {
+		return "", false
+	}
+	return value.String, true
+}
