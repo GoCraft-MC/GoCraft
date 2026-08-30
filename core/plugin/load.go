@@ -74,5 +74,8 @@ func (r *Registry) LoadAll(ctx context.Context, bundles []Bundle) error {
 		r.loadOrder = append(r.loadOrder, instance)
 		r.mu.Unlock()
 	}
+	if err := r.readyRuntimes(ctx, ordered); err != nil {
+		return rollback(err, nil)
+	}
 	return nil
 }

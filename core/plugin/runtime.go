@@ -47,3 +47,17 @@ type Instance interface {
 type CommandInstance interface {
 	InvokeCommand(context.Context, command.ExecID, command.Sender, command.Values) error
 }
+
+// ReadyRuntime is implemented by runtimes that have to be told the load phase
+// is over.
+//
+// An out-of-process runtime cannot work it out for itself: it is sent plugins
+// one at a time and never learns which one was last, so without this it would
+// either go live too early or wait forever. An in-process runtime has no phase
+// to end and does not implement it — which is why this is a separate interface
+// rather than a method on Runtime that half the backends would leave empty.
+//
+// It runs after every plugin is up and before any listener opens.
+type ReadyRuntime interface {
+	Ready(ctx context.Context) error
+}
