@@ -27,6 +27,18 @@ import (
 // purged in the meantime, fetching 45 MB while players are connected is not an
 // improvement over leaving the runtime down until the next restart.
 func (r *Runtime) Provision(ctx context.Context, provisioner plugin.Provisioner) error {
+	if java := strings.TrimSpace(r.config.JavaPath); java != "" {
+		version, err := r.probe(ctx, java)
+		if err != nil {
+			return fmt.Errorf("jvm: configured java %s: %w", java, err)
+		}
+		if version < minimumJavaVersion {
+			return fmt.Errorf("jvm: configured java %s is Java %d, the runtime needs %d or newer",
+				java, version, minimumJavaVersion)
+		}
+		r.setJava(java)
+		return nil
+	}
 	if r.config.PreferSystem {
 		java, err := r.detectSystem(ctx)
 		if err == nil {

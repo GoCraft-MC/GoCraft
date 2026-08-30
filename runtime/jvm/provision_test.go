@@ -172,6 +172,25 @@ func TestProvisionAcceptsASystemJDK(t *testing.T) {
 	}
 }
 
+func TestProvisionDoesNotReplaceAnInvalidConfiguredJava(t *testing.T) {
+	configured := filepath.FromSlash("/opt/jdk21/bin/" + javaExecutable())
+	system := filepath.FromSlash("/opt/jdk25/bin/" + javaExecutable())
+	t.Setenv("JAVA_HOME", filepath.FromSlash("/opt/jdk25"))
+	t.Setenv("PATH", "")
+	runtime := New(Config{
+		JavaPath: configured, PreferSystem: true,
+		Probe: probeReturning(map[string]int{configured: 21, system: 25}),
+	})
+
+	err := runtime.Provision(t.Context(), nil)
+	if err == nil || !strings.Contains(err.Error(), "Java 21") {
+		t.Fatalf("Provision() = %v, want the configured JDK rejected", err)
+	}
+	if runtime.Java() != "" {
+		t.Fatalf("Java() = %q after rejecting the configured JDK", runtime.Java())
+	}
+}
+
 // The failure an admin actually hits today: no system JDK, and a pin table with
 // no rows in it. One message has to carry both halves, or it becomes two
 // support questions.
@@ -195,16 +214,18 @@ func TestProvisionExplainsBothHalvesOfTheFailure(t *testing.T) {
 	}
 }
 
-// prefer_system: false is an admin asking for the pinned JDK even though one is
-// installed. It must not quietly fall back to the system one.
-func TestProvisionSkipsDetectionWhenSystemIsNotPreferred(t *testing.T) {
+// An explicit path is more authoritative than the provisioning preference.
+func TestProvisionUsesConfiguredJavaWhenSystemIsNotPreferred(t *testing.T) {
 	java := filepath.FromSlash("/opt/jdk25/bin/" + javaExecutable())
 	runtime := New(Config{
 		JavaPath:     java,
 		PreferSystem: false,
 		Probe:        probeReturning(map[string]int{java: 25}),
 	})
-	if err := runtime.Provision(t.Context(), nil); err == nil {
-		t.Fatal("Provision() used the system JDK despite PreferSystem being false")
+	if err := runtime.Provision(t.Context(), nil); err != nil {
+		t.Fatalf("Provision() = %v", err)
+	}
+	if runtime.Java() != java {
+		t.Fatalf("Java() = %q, want the configured JDK", runtime.Java())
 	}
 }
