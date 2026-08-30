@@ -252,6 +252,9 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 	}
 	_ = sendUpdateHealth(target.Conn, p)
 	if mgr != nil {
+		sound := "minecraft:entity.player.hurt"
+		broadcastSoundAt(mgr, sound, soundCategoryPlayers,
+			target.Player.Position.X, target.Player.Position.Y, target.Player.Position.Z, 1.0, 1.0)
 		BroadcastHurtAnimation(p.EntityID, p.Rotation.Yaw, mgr)
 	}
 	if died {
@@ -271,6 +274,7 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 		}
 		if p.OnDeath != nil {
 			p.OnDeath(p)
+			BroadcastSystemMessage(mgr, cause)
 		}
 		if mgr != nil {
 			BroadcastDeathAnimation(p.EntityID, mgr)

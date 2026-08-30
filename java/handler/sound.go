@@ -183,8 +183,43 @@ func blockBreakSound(blockName string) string {
 		strings.Contains(blockName, "fern"),
 		strings.Contains(blockName, "bush"):
 		return "minecraft:block.grass.break"
+	case strings.Contains(blockName, "tnt"):
+		return "minecraft:block.grass.break"
 	default:
 		return "minecraft:block.stone.break"
+	}
+}
+
+func blockPlaceSound(blockName string) string {
+	switch {
+	case strings.Contains(blockName, "_ore"),
+		strings.Contains(blockName, "stone"),
+		strings.Contains(blockName, "deepslate"),
+		strings.Contains(blockName, "andesite"),
+		strings.Contains(blockName, "diorite"),
+		strings.Contains(blockName, "granite"):
+		return "minecraft:block.stone.place"
+	case strings.Contains(blockName, "glass"):
+		return "minecraft:block.glass.place"
+	case strings.Contains(blockName, "planks"),
+		strings.Contains(blockName, "log"),
+		strings.Contains(blockName, "wood"),
+		strings.Contains(blockName, "door"):
+		return "minecraft:block.wood.place"
+	case strings.Contains(blockName, "sand"):
+		return "minecraft:block.sand.place"
+	case strings.Contains(blockName, "gravel"):
+		return "minecraft:block.gravel.place"
+	case strings.Contains(blockName, "grass"),
+		strings.Contains(blockName, "dirt"),
+		strings.Contains(blockName, "flower"),
+		strings.Contains(blockName, "fern"),
+		strings.Contains(blockName, "bush"):
+		return "minecraft:block.grass.place"
+	case strings.Contains(blockName, "tnt"):
+		return "minecraft:block.grass.place"
+	default:
+		return "minecraft:block.stone.place"
 	}
 }
 
