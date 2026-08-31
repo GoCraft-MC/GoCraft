@@ -1,7 +1,7 @@
 # Code generation for the plugin ABI.
 #
 # Generated files are committed, so neither CI nor a contributor needs buf or
-# protoc-gen-go to build the server. `make proto` regenerates them; CI can
+# protoc-gen-go to build the server. `buf generate` regenerates them; CI can
 # verify that doing so leaves no diff.
 #
 # Every schema here is generated. A schema that is parsed by hand somewhere else

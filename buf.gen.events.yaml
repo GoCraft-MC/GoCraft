@@ -4,7 +4,7 @@
 # generates the transport for the whole module, this one runs only over
 # events.proto, and only messages carrying a gc.event option produce anything.
 #
-#   make events
+#   buf generate --template buf.gen.events.yaml --path abi/v1/events.proto
 #
 # Both languages come out of one command on purpose. Generating them separately
 # would let someone regenerate Go, forget Java, and ship a host that writes a
