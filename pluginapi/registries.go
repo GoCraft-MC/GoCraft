@@ -10,10 +10,11 @@ type Events struct {
 	mu        sync.RWMutex
 	logger    *slog.Logger
 	listeners map[string][]EventHandler
+	active    bool
 }
 
 func newEvents(logger *slog.Logger) *Events {
-	return &Events{logger: logger, listeners: make(map[string][]EventHandler)}
+	return &Events{logger: logger, listeners: make(map[string][]EventHandler), active: true}
 }
 
 // Commands owns command callbacks registered by one plugin.
