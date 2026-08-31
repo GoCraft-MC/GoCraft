@@ -174,3 +174,42 @@ func TestNewCommandInvocationHandlesAConsoleSender(t *testing.T) {
 		t.Fatal("Allowed() = true for a console sender that was never asked")
 	}
 }
+
+// A reply to the console travels as a chat.message with an empty PlayerRef,
+// which the tick drops on purpose — for an event that ref means a piston, and
+// nobody to tell. A command always has somebody to tell.
+func TestConsoleReplyIsAnsweredThroughTheSender(t *testing.T) {
+	sender := &fakeSender{name: "Console"}
+	reply := abi.HostCall{
+		Type:   EffectMessage,
+		Fields: []abi.Value{playerReference(nil), abi.String("done")},
+	}
+
+	text, ok := consoleReply(reply, sender)
+	if !ok || text != "done" {
+		t.Fatalf("consoleReply() = %q, %v; want the line to send", text, ok)
+	}
+}
+
+// A reply that names a player is queued like every other effect, so it reaches
+// them on the tick rather than from whatever goroutine ran the handler.
+func TestAPlayerReplyIsLeftForTheQueue(t *testing.T) {
+	sender := &fakeSender{name: "oreo", player: player.New([16]byte{4}, "oreo", player.ClientEditionJava)}
+	reply := abi.HostCall{
+		Type:   EffectMessage,
+		Fields: []abi.Value{playerReference(sender.player), abi.String("done")},
+	}
+
+	if _, ok := consoleReply(reply, sender); ok {
+		t.Fatal("consoleReply() diverted a reply that names a player")
+	}
+}
+
+// Anything that is not a reply is queued, whoever typed the command.
+func TestOtherEffectsAreNeverDiverted(t *testing.T) {
+	effect := abi.HostCall{Type: "world.setblock", Fields: []abi.Value{abi.String("x")}}
+
+	if _, ok := consoleReply(effect, &fakeSender{name: "Console"}); ok {
+		t.Fatal("consoleReply() diverted an effect that is not a reply")
+	}
+}

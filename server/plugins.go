@@ -124,7 +124,9 @@ func (s *Server) unloadPlugins() {
 
 // pluginEffectMessage is the only host call a plugin can make today: send text
 // to the player an event was about.
-const pluginEffectMessage = "chat.message"
+// The string lives in core/plugin, because the command path has to agree
+// with the queue on what a reply is called.
+const pluginEffectMessage = coreplugin.EffectMessage
 
 // applyPluginEffects performs what plugins asked for, on the tick.
 //
