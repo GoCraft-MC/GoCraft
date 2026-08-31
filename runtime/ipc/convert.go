@@ -341,3 +341,97 @@ func decodeCommandResult(invoked *wire.Invoked) (abi.CommandResult, error) {
 	}
 	return abi.CommandResult{Error: invoked.GetError(), Effects: effects}, nil
 }
+
+// The command frame's other half.
+//
+// Encoding an invocation and decoding a result is what the host needs; the two
+// below are the mirror, and they are exported for one caller: pluginapi, the
+// SDK a native Go plugin links against. That plugin is the far end of this
+// socket and has to read exactly what the host wrote, so it uses these rather
+// than a second decoder of its own — which is the same rule that keeps the
+// conversion in this file instead of in each runtime package. Nothing else may
+// call them.
+
+func decodeCommandArgumentType(kind wire.CommandArgumentType) (abi.CommandArgumentType, error) {
+	switch kind {
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_INTEGER:
+		return abi.CommandArgumentInteger, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_DECIMAL:
+		return abi.CommandArgumentDecimal, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_STRING:
+		return abi.CommandArgumentString, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_GREEDY:
+		return abi.CommandArgumentGreedy, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_PLAYER:
+		return abi.CommandArgumentPlayer, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_BLOCK_POS:
+		return abi.CommandArgumentBlockPos, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_BLOCK_STATE:
+		return abi.CommandArgumentBlockState, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_ITEM:
+		return abi.CommandArgumentItem, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_DURATION:
+		return abi.CommandArgumentDuration, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_ENUM:
+		return abi.CommandArgumentEnum, nil
+	case wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_CUSTOM:
+		return abi.CommandArgumentCustom, nil
+	default:
+		// UNSPECIFIED is refused rather than defaulted, like the failure
+		// policy: the type decides which reading of the value is the real one,
+		// so guessing it yields a number instead of an error.
+		return 0, fmt.Errorf("ipc: command argument has no type")
+	}
+}
+
+// DecodeCommandInvocation reads one INVOKE. For pluginapi only.
+func DecodeCommandInvocation(invoke *wire.Invoke) (abi.CommandInvocation, error) {
+	if invoke == nil {
+		return abi.CommandInvocation{}, fmt.Errorf("ipc: missing command invocation")
+	}
+	sender := invoke.GetSender()
+	player, err := decodeValue(sender.GetPlayer())
+	if err != nil {
+		return abi.CommandInvocation{}, err
+	}
+	permissions, err := decodeValues(sender.GetPermissions())
+	if err != nil {
+		return abi.CommandInvocation{}, err
+	}
+	arguments := make([]abi.CommandArgument, 0, len(invoke.GetArguments()))
+	for _, argument := range invoke.GetArguments() {
+		kind, err := decodeCommandArgumentType(argument.GetType())
+		if err != nil {
+			return abi.CommandInvocation{}, fmt.Errorf("ipc: command argument %s: %w",
+				argument.GetName(), err)
+		}
+		value, err := decodeValue(argument.GetValue())
+		if err != nil {
+			return abi.CommandInvocation{}, fmt.Errorf("ipc: command argument %s: %w",
+				argument.GetName(), err)
+		}
+		arguments = append(arguments, abi.CommandArgument{
+			Name: argument.GetName(), Type: kind, Value: value,
+		})
+	}
+	return abi.CommandInvocation{
+		Executor: invoke.GetExecutor(),
+		Sender: abi.CommandSender{
+			Player: player, Name: sender.GetName(), Permissions: permissions,
+		},
+		Arguments: arguments,
+	}, nil
+}
+
+// EncodeCommandResult writes one INVOKED. For pluginapi only.
+func EncodeCommandResult(result abi.CommandResult) (*wire.Invoked, error) {
+	effects := make([]*wire.HostCall, 0, len(result.Effects))
+	for _, effect := range result.Effects {
+		call, err := encodeHostCall(effect)
+		if err != nil {
+			return nil, err
+		}
+		effects = append(effects, call)
+	}
+	return &wire.Invoked{Error: result.Error, Effects: effects}, nil
+}
