@@ -19,6 +19,8 @@ func (s *pluginSession) handle(envelope *wire.Envelope) {
 		s.handleLoad(envelope.GetSeq(), body.Load)
 	case *wire.Envelope_Dispatch:
 		s.handleDispatch(envelope.GetSeq(), body.Dispatch)
+	case *wire.Envelope_Invoke:
+		s.handleInvoke(envelope.GetSeq(), body.Invoke)
 	case *wire.Envelope_Unload:
 		if body.Unload.GetPluginId() != s.state.metadata.ID {
 			slog.Error("plugin unload id mismatch", "plugin", s.state.metadata.ID,
@@ -51,20 +53,11 @@ func (s *pluginSession) handleDispatch(seq uint64, dispatch *wire.Dispatch) {
 		err = &pluginIDError{expected: s.state.metadata.ID, got: dispatch.GetPluginId()}
 	}
 	if err == nil {
-		if event.Type == abi.EventCommandInvoke {
-			verdict, err = s.state.invokeCommand(event)
-		} else {
-			verdict, err = s.state.dispatch(event)
-		}
+		verdict, err = s.state.dispatch(event)
 	}
 	if err != nil {
 		if event != nil && event.OnFailure == abi.FailureDeny {
 			verdict.Cancelled = true
-		}
-		if event != nil && event.Type == abi.EventCommandInvoke {
-			verdict.Effects = append(verdict.Effects, abi.HostCall{
-				Type: abi.HostCallCommandFailed, Fields: []abi.Value{abi.String(err.Error())},
-			})
 		}
 		slog.Error("plugin event failed", "plugin", s.state.metadata.ID, "err", err)
 	}
@@ -74,6 +67,31 @@ func (s *pluginSession) handleDispatch(seq uint64, dispatch *wire.Dispatch) {
 		encoded = &wire.Verdict{Cancelled: verdict.Cancelled}
 	}
 	s.send(&wire.Envelope{Seq: seq, Body: &wire.Envelope_Verdict{Verdict: encoded}})
+}
+
+// handleInvoke answers one command. It always answers: somebody typed a line
+// and is waiting on it, so a silence would leave them there until the host gave
+// up on a plugin that is working perfectly well.
+func (s *pluginSession) handleInvoke(seq uint64, invoke *wire.Invoke) {
+	result := abi.CommandResult{}
+	invocation, err := ipc.DecodeCommandInvocation(invoke)
+	if err == nil && invoke.GetPluginId() != s.state.metadata.ID {
+		err = &pluginIDError{expected: s.state.metadata.ID, got: invoke.GetPluginId()}
+	}
+	if err == nil {
+		result = s.state.invokeCommand(invocation)
+	} else {
+		result.Error = err.Error()
+	}
+	if result.Error != "" {
+		slog.Error("plugin command failed", "plugin", s.state.metadata.ID, "err", result.Error)
+	}
+	encoded, encodeErr := ipc.EncodeCommandResult(result)
+	if encodeErr != nil {
+		slog.Error("plugin command encoding failed", "plugin", s.state.metadata.ID, "err", encodeErr)
+		encoded = &wire.Invoked{Error: result.Error}
+	}
+	s.send(&wire.Envelope{Seq: seq, Body: &wire.Envelope_Invoked{Invoked: encoded}})
 }
 
 func (s *pluginSession) send(envelope *wire.Envelope) {

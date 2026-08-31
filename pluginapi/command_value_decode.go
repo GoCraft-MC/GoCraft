@@ -45,7 +45,7 @@ func commandValueFrom(kind CommandValueKind, value abi.Value) (CommandValue, err
 		}
 		decoded.Block = block
 	case CommandItem:
-		item, err := stringFrom(value, "item argument")
+		item, err := itemFrom(value)
 		if err != nil {
 			return decoded, err
 		}
@@ -54,11 +54,29 @@ func commandValueFrom(kind CommandValueKind, value abi.Value) (CommandValue, err
 		if value.Kind != abi.ValueInt64 {
 			return decoded, wrongCommandValue(kind)
 		}
-		decoded.Duration = time.Duration(value.Int64)
+		// Milliseconds on the wire. No two runtimes agree on a finer unit, and
+		// a tick is fifty of them.
+		decoded.Duration = time.Duration(value.Int64) * time.Millisecond
 	default:
 		return decoded, fmt.Errorf("pluginapi: unsupported command value kind %d", kind)
 	}
 	return decoded, nil
+}
+
+// itemFrom reads the ItemRef vocabulary type: id, count, damage.
+func itemFrom(value abi.Value) (Item, error) {
+	entry, err := listOf(value, 3, "item argument")
+	if err != nil {
+		return Item{}, err
+	}
+	id, err := stringFrom(entry[0], "item id")
+	if err != nil {
+		return Item{}, err
+	}
+	if entry[1].Kind != abi.ValueInt64 || entry[2].Kind != abi.ValueInt64 {
+		return Item{}, fmt.Errorf("pluginapi: item count and damage are not integers")
+	}
+	return Item{ID: id, Count: entry[1].Int64, Damage: entry[2].Int64}, nil
 }
 
 func wrongCommandValue(kind CommandValueKind) error {

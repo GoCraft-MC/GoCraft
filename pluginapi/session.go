@@ -46,7 +46,8 @@ func serve(codec *ipc.Codec, state *runtimeState) error {
 		case *wire.Envelope_Shutdown:
 			stop()
 			return nil
-		case *wire.Envelope_Load, *wire.Envelope_Dispatch, *wire.Envelope_Unload:
+		case *wire.Envelope_Load, *wire.Envelope_Dispatch, *wire.Envelope_Unload,
+			*wire.Envelope_Invoke:
 			work <- envelope
 		default:
 			stop()

@@ -1,6 +1,10 @@
 package pluginapi
 
-import "time"
+import (
+	"time"
+
+	abi "GoCraft/abi/v1"
+)
 
 type CommandValueKind uint8
 
@@ -27,6 +31,21 @@ type CommandContext struct {
 	SenderName string
 	Args       CommandValues
 	replies    []string
+
+	// permissions carries what the host resolved before sending the
+	// invocation. The ABI has no message for asking afterwards, so this is the
+	// only answer available — see Can.
+	permissions abi.CommandSender
+}
+
+// Can reports whether the sender holds a permission node.
+//
+// Answered from what the host already resolved, not by asking it: the ABI has
+// no message for asking, and one that existed would be a round trip inside a
+// command somebody is waiting on. A node this plugin's manifest never declared
+// reads false, which is a manifest bug rather than a denial.
+func (c *CommandContext) Can(node string) bool {
+	return c.permissions.Allowed(node)
 }
 
 // Reply sends text to the player who invoked the command.
@@ -45,8 +64,18 @@ type CommandValue struct {
 	Player   *Player
 	Position BlockPos
 	Block    Block
-	Item     string
+	Item     Item
 	Duration time.Duration
+}
+
+// Item is the ItemRef vocabulary type: what a command's item argument carries.
+//
+// Not a whole stack. The argument is parsed from an id and a count, so
+// enchantments and component data would arrive empty on every invocation.
+type Item struct {
+	ID     string
+	Count  int64
+	Damage int64
 }
 
 // CommandValues is keyed by the argument name from the command tree.
