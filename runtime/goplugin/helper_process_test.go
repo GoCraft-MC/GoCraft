@@ -1,0 +1,64 @@
+package goplugin
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"testing"
+
+	"GoCraft/pluginapi"
+	"GoCraft/runtime/ipc"
+)
+
+type helperPlugin struct{}
+
+func (*helperPlugin) OnLoad(context pluginapi.Context) error {
+	if err := context.Events().OnBlockBreak(func(event *pluginapi.BlockBreakEvent) {
+		event.Cancel()
+	}); err != nil {
+		return err
+	}
+	return context.Commands().Register(7, func(call *pluginapi.CommandContext) error {
+		value, ok := call.Args.Integer("amount")
+		if !ok {
+			return fmt.Errorf("amount is missing")
+		}
+		call.Reply(fmt.Sprintf("amount=%d", value))
+		return nil
+	})
+}
+
+func (*helperPlugin) OnEnable() error  { return nil }
+func (*helperPlugin) OnDisable() error { return nil }
+
+func TestNativePluginHelperProcess(t *testing.T) {
+	if os.Getenv("GOCRAFT_NATIVE_PLUGIN_HELPER") != "1" {
+		return
+	}
+	separator := 0
+	for index, argument := range os.Args {
+		if argument == "--" {
+			separator = index
+			break
+		}
+	}
+	os.Args = append([]string{os.Args[0]}, os.Args[separator+1:]...)
+	err := pluginapi.Run(pluginapi.Metadata{
+		ID: "example", Version: "1.0.0", APIVersion: pluginapi.CurrentVersion,
+	}, &helperPlugin{})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+func helperSpawn(string) ipc.Spawn {
+	return func(socket string) *exec.Cmd {
+		command := exec.Command(os.Args[0],
+			"-test.run=TestNativePluginHelperProcess", "--",
+			"--sock", socket, "--abi", "1")
+		command.Env = append(os.Environ(), "GOCRAFT_NATIVE_PLUGIN_HELPER=1")
+		return command
+	}
+}
