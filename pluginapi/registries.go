@@ -1,11 +1,20 @@
 package pluginapi
 
-import "log/slog"
+import (
+	"log/slog"
+	"sync"
+)
 
 // Events owns listeners registered by one plugin.
-type Events struct{ logger *slog.Logger }
+type Events struct {
+	mu        sync.RWMutex
+	logger    *slog.Logger
+	listeners map[string][]EventHandler
+}
 
-func newEvents(logger *slog.Logger) *Events { return &Events{logger: logger} }
+func newEvents(logger *slog.Logger) *Events {
+	return &Events{logger: logger, listeners: make(map[string][]EventHandler)}
+}
 
 // Commands owns command callbacks registered by one plugin.
 type Commands struct{ logger *slog.Logger }
