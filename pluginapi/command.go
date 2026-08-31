@@ -23,9 +23,10 @@ type CommandHandler func(*CommandContext) error
 
 // CommandContext contains host-validated command arguments.
 type CommandContext struct {
-	Sender  *Player
-	Args    CommandValues
-	replies []string
+	Sender     *Player
+	SenderName string
+	Args       CommandValues
+	replies    []string
 }
 
 // Reply sends text to the player who invoked the command.
