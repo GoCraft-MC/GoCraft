@@ -1,6 +1,7 @@
 package goplugin
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,9 @@ import (
 type helperPlugin struct{}
 
 func (*helperPlugin) OnLoad(context pluginapi.Context) error {
+	if os.Getenv("GOCRAFT_NATIVE_PLUGIN_FAILURE") == "load" {
+		return errors.New("load failure")
+	}
 	if err := context.Events().OnBlockBreak(func(event *pluginapi.BlockBreakEvent) {
 		event.Cancel()
 	}); err != nil {
@@ -28,7 +32,12 @@ func (*helperPlugin) OnLoad(context pluginapi.Context) error {
 	})
 }
 
-func (*helperPlugin) OnEnable() error  { return nil }
+func (*helperPlugin) OnEnable() error {
+	if os.Getenv("GOCRAFT_NATIVE_PLUGIN_FAILURE") == "enable" {
+		return errors.New("enable failure")
+	}
+	return nil
+}
 func (*helperPlugin) OnDisable() error { return nil }
 
 func TestNativePluginHelperProcess(t *testing.T) {
@@ -54,11 +63,16 @@ func TestNativePluginHelperProcess(t *testing.T) {
 }
 
 func helperSpawn(string) ipc.Spawn {
+	return helperSpawnFailure("")
+}
+
+func helperSpawnFailure(failure string) ipc.Spawn {
 	return func(socket string) *exec.Cmd {
 		command := exec.Command(os.Args[0],
 			"-test.run=TestNativePluginHelperProcess", "--",
 			"--sock", socket, "--abi", "1")
-		command.Env = append(os.Environ(), "GOCRAFT_NATIVE_PLUGIN_HELPER=1")
+		command.Env = append(os.Environ(), "GOCRAFT_NATIVE_PLUGIN_HELPER=1",
+			"GOCRAFT_NATIVE_PLUGIN_FAILURE="+failure)
 		return command
 	}
 }
