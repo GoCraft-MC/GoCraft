@@ -167,6 +167,11 @@ func encodeEvent(event *abi.Event) (*wire.Event, error) {
 	}, nil
 }
 
+// EncodeEvent converts a shared event for transmission to a runtime.
+func EncodeEvent(event *abi.Event) (*wire.Event, error) {
+	return encodeEvent(event)
+}
+
 func decodeEvent(event *wire.Event) (*abi.Event, error) {
 	if event == nil {
 		return nil, fmt.Errorf("ipc: missing event")
