@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gocraft.abi.v1;
 
+import "abi/v1/commands.proto";
+
 // Generated Go code lives in its own package. abi/v1 holds the hand-written
 // domain types the bus, the mutation queue and the in-process runtimes use on
 // the hot path; wire types stay at the transport boundary and are converted in,
@@ -48,11 +50,15 @@ message Envelope {
     Pong pong = 12;
 
     Shutdown shutdown = 13;
+
+    // Command invocation. Not the hot path: a person typing, at typing speed.
+    Invoke invoke = 14;
+    Invoked invoked = 15;
   }
 
-  // 14 onward are free for command invocation, service calls and host-call
-  // results. They are left undesigned rather than half-specified: adding a
-  // variant to a oneof is backward compatible, changing one is not.
+  // 16 onward are free for service calls and host-call results. They are left
+  // undesigned rather than half-specified: adding a variant to a oneof is
+  // backward compatible, changing one is not.
 }
 
 // Hello announces the runtime and the ABI it was built against. A mismatch
@@ -197,4 +203,71 @@ message Verdict {
   bool cancelled = 1;
   repeated Mutation mutations = 2;
   repeated HostCall effects = 3;
+}
+
+// Invoke runs one command executor in the runtime that loaded it.
+//
+// The host has already parsed the line against the command tree the bundle
+// shipped, resolved every argument to a value of the declared type, and checked
+// the permissions guarding the path to this executor. The runtime is handed the
+// result; it never sees the raw line and never parses one. Two runtimes parsing
+// the same grammar would eventually parse it differently, and the tree is the
+// host's to enforce because the host is what offers completions to a client.
+message Invoke {
+  string plugin_id = 1;
+  // The executor field of the CommandNode this invocation reached.
+  uint32 executor = 2;
+  CommandSender sender = 3;
+  repeated CommandArgument arguments = 4;
+}
+
+// CommandSender is whoever typed the command.
+message CommandSender {
+  // The PlayerRef vocabulary type: uuid, username, edition. An empty list means
+  // there is no player behind this — the console, or a command block — which is
+  // a normal case a handler has to expect, not an error.
+  Value player = 1;
+  // Display name, for a handler that wants to name the sender in its reply.
+  // The console has one and no player, which is why this is not read off the
+  // PlayerRef.
+  string name = 2;
+  // Every permission node the plugin's manifest declared, resolved for this
+  // sender, as [node, allowed] pairs.
+  //
+  // Injected for the same reason events inject theirs: the envelope has no
+  // message for asking, so can() is only answerable because the answer arrived
+  // with the request. Unlike an event this costs nothing to over-supply — one
+  // resolution per command typed, not per block broken.
+  repeated Value permissions = 3;
+}
+
+// CommandArgument is one parsed argument.
+//
+// Named, where an event's fields are positional. An event's layout is declared
+// once in the manifest and read on every dispatch, so paying for names there
+// would be paying on the hot path for something both sides already agree on.
+// A command executor's arguments are whatever the path through the tree
+// collected, so a runtime would have to walk its own copy of the tree to
+// recover the order — the same derivation written once per language, free to
+// drift. The name is cheaper than the drift.
+message CommandArgument {
+  string name = 1;
+  // What the host parsed it as, so a handler asking for the wrong type is
+  // refused by the runtime rather than reading a zero value.
+  CommandArgumentType type = 2;
+  Value value = 3;
+}
+
+// Invoked answers one Invoke. It carries no plugin id: like Verdict, it is
+// correlated by seq.
+message Invoked {
+  // Empty means the command succeeded. Anything else is shown to the sender and
+  // logged, so it is written for a person: "no region named spawn", not a stack
+  // trace.
+  string error = 1;
+  // Everything the handler asked the world to do, including replying to the
+  // sender. A command handler runs in another process and must not write to the
+  // world from there, so it queues the same host calls a verdict does and the
+  // tick applies them.
+  repeated HostCall effects = 2;
 }

@@ -96,6 +96,8 @@ type Envelope struct {
 	//	*Envelope_Ping
 	//	*Envelope_Pong
 	//	*Envelope_Shutdown
+	//	*Envelope_Invoke
+	//	*Envelope_Invoked
 	Body          isEnvelope_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -253,6 +255,24 @@ func (x *Envelope) GetShutdown() *Shutdown {
 	return nil
 }
 
+func (x *Envelope) GetInvoke() *Invoke {
+	if x != nil {
+		if x, ok := x.Body.(*Envelope_Invoke); ok {
+			return x.Invoke
+		}
+	}
+	return nil
+}
+
+func (x *Envelope) GetInvoked() *Invoked {
+	if x != nil {
+		if x, ok := x.Body.(*Envelope_Invoked); ok {
+			return x.Invoked
+		}
+	}
+	return nil
+}
+
 type isEnvelope_Body interface {
 	isEnvelope_Body()
 }
@@ -311,6 +331,15 @@ type Envelope_Shutdown struct {
 	Shutdown *Shutdown `protobuf:"bytes,13,opt,name=shutdown,proto3,oneof"`
 }
 
+type Envelope_Invoke struct {
+	// Command invocation. Not the hot path: a person typing, at typing speed.
+	Invoke *Invoke `protobuf:"bytes,14,opt,name=invoke,proto3,oneof"`
+}
+
+type Envelope_Invoked struct {
+	Invoked *Invoked `protobuf:"bytes,15,opt,name=invoked,proto3,oneof"`
+}
+
 func (*Envelope_Hello) isEnvelope_Body() {}
 
 func (*Envelope_Welcome) isEnvelope_Body() {}
@@ -334,6 +363,10 @@ func (*Envelope_Ping) isEnvelope_Body() {}
 func (*Envelope_Pong) isEnvelope_Body() {}
 
 func (*Envelope_Shutdown) isEnvelope_Body() {}
+
+func (*Envelope_Invoke) isEnvelope_Body() {}
+
+func (*Envelope_Invoked) isEnvelope_Body() {}
 
 // Hello announces the runtime and the ABI it was built against. A mismatch
 // makes the runtime exit rather than negotiate: a runtime that guesses is worse
@@ -1332,11 +1365,294 @@ func (x *Verdict) GetEffects() []*HostCall {
 	return nil
 }
 
+// Invoke runs one command executor in the runtime that loaded it.
+//
+// The host has already parsed the line against the command tree the bundle
+// shipped, resolved every argument to a value of the declared type, and checked
+// the permissions guarding the path to this executor. The runtime is handed the
+// result; it never sees the raw line and never parses one. Two runtimes parsing
+// the same grammar would eventually parse it differently, and the tree is the
+// host's to enforce because the host is what offers completions to a client.
+type Invoke struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	PluginId string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	// The executor field of the CommandNode this invocation reached.
+	Executor      uint32             `protobuf:"varint,2,opt,name=executor,proto3" json:"executor,omitempty"`
+	Sender        *CommandSender     `protobuf:"bytes,3,opt,name=sender,proto3" json:"sender,omitempty"`
+	Arguments     []*CommandArgument `protobuf:"bytes,4,rep,name=arguments,proto3" json:"arguments,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Invoke) Reset() {
+	*x = Invoke{}
+	mi := &file_abi_v1_envelope_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Invoke) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Invoke) ProtoMessage() {}
+
+func (x *Invoke) ProtoReflect() protoreflect.Message {
+	mi := &file_abi_v1_envelope_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Invoke.ProtoReflect.Descriptor instead.
+func (*Invoke) Descriptor() ([]byte, []int) {
+	return file_abi_v1_envelope_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *Invoke) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *Invoke) GetExecutor() uint32 {
+	if x != nil {
+		return x.Executor
+	}
+	return 0
+}
+
+func (x *Invoke) GetSender() *CommandSender {
+	if x != nil {
+		return x.Sender
+	}
+	return nil
+}
+
+func (x *Invoke) GetArguments() []*CommandArgument {
+	if x != nil {
+		return x.Arguments
+	}
+	return nil
+}
+
+// CommandSender is whoever typed the command.
+type CommandSender struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The PlayerRef vocabulary type: uuid, username, edition. An empty list means
+	// there is no player behind this — the console, or a command block — which is
+	// a normal case a handler has to expect, not an error.
+	Player *Value `protobuf:"bytes,1,opt,name=player,proto3" json:"player,omitempty"`
+	// Display name, for a handler that wants to name the sender in its reply.
+	// The console has one and no player, which is why this is not read off the
+	// PlayerRef.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Every permission node the plugin's manifest declared, resolved for this
+	// sender, as [node, allowed] pairs.
+	//
+	// Injected for the same reason events inject theirs: the envelope has no
+	// message for asking, so can() is only answerable because the answer arrived
+	// with the request. Unlike an event this costs nothing to over-supply — one
+	// resolution per command typed, not per block broken.
+	Permissions   []*Value `protobuf:"bytes,3,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandSender) Reset() {
+	*x = CommandSender{}
+	mi := &file_abi_v1_envelope_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandSender) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandSender) ProtoMessage() {}
+
+func (x *CommandSender) ProtoReflect() protoreflect.Message {
+	mi := &file_abi_v1_envelope_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandSender.ProtoReflect.Descriptor instead.
+func (*CommandSender) Descriptor() ([]byte, []int) {
+	return file_abi_v1_envelope_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CommandSender) GetPlayer() *Value {
+	if x != nil {
+		return x.Player
+	}
+	return nil
+}
+
+func (x *CommandSender) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CommandSender) GetPermissions() []*Value {
+	if x != nil {
+		return x.Permissions
+	}
+	return nil
+}
+
+// CommandArgument is one parsed argument.
+//
+// Named, where an event's fields are positional. An event's layout is declared
+// once in the manifest and read on every dispatch, so paying for names there
+// would be paying on the hot path for something both sides already agree on.
+// A command executor's arguments are whatever the path through the tree
+// collected, so a runtime would have to walk its own copy of the tree to
+// recover the order — the same derivation written once per language, free to
+// drift. The name is cheaper than the drift.
+type CommandArgument struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// What the host parsed it as, so a handler asking for the wrong type is
+	// refused by the runtime rather than reading a zero value.
+	Type          CommandArgumentType `protobuf:"varint,2,opt,name=type,proto3,enum=gocraft.abi.v1.CommandArgumentType" json:"type,omitempty"`
+	Value         *Value              `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandArgument) Reset() {
+	*x = CommandArgument{}
+	mi := &file_abi_v1_envelope_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandArgument) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandArgument) ProtoMessage() {}
+
+func (x *CommandArgument) ProtoReflect() protoreflect.Message {
+	mi := &file_abi_v1_envelope_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandArgument.ProtoReflect.Descriptor instead.
+func (*CommandArgument) Descriptor() ([]byte, []int) {
+	return file_abi_v1_envelope_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *CommandArgument) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CommandArgument) GetType() CommandArgumentType {
+	if x != nil {
+		return x.Type
+	}
+	return CommandArgumentType_COMMAND_ARGUMENT_TYPE_UNSPECIFIED
+}
+
+func (x *CommandArgument) GetValue() *Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+// Invoked answers one Invoke. It carries no plugin id: like Verdict, it is
+// correlated by seq.
+type Invoked struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty means the command succeeded. Anything else is shown to the sender and
+	// logged, so it is written for a person: "no region named spawn", not a stack
+	// trace.
+	Error string `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	// Everything the handler asked the world to do, including replying to the
+	// sender. A command handler runs in another process and must not write to the
+	// world from there, so it queues the same host calls a verdict does and the
+	// tick applies them.
+	Effects       []*HostCall `protobuf:"bytes,2,rep,name=effects,proto3" json:"effects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Invoked) Reset() {
+	*x = Invoked{}
+	mi := &file_abi_v1_envelope_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Invoked) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Invoked) ProtoMessage() {}
+
+func (x *Invoked) ProtoReflect() protoreflect.Message {
+	mi := &file_abi_v1_envelope_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Invoked.ProtoReflect.Descriptor instead.
+func (*Invoked) Descriptor() ([]byte, []int) {
+	return file_abi_v1_envelope_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *Invoked) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *Invoked) GetEffects() []*HostCall {
+	if x != nil {
+		return x.Effects
+	}
+	return nil
+}
+
 var File_abi_v1_envelope_proto protoreflect.FileDescriptor
 
 const file_abi_v1_envelope_proto_rawDesc = "" +
 	"\n" +
-	"\x15abi/v1/envelope.proto\x12\x0egocraft.abi.v1\"\xf0\x04\n" +
+	"\x15abi/v1/envelope.proto\x12\x0egocraft.abi.v1\x1a\x15abi/v1/commands.proto\"\xd7\x05\n" +
 	"\bEnvelope\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12-\n" +
 	"\x05hello\x18\x02 \x01(\v2\x15.gocraft.abi.v1.HelloH\x00R\x05hello\x123\n" +
@@ -1351,7 +1667,9 @@ const file_abi_v1_envelope_proto_rawDesc = "" +
 	" \x01(\v2\x17.gocraft.abi.v1.VerdictH\x00R\averdict\x12*\n" +
 	"\x04ping\x18\v \x01(\v2\x14.gocraft.abi.v1.PingH\x00R\x04ping\x12*\n" +
 	"\x04pong\x18\f \x01(\v2\x14.gocraft.abi.v1.PongH\x00R\x04pong\x126\n" +
-	"\bshutdown\x18\r \x01(\v2\x18.gocraft.abi.v1.ShutdownH\x00R\bshutdownB\x06\n" +
+	"\bshutdown\x18\r \x01(\v2\x18.gocraft.abi.v1.ShutdownH\x00R\bshutdown\x120\n" +
+	"\x06invoke\x18\x0e \x01(\v2\x16.gocraft.abi.v1.InvokeH\x00R\x06invoke\x123\n" +
+	"\ainvoked\x18\x0f \x01(\v2\x17.gocraft.abi.v1.InvokedH\x00R\ainvokedB\x06\n" +
 	"\x04body\"3\n" +
 	"\x05Hello\x12\x10\n" +
 	"\x03abi\x18\x01 \x01(\rR\x03abi\x12\x18\n" +
@@ -1411,7 +1729,23 @@ const file_abi_v1_envelope_proto_rawDesc = "" +
 	"\aVerdict\x12\x1c\n" +
 	"\tcancelled\x18\x01 \x01(\bR\tcancelled\x126\n" +
 	"\tmutations\x18\x02 \x03(\v2\x18.gocraft.abi.v1.MutationR\tmutations\x122\n" +
-	"\aeffects\x18\x03 \x03(\v2\x18.gocraft.abi.v1.HostCallR\aeffects*b\n" +
+	"\aeffects\x18\x03 \x03(\v2\x18.gocraft.abi.v1.HostCallR\aeffects\"\xb7\x01\n" +
+	"\x06Invoke\x12\x1b\n" +
+	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x1a\n" +
+	"\bexecutor\x18\x02 \x01(\rR\bexecutor\x125\n" +
+	"\x06sender\x18\x03 \x01(\v2\x1d.gocraft.abi.v1.CommandSenderR\x06sender\x12=\n" +
+	"\targuments\x18\x04 \x03(\v2\x1f.gocraft.abi.v1.CommandArgumentR\targuments\"\x8b\x01\n" +
+	"\rCommandSender\x12-\n" +
+	"\x06player\x18\x01 \x01(\v2\x15.gocraft.abi.v1.ValueR\x06player\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
+	"\vpermissions\x18\x03 \x03(\v2\x15.gocraft.abi.v1.ValueR\vpermissions\"\x8b\x01\n" +
+	"\x0fCommandArgument\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x127\n" +
+	"\x04type\x18\x02 \x01(\x0e2#.gocraft.abi.v1.CommandArgumentTypeR\x04type\x12+\n" +
+	"\x05value\x18\x03 \x01(\v2\x15.gocraft.abi.v1.ValueR\x05value\"S\n" +
+	"\aInvoked\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\x122\n" +
+	"\aeffects\x18\x02 \x03(\v2\x18.gocraft.abi.v1.HostCallR\aeffects*b\n" +
 	"\rFailurePolicy\x12\x1e\n" +
 	"\x1aFAILURE_POLICY_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14FAILURE_POLICY_ALLOW\x10\x01\x12\x17\n" +
@@ -1431,27 +1765,32 @@ func file_abi_v1_envelope_proto_rawDescGZIP() []byte {
 }
 
 var file_abi_v1_envelope_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_abi_v1_envelope_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_abi_v1_envelope_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_abi_v1_envelope_proto_goTypes = []any{
-	(FailurePolicy)(0), // 0: gocraft.abi.v1.FailurePolicy
-	(*Envelope)(nil),   // 1: gocraft.abi.v1.Envelope
-	(*Hello)(nil),      // 2: gocraft.abi.v1.Hello
-	(*Welcome)(nil),    // 3: gocraft.abi.v1.Welcome
-	(*Load)(nil),       // 4: gocraft.abi.v1.Load
-	(*Loaded)(nil),     // 5: gocraft.abi.v1.Loaded
-	(*Fail)(nil),       // 6: gocraft.abi.v1.Fail
-	(*Ready)(nil),      // 7: gocraft.abi.v1.Ready
-	(*Unload)(nil),     // 8: gocraft.abi.v1.Unload
-	(*Dispatch)(nil),   // 9: gocraft.abi.v1.Dispatch
-	(*Ping)(nil),       // 10: gocraft.abi.v1.Ping
-	(*Pong)(nil),       // 11: gocraft.abi.v1.Pong
-	(*Shutdown)(nil),   // 12: gocraft.abi.v1.Shutdown
-	(*Value)(nil),      // 13: gocraft.abi.v1.Value
-	(*ValueList)(nil),  // 14: gocraft.abi.v1.ValueList
-	(*Event)(nil),      // 15: gocraft.abi.v1.Event
-	(*Mutation)(nil),   // 16: gocraft.abi.v1.Mutation
-	(*HostCall)(nil),   // 17: gocraft.abi.v1.HostCall
-	(*Verdict)(nil),    // 18: gocraft.abi.v1.Verdict
+	(FailurePolicy)(0),       // 0: gocraft.abi.v1.FailurePolicy
+	(*Envelope)(nil),         // 1: gocraft.abi.v1.Envelope
+	(*Hello)(nil),            // 2: gocraft.abi.v1.Hello
+	(*Welcome)(nil),          // 3: gocraft.abi.v1.Welcome
+	(*Load)(nil),             // 4: gocraft.abi.v1.Load
+	(*Loaded)(nil),           // 5: gocraft.abi.v1.Loaded
+	(*Fail)(nil),             // 6: gocraft.abi.v1.Fail
+	(*Ready)(nil),            // 7: gocraft.abi.v1.Ready
+	(*Unload)(nil),           // 8: gocraft.abi.v1.Unload
+	(*Dispatch)(nil),         // 9: gocraft.abi.v1.Dispatch
+	(*Ping)(nil),             // 10: gocraft.abi.v1.Ping
+	(*Pong)(nil),             // 11: gocraft.abi.v1.Pong
+	(*Shutdown)(nil),         // 12: gocraft.abi.v1.Shutdown
+	(*Value)(nil),            // 13: gocraft.abi.v1.Value
+	(*ValueList)(nil),        // 14: gocraft.abi.v1.ValueList
+	(*Event)(nil),            // 15: gocraft.abi.v1.Event
+	(*Mutation)(nil),         // 16: gocraft.abi.v1.Mutation
+	(*HostCall)(nil),         // 17: gocraft.abi.v1.HostCall
+	(*Verdict)(nil),          // 18: gocraft.abi.v1.Verdict
+	(*Invoke)(nil),           // 19: gocraft.abi.v1.Invoke
+	(*CommandSender)(nil),    // 20: gocraft.abi.v1.CommandSender
+	(*CommandArgument)(nil),  // 21: gocraft.abi.v1.CommandArgument
+	(*Invoked)(nil),          // 22: gocraft.abi.v1.Invoked
+	(CommandArgumentType)(0), // 23: gocraft.abi.v1.CommandArgumentType
 }
 var file_abi_v1_envelope_proto_depIdxs = []int32{
 	2,  // 0: gocraft.abi.v1.Envelope.hello:type_name -> gocraft.abi.v1.Hello
@@ -1466,20 +1805,29 @@ var file_abi_v1_envelope_proto_depIdxs = []int32{
 	10, // 9: gocraft.abi.v1.Envelope.ping:type_name -> gocraft.abi.v1.Ping
 	11, // 10: gocraft.abi.v1.Envelope.pong:type_name -> gocraft.abi.v1.Pong
 	12, // 11: gocraft.abi.v1.Envelope.shutdown:type_name -> gocraft.abi.v1.Shutdown
-	15, // 12: gocraft.abi.v1.Dispatch.event:type_name -> gocraft.abi.v1.Event
-	14, // 13: gocraft.abi.v1.Value.list_value:type_name -> gocraft.abi.v1.ValueList
-	13, // 14: gocraft.abi.v1.ValueList.values:type_name -> gocraft.abi.v1.Value
-	13, // 15: gocraft.abi.v1.Event.fields:type_name -> gocraft.abi.v1.Value
-	0,  // 16: gocraft.abi.v1.Event.on_failure:type_name -> gocraft.abi.v1.FailurePolicy
-	13, // 17: gocraft.abi.v1.Mutation.value:type_name -> gocraft.abi.v1.Value
-	13, // 18: gocraft.abi.v1.HostCall.fields:type_name -> gocraft.abi.v1.Value
-	16, // 19: gocraft.abi.v1.Verdict.mutations:type_name -> gocraft.abi.v1.Mutation
-	17, // 20: gocraft.abi.v1.Verdict.effects:type_name -> gocraft.abi.v1.HostCall
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	19, // 12: gocraft.abi.v1.Envelope.invoke:type_name -> gocraft.abi.v1.Invoke
+	22, // 13: gocraft.abi.v1.Envelope.invoked:type_name -> gocraft.abi.v1.Invoked
+	15, // 14: gocraft.abi.v1.Dispatch.event:type_name -> gocraft.abi.v1.Event
+	14, // 15: gocraft.abi.v1.Value.list_value:type_name -> gocraft.abi.v1.ValueList
+	13, // 16: gocraft.abi.v1.ValueList.values:type_name -> gocraft.abi.v1.Value
+	13, // 17: gocraft.abi.v1.Event.fields:type_name -> gocraft.abi.v1.Value
+	0,  // 18: gocraft.abi.v1.Event.on_failure:type_name -> gocraft.abi.v1.FailurePolicy
+	13, // 19: gocraft.abi.v1.Mutation.value:type_name -> gocraft.abi.v1.Value
+	13, // 20: gocraft.abi.v1.HostCall.fields:type_name -> gocraft.abi.v1.Value
+	16, // 21: gocraft.abi.v1.Verdict.mutations:type_name -> gocraft.abi.v1.Mutation
+	17, // 22: gocraft.abi.v1.Verdict.effects:type_name -> gocraft.abi.v1.HostCall
+	20, // 23: gocraft.abi.v1.Invoke.sender:type_name -> gocraft.abi.v1.CommandSender
+	21, // 24: gocraft.abi.v1.Invoke.arguments:type_name -> gocraft.abi.v1.CommandArgument
+	13, // 25: gocraft.abi.v1.CommandSender.player:type_name -> gocraft.abi.v1.Value
+	13, // 26: gocraft.abi.v1.CommandSender.permissions:type_name -> gocraft.abi.v1.Value
+	23, // 27: gocraft.abi.v1.CommandArgument.type:type_name -> gocraft.abi.v1.CommandArgumentType
+	13, // 28: gocraft.abi.v1.CommandArgument.value:type_name -> gocraft.abi.v1.Value
+	17, // 29: gocraft.abi.v1.Invoked.effects:type_name -> gocraft.abi.v1.HostCall
+	30, // [30:30] is the sub-list for method output_type
+	30, // [30:30] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_abi_v1_envelope_proto_init() }
@@ -1487,6 +1835,7 @@ func file_abi_v1_envelope_proto_init() {
 	if File_abi_v1_envelope_proto != nil {
 		return
 	}
+	file_abi_v1_commands_proto_init()
 	file_abi_v1_envelope_proto_msgTypes[0].OneofWrappers = []any{
 		(*Envelope_Hello)(nil),
 		(*Envelope_Welcome)(nil),
@@ -1500,6 +1849,8 @@ func file_abi_v1_envelope_proto_init() {
 		(*Envelope_Ping)(nil),
 		(*Envelope_Pong)(nil),
 		(*Envelope_Shutdown)(nil),
+		(*Envelope_Invoke)(nil),
+		(*Envelope_Invoked)(nil),
 	}
 	file_abi_v1_envelope_proto_msgTypes[12].OneofWrappers = []any{
 		(*Value_BoolValue)(nil),
@@ -1515,7 +1866,7 @@ func file_abi_v1_envelope_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_abi_v1_envelope_proto_rawDesc), len(file_abi_v1_envelope_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   18,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
