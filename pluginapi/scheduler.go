@@ -72,3 +72,32 @@ func (s *Scheduler) call(id TaskID, task func()) {
 	}()
 	task()
 }
+
+// Cancel stops an owned task. It reports whether the task was still active.
+func (s *Scheduler) Cancel(id TaskID) bool {
+	s.mu.Lock()
+	cancel, ok := s.cancels[id]
+	s.mu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
+func (s *Scheduler) stop() {
+	s.mu.Lock()
+	if !s.active {
+		s.mu.Unlock()
+		return
+	}
+	s.active = false
+	cancels := make([]context.CancelFunc, 0, len(s.cancels))
+	for _, cancel := range s.cancels {
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	s.wait.Wait()
+}
