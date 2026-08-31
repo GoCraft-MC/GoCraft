@@ -2,42 +2,31 @@ package goplugin
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
+	"GoCraft/core/plugin"
 )
 
+// InvokeCommand runs one of the plugin's command executors in its process.
+//
+// The conversion is core/plugin's, not this package's. Writing it here would be
+// the same conversion written once per runtime — which is how this ended up
+// encoding a duration in nanoseconds while the JVM encoded milliseconds, from
+// two functions that were otherwise line-for-line the same.
+//
+// Effects come back rather than being applied here. A reply travels as a
+// chat.message the tick delivers, exactly as a verdict's effects do, so a
+// command handler and an event handler reach the world by one path.
 func (i *Instance) InvokeCommand(ctx context.Context, executor command.ExecID,
-	sender command.Sender, values command.Values) error {
+	sender command.Sender, values command.Values) (abi.CommandResult, error) {
 	if sender == nil {
-		return fmt.Errorf("go runtime: command sender is required")
+		return abi.CommandResult{}, fmt.Errorf("go runtime: command sender is required")
 	}
-	event, err := commandEvent(executor, sender, values)
+	invocation, err := plugin.NewCommandInvocation(executor, sender, values, i.manifest.Permissions)
 	if err != nil {
-		return err
+		return abi.CommandResult{}, err
 	}
-	verdict, err := i.supervisor.Dispatch(ctx, i.manifest.ID, event)
-	if err != nil {
-		return err
-	}
-	var joined error
-	for _, effect := range verdict.Effects {
-		if len(effect.Fields) != 1 || effect.Fields[0].Kind != abi.ValueString {
-			joined = errors.Join(joined, fmt.Errorf("go runtime: malformed command result %s", effect.Type))
-			continue
-		}
-		switch effect.Type {
-		case abi.HostCallCommandReply:
-			if err := sender.SendMessage(effect.Fields[0].String); err != nil {
-				joined = errors.Join(joined, err)
-			}
-		case abi.HostCallCommandFailed:
-			joined = errors.Join(joined, errors.New(effect.Fields[0].String))
-		default:
-			joined = errors.Join(joined, fmt.Errorf("go runtime: unknown command result %s", effect.Type))
-		}
-	}
-	return joined
+	return i.supervisor.Invoke(ctx, i.manifest.ID, invocation)
 }

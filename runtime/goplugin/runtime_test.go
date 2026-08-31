@@ -58,13 +58,21 @@ func TestRuntimeLoadsDispatchesCommandsAndStops(t *testing.T) {
 	}
 	sender := &testSender{}
 	commands := loaded.(plugin.CommandInstance)
-	if err := commands.InvokeCommand(t.Context(), 7, sender, command.Values{
+	result, err := commands.InvokeCommand(t.Context(), 7, sender, command.Values{
 		"amount": {Type: command.ArgInteger, Integer: 4},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sender.messages) != 1 || sender.messages[0] != "amount=4" {
-		t.Fatalf("command messages = %v", sender.messages)
+	if result.Error != "" {
+		t.Fatalf("InvokeCommand() error = %q", result.Error)
+	}
+	// The reply comes back as an effect for the tick to deliver rather than
+	// being written to the sender from this goroutine, which is what makes a
+	// command handler reach the world by the same path an event handler does.
+	if len(result.Effects) != 1 || result.Effects[0].Type != "chat.message" ||
+		result.Effects[0].Fields[1].String != "amount=4" {
+		t.Fatalf("command effects = %#v", result.Effects)
 	}
 	if err := loaded.Unload(t.Context()); err != nil {
 		t.Fatal(err)
