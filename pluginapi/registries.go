@@ -1,6 +1,7 @@
 package pluginapi
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 )
@@ -30,6 +31,15 @@ func newCommands(logger *slog.Logger) *Commands {
 }
 
 // Scheduler owns asynchronous tasks registered by one plugin.
-type Scheduler struct{ logger *slog.Logger }
+type Scheduler struct {
+	mu      sync.Mutex
+	logger  *slog.Logger
+	next    TaskID
+	active  bool
+	cancels map[TaskID]context.CancelFunc
+	wait    sync.WaitGroup
+}
 
-func newScheduler(logger *slog.Logger) *Scheduler { return &Scheduler{logger: logger} }
+func newScheduler(logger *slog.Logger) *Scheduler {
+	return &Scheduler{logger: logger, active: true, cancels: make(map[TaskID]context.CancelFunc)}
+}
