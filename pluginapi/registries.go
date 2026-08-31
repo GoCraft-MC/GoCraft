@@ -18,9 +18,16 @@ func newEvents(logger *slog.Logger) *Events {
 }
 
 // Commands owns command callbacks registered by one plugin.
-type Commands struct{ logger *slog.Logger }
+type Commands struct {
+	mu       sync.RWMutex
+	logger   *slog.Logger
+	handlers map[uint32]CommandHandler
+	active   bool
+}
 
-func newCommands(logger *slog.Logger) *Commands { return &Commands{logger: logger} }
+func newCommands(logger *slog.Logger) *Commands {
+	return &Commands{logger: logger, handlers: make(map[uint32]CommandHandler), active: true}
+}
 
 // Scheduler owns asynchronous tasks registered by one plugin.
 type Scheduler struct{ logger *slog.Logger }
