@@ -10,6 +10,7 @@ import (
 	"GoCraft/config"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
+	"GoCraft/runtime/goplugin"
 	"GoCraft/runtime/jvm"
 )
 
@@ -31,13 +32,19 @@ const pluginTickRate = 20
 // is why this runs unconditionally rather than behind a config switch.
 func (s *Server) registerPluginRuntimes(cfg *config.Config) error {
 	java := cfg.Plugins.Runtimes.JVM
-	return s.pluginRegistry.RegisterRuntime(jvm.New(jvm.Config{
+	if err := s.pluginRegistry.RegisterRuntime(jvm.New(jvm.Config{
 		JavaPath:     java.JavaPath,
 		PreferSystem: java.PreferSystem,
 		JarPath:      java.JarPath,
 		TickRate:     pluginTickRate,
 		EventBudget:  time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond,
 		OnRespawn:    s.replayJoins,
+	})); err != nil {
+		return err
+	}
+	return s.pluginRegistry.RegisterRuntime(goplugin.New(goplugin.Config{
+		TickRate:    pluginTickRate,
+		EventBudget: time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond,
 	}))
 }
 
