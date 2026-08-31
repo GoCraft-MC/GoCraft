@@ -29,6 +29,7 @@ func (s *runtimeState) load(pluginID, dataDirectory string) ([]string, error) {
 	s.context = newContext(s.metadata, dataDirectory, logger)
 	if err := s.call("load", func() error { return s.implementation.OnLoad(s.context) }); err != nil {
 		s.cleanup()
+		s.context = nil
 		return nil, err
 	}
 	s.initialized = true
