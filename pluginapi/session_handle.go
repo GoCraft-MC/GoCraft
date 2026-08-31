@@ -51,11 +51,20 @@ func (s *pluginSession) handleDispatch(seq uint64, dispatch *wire.Dispatch) {
 		err = &pluginIDError{expected: s.state.metadata.ID, got: dispatch.GetPluginId()}
 	}
 	if err == nil {
-		verdict, err = s.state.dispatch(event)
+		if event.Type == abi.EventCommandInvoke {
+			verdict, err = s.state.invokeCommand(event)
+		} else {
+			verdict, err = s.state.dispatch(event)
+		}
 	}
 	if err != nil {
 		if event != nil && event.OnFailure == abi.FailureDeny {
 			verdict.Cancelled = true
+		}
+		if event != nil && event.Type == abi.EventCommandInvoke {
+			verdict.Effects = append(verdict.Effects, abi.HostCall{
+				Type: abi.HostCallCommandFailed, Fields: []abi.Value{abi.String(err.Error())},
+			})
 		}
 		slog.Error("plugin event failed", "plugin", s.state.metadata.ID, "err", err)
 	}
