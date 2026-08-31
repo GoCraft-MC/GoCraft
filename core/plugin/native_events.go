@@ -102,6 +102,20 @@ func blockValue(block coreworld.Block) abi.Value {
 	return abi.List(abi.String(block.ResourceLocation()), abi.List(properties...))
 }
 
+// itemValue is the ItemRef vocabulary type: id, count, damage.
+//
+// Deliberately not the whole ItemStack. A command's item argument is parsed
+// from an id and a count, so enchantments, firework data and pot decorations
+// would ship empty on every invocation and mean nothing when they did not. A
+// vocabulary type is a wire contract: appending a field later is compatible,
+// explaining one nobody fills is not.
+func itemValue(stack player.ItemStack) abi.Value {
+	return abi.List(
+		abi.String(stack.ItemID),
+		abi.Int64(int64(stack.Count)),
+		abi.Int64(int64(stack.Damage)))
+}
+
 // PlayerUUIDFrom reads the uuid out of a PlayerRef value.
 //
 // The inverse of playerReference, and it lives beside it so the two shapes
