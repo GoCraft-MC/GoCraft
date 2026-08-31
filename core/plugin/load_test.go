@@ -21,9 +21,9 @@ func (i *recordingInstance) Manifest() Manifest { return i.manifest }
 func (i *recordingInstance) Dispatch(context.Context, *abi.Event) (abi.Verdict, error) {
 	return abi.Verdict{}, nil
 }
-func (i *recordingInstance) InvokeCommand(_ context.Context, executor command.ExecID, _ command.Sender, _ command.Values) error {
+func (i *recordingInstance) InvokeCommand(_ context.Context, executor command.ExecID, _ command.Sender, _ command.Values) (abi.CommandResult, error) {
 	*i.order = append(*i.order, fmt.Sprintf("command:%d", executor))
-	return nil
+	return abi.CommandResult{}, nil
 }
 func (i *recordingInstance) Unload(context.Context) error {
 	*i.order = append(*i.order, "unload:"+i.manifest.ID)

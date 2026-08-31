@@ -44,8 +44,13 @@ type Instance interface {
 }
 
 // CommandInstance is implemented by runtimes that loaded a command tree.
+//
+// It answers with a result rather than an error for the same reason Dispatch
+// answers with a verdict: what a handler asked the world to do is queued here,
+// not by the runtime, so a runtime stays a forward and every effect in the
+// system passes through one queue.
 type CommandInstance interface {
-	InvokeCommand(context.Context, command.ExecID, command.Sender, command.Values) error
+	InvokeCommand(context.Context, command.ExecID, command.Sender, command.Values) (abi.CommandResult, error)
 }
 
 // ReadyRuntime is implemented by runtimes that have to be told the load phase
