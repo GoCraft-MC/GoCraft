@@ -20,6 +20,7 @@ import (
 	"time"
 
 	abi "GoCraft/abi/v1"
+	"GoCraft/core/command"
 	"GoCraft/core/plugin"
 	"GoCraft/runtime/ipc"
 )
@@ -240,19 +241,10 @@ func (r *Runtime) socketDirectory() string {
 
 // Load brings up one plugin inside the running JVM.
 func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instance, error) {
-	// Checked before the process is, because it is a property of the bundle
-	// rather than of the runtime's state: the answer is the same whether the
-	// JVM is up or not, and it is the more useful of the two messages.
-	//
-	// A command tree cannot be honoured yet — the envelope reserves the fields
-	// for command invocation and does not define them, so there is no way to
-	// reach a plugin's executor across the process boundary. Loading anyway
-	// would give an admin a plugin whose commands silently do nothing.
-	if bundle.Commands != nil {
-		return nil, fmt.Errorf(
-			"jvm: plugin %s declares commands, which the ABI cannot yet carry to an "+
-				"out-of-process runtime", bundle.Manifest.ID)
-	}
+	// The command tree is not sent. The runtime opens the same bundle this
+	// names and reads it from there, which is also where the executor ids come
+	// from — sending a second copy would be a second definition of the tree,
+	// free to disagree with the one the JVM binds its handlers against.
 	supervisor, err := r.running()
 	if err != nil {
 		return nil, err
@@ -373,6 +365,30 @@ func (i *Instance) Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict,
 		return abi.Verdict{}, err
 	}
 	return supervisor.Dispatch(ctx, i.manifest.ID, event)
+}
+
+// InvokeCommand runs one of the plugin's command executors in the JVM.
+//
+// The host parsed the line against the command tree, resolved every argument
+// and checked the permissions guarding the path before this is reached, so what
+// crosses is a result rather than a line to parse again. Like Dispatch it
+// resolves the live supervisor, so a command typed after a crash reaches the
+// process that came back rather than the socket the old one left behind.
+func (i *Instance) InvokeCommand(
+	ctx context.Context,
+	executor command.ExecID,
+	sender command.Sender,
+	arguments command.Values,
+) (abi.CommandResult, error) {
+	invocation, err := plugin.NewCommandInvocation(executor, sender, arguments, i.manifest.Permissions)
+	if err != nil {
+		return abi.CommandResult{}, err
+	}
+	supervisor, err := i.runtime.running()
+	if err != nil {
+		return abi.CommandResult{}, err
+	}
+	return supervisor.Invoke(ctx, i.manifest.ID, invocation)
 }
 
 // Unload drops the plugin. The context is unused because the schema carries no

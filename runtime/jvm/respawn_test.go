@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -337,6 +338,19 @@ func serveFakeJVM(codec *ipc.Codec, slowLoad bool) {
 		case *wire.Envelope_Ping:
 			codec.Send(&wire.Envelope{Seq: envelope.GetSeq(),
 				Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}})
+		case *wire.Envelope_Invoke:
+			// Replies to whoever typed it, which is what a real handler does
+			// and what proves the sender crossed with the invocation.
+			invoke := envelope.GetInvoke()
+			codec.Send(&wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Invoked{
+				Invoked: &wire.Invoked{Effects: []*wire.HostCall{{
+					Type: "chat.message",
+					Fields: []*wire.Value{
+						invoke.GetSender().GetPlayer(),
+						{Kind: &wire.Value_StringValue{StringValue: "ran " + strconv.Itoa(int(invoke.GetExecutor()))}},
+					},
+				}}},
+			}})
 		case *wire.Envelope_Shutdown:
 			os.Exit(0)
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"GoCraft/core/command"
+	"GoCraft/core/player"
 	"GoCraft/core/plugin"
 )
 
@@ -59,23 +60,20 @@ func TestStopBeforeStartIsNotAnError(t *testing.T) {
 	}
 }
 
-// The envelope reserves the fields for command invocation and never defines
-// them, so nothing can reach a plugin's executor across the process boundary.
-// Loading anyway would hand an admin a plugin whose commands silently do
-// nothing, which is the worst of the three possible outcomes.
-func TestLoadRefusesABundleWithCommands(t *testing.T) {
+// A command tree is no longer a reason to refuse a bundle: INVOKE carries an
+// executor to the JVM and Invoked brings its answer back. What is left is the
+// ordinary failure — the runtime is not running — and it has to name that
+// rather than the commands, or an admin chases a gap that closed.
+func TestLoadNoLongerRefusesABundleWithCommands(t *testing.T) {
 	_, err := New(Config{}).Load(t.Context(), plugin.Bundle{
 		Manifest: plugin.Manifest{ID: "dev.example.shop"},
 		Commands: &command.Root{},
 	})
 	if err == nil {
-		t.Fatal("Load() accepted a command tree the ABI cannot carry")
+		t.Fatal("Load() succeeded with no runtime running")
 	}
-	// The bundle is judged before the process is: the answer is the same
-	// whether the JVM is up or not, and naming the real reason beats telling an
-	// admin the runtime is merely not running.
-	if !strings.Contains(err.Error(), "commands") {
-		t.Fatalf("Load() error = %v, want commands named as the reason", err)
+	if strings.Contains(err.Error(), "commands") {
+		t.Fatalf("Load() error = %v, want the stopped runtime as the reason", err)
 	}
 }
 
@@ -137,18 +135,19 @@ func TestSocketDirectoryFallsBackToTemp(t *testing.T) {
 // these interfaces and nothing else, so a signature drifting out of line has to
 // fail here rather than at the call site in core/plugin.
 var (
-	_ plugin.Runtime      = (*Runtime)(nil)
-	_ plugin.ReadyRuntime = (*Runtime)(nil)
-	_ plugin.Instance     = (*Instance)(nil)
+	_ plugin.Runtime         = (*Runtime)(nil)
+	_ plugin.ReadyRuntime    = (*Runtime)(nil)
+	_ plugin.Instance        = (*Instance)(nil)
+	_ plugin.CommandInstance = (*Instance)(nil)
 )
 
-// A Java plugin cannot answer a command yet, so the runtime must not claim it
-// can: core/plugin refuses a bundle whose instance does not implement this, and
-// a false positive there would surface as a command that does nothing.
-func TestInstanceDoesNotClaimCommandSupport(t *testing.T) {
+// core/plugin refuses to load a bundle whose instance cannot answer a command,
+// so this claim has to hold for a Java plugin with commands to load at all. It
+// held the opposite way round until the envelope gained INVOKE.
+func TestInstanceClaimsCommandSupport(t *testing.T) {
 	var instance plugin.Instance = &Instance{}
-	if _, ok := instance.(plugin.CommandInstance); ok {
-		t.Fatal("Instance claims command support the ABI cannot deliver")
+	if _, ok := instance.(plugin.CommandInstance); !ok {
+		t.Fatal("Instance does not implement CommandInstance")
 	}
 }
 
@@ -159,3 +158,75 @@ func TestInstanceReportsItsManifest(t *testing.T) {
 		t.Fatalf("Manifest() = %+v", instance.Manifest())
 	}
 }
+
+// The whole command path in one pass: the host converts, the transport carries,
+// the JVM answers, and what comes back is a result the registry can queue.
+func TestInvokeCommandReachesTheJVM(t *testing.T) {
+	runtime := fakeRuntime(t, "ok", filepath.Join(t.TempDir(), "lives"), nil)
+	if err := runtime.Start(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := runtime.Load(t.Context(), plugin.Bundle{
+		Path: "plugins/shop.gcpkg",
+		Manifest: plugin.Manifest{
+			ID: "dev.example.shop", Entry: "dev.example.shop.Shop",
+			Permissions: []string{"shop.admin"},
+		},
+		Commands: &command.Root{Children: []command.Node{command.Literal{Name: "shop", Exec: 4}}},
+	})
+	if err != nil {
+		t.Fatalf("Load() = %v", err)
+	}
+	commands, ok := loaded.(plugin.CommandInstance)
+	if !ok {
+		t.Fatal("Load() returned an instance that cannot answer a command")
+	}
+
+	sender := &stubSender{
+		name:   "oreo",
+		held:   map[string]bool{"shop.admin": true},
+		player: player.New([16]byte{9}, "oreo", player.ClientEditionJava),
+	}
+	result, err := commands.InvokeCommand(t.Context(), 4, sender, command.Values{
+		"item": {Type: command.ArgString, String: "bread"},
+	})
+	if err != nil {
+		t.Fatalf("InvokeCommand() = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("InvokeCommand() result error = %q", result.Error)
+	}
+	// Not applied here: the effect is the runtime's answer, and queueing it is
+	// core/plugin's job. What this proves is that it came back at all.
+	if len(result.Effects) != 1 || result.Effects[0].Type != "chat.message" {
+		t.Fatalf("InvokeCommand() effects = %+v", result.Effects)
+	}
+	fields := result.Effects[0].Fields
+	if len(fields) != 2 || fields[1].String != "ran 4" {
+		t.Fatalf("InvokeCommand() effect fields = %+v", fields)
+	}
+	if _, ok := plugin.PlayerUUIDFrom(fields[0]); !ok {
+		t.Fatalf("InvokeCommand() lost the sender: %+v", fields[0])
+	}
+}
+
+// A command typed while the JVM is down is refused, not queued. The sender is
+// waiting on the answer, so an error they can read beats a silence.
+func TestInvokeCommandWithoutARuntimeFails(t *testing.T) {
+	instance := &Instance{runtime: New(Config{}), manifest: plugin.Manifest{ID: "dev.example.shop"}}
+	if _, err := instance.InvokeCommand(t.Context(), 1, nil, nil); err == nil {
+		t.Fatal("InvokeCommand() succeeded with no runtime running")
+	}
+}
+
+type stubSender struct {
+	name   string
+	held   map[string]bool
+	player *player.Player
+}
+
+func (s *stubSender) Name() string                   { return s.name }
+func (s *stubSender) UUID() [16]byte                 { return [16]byte{} }
+func (s *stubSender) SendMessage(string) error       { return nil }
+func (s *stubSender) Has(permission string) bool     { return s.held[permission] }
+func (s *stubSender) Player() (*player.Player, bool) { return s.player, s.player != nil }
