@@ -77,6 +77,14 @@ type LoadRequest struct {
 	// derive it differently.
 	DataDirectory string
 
+	// CommandTree is where the tree sits inside the bundle, from the manifest's
+	// [commands] tree. Empty when the plugin declares no commands.
+	//
+	// The path rather than the tree itself: the runtime opens the bundle
+	// anyway, and its executor ids are numbered by that file, so a second copy
+	// would be free to disagree with the one it binds handlers against.
+	CommandTree string
+
 	// Events are the subscriptions the manifest declared. What the runtime
 	// reports back is checked against them.
 	Events []string
@@ -164,6 +172,7 @@ func (s *Supervisor) Load(ctx context.Context, request LoadRequest) ([]string, e
 		BundlePath:    request.BundlePath,
 		Entry:         request.Entry,
 		DataDirectory: request.DataDirectory,
+		CommandTree:   request.CommandTree,
 	}}})
 	if err != nil {
 		return nil, fmt.Errorf("ipc: %s: load %s: %w", s.config.Runtime, request.ID, err)

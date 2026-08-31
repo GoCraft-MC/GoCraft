@@ -122,6 +122,16 @@ func fakeLoadReply(behaviour string, envelope *wire.Envelope) *wire.Envelope {
 		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Loaded{
 			Loaded: &wire.Loaded{PluginId: "somebody.else"},
 		}}
+	case "load-echo":
+		// Answers with what LOAD carried, so a test can prove the fields the
+		// runtime binds against actually arrived rather than defaulting to "".
+		load := envelope.GetLoad()
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Fail{
+			Fail: &wire.Fail{PluginId: id, Reason: strings.Join([]string{
+				load.GetBundlePath(), load.GetEntry(),
+				load.GetDataDirectory(), load.GetCommandTree(),
+			}, "|")},
+		}}
 	case "load-nonsense":
 		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}}
 	default:

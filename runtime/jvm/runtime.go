@@ -127,11 +127,12 @@ type Runtime struct {
 
 // loadedBundle is everything needed to bring one plugin back after a crash.
 type loadedBundle struct {
-	id     string
-	path   string
-	entry  string
-	data   string
-	events []string
+	id          string
+	path        string
+	entry       string
+	data        string
+	commandTree string
+	events      []string
 }
 
 // New prepares the runtime. Nothing is spawned and nothing is downloaded until
@@ -241,10 +242,6 @@ func (r *Runtime) socketDirectory() string {
 
 // Load brings up one plugin inside the running JVM.
 func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instance, error) {
-	// The command tree is not sent. The runtime opens the same bundle this
-	// names and reads it from there, which is also where the executor ids come
-	// from — sending a second copy would be a second definition of the tree,
-	// free to disagree with the one the JVM binds its handlers against.
 	supervisor, err := r.running()
 	if err != nil {
 		return nil, err
@@ -259,13 +256,15 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 		BundlePath:    bundle.Path,
 		Entry:         bundle.Manifest.Entry,
 		DataDirectory: bundle.DataDirectory,
+		CommandTree:   bundle.Manifest.CommandTree,
 		Events:        events,
 	}); err != nil {
 		return nil, err
 	}
 	r.remember(loadedBundle{
 		id: bundle.Manifest.ID, path: bundle.Path,
-		entry: bundle.Manifest.Entry, data: bundle.DataDirectory, events: events,
+		entry: bundle.Manifest.Entry, data: bundle.DataDirectory,
+		commandTree: bundle.Manifest.CommandTree, events: events,
 	})
 	return &Instance{runtime: r, manifest: bundle.Manifest}, nil
 }

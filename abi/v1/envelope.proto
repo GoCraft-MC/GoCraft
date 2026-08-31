@@ -98,6 +98,16 @@ message Load {
   // Added in ABI 1 after the fact: a runtime built before this reads an empty
   // string, which is why nothing may assume it is set.
   string data_directory = 4;
+
+  // Where the command tree sits inside the bundle, from the manifest's
+  // [commands] tree. Empty when the plugin declares no commands.
+  //
+  // The path, not the tree. The runtime opens this bundle anyway, and the tree
+  // is what its executor ids are numbered by, so sending a copy would be a
+  // second definition of it — free to disagree with the one the runtime binds
+  // its handlers against. Sending the path instead is what the host already
+  // does for entry: it read the manifest, so the runtime does not have to.
+  string command_tree = 5;
 }
 
 // Loaded reports what the plugin actually registered, which the host checks

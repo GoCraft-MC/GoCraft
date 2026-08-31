@@ -173,7 +173,8 @@ func (r *Runtime) respawn() error {
 	for _, bundle := range r.remembered() {
 		if _, err := supervisor.Load(ctx, ipc.LoadRequest{
 			ID: bundle.id, BundlePath: bundle.path,
-			Entry: bundle.entry, DataDirectory: bundle.data, Events: bundle.events,
+			Entry: bundle.entry, DataDirectory: bundle.data,
+			CommandTree: bundle.commandTree, Events: bundle.events,
 		}); err != nil {
 			// One plugin refusing to come back must not keep the others down.
 			// It was running a moment ago, so this is worth reporting loudly

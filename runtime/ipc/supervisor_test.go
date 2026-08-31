@@ -365,3 +365,25 @@ func TestSupervisorRefusesAnUntypedArgument(t *testing.T) {
 		t.Fatal("Invoke() accepted an argument with no type")
 	}
 }
+
+// Every string LOAD carries has to arrive. The command tree path is the one
+// that fails silently if it does not: the runtime binds its handlers against
+// that file, so an empty path is a plugin whose commands load and never run.
+func TestSupervisorSendsEveryLoadField(t *testing.T) {
+	supervisor := startedSupervisor(t, "load-echo")
+
+	_, err := supervisor.Load(t.Context(), LoadRequest{
+		ID:            "fr.oreo.shop",
+		BundlePath:    "plugins/shop.gcpkg",
+		Entry:         "fr.oreo.shop.ShopPlugin",
+		DataDirectory: "plugins/fr.oreo.shop",
+		CommandTree:   "commands.pb",
+	})
+	if err == nil {
+		t.Fatal("Load() succeeded; the fake answers FAIL with what it received")
+	}
+	want := "plugins/shop.gcpkg|fr.oreo.shop.ShopPlugin|plugins/fr.oreo.shop|commands.pb"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("Load() carried %v, want %q", err, want)
+	}
+}

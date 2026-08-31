@@ -506,6 +506,15 @@ type Load struct {
 	// Added in ABI 1 after the fact: a runtime built before this reads an empty
 	// string, which is why nothing may assume it is set.
 	DataDirectory string `protobuf:"bytes,4,opt,name=data_directory,json=dataDirectory,proto3" json:"data_directory,omitempty"`
+	// Where the command tree sits inside the bundle, from the manifest's
+	// [commands] tree. Empty when the plugin declares no commands.
+	//
+	// The path, not the tree. The runtime opens this bundle anyway, and the tree
+	// is what its executor ids are numbered by, so sending a copy would be a
+	// second definition of it — free to disagree with the one the runtime binds
+	// its handlers against. Sending the path instead is what the host already
+	// does for entry: it read the manifest, so the runtime does not have to.
+	CommandTree   string `protobuf:"bytes,5,opt,name=command_tree,json=commandTree,proto3" json:"command_tree,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -564,6 +573,13 @@ func (x *Load) GetEntry() string {
 func (x *Load) GetDataDirectory() string {
 	if x != nil {
 		return x.DataDirectory
+	}
+	return ""
+}
+
+func (x *Load) GetCommandTree() string {
+	if x != nil {
+		return x.CommandTree
 	}
 	return ""
 }
@@ -1677,13 +1693,14 @@ const file_abi_v1_envelope_proto_rawDesc = "" +
 	"\aWelcome\x12\x10\n" +
 	"\x03abi\x18\x01 \x01(\rR\x03abi\x12\x1b\n" +
 	"\ttick_rate\x18\x02 \x01(\rR\btickRate\x12&\n" +
-	"\x0fevent_budget_ms\x18\x03 \x01(\rR\reventBudgetMs\"\x81\x01\n" +
+	"\x0fevent_budget_ms\x18\x03 \x01(\rR\reventBudgetMs\"\xa4\x01\n" +
 	"\x04Load\x12\x1b\n" +
 	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x1f\n" +
 	"\vbundle_path\x18\x02 \x01(\tR\n" +
 	"bundlePath\x12\x14\n" +
 	"\x05entry\x18\x03 \x01(\tR\x05entry\x12%\n" +
-	"\x0edata_directory\x18\x04 \x01(\tR\rdataDirectory\"=\n" +
+	"\x0edata_directory\x18\x04 \x01(\tR\rdataDirectory\x12!\n" +
+	"\fcommand_tree\x18\x05 \x01(\tR\vcommandTree\"=\n" +
 	"\x06Loaded\x12\x1b\n" +
 	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x16\n" +
 	"\x06events\x18\x02 \x03(\tR\x06events\";\n" +
