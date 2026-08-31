@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 const (
 	EventBlockBreak = "block.break"

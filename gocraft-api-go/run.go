@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func Run(metadata Metadata, implementation Plugin) error {
 	}
 	stream, err := net.DialTimeout("unix", options.socket, connectTimeout)
 	if err != nil {
-		return fmt.Errorf("pluginapi: connect to host: %w", err)
+		return fmt.Errorf("gocraft: connect to host: %w", err)
 	}
 	defer stream.Close()
 	codec := ipc.NewCodec(stream)
@@ -34,18 +34,18 @@ func Run(metadata Metadata, implementation Plugin) error {
 	if err := codec.Send(&wire.Envelope{Seq: sequence, Body: &wire.Envelope_Hello{Hello: &wire.Hello{
 		Abi: CurrentVersion, Runtime: "native-go/" + runtime.Version(),
 	}}}); err != nil {
-		return fmt.Errorf("pluginapi: send handshake: %w", err)
+		return fmt.Errorf("gocraft: send handshake: %w", err)
 	}
 	reply, err := codec.Receive()
 	if err != nil {
-		return fmt.Errorf("pluginapi: receive handshake: %w", err)
+		return fmt.Errorf("gocraft: receive handshake: %w", err)
 	}
 	welcome := reply.GetWelcome()
 	if reply.GetSeq() != sequence || welcome == nil {
-		return fmt.Errorf("pluginapi: host answered HELLO with %T", reply.GetBody())
+		return fmt.Errorf("gocraft: host answered HELLO with %T", reply.GetBody())
 	}
 	if welcome.GetAbi() != CurrentVersion {
-		return fmt.Errorf("pluginapi: host uses ABI %d, plugin uses %d", welcome.GetAbi(), CurrentVersion)
+		return fmt.Errorf("gocraft: host uses ABI %d, plugin uses %d", welcome.GetAbi(), CurrentVersion)
 	}
 	return serve(codec, newRuntimeState(metadata, implementation))
 }

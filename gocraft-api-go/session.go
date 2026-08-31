@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -32,7 +32,7 @@ func serve(codec *ipc.Codec, state *runtimeState) error {
 			if err == io.EOF {
 				return nil
 			}
-			return fmt.Errorf("pluginapi: receive host message: %w", err)
+			return fmt.Errorf("gocraft: receive host message: %w", err)
 		}
 		switch envelope.GetBody().(type) {
 		case *wire.Envelope_Ping:
@@ -51,7 +51,7 @@ func serve(codec *ipc.Codec, state *runtimeState) error {
 			work <- envelope
 		default:
 			stop()
-			return fmt.Errorf("pluginapi: unexpected host message %T", envelope.GetBody())
+			return fmt.Errorf("gocraft: unexpected host message %T", envelope.GetBody())
 		}
 	}
 }

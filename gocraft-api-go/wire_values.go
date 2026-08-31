@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ func playerFrom(value abi.Value) (Player, error) {
 		return Player{}, err
 	}
 	if items[0].Kind != abi.ValueBytes || len(items[0].Bytes) != 16 {
-		return Player{}, fmt.Errorf("pluginapi: player uuid is not 16 bytes")
+		return Player{}, fmt.Errorf("gocraft: player uuid is not 16 bytes")
 	}
 	username, err := stringFrom(items[1], "player username")
 	if err != nil {
@@ -35,7 +35,7 @@ func positionFrom(value abi.Value) (BlockPos, error) {
 	}
 	for _, item := range items {
 		if item.Kind != abi.ValueInt64 {
-			return BlockPos{}, fmt.Errorf("pluginapi: block position coordinate is not an integer")
+			return BlockPos{}, fmt.Errorf("gocraft: block position coordinate is not an integer")
 		}
 	}
 	return BlockPos{X: int32(items[0].Int64), Y: int32(items[1].Int64), Z: int32(items[2].Int64)}, nil

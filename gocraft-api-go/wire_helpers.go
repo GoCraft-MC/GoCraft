@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -8,21 +8,21 @@ import (
 
 func listOf(value abi.Value, length int, name string) ([]abi.Value, error) {
 	if value.Kind != abi.ValueList || len(value.List) != length {
-		return nil, fmt.Errorf("pluginapi: %s must contain %d values", name, length)
+		return nil, fmt.Errorf("gocraft: %s must contain %d values", name, length)
 	}
 	return value.List, nil
 }
 
 func stringFrom(value abi.Value, name string) (string, error) {
 	if value.Kind != abi.ValueString {
-		return "", fmt.Errorf("pluginapi: %s is not a string", name)
+		return "", fmt.Errorf("gocraft: %s is not a string", name)
 	}
 	return value.String, nil
 }
 
 func permissionsFrom(value abi.Value) (map[string]bool, error) {
 	if value.Kind != abi.ValueList {
-		return nil, fmt.Errorf("pluginapi: permissions are not a list")
+		return nil, fmt.Errorf("gocraft: permissions are not a list")
 	}
 	permissions := make(map[string]bool, len(value.List))
 	for _, entry := range value.List {
@@ -35,7 +35,7 @@ func permissionsFrom(value abi.Value) (map[string]bool, error) {
 			return nil, err
 		}
 		if pair[1].Kind != abi.ValueBool {
-			return nil, fmt.Errorf("pluginapi: permission %s is not boolean", node)
+			return nil, fmt.Errorf("gocraft: permission %s is not boolean", node)
 		}
 		permissions[node] = pair[1].Bool
 	}
@@ -44,7 +44,7 @@ func permissionsFrom(value abi.Value) (map[string]bool, error) {
 
 func propertiesFrom(value abi.Value) (map[string]string, error) {
 	if value.Kind != abi.ValueList {
-		return nil, fmt.Errorf("pluginapi: block properties are not a list")
+		return nil, fmt.Errorf("gocraft: block properties are not a list")
 	}
 	properties := make(map[string]string, len(value.List))
 	for _, entry := range value.List {

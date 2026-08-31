@@ -5,33 +5,33 @@ import (
 	"log/slog"
 	"os"
 
-	"GoCraft/pluginapi"
+	gocraft "GoCraft/gocraft-api-go"
 )
 
-var metadata = pluginapi.Metadata{
-	ID: "example-go", Version: "1.0.0", APIVersion: pluginapi.CurrentVersion,
+var metadata = gocraft.Metadata{
+	ID: "example-go", Version: "1.0.0", APIVersion: gocraft.CurrentVersion,
 }
 
 type examplePlugin struct {
-	context pluginapi.Context
+	context gocraft.Context
 }
 
-func (p *examplePlugin) OnLoad(context pluginapi.Context) error {
+func (p *examplePlugin) OnLoad(context gocraft.Context) error {
 	p.context = context
 	context.Logger().Info("loaded", "data", context.DataDirectory())
-	if err := context.Events().OnPlayerJoin(func(event *pluginapi.PlayerJoinEvent) {
+	if err := context.Events().OnPlayerJoin(func(event *gocraft.PlayerJoinEvent) {
 		context.Logger().Info("player joined", "player", event.Player.Username,
 			"edition", event.Player.Edition)
 	}); err != nil {
 		return err
 	}
-	if err := context.Events().OnBlockBreak(func(event *pluginapi.BlockBreakEvent) {
+	if err := context.Events().OnBlockBreak(func(event *gocraft.BlockBreakEvent) {
 		context.Logger().Info("block broken", "player", event.Player.Username,
 			"block", event.Block.ID, "position", event.Position)
 	}); err != nil {
 		return err
 	}
-	return context.Commands().Register(1, func(call *pluginapi.CommandContext) error {
+	return context.Commands().Register(1, func(call *gocraft.CommandContext) error {
 		call.Reply(fmt.Sprintf("Hello, %s!", call.SenderName))
 		return nil
 	})
@@ -48,7 +48,7 @@ func (p *examplePlugin) OnDisable() error {
 }
 
 func main() {
-	if err := pluginapi.Run(metadata, &examplePlugin{}); err != nil {
+	if err := gocraft.Run(metadata, &examplePlugin{}); err != nil {
 		slog.Error("example plugin stopped", "err", err)
 		os.Exit(1)
 	}

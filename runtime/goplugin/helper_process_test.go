@@ -7,22 +7,22 @@ import (
 	"os/exec"
 	"testing"
 
-	"GoCraft/pluginapi"
+	gocraft "GoCraft/gocraft-api-go"
 	"GoCraft/runtime/ipc"
 )
 
 type helperPlugin struct{}
 
-func (*helperPlugin) OnLoad(context pluginapi.Context) error {
+func (*helperPlugin) OnLoad(context gocraft.Context) error {
 	if os.Getenv("GOCRAFT_NATIVE_PLUGIN_FAILURE") == "load" {
 		return errors.New("load failure")
 	}
-	if err := context.Events().OnBlockBreak(func(event *pluginapi.BlockBreakEvent) {
+	if err := context.Events().OnBlockBreak(func(event *gocraft.BlockBreakEvent) {
 		event.Cancel()
 	}); err != nil {
 		return err
 	}
-	return context.Commands().Register(7, func(call *pluginapi.CommandContext) error {
+	return context.Commands().Register(7, func(call *gocraft.CommandContext) error {
 		value, ok := call.Args.Integer("amount")
 		if !ok {
 			return fmt.Errorf("amount is missing")
@@ -52,8 +52,8 @@ func TestNativePluginHelperProcess(t *testing.T) {
 		}
 	}
 	os.Args = append([]string{os.Args[0]}, os.Args[separator+1:]...)
-	err := pluginapi.Run(pluginapi.Metadata{
-		ID: "example", Version: "1.0.0", APIVersion: pluginapi.CurrentVersion,
+	err := gocraft.Run(gocraft.Metadata{
+		ID: "example", Version: "1.0.0", APIVersion: gocraft.CurrentVersion,
 	}, &helperPlugin{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

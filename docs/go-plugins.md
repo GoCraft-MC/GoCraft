@@ -16,14 +16,17 @@ overwritten. `Context.DataDirectory()` returns that directory.
 
 ## Lifecycle
 
-Implement `pluginapi.Plugin`:
+Implement `gocraft.Plugin`. The import path does not end in the package name,
+so name it:
 
 ```go
+import gocraft "GoCraft/gocraft-api-go"
+
 type Plugin struct{}
 
-func (*Plugin) OnLoad(ctx pluginapi.Context) error { return nil }
-func (*Plugin) OnEnable() error                    { return nil }
-func (*Plugin) OnDisable() error                   { return nil }
+func (*Plugin) OnLoad(ctx gocraft.Context) error { return nil }
+func (*Plugin) OnEnable() error                  { return nil }
+func (*Plugin) OnDisable() error                 { return nil }
 ```
 
 `OnLoad` receives the logger, event registry, command registry, scheduler, and
@@ -49,7 +52,7 @@ protocol IDs are exposed. Cancelling `BlockBreakEvent` keeps the block intact
 for either edition.
 
 ```go
-ctx.Events().OnBlockBreak(func(event *pluginapi.BlockBreakEvent) {
+ctx.Events().OnBlockBreak(func(event *gocraft.BlockBreakEvent) {
     if event.Block.ID == "minecraft:diamond_block" {
         event.Cancel()
     }
@@ -62,7 +65,7 @@ Commands are declared in the bundle's generated `commands.pb`. Register the
 matching executor ID during `OnLoad`:
 
 ```go
-ctx.Commands().Register(1, func(call *pluginapi.CommandContext) error {
+ctx.Commands().Register(1, func(call *gocraft.CommandContext) error {
     call.Reply("Hello, " + call.SenderName)
     return nil
 })

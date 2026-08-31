@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"log/slog"
@@ -103,5 +103,5 @@ func (s *pluginSession) send(envelope *wire.Envelope) {
 type pluginIDError struct{ expected, got string }
 
 func (e *pluginIDError) Error() string {
-	return "pluginapi: dispatch id " + e.got + " does not match " + e.expected
+	return "gocraft: dispatch id " + e.got + " does not match " + e.expected
 }

@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -8,15 +8,15 @@ import (
 // Register binds a local executor ID from commands.pb to a callback.
 func (c *Commands) Register(executor uint32, handler CommandHandler) error {
 	if executor == 0 || handler == nil {
-		return fmt.Errorf("pluginapi: command executor and handler are required")
+		return fmt.Errorf("gocraft: command executor and handler are required")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.active {
-		return fmt.Errorf("pluginapi: command registry is disabled")
+		return fmt.Errorf("gocraft: command registry is disabled")
 	}
 	if _, duplicate := c.handlers[executor]; duplicate {
-		return fmt.Errorf("pluginapi: command executor %d is already registered", executor)
+		return fmt.Errorf("gocraft: command executor %d is already registered", executor)
 	}
 	c.handlers[executor] = handler
 	return nil
@@ -28,10 +28,10 @@ func (c *Commands) invoke(executor uint32, call *CommandContext) (replies []stri
 	active := c.active
 	c.mu.RUnlock()
 	if !active {
-		return nil, fmt.Errorf("pluginapi: command registry is disabled")
+		return nil, fmt.Errorf("gocraft: command registry is disabled")
 	}
 	if !ok {
-		return nil, fmt.Errorf("pluginapi: command executor %d is not registered", executor)
+		return nil, fmt.Errorf("gocraft: command executor %d is not registered", executor)
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {

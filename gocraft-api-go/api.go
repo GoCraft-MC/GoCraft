@@ -1,5 +1,5 @@
-// Package pluginapi is the public API used by native Go plugins.
-package pluginapi
+// Package gocraft is the public API used by native Go plugins.
+package gocraft
 
 import "log/slog"
 

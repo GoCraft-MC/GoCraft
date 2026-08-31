@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 
 func (s *runtimeState) dispatch(incoming *abi.Event) (abi.Verdict, error) {
 	if !s.enabled || s.context == nil {
-		return abi.Verdict{}, fmt.Errorf("pluginapi: plugin is not enabled")
+		return abi.Verdict{}, fmt.Errorf("gocraft: plugin is not enabled")
 	}
 	event, err := eventFrom(incoming)
 	if err != nil {
@@ -24,7 +24,7 @@ func (s *runtimeState) dispatch(incoming *abi.Event) (abi.Verdict, error) {
 
 func eventFrom(incoming *abi.Event) (Event, error) {
 	if incoming == nil {
-		return nil, fmt.Errorf("pluginapi: missing event")
+		return nil, fmt.Errorf("gocraft: missing event")
 	}
 	switch incoming.Type {
 	case EventPlayerJoin:
@@ -32,13 +32,13 @@ func eventFrom(incoming *abi.Event) (Event, error) {
 	case EventBlockBreak:
 		return blockBreakFrom(incoming.Fields)
 	default:
-		return nil, fmt.Errorf("pluginapi: unsupported event %s", incoming.Type)
+		return nil, fmt.Errorf("gocraft: unsupported event %s", incoming.Type)
 	}
 }
 
 func playerJoinFrom(fields []abi.Value) (*PlayerJoinEvent, error) {
 	if len(fields) != 2 {
-		return nil, fmt.Errorf("pluginapi: player.join has %d fields, want 2", len(fields))
+		return nil, fmt.Errorf("gocraft: player.join has %d fields, want 2", len(fields))
 	}
 	player, err := playerFrom(fields[0])
 	if err != nil {
@@ -53,7 +53,7 @@ func playerJoinFrom(fields []abi.Value) (*PlayerJoinEvent, error) {
 
 func blockBreakFrom(fields []abi.Value) (*BlockBreakEvent, error) {
 	if len(fields) != 5 {
-		return nil, fmt.Errorf("pluginapi: block.break has %d fields, want 5", len(fields))
+		return nil, fmt.Errorf("gocraft: block.break has %d fields, want 5", len(fields))
 	}
 	player, err := playerFrom(fields[0])
 	if err != nil {

@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 // would.
 func (s *runtimeState) invokeCommand(invocation abi.CommandInvocation) abi.CommandResult {
 	if !s.enabled || s.context == nil {
-		return abi.CommandResult{Error: "pluginapi: plugin is not enabled"}
+		return abi.CommandResult{Error: "gocraft: plugin is not enabled"}
 	}
 	call, err := commandContextFrom(invocation)
 	if err != nil {
@@ -39,7 +39,7 @@ func (s *runtimeState) invokeCommand(invocation abi.CommandInvocation) abi.Comma
 }
 
 // hostCallMessage is the host call that delivers a line to a player. Named here
-// rather than imported from the host: pluginapi is compiled into plugin
+// rather than imported from the host: this package is compiled into plugin
 // binaries, which must not link the server.
 const hostCallMessage = "chat.message"
 
@@ -68,11 +68,11 @@ func commandValuesFrom(arguments []abi.CommandArgument) (CommandValues, error) {
 	values := make(CommandValues, len(arguments))
 	for _, argument := range arguments {
 		if _, duplicate := values[argument.Name]; duplicate {
-			return nil, fmt.Errorf("pluginapi: duplicate command argument %s", argument.Name)
+			return nil, fmt.Errorf("gocraft: duplicate command argument %s", argument.Name)
 		}
 		decoded, err := commandValueFrom(CommandValueKind(argument.Type), argument.Value)
 		if err != nil {
-			return nil, fmt.Errorf("pluginapi: command argument %s: %w", argument.Name, err)
+			return nil, fmt.Errorf("gocraft: command argument %s: %w", argument.Name, err)
 		}
 		values[argument.Name] = decoded
 	}

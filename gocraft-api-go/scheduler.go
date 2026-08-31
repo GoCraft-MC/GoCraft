@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"context"
@@ -21,12 +21,12 @@ func (s *Scheduler) Every(interval time.Duration, task func()) (TaskID, error) {
 
 func (s *Scheduler) schedule(delay time.Duration, repeat bool, task func()) (TaskID, error) {
 	if delay <= 0 || task == nil {
-		return 0, fmt.Errorf("pluginapi: task and positive duration are required")
+		return 0, fmt.Errorf("gocraft: task and positive duration are required")
 	}
 	s.mu.Lock()
 	if !s.active {
 		s.mu.Unlock()
-		return 0, fmt.Errorf("pluginapi: scheduler is disabled")
+		return 0, fmt.Errorf("gocraft: scheduler is disabled")
 	}
 	s.next++
 	id := s.next

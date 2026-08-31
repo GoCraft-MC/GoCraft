@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -20,10 +20,10 @@ func newRuntimeState(metadata Metadata, implementation Plugin) *runtimeState {
 
 func (s *runtimeState) load(pluginID, dataDirectory string) ([]string, error) {
 	if s.context != nil {
-		return nil, fmt.Errorf("pluginapi: plugin is already loaded")
+		return nil, fmt.Errorf("gocraft: plugin is already loaded")
 	}
 	if pluginID != s.metadata.ID {
-		return nil, fmt.Errorf("pluginapi: executable is %s, bundle requested %s", s.metadata.ID, pluginID)
+		return nil, fmt.Errorf("gocraft: executable is %s, bundle requested %s", s.metadata.ID, pluginID)
 	}
 	logger := slog.Default().With("plugin", s.metadata.ID)
 	s.context = newContext(s.metadata, dataDirectory, logger)

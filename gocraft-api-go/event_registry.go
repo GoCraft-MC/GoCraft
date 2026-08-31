@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -11,12 +11,12 @@ import (
 func (e *Events) On(eventType string, handler EventHandler) error {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" || handler == nil {
-		return fmt.Errorf("pluginapi: event type and handler are required")
+		return fmt.Errorf("gocraft: event type and handler are required")
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if !e.active {
-		return fmt.Errorf("pluginapi: event registry is disabled")
+		return fmt.Errorf("gocraft: event registry is disabled")
 	}
 	e.listeners[eventType] = append(e.listeners[eventType], handler)
 	return nil
@@ -24,14 +24,14 @@ func (e *Events) On(eventType string, handler EventHandler) error {
 
 func (e *Events) OnPlayerJoin(handler func(*PlayerJoinEvent)) error {
 	if handler == nil {
-		return fmt.Errorf("pluginapi: player join handler is required")
+		return fmt.Errorf("gocraft: player join handler is required")
 	}
 	return e.On(EventPlayerJoin, func(event Event) { handler(event.(*PlayerJoinEvent)) })
 }
 
 func (e *Events) OnBlockBreak(handler func(*BlockBreakEvent)) error {
 	if handler == nil {
-		return fmt.Errorf("pluginapi: block break handler is required")
+		return fmt.Errorf("gocraft: block break handler is required")
 	}
 	return e.On(EventBlockBreak, func(event Event) { handler(event.(*BlockBreakEvent)) })
 }

@@ -1,4 +1,4 @@
-package pluginapi
+package gocraft
 
 import (
 	"fmt"
@@ -58,7 +58,7 @@ func commandValueFrom(kind CommandValueKind, value abi.Value) (CommandValue, err
 		// a tick is fifty of them.
 		decoded.Duration = time.Duration(value.Int64) * time.Millisecond
 	default:
-		return decoded, fmt.Errorf("pluginapi: unsupported command value kind %d", kind)
+		return decoded, fmt.Errorf("gocraft: unsupported command value kind %d", kind)
 	}
 	return decoded, nil
 }
@@ -74,11 +74,11 @@ func itemFrom(value abi.Value) (Item, error) {
 		return Item{}, err
 	}
 	if entry[1].Kind != abi.ValueInt64 || entry[2].Kind != abi.ValueInt64 {
-		return Item{}, fmt.Errorf("pluginapi: item count and damage are not integers")
+		return Item{}, fmt.Errorf("gocraft: item count and damage are not integers")
 	}
 	return Item{ID: id, Count: entry[1].Int64, Damage: entry[2].Int64}, nil
 }
 
 func wrongCommandValue(kind CommandValueKind) error {
-	return fmt.Errorf("pluginapi: invalid value for command kind %d", kind)
+	return fmt.Errorf("gocraft: invalid value for command kind %d", kind)
 }
