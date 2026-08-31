@@ -271,6 +271,38 @@ func (s *Supervisor) Dispatch(ctx context.Context, pluginID string, event *abi.E
 	return decodeVerdict(verdict)
 }
 
+// Invoke runs one command executor in the runtime that loaded it.
+//
+// Unlike Dispatch this is not on the tick's critical path — it answers someone
+// who typed a line — but it blocks the caller all the same, so ctx is what
+// bounds a handler that never returns.
+//
+// A handler that fails reports it in the result, not as an error here: the
+// command was delivered and answered, and telling those two apart is what lets
+// the caller show the sender a reason instead of a transport failure.
+func (s *Supervisor) Invoke(ctx context.Context, pluginID string, invocation abi.CommandInvocation) (abi.CommandResult, error) {
+	encoded, err := encodeCommandInvocation(invocation)
+	if err != nil {
+		return abi.CommandResult{}, err
+	}
+	encoded.PluginId = pluginID
+	conn, err := s.conn()
+	if err != nil {
+		return abi.CommandResult{}, err
+	}
+	reply, err := conn.Request(ctx, &wire.Envelope{Body: &wire.Envelope_Invoke{Invoke: encoded}})
+	if err != nil {
+		return abi.CommandResult{}, fmt.Errorf("ipc: %s: invoke executor %d in %s: %w",
+			s.config.Runtime, invocation.Executor, pluginID, err)
+	}
+	invoked := reply.GetInvoked()
+	if invoked == nil {
+		return abi.CommandResult{}, fmt.Errorf("ipc: %s: %w: answered INVOKE with %T",
+			s.config.Runtime, ErrProtocol, reply.GetBody())
+	}
+	return decodeCommandResult(invoked)
+}
+
 // Unload asks the runtime to drop one plugin.
 //
 // The schema carries no acknowledgement for UNLOAD, so this reports that the

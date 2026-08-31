@@ -98,6 +98,8 @@ func runFakeRuntime(behaviour, socket string) {
 			codec.Send(fakeLoadReply(behaviour, envelope))
 		case *wire.Envelope_Dispatch:
 			codec.Send(fakeDispatchReply(behaviour, envelope))
+		case *wire.Envelope_Invoke:
+			codec.Send(fakeInvokeReply(behaviour, envelope))
 		}
 	}
 }
@@ -149,6 +151,35 @@ func fakeDispatchReply(behaviour string, envelope *wire.Envelope) *wire.Envelope
 				Fields: []*wire.Value{{Kind: &wire.Value_Int64Value{Int64Value: int64(event.GetTypeId())}}},
 			}},
 		},
+	}}
+}
+
+// fakeInvokeReply echoes back what INVOKE carried rather than answering a
+// constant, so a test can prove the sender and the arguments survived the
+// crossing instead of only that a reply came back.
+func fakeInvokeReply(behaviour string, envelope *wire.Envelope) *wire.Envelope {
+	switch behaviour {
+	case "invoke-nonsense":
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Pong{Pong: &wire.Pong{}}}
+	case "command-fails":
+		return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Invoked{
+			Invoked: &wire.Invoked{Error: "no region named spawn"},
+		}}
+	}
+	invoke := envelope.GetInvoke()
+	fields := []*wire.Value{
+		{Kind: &wire.Value_StringValue{StringValue: invoke.GetPluginId()}},
+		{Kind: &wire.Value_Int64Value{Int64Value: int64(invoke.GetExecutor())}},
+		{Kind: &wire.Value_StringValue{StringValue: invoke.GetSender().GetName()}},
+	}
+	for _, argument := range invoke.GetArguments() {
+		fields = append(fields,
+			&wire.Value{Kind: &wire.Value_StringValue{StringValue: argument.GetName()}},
+			&wire.Value{Kind: &wire.Value_Int64Value{Int64Value: int64(argument.GetType())}},
+			argument.GetValue())
+	}
+	return &wire.Envelope{Seq: envelope.GetSeq(), Body: &wire.Envelope_Invoked{
+		Invoked: &wire.Invoked{Effects: []*wire.HostCall{{Type: "chat.message", Fields: fields}}},
 	}}
 }
 

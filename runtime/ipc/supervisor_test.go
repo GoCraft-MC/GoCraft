@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -276,5 +277,91 @@ func TestSupervisorStopIsNotReportedAsAFailure(t *testing.T) {
 	}
 	if err := supervisor.Err(); err != nil {
 		t.Fatalf("Err() = %v after a clean stop", err)
+	}
+}
+
+func regionInvocation() abi.CommandInvocation {
+	return abi.CommandInvocation{
+		Executor: 7,
+		Sender: abi.CommandSender{
+			Player: abi.List(abi.Bytes(make([]byte, 16)), abi.String("oreo"), abi.String("java")),
+			Name:   "oreo",
+			Permissions: []abi.Value{
+				abi.List(abi.String("worldguard.region.define"), abi.Bool(true)),
+			},
+		},
+		Arguments: []abi.CommandArgument{
+			{Name: "name", Type: abi.CommandArgumentString, Value: abi.String("spawn")},
+			{Name: "radius", Type: abi.CommandArgumentInteger, Value: abi.Int64(32)},
+		},
+	}
+}
+
+// The executor, the sender and every argument have to arrive intact: the host
+// parsed the line once and the runtime is not going to parse it again, so
+// anything dropped here is a value a handler silently reads as zero.
+func TestSupervisorInvokesACommand(t *testing.T) {
+	supervisor := startedSupervisor(t, "ok")
+
+	result, err := supervisor.Invoke(t.Context(), "fr.oreo.hello", regionInvocation())
+	if err != nil {
+		t.Fatalf("Invoke() = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result error = %q, want none", result.Error)
+	}
+	if len(result.Effects) != 1 || result.Effects[0].Type != "chat.message" {
+		t.Fatalf("Invoke() effects = %+v", result.Effects)
+	}
+	fields := result.Effects[0].Fields
+	want := []abi.Value{
+		abi.String("fr.oreo.hello"),
+		abi.Int64(7),
+		abi.String("oreo"),
+		abi.String("name"), abi.Int64(int64(abi.CommandArgumentString)), abi.String("spawn"),
+		abi.String("radius"), abi.Int64(int64(abi.CommandArgumentInteger)), abi.Int64(32),
+	}
+	if len(fields) != len(want) {
+		t.Fatalf("Invoke() echoed %d fields, want %d: %+v", len(fields), len(want), fields)
+	}
+	for index, value := range want {
+		if !reflect.DeepEqual(fields[index], value) {
+			t.Fatalf("Invoke() echoed field %d = %+v, want %+v", index, fields[index], value)
+		}
+	}
+}
+
+// A handler that fails is not a transport failure. Conflating the two would
+// show the sender "connection reset" where the plugin said "no region named
+// spawn", and would make the host treat a working runtime as a broken one.
+func TestSupervisorReportsACommandThatFailed(t *testing.T) {
+	supervisor := startedSupervisor(t, "command-fails")
+
+	result, err := supervisor.Invoke(t.Context(), "fr.oreo.hello", regionInvocation())
+	if err != nil {
+		t.Fatalf("Invoke() = %v, want the failure in the result", err)
+	}
+	if result.Error != "no region named spawn" {
+		t.Fatalf("Invoke() result error = %q", result.Error)
+	}
+}
+
+func TestSupervisorRefusesAWrongAnswerToInvoke(t *testing.T) {
+	supervisor := startedSupervisor(t, "invoke-nonsense")
+
+	if _, err := supervisor.Invoke(t.Context(), "fr.oreo.hello", regionInvocation()); !errors.Is(err, ErrProtocol) {
+		t.Fatalf("Invoke() = %v, want ErrProtocol", err)
+	}
+}
+
+// An argument the host cannot name a type for never reaches the socket. It
+// would arrive as UNSPECIFIED and the runtime would have to guess.
+func TestSupervisorRefusesAnUntypedArgument(t *testing.T) {
+	supervisor := startedSupervisor(t, "ok")
+
+	invocation := regionInvocation()
+	invocation.Arguments[1].Type = abi.CommandArgumentInvalid
+	if _, err := supervisor.Invoke(t.Context(), "fr.oreo.hello", invocation); err == nil {
+		t.Fatal("Invoke() accepted an argument with no type")
 	}
 }

@@ -248,3 +248,81 @@ func decodeVerdict(verdict *wire.Verdict) (abi.Verdict, error) {
 	}
 	return abi.Verdict{Cancelled: verdict.GetCancelled(), Mutations: mutations, Effects: effects}, nil
 }
+
+func encodeCommandArgumentType(kind abi.CommandArgumentType) (wire.CommandArgumentType, error) {
+	switch kind {
+	case abi.CommandArgumentInteger:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_INTEGER, nil
+	case abi.CommandArgumentDecimal:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_DECIMAL, nil
+	case abi.CommandArgumentString:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_STRING, nil
+	case abi.CommandArgumentGreedy:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_GREEDY, nil
+	case abi.CommandArgumentPlayer:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_PLAYER, nil
+	case abi.CommandArgumentBlockPos:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_BLOCK_POS, nil
+	case abi.CommandArgumentBlockState:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_BLOCK_STATE, nil
+	case abi.CommandArgumentItem:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_ITEM, nil
+	case abi.CommandArgumentDuration:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_DURATION, nil
+	case abi.CommandArgumentEnum:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_ENUM, nil
+	case abi.CommandArgumentCustom:
+		return wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_CUSTOM, nil
+	default:
+		return 0, fmt.Errorf("ipc: unknown command argument type %d", kind)
+	}
+}
+
+func encodeCommandSender(sender abi.CommandSender) (*wire.CommandSender, error) {
+	player, err := encodeValue(sender.Player)
+	if err != nil {
+		return nil, err
+	}
+	permissions, err := encodeValues(sender.Permissions)
+	if err != nil {
+		return nil, err
+	}
+	return &wire.CommandSender{Player: player, Name: sender.Name, Permissions: permissions}, nil
+}
+
+func encodeCommandInvocation(invocation abi.CommandInvocation) (*wire.Invoke, error) {
+	sender, err := encodeCommandSender(invocation.Sender)
+	if err != nil {
+		return nil, err
+	}
+	arguments := make([]*wire.CommandArgument, 0, len(invocation.Arguments))
+	for _, argument := range invocation.Arguments {
+		kind, err := encodeCommandArgumentType(argument.Type)
+		if err != nil {
+			return nil, fmt.Errorf("ipc: command argument %s: %w", argument.Name, err)
+		}
+		value, err := encodeValue(argument.Value)
+		if err != nil {
+			return nil, fmt.Errorf("ipc: command argument %s: %w", argument.Name, err)
+		}
+		arguments = append(arguments, &wire.CommandArgument{
+			Name: argument.Name, Type: kind, Value: value,
+		})
+	}
+	return &wire.Invoke{Executor: invocation.Executor, Sender: sender, Arguments: arguments}, nil
+}
+
+func decodeCommandResult(invoked *wire.Invoked) (abi.CommandResult, error) {
+	if invoked == nil {
+		return abi.CommandResult{}, fmt.Errorf("ipc: missing command result")
+	}
+	var effects []abi.HostCall
+	for _, effect := range invoked.GetEffects() {
+		call, err := decodeHostCall(effect)
+		if err != nil {
+			return abi.CommandResult{}, err
+		}
+		effects = append(effects, call)
+	}
+	return abi.CommandResult{Error: invoked.GetError(), Effects: effects}, nil
+}
