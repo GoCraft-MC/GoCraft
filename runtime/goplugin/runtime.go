@@ -1,0 +1,77 @@
+// Package goplugin runs compiled GoCraft plugins in isolated child processes.
+package goplugin
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sync"
+	"time"
+
+	"GoCraft/core/plugin"
+	"GoCraft/runtime/ipc"
+)
+
+const (
+	RuntimeName = "go"
+	abiVersion  = 1
+)
+
+type Config struct {
+	ExtractDirectory string
+	SocketDirectory  string
+	TickRate         uint32
+	EventBudget      time.Duration
+	StartTimeout     time.Duration
+	Liveness         ipc.Liveness
+	Stdout           io.Writer
+	Stderr           io.Writer
+	// Spawn replaces process creation in tests.
+	Spawn func(executable string) ipc.Spawn
+}
+
+type Runtime struct {
+	config Config
+
+	mu        sync.Mutex
+	started   bool
+	instances map[string]*Instance
+}
+
+func New(config Config) *Runtime {
+	return &Runtime{config: config, instances: make(map[string]*Instance)}
+}
+
+func (*Runtime) Name() string { return RuntimeName }
+
+// Provision is intentionally empty: a native plugin carries its own runtime.
+func (*Runtime) Provision(context.Context, plugin.Provisioner) error { return nil }
+
+func (r *Runtime) Start(context.Context, plugin.Host) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.started {
+		return fmt.Errorf("go runtime: already started")
+	}
+	r.started = true
+	return nil
+}
+
+func (r *Runtime) add(instance *Instance) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.started {
+		return fmt.Errorf("go runtime: not started")
+	}
+	if _, exists := r.instances[instance.manifest.ID]; exists {
+		return fmt.Errorf("go runtime: plugin %s is already loaded", instance.manifest.ID)
+	}
+	r.instances[instance.manifest.ID] = instance
+	return nil
+}
+
+func (r *Runtime) remove(id string) {
+	r.mu.Lock()
+	delete(r.instances, id)
+	r.mu.Unlock()
+}

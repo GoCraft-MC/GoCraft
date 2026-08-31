@@ -167,6 +167,11 @@ func encodeEvent(event *abi.Event) (*wire.Event, error) {
 	}, nil
 }
 
+// EncodeEvent converts a shared event for transmission to a runtime.
+func EncodeEvent(event *abi.Event) (*wire.Event, error) {
+	return encodeEvent(event)
+}
+
 func decodeEvent(event *wire.Event) (*abi.Event, error) {
 	if event == nil {
 		return nil, fmt.Errorf("ipc: missing event")
@@ -185,6 +190,11 @@ func decodeEvent(event *wire.Event) (*abi.Event, error) {
 		Fields:    fields,
 		OnFailure: policy,
 	}, nil
+}
+
+// DecodeEvent converts an untrusted runtime wire event into the shared ABI form.
+func DecodeEvent(event *wire.Event) (*abi.Event, error) {
+	return decodeEvent(event)
 }
 
 func encodeHostCall(call abi.HostCall) (*wire.HostCall, error) {
@@ -224,6 +234,11 @@ func encodeVerdict(verdict abi.Verdict) (*wire.Verdict, error) {
 		effects = append(effects, call)
 	}
 	return &wire.Verdict{Cancelled: verdict.Cancelled, Mutations: mutations, Effects: effects}, nil
+}
+
+// EncodeVerdict converts a plugin verdict for transmission to the host.
+func EncodeVerdict(verdict abi.Verdict) (*wire.Verdict, error) {
+	return encodeVerdict(verdict)
 }
 
 func decodeVerdict(verdict *wire.Verdict) (abi.Verdict, error) {
