@@ -26,6 +26,8 @@ type Config struct {
 	Liveness         ipc.Liveness
 	Stdout           io.Writer
 	Stderr           io.Writer
+	// Spawn replaces process creation in tests.
+	Spawn func(executable string) ipc.Spawn
 }
 
 type Runtime struct {
