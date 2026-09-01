@@ -258,8 +258,9 @@ func canPlaceWorkstationSlot(kind string, index int, stack player.ItemStack) boo
 	case "minecraft:enchanting_table":
 		return (index == 1 && stack.ItemID == "minecraft:lapis_lazuli") || index == 0
 	case "minecraft:loom":
-		return (index == 0 && strings.HasSuffix(stack.ItemID, "_banner")) ||
-			(index == 1 && isDye(stack.ItemID)) || (index == 2 && strings.HasSuffix(stack.ItemID, "_banner_pattern"))
+		return (index == 0 && itemregistry.HasTag(stack.ItemID, "minecraft:banners")) ||
+			(index == 1 && itemregistry.HasTag(stack.ItemID, "gocraft:dyes")) ||
+			(index == 2 && itemregistry.HasTag(stack.ItemID, "gocraft:banner_patterns"))
 	case "minecraft:smithing_table":
 		return (index == 0 && strings.HasSuffix(stack.ItemID, "_smithing_template")) ||
 			(index == 1 && player.MaxDurability(stack.ItemID) > 0) || index == 2
@@ -505,7 +506,8 @@ func smithingOperation(slots []player.ItemStack) workstationOperation {
 }
 
 func loomOperation(slots []player.ItemStack) workstationOperation {
-	if !strings.HasSuffix(slots[0].ItemID, "_banner") || !isDye(slots[1].ItemID) {
+	if !itemregistry.HasTag(slots[0].ItemID, "minecraft:banners") ||
+		!itemregistry.HasTag(slots[1].ItemID, "gocraft:dyes") {
 		return workstationOperation{}
 	}
 	result := slots[0]
@@ -515,20 +517,6 @@ func loomOperation(slots []player.ItemStack) workstationOperation {
 		consume[2] = 1
 	}
 	return workstationOperation{result: result, consume: consume}
-}
-
-func isDye(itemID string) bool {
-	if !strings.HasSuffix(itemID, "_dye") {
-		return false
-	}
-	colour := strings.TrimSuffix(strings.TrimPrefix(itemID, "minecraft:"), "_dye")
-	switch colour {
-	case "white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray",
-		"light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black":
-		return true
-	default:
-		return false
-	}
 }
 
 func stonecutterOperation(slots []player.ItemStack, selection int) workstationOperation {
