@@ -19,15 +19,24 @@ func newEvents(logger *slog.Logger) *Events {
 }
 
 // Commands owns command callbacks registered by one plugin.
+//
+// tree is what the bundle declared, so a handler is registered against the path
+// an author wrote in their command tree rather than against the executor id
+// that tree happened to assign it.
 type Commands struct {
 	mu       sync.RWMutex
 	logger   *slog.Logger
+	tree     *commandTree
 	handlers map[uint32]CommandHandler
 	active   bool
 }
 
-func newCommands(logger *slog.Logger) *Commands {
-	return &Commands{logger: logger, handlers: make(map[uint32]CommandHandler), active: true}
+func newCommands(logger *slog.Logger, tree *commandTree) *Commands {
+	if tree == nil {
+		tree = &commandTree{executors: map[string]uint32{}}
+	}
+	return &Commands{logger: logger, tree: tree,
+		handlers: make(map[uint32]CommandHandler), active: true}
 }
 
 // Scheduler owns asynchronous tasks registered by one plugin.

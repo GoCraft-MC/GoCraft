@@ -26,7 +26,7 @@ func (*eventPlugin) OnDisable() error { return nil }
 func TestRuntimeDispatchesEventsOnceAndReturnsCancellation(t *testing.T) {
 	implementation := &eventPlugin{}
 	state := newRuntimeState(Metadata{ID: "events"}, implementation)
-	if _, err := state.load("events", "data"); err != nil {
+	if _, err := state.load(loadRequest{pluginID: "events", dataDirectory: "data"}); err != nil {
 		t.Fatal(err)
 	}
 	player := abi.List(abi.Bytes(make([]byte, 16)), abi.String("Elias"), abi.String("java"))
@@ -57,7 +57,7 @@ func TestRuntimeDispatchesEventsOnceAndReturnsCancellation(t *testing.T) {
 
 func TestRuntimeRejectsMalformedEvents(t *testing.T) {
 	state := newRuntimeState(Metadata{ID: "events"}, &eventPlugin{})
-	if _, err := state.load("events", "data"); err != nil {
+	if _, err := state.load(loadRequest{pluginID: "events", dataDirectory: "data"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := state.dispatch(&abi.Event{Type: EventBlockBreak}); err == nil {

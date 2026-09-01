@@ -33,7 +33,7 @@ func (p *lifecyclePlugin) OnDisable() error {
 func TestRuntimeStateLifecycle(t *testing.T) {
 	implementation := &lifecyclePlugin{}
 	state := newRuntimeState(Metadata{ID: "example", Version: "1", APIVersion: 1}, implementation)
-	events, err := state.load("example", "plugin-data")
+	events, err := state.load(loadRequest{pluginID: "example", dataDirectory: "plugin-data"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestRuntimeStateLifecycle(t *testing.T) {
 	if implementation.context.DataDirectory() != "plugin-data" || !state.enabled {
 		t.Fatal("load did not expose the context or enable the plugin")
 	}
-	if _, err := state.load("example", "plugin-data"); err == nil {
+	if _, err := state.load(loadRequest{pluginID: "example", dataDirectory: "plugin-data"}); err == nil {
 		t.Fatal("duplicate load was accepted")
 	}
 	if err := state.disable(); err != nil {
@@ -57,7 +57,7 @@ func TestRuntimeStateLifecycle(t *testing.T) {
 func TestRuntimeStateFailuresCleanOwnership(t *testing.T) {
 	loadFailure := &lifecyclePlugin{loadErr: errors.New("bad config")}
 	state := newRuntimeState(Metadata{ID: "example"}, loadFailure)
-	if _, err := state.load("example", "data"); err == nil || state.context != nil {
+	if _, err := state.load(loadRequest{pluginID: "example", dataDirectory: "data"}); err == nil || state.context != nil {
 		t.Fatal("load failure retained plugin state")
 	}
 	if loadFailure.stops != 0 {
@@ -66,7 +66,7 @@ func TestRuntimeStateFailuresCleanOwnership(t *testing.T) {
 
 	enableFailure := &lifecyclePlugin{enableErr: errors.New("not ready")}
 	state = newRuntimeState(Metadata{ID: "example"}, enableFailure)
-	if _, err := state.load("example", "data"); err == nil || state.context != nil {
+	if _, err := state.load(loadRequest{pluginID: "example", dataDirectory: "data"}); err == nil || state.context != nil {
 		t.Fatal("enable failure retained plugin state")
 	}
 	if enableFailure.stops != 1 {

@@ -28,9 +28,11 @@ func TestRuntimeCleansUpPluginFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			bundle := plugin.Bundle{
-				Path:          writeTestBundle(t, "bin/example", []byte("placeholder")),
+				Path:          writeTestBundleWith(t, "bin/example", []byte("placeholder"), helperCommandTree(t)),
 				DataDirectory: t.TempDir(),
-				Manifest:      plugin.Manifest{ID: "example", Entry: "bin/example"},
+				Manifest: plugin.Manifest{
+					ID: "example", Entry: "bin/example", CommandTree: commandTreeEntry,
+				},
 			}
 			if _, err := runtime.Load(t.Context(), bundle); err == nil ||
 				!strings.Contains(err.Error(), phase+" failure") {

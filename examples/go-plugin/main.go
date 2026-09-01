@@ -31,7 +31,9 @@ func (p *examplePlugin) OnLoad(context gocraft.Context) error {
 	}); err != nil {
 		return err
 	}
-	return context.Commands().Register(1, func(call *gocraft.CommandContext) error {
+	// The path, as commands.pb spells it. The executor id that tree assigns is
+	// the tree's business, not this file's.
+	return context.Commands().Register("greet", func(call *gocraft.CommandContext) error {
 		call.Reply(fmt.Sprintf("Hello, %s!", call.SenderName))
 		return nil
 	})

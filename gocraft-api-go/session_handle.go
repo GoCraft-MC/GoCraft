@@ -34,7 +34,12 @@ func (s *pluginSession) handle(envelope *wire.Envelope) {
 }
 
 func (s *pluginSession) handleLoad(seq uint64, load *wire.Load) {
-	events, err := s.state.load(load.GetPluginId(), load.GetDataDirectory())
+	events, err := s.state.load(loadRequest{
+		pluginID:      load.GetPluginId(),
+		bundlePath:    load.GetBundlePath(),
+		dataDirectory: load.GetDataDirectory(),
+		commandTree:   load.GetCommandTree(),
+	})
 	if err != nil {
 		s.send(&wire.Envelope{Seq: seq, Body: &wire.Envelope_Fail{Fail: &wire.Fail{
 			PluginId: load.GetPluginId(), Reason: err.Error(),

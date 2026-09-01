@@ -40,6 +40,12 @@ func TestExtractRejectsUnsafeOrMissingEntry(t *testing.T) {
 }
 
 func writeTestBundle(t *testing.T, entry string, content []byte) string {
+	return writeTestBundleWith(t, entry, content, nil)
+}
+
+// writeTestBundleWith packs an executable and, when one is given, the command
+// tree a plugin registers its handlers against.
+func writeTestBundleWith(t *testing.T, entry string, content, commandTree []byte) string {
 	t.Helper()
 	name := filepath.Join(t.TempDir(), "example.gcpkg")
 	file, err := os.Create(name)
@@ -53,6 +59,15 @@ func writeTestBundle(t *testing.T, entry string, content []byte) string {
 	}
 	if _, err := writer.Write(content); err != nil {
 		t.Fatal(err)
+	}
+	if commandTree != nil {
+		trees, err := archive.Create(commandTreeEntry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := trees.Write(commandTree); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := archive.Close(); err != nil {
 		t.Fatal(err)

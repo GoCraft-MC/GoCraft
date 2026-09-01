@@ -5,18 +5,32 @@ import (
 	"runtime/debug"
 )
 
-// Register binds a local executor ID from commands.pb to a callback.
-func (c *Commands) Register(executor uint32, handler CommandHandler) error {
-	if executor == 0 || handler == nil {
-		return fmt.Errorf("gocraft: command executor and handler are required")
+// Register binds a callback to one path through the bundle's command tree:
+//
+//	ctx.Commands().Register("shop sell <price>", func(call *gocraft.CommandContext) error {
+//	    return sell(call.Sender, call.Args.Decimal("price"))
+//	})
+//
+// The path, not the executor id the tree assigns. Ids are chosen by whatever
+// built the tree, so naming one here would write it down a second time — free
+// to disagree with the first the day a command is inserted above it. A path
+// that names nothing is refused at registration, with the paths the bundle does
+// declare, rather than becoming a handler that silently never runs.
+func (c *Commands) Register(commandPath string, handler CommandHandler) error {
+	if handler == nil {
+		return fmt.Errorf("gocraft: a command handler is required")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.active {
 		return fmt.Errorf("gocraft: command registry is disabled")
 	}
+	executor, err := c.tree.lookup(commandPath)
+	if err != nil {
+		return err
+	}
 	if _, duplicate := c.handlers[executor]; duplicate {
-		return fmt.Errorf("gocraft: command executor %d is already registered", executor)
+		return fmt.Errorf("gocraft: command %q is already registered", commandPath)
 	}
 	c.handlers[executor] = handler
 	return nil

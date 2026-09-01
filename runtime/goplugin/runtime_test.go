@@ -7,10 +7,36 @@ import (
 	"time"
 
 	abi "GoCraft/abi/v1"
+	wire "GoCraft/abi/v1/wire"
 	"GoCraft/core/command"
 	"GoCraft/core/player"
 	"GoCraft/core/plugin"
+
+	"google.golang.org/protobuf/proto"
 )
+
+// commandTreeEntry is where the test bundle keeps its tree, as a manifest would
+// name it.
+const commandTreeEntry = "commands.pb"
+
+// helperCommandTree declares the one command the helper plugin registers. The
+// executor id lives here and nowhere else: the plugin binds to the path.
+func helperCommandTree(t *testing.T) []byte {
+	t.Helper()
+	encoded, err := proto.Marshal(&wire.CommandTree{Version: 1, Children: []*wire.CommandNode{{
+		Kind: wire.CommandNodeKind_COMMAND_NODE_KIND_LITERAL, Name: "give",
+		Children: []*wire.CommandNode{{
+			Kind:         wire.CommandNodeKind_COMMAND_NODE_KIND_ARGUMENT,
+			Name:         "amount",
+			ArgumentType: wire.CommandArgumentType_COMMAND_ARGUMENT_TYPE_INTEGER,
+			Executor:     7,
+		}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
 
 type testSender struct{ messages []string }
 
@@ -37,11 +63,12 @@ func TestRuntimeLoadsDispatchesCommandsAndStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle := plugin.Bundle{
-		Path:          writeTestBundle(t, "bin/example", []byte("placeholder")),
+		Path:          writeTestBundleWith(t, "bin/example", []byte("placeholder"), helperCommandTree(t)),
 		DataDirectory: t.TempDir(),
 		Manifest: plugin.Manifest{
 			ID: "example", Version: "1.0.0", APIVersion: 1,
 			Runtime: RuntimeName, Entry: "bin/example",
+			CommandTree:   commandTreeEntry,
 			Subscriptions: []plugin.Subscription{{Event: "block.break"}},
 		},
 	}

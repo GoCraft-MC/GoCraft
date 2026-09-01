@@ -22,7 +22,7 @@ func (*helperPlugin) OnLoad(context gocraft.Context) error {
 	}); err != nil {
 		return err
 	}
-	return context.Commands().Register(7, func(call *gocraft.CommandContext) error {
+	return context.Commands().Register("give <amount>", func(call *gocraft.CommandContext) error {
 		value, ok := call.Args.Integer("amount")
 		if !ok {
 			return fmt.Errorf("amount is missing")

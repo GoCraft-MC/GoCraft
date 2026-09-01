@@ -9,8 +9,18 @@ import (
 
 type wireCommandPlugin struct{}
 
+// commandsLoadRequest loads the test plugin from a bundle carrying the tree its
+// paths are registered against.
+func commandsLoadRequest(t *testing.T) loadRequest {
+	t.Helper()
+	return loadRequest{
+		pluginID: "commands", dataDirectory: "data",
+		bundlePath: bundleWithCommands(t, "commands.pb", shopNodes()), commandTree: "commands.pb",
+	}
+}
+
 func (*wireCommandPlugin) OnLoad(context Context) error {
-	return context.Commands().Register(7, func(call *CommandContext) error {
+	return context.Commands().Register("shop sell <price>", func(call *CommandContext) error {
 		amount, ok := call.Args.Integer("amount")
 		if !ok || amount != 3 || call.SenderName != "Console" || call.Sender != nil {
 			return errors.New("bad command context")
@@ -47,7 +57,7 @@ func consoleInvocation() abi.CommandInvocation {
 // also failed would leave them with nothing to read.
 func TestRuntimeCommandDispatchReturnsRepliesAndErrors(t *testing.T) {
 	state := newRuntimeState(Metadata{ID: "commands"}, &wireCommandPlugin{})
-	if _, err := state.load("commands", "data"); err != nil {
+	if _, err := state.load(commandsLoadRequest(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +78,7 @@ func TestRuntimeCommandDispatchReturnsRepliesAndErrors(t *testing.T) {
 // whichever field the plugin asked for, which is a value rather than a failure.
 func TestRuntimeCommandDispatchRejectsMalformedCall(t *testing.T) {
 	state := newRuntimeState(Metadata{ID: "commands"}, &wireCommandPlugin{})
-	if _, err := state.load("commands", "data"); err != nil {
+	if _, err := state.load(commandsLoadRequest(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +93,7 @@ func TestRuntimeCommandDispatchRejectsMalformedCall(t *testing.T) {
 // typed the command is waiting on the reply either way.
 func TestRuntimeCommandDispatchRejectsAnUnregisteredExecutor(t *testing.T) {
 	state := newRuntimeState(Metadata{ID: "commands"}, &wireCommandPlugin{})
-	if _, err := state.load("commands", "data"); err != nil {
+	if _, err := state.load(commandsLoadRequest(t)); err != nil {
 		t.Fatal(err)
 	}
 

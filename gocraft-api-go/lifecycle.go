@@ -6,6 +6,16 @@ import (
 	"runtime/debug"
 )
 
+// loadRequest is what the host sends with LOAD, in the plugin's own words.
+type loadRequest struct {
+	pluginID      string
+	bundlePath    string
+	dataDirectory string
+	// commandTree is where the tree sits inside the bundle, empty when the
+	// plugin declares no commands.
+	commandTree string
+}
+
 type runtimeState struct {
 	metadata       Metadata
 	implementation Plugin
@@ -18,15 +28,23 @@ func newRuntimeState(metadata Metadata, implementation Plugin) *runtimeState {
 	return &runtimeState{metadata: metadata, implementation: implementation}
 }
 
-func (s *runtimeState) load(pluginID, dataDirectory string) ([]string, error) {
+func (s *runtimeState) load(request loadRequest) ([]string, error) {
 	if s.context != nil {
 		return nil, fmt.Errorf("gocraft: plugin is already loaded")
 	}
-	if pluginID != s.metadata.ID {
-		return nil, fmt.Errorf("gocraft: executable is %s, bundle requested %s", s.metadata.ID, pluginID)
+	if request.pluginID != s.metadata.ID {
+		return nil, fmt.Errorf("gocraft: executable is %s, bundle requested %s", s.metadata.ID, request.pluginID)
+	}
+	// Read before anything is constructed: a bundle whose command tree cannot
+	// be read is a bundle whose commands would never run, and failing here
+	// gives the admin a reason instead of a plugin that loads and does half of
+	// what it says.
+	tree, err := loadCommandTree(request.bundlePath, request.commandTree)
+	if err != nil {
+		return nil, err
 	}
 	logger := slog.Default().With("plugin", s.metadata.ID)
-	s.context = newContext(s.metadata, dataDirectory, logger)
+	s.context = newContext(s.metadata, request.dataDirectory, tree, logger)
 	if err := s.call("load", func() error { return s.implementation.OnLoad(s.context) }); err != nil {
 		s.cleanup()
 		s.context = nil
