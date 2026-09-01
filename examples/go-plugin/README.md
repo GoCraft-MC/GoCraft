@@ -22,8 +22,9 @@ example:
 GOOS=linux GOARCH=amd64 go build -o examples/go-plugin/bin/example-go ./examples/go-plugin
 ```
 
-The command tree is generated as `commands.pb`. Its executor ID (`1`) matches
-the ID passed to `context.Commands().Register` in `main.go`.
+The command tree is generated as `commands.pb`. `main.go` registers its handler
+against the path through that tree — `greet` — and never against the executor ID
+the tree assigns it.
 
 Native plugins currently cannot be hot-reloaded or unloaded independently of
 their process. Rebuild the plugin whenever GoCraft's Go version or Plugin API

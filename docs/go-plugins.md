@@ -61,19 +61,35 @@ ctx.Events().OnBlockBreak(func(event *gocraft.BlockBreakEvent) {
 
 ## Commands
 
-Commands are declared in the bundle's generated `commands.pb`. Register the
-matching executor ID during `OnLoad`:
+Commands are declared in the bundle's generated `commands.pb`. Register a
+callback against the path through that tree during `OnLoad`:
 
 ```go
-ctx.Commands().Register(1, func(call *gocraft.CommandContext) error {
+ctx.Commands().Register("shop sell <price>", func(call *gocraft.CommandContext) error {
     call.Reply("Hello, " + call.SenderName)
     return nil
 })
 ```
 
-The host parses and validates arguments before the callback. Typed values are
-available through `CommandContext.Args`. Replies work for players and console
-senders.
+The path, not the executor ID the tree assigns. IDs are chosen by whatever built
+the tree, so naming one in plugin source would write it down a second time —
+free to disagree with the first the day a command is inserted above it. A path
+that names nothing in the bundle is refused at load, listing the paths the
+bundle does declare, rather than becoming a handler that silently never runs.
+Literals appear as written and arguments in angle brackets, the same spelling a
+Java plugin uses.
+
+The host owns everything before the callback. It matches the line against the
+tree, resolves each argument to the declared type, and checks the permissions
+guarding the path; the plugin never sees the raw line. Typed values arrive
+through `CommandContext.Args`, and `call.Can` answers from permissions the host
+resolved before sending the invocation.
+
+Replies are queued as effects and delivered on the next tick, the same path an
+event handler's effects take, so they reach players on either edition and the
+console alike. Java clients receive the plugin's commands in their command graph
+and tab-complete them; a Bedrock player can type them, but this server does not
+yet advertise any command list to Bedrock, plugin or built-in.
 
 ## Build a bundle
 
