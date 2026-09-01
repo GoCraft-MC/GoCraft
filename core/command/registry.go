@@ -32,6 +32,29 @@ func NewRegistry() *Registry {
 	}
 }
 
+// Replace installs a source's tree whether or not it already had one.
+//
+// Register refuses a second registration because two plugins claiming one id is
+// a mistake. The built-ins are the case where it is not: they are declared as
+// they are registered, so the tree grows through startup and every growth is a
+// new version for clients already connected. Replacing drops the previous
+// executors first, so a command that went away takes its handler with it.
+func (r *Registry) Replace(source Source, root Root, handlers map[ExecID]Handler) error {
+	key, err := sourceKey(source)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	if previous, exists := r.entries[key]; exists {
+		for _, executor := range previous.executors {
+			delete(r.handlers, executor)
+		}
+		delete(r.entries, key)
+	}
+	r.mu.Unlock()
+	return r.Register(source, root, handlers)
+}
+
 func (r *Registry) Register(source Source, root Root, handlers map[ExecID]Handler) error {
 	if err := Validate(&root); err != nil {
 		return err

@@ -104,3 +104,43 @@ func TestRegistryDoesNotRevokeCoreAsPlugin(t *testing.T) {
 		t.Fatalf("version = %d, want 1", registry.Version())
 	}
 }
+
+func TestReplaceSwapsATreeAndItsHandlers(t *testing.T) {
+	registry := NewRegistry()
+	first := Root{Children: []Node{Literal{Name: "time", Exec: 1}}}
+	if err := registry.Replace(Source{Kind: SourceCore}, first, commandHandlers(1)); err != nil {
+		t.Fatal(err)
+	}
+	version := registry.Version()
+
+	second := Root{Children: []Node{
+		Literal{Name: "time", Exec: 1}, Literal{Name: "weather", Exec: 2},
+	}}
+	handlers := map[ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
+	if err := registry.Replace(Source{Kind: SourceCore}, second, handlers); err != nil {
+		t.Fatal(err)
+	}
+	if registry.Version() <= version {
+		t.Fatal("replacing a tree did not bump the version")
+	}
+	if got := len(registry.Snapshot(commandSender{}).Root.Children); got != 2 {
+		t.Fatalf("replaced tree has %d commands, want 2", got)
+	}
+	// The executors of the tree that went away must go with it, or a stale id
+	// keeps calling a handler nothing can reach any more.
+	if len(registry.handlers) != 2 {
+		t.Fatalf("registry holds %d handlers after a replace", len(registry.handlers))
+	}
+}
+
+// Replacing one source still answers to the conflict rules of the others.
+func TestReplaceStillRefusesACoreConflict(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Replace(Source{Kind: SourceCore}, commandRoot("tp", 1), commandHandlers(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "shop"},
+		commandRoot("tp", 1), commandHandlers(1)); err == nil {
+		t.Fatal("a plugin took a core command name")
+	}
+}
