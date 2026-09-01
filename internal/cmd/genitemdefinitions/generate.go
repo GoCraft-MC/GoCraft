@@ -56,6 +56,7 @@ func generate(paths options) catalogue {
 		value.FuelTicks = ticks
 		items[itemID] = value
 	}
+	addGeneratedItemCategories(items, tags)
 	for tag, values := range tags {
 		sort.Strings(values)
 		tags[tag] = compactStrings(values)
