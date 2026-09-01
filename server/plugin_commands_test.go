@@ -10,6 +10,8 @@ import (
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
+	"GoCraft/java/handler"
+	"GoCraft/java/session"
 )
 
 // pluginCommandServer is the smallest server that can answer a plugin command:
@@ -136,5 +138,43 @@ func TestSplitIdentifierDefaultsAndRefuses(t *testing.T) {
 			t.Fatalf("splitIdentifier(%q) = (%q, %q, %t), want (%q, %q, %t)",
 				testCase.raw, namespace, name, ok, testCase.namespace, testCase.name, testCase.ok)
 		}
+	}
+}
+
+// The version is read once per tick and nothing is sent while it stands still.
+// A resend on every tick would mean shipping the whole command list twenty
+// times a second to everyone.
+func TestResendChangedCommandsOnlyFollowsTheVersion(t *testing.T) {
+	dispatcher := handler.NewDispatcher()
+	registry := command.NewRegistry()
+	dispatcher.SetCommandRegistry(registry)
+	server := &Server{cmds: dispatcher, sessions: session.NewManager()}
+
+	dispatcher.Register("first", func(handler.CommandContext) error { return nil })
+	server.resendChangedCommands()
+	settled := server.commandTreeVersion
+	if settled == 0 {
+		t.Fatal("the first tick recorded no version")
+	}
+
+	server.resendChangedCommands()
+	if server.commandTreeVersion != settled {
+		t.Fatal("an unchanged tree moved the recorded version")
+	}
+
+	dispatcher.Register("second", func(handler.CommandContext) error { return nil })
+	server.resendChangedCommands()
+	if server.commandTreeVersion <= settled {
+		t.Fatalf("a new command left the version at %d", server.commandTreeVersion)
+	}
+}
+
+// A server whose dispatcher has no registry never claims a version, so it
+// never resends.
+func TestResendChangedCommandsToleratesNoRegistry(t *testing.T) {
+	server := &Server{cmds: handler.NewDispatcher(), sessions: session.NewManager()}
+	server.resendChangedCommands()
+	if server.commandTreeVersion != 0 {
+		t.Fatalf("version = %d with no registry", server.commandTreeVersion)
 	}
 }

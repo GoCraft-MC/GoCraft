@@ -124,6 +124,11 @@ type Server struct {
 	// state while the simulation is reading it.
 	pluginEffects *coreplugin.MutationQueue
 
+	// commandTreeVersion is the registry version every connected client was
+	// last told about. Compared once per tick, because both editions are told
+	// their command list once and have no way to ask for it again.
+	commandTreeVersion uint64
+
 	// pendingJoins holds players who have joined but cannot yet be written to.
 	// See announceJoinWhenReachable.
 	pendingJoinsMu sync.Mutex
@@ -557,6 +562,10 @@ func New(cfg *config.Config) (*Server, error) {
 			configuredGameMode(cfg.DefaultGameMode),
 			difficultyID(cfg.Difficulty),
 		)
+		// The same tree the Java adapter renders. Installed here rather than
+		// passed to the constructor because a listener without it behaves
+		// exactly as this edition did before: it advertises nothing.
+		s.bedrockListener.SetCommandTree(s.cmds.CommandTree)
 		// Load manually-configured Bedrock packs from server.yml.
 		if cfg.ResourcePack.Bedrock.Enabled && len(cfg.ResourcePack.Bedrock.Paths) > 0 {
 			if packs, err := loadBedrockPacks(cfg.ResourcePack.Bedrock.Paths); err != nil {
@@ -1024,6 +1033,7 @@ func (s *Server) tickPlayerHunger() {
 func (s *Server) tickIntents() {
 	s.announceReachableJoins()
 	s.applyPluginEffects()
+	s.resendChangedCommands()
 	dr := s.intentBus.Drain()
 
 	for _, l := range dr.Lifecycle {

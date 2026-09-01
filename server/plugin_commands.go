@@ -9,6 +9,7 @@ import (
 	"GoCraft/core/command"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/handler"
 )
 
 // defaultNamespace is what an unqualified identifier means, as everywhere else
@@ -109,4 +110,32 @@ func validIdentifierPart(part string) bool {
 		}
 	}
 	return true
+}
+
+// resendChangedCommands tells every connected player when the command list
+// moved under them.
+//
+// The tree changes while people are online: a plugin loads and brings its
+// commands, or unloads and takes them away. Neither client can ask what changed
+// — Java is told once on join, Bedrock is told once and its packet replaces the
+// whole list — so the server has to notice and say so.
+//
+// The version is a counter on the registry, compared once per tick. Nothing is
+// sent while it stands still, which is every tick but the handful where a
+// plugin moved.
+func (s *Server) resendChangedCommands() {
+	if s.cmds == nil {
+		return
+	}
+	version := s.cmds.TreeVersion()
+	if version == s.commandTreeVersion {
+		return
+	}
+	s.commandTreeVersion = version
+	for _, online := range s.sessions.SnapshotAll() {
+		_ = handler.SyncCommandPermissions(online.Conn, online.Player, s.cmds)
+	}
+	if s.bedrockListener != nil {
+		s.bedrockListener.RefreshCommands()
+	}
 }
