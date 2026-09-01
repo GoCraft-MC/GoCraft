@@ -1,6 +1,10 @@
 package player
 
-import "strings"
+import (
+	"strings"
+
+	"GoCraft/core/itemregistry"
+)
 
 // InventorySize is the total number of slots in a Java Edition player inventory.
 //
@@ -201,55 +205,19 @@ func (s ItemStack) EffectiveFireworks() FireworkData {
 // damageable items GoCraft currently supports. A zero result means the item is
 // not damageable.
 func MaxDurability(itemID string) int {
-	if stats, ok := armorItemStatsByID[itemID]; ok {
-		return stats.maxDurability
-	}
-	switch itemID {
-	case "minecraft:bow":
-		return 384
-	case "minecraft:crossbow":
-		return 465
-	case "minecraft:trident":
-		return 250
-	case "minecraft:shield":
-		return 336
-	case "minecraft:fishing_rod", "minecraft:flint_and_steel", "minecraft:brush":
-		return 64
-	case "minecraft:shears":
-		return 238
-	case "minecraft:elytra":
-		return 432
-	case "minecraft:mace":
-		return 500
-	case "minecraft:carrot_on_a_stick":
-		return 25
-	case "minecraft:warped_fungus_on_a_stick":
-		return 100
-	}
-	for material, durability := range map[string]int{
-		"wooden": 59, "stone": 131, "iron": 250,
-		"golden": 32, "diamond": 1561, "netherite": 2031,
-	} {
-		prefix := "minecraft:" + material + "_"
-		if !strings.HasPrefix(itemID, prefix) {
-			continue
-		}
-		switch strings.TrimPrefix(itemID, prefix) {
-		case "sword", "pickaxe", "axe", "shovel", "hoe":
-			return durability
-		}
+	if definition, ok := itemregistry.Lookup(itemID); ok {
+		return definition.MaxDurability
 	}
 	return 0
 }
 
 // MaxStackSize returns the stack limit used by the inventory implementation.
 func MaxStackSize(itemID string) int {
-	if _, ok := armorItemStatsByID[itemID]; ok {
-		return 1
+	if definition, ok := itemregistry.Lookup(itemID); ok {
+		return definition.MaxStackSize
 	}
-	if MaxDurability(itemID) > 0 {
-		return 1
-	}
+	// Unknown/custom items retain the historical default until the custom item
+	// manager registers definitions directly.
 	return 64
 }
 
