@@ -86,6 +86,23 @@ func (e event) JavaClass() string {
 	return e.Message + "Event"
 }
 
+// SDKType is the struct a Go plugin's handler takes, e.g. BlockBreakEvent.
+// The same name as the Java class on purpose: an author moving between the two
+// runtimes should not have to learn the vocabulary twice.
+func (e event) SDKType() string {
+	return e.Message + "Event"
+}
+
+// SDKRegister is the typed registration, e.g. OnBlockBreak.
+func (e event) SDKRegister() string {
+	return "On" + e.Message
+}
+
+// SDKDecoder is the reader for one event's payload, e.g. blockBreakFrom.
+func (e event) SDKDecoder() string {
+	return lowerFirst(e.Message) + "From"
+}
+
 // Payload lists the fields an emitter supplies, which is every field the host
 // does not inject.
 func (e event) Payload() []field {

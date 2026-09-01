@@ -31,10 +31,23 @@ type binding struct {
 
 	// JavaDecode reads it out of the positional payload. %d is the index.
 	JavaDecode string
+
+	// SDKType is what the plugin-side Go struct holds, e.g. BlockPos.
+	SDKType string
+
+	// SDKDecode reads it out of the payload in a plugin binary. {v} is the
+	// value expression and {d} a quoted description for the error message.
+	//
+	// Empty means no plugin-side Go representation was decided for this type.
+	// A schema reaching for one fails generation by name rather than emitting a
+	// SDK that compiles and a host that disagrees with it.
+	SDKDecode string
 }
 
 var vocabulary = map[string]binding{
 	"PlayerRef": {
+		SDKType:    "Player",
+		SDKDecode:  "playerFrom({v})",
 		GoImport:   `"GoCraft/core/player"`,
 		GoType:     "*player.Player",
 		GoEncode:   "playerReference(%s)",
@@ -42,6 +55,8 @@ var vocabulary = map[string]binding{
 		JavaDecode: "PlayerRef.of(field(%d))",
 	},
 	"BlockPos": {
+		SDKType:    "BlockPos",
+		SDKDecode:  "positionFrom({v})",
 		GoImport:   `"GoCraft/core/spatial"`,
 		GoType:     "spatial.BlockPos",
 		GoEncode:   "positionValue(%s)",
@@ -49,6 +64,8 @@ var vocabulary = map[string]binding{
 		JavaDecode: "BlockPos.of(field(%d))",
 	},
 	"Block": {
+		SDKType:    "Block",
+		SDKDecode:  "blockFrom({v})",
 		GoImport:   `coreworld "GoCraft/core/world"`,
 		GoType:     "coreworld.Block",
 		GoEncode:   "blockValue(%s)",
@@ -56,6 +73,8 @@ var vocabulary = map[string]binding{
 		JavaDecode: "Block.of(field(%d))",
 	},
 	"string": {
+		SDKType:    "string",
+		SDKDecode:  "stringFrom({v}, {d})",
 		GoType:     "string",
 		GoEncode:   "abi.String(%s)",
 		JavaType:   "String",

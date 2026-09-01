@@ -14,7 +14,9 @@
 // emitters share the model and the vocabulary table and would drift if they
 // were separated:
 //
-//	--gocraft_opt=lang=go     writes core/plugin/events.gen.go
+//	--gocraft_opt=lang=go     writes core/plugin/events.gen.go, the host emitters
+//	--gocraft_opt=lang=gosdk  writes gocraft-api-go/events.gen.go, what a Go
+//	                          plugin receives
 //	--gocraft_opt=lang=java   writes the event classes for gocraft-jvm
 //
 // Java is emitted from Go with text/template rather than by a protoc plugin
@@ -51,10 +53,12 @@ func main() {
 			return generateGo(plugin, events)
 		case "java":
 			return generateJava(plugin, events)
+		case "gosdk":
+			return generateSDK(plugin, events)
 		case "":
-			return fmt.Errorf("protoc-gen-gocraft: lang is required, one of go or java")
+			return fmt.Errorf("protoc-gen-gocraft: lang is required, one of go, gosdk or java")
 		default:
-			return fmt.Errorf("protoc-gen-gocraft: unknown lang %q, want go or java", language)
+			return fmt.Errorf("protoc-gen-gocraft: unknown lang %q, want go, gosdk or java", language)
 		}
 	})
 }
