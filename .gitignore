@@ -3,6 +3,8 @@ gocraft-linux-amd64
 gocraft-windows-amd64.exe
 *.exe
 examples/go-plugin/bin/
+# `go build` with no -o names the binary after the directory.
+examples/go-plugin/go-plugin
 
 # Plugin bundles (.gcpkg files) dropped in by the admin.
 # The README is tracked, so use the wildcard pattern instead of plugins/ to
