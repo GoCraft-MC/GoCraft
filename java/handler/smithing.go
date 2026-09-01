@@ -11,6 +11,7 @@ type smithingTransformKey struct {
 var (
 	smithingTransformsOnce sync.Once
 	smithingTransforms     map[smithingTransformKey]string
+	smithingIngredients    [3]map[string]struct{}
 )
 
 func smithingTransform(template, base, addition string) (string, bool) {
@@ -19,10 +20,30 @@ func smithingTransform(template, base, addition string) (string, bool) {
 	return result, ok
 }
 
+func smithingAccepts(slot int, itemID string) bool {
+	smithingTransformsOnce.Do(buildSmithingTransforms)
+	if slot < 0 || slot >= len(smithingIngredients) {
+		return false
+	}
+	_, ok := smithingIngredients[slot][itemID]
+	return ok
+}
+
 func buildSmithingTransforms() {
 	smithingTransforms = make(map[smithingTransformKey]string)
+	for slot := range smithingIngredients {
+		smithingIngredients[slot] = make(map[string]struct{})
+	}
 	for _, recipe := range CraftingRecipeCatalog() {
-		if recipe.Kind != "smithing" || len(recipe.Ingredients) != 3 || recipe.Result.IsEmpty() {
+		if recipe.Kind != "smithing" || len(recipe.Ingredients) != 3 {
+			continue
+		}
+		for slot, ingredient := range recipe.Ingredients {
+			for _, itemID := range ingredient.Alternatives {
+				smithingIngredients[slot][itemID] = struct{}{}
+			}
+		}
+		if recipe.Result.IsEmpty() {
 			continue
 		}
 		for _, template := range recipe.Ingredients[0].Alternatives {
