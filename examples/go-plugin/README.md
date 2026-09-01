@@ -12,13 +12,14 @@ go run generate.go
 go build -o bin/example-go .
 ```
 
-Then, from the repository root, because the CLI is part of the server module:
+Then package it. The build tool is its own module, so it needs no checkout of
+anything:
 
 ```sh
-go run ./cmd/gocraft-cli build -o example-go.gcpkg ./examples/go-plugin
+go run github.com/GoCraft-MC/gocraft-cli@latest build -o example-go.gcpkg .
 ```
 
-The CLI reads the directory, it does not compile it.
+It reads the directory, it does not compile it.
 
 Copy `example-go.gcpkg` into the server's `plugins/` directory and restart the
 server. GoCraft creates `plugins/example-go/` for configuration and plugin data.

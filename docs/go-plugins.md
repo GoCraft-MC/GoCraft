@@ -103,8 +103,13 @@ its executable for the server operating system, place it at the manifest's
 `entry`, then package it:
 
 ```sh
-go run ./cmd/gocraft-cli build -o my-plugin.gcpkg ./my-plugin
+go install github.com/GoCraft-MC/gocraft-cli@latest
+gocraft-cli build -o my-plugin.gcpkg ./my-plugin
 ```
+
+The build tool is its own module: a plugin author compiles, they never run a
+server, so installing one to package the other would be absurd. It reads the
+bundle format from the same code the server does.
 
 Native binaries are operating-system and architecture specific. Hot reload and
 in-process unloading are not supported. Rebuild plugins after a Plugin API
