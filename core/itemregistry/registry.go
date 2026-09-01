@@ -44,8 +44,7 @@ func NewRegistry(definitions []Definition) (*Registry, error) {
 		tags:        make(map[string]map[string]struct{}),
 	}
 	for _, source := range definitions {
-		definition := source
-		definition.Tags = append([]string(nil), source.Tags...)
+		definition := cloneDefinition(source)
 		sort.Strings(definition.Tags)
 		if err := validateDefinition(&definition); err != nil {
 			return nil, err
