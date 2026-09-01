@@ -133,9 +133,8 @@ func (s ItemStack) EffectiveFireworks() FireworkData {
 	return data
 }
 
-// MaxDurability returns Java Edition's vanilla maximum durability for the
-// damageable items GoCraft currently supports. A zero result means the item is
-// not damageable.
+// MaxDurability returns the canonical vanilla maximum durability. A zero
+// result means the item is unknown or is not damageable.
 func MaxDurability(itemID string) int {
 	if definition, ok := itemregistry.Lookup(itemID); ok {
 		return definition.MaxDurability
