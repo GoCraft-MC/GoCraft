@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 func TestEmitCancellableUsesPriorityOrder(t *testing.T) {

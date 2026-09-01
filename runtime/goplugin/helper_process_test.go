@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"testing"
 
-	gocraft "GoCraft/gocraft-api-go"
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
+	gocraft "github.com/GoCraft-MC/gocraft-api-go"
 )
 
 type helperPlugin struct{}
@@ -62,11 +62,11 @@ func TestNativePluginHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func helperSpawn(string) ipc.Spawn {
+func helperSpawn(string) link.Spawn {
 	return helperSpawnFailure("")
 }
 
-func helperSpawnFailure(failure string) ipc.Spawn {
+func helperSpawnFailure(failure string) link.Spawn {
 	return func(socket string) *exec.Cmd {
 		command := exec.Command(os.Args[0],
 			"-test.run=TestNativePluginHelperProcess", "--",

@@ -29,7 +29,6 @@ func generateGo(plugin *protogen.Plugin, events []event) error {
 	file.P("package plugin")
 	file.P()
 	file.P("import (")
-	file.P("	abi \"GoCraft/abi/v1\"")
 	for _, line := range imports(events) {
 		file.P("	" + line)
 	}
@@ -60,9 +59,22 @@ func generateGo(plugin *protogen.Plugin, events []event) error {
 // Computed rather than fixed: a list written by hand breaks the day a schema
 // drops its last BlockPos, and padding it with blank identifiers to stop that
 // is worse than working it out.
+
+// abiImport is where the shared types live, now that they are their own module.
+const abiImport = `abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"`
+
+// importPath is the quoted path of an import line, alias or not.
+func importPath(line string) string {
+	start, end := strings.Index(line, `"`), strings.LastIndex(line, `"`)
+	if start < 0 || end <= start {
+		return line
+	}
+	return line[start+1 : end]
+}
 func imports(events []event) []string {
-	seen := make(map[string]struct{})
-	var lines []string
+	// The ABI is always imported: every emitter takes an abi.Event apart.
+	seen := map[string]struct{}{abiImport: {}}
+	lines := []string{abiImport}
 	for _, declared := range events {
 		for _, f := range declared.Fields {
 			if f.Injected {
@@ -79,7 +91,10 @@ func imports(events []event) []string {
 			lines = append(lines, bound.GoImport)
 		}
 	}
-	sort.Strings(lines)
+	// By path rather than by line, because an aliased import starts with its
+	// alias and would sort where the alias falls. gofmt sorts by path, and a
+	// generated file it would reformat is a file the next regeneration undoes.
+	sort.Slice(lines, func(i, j int) bool { return importPath(lines[i]) < importPath(lines[j]) })
 	return lines
 }
 

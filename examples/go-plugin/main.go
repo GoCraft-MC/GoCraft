@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	gocraft "GoCraft/gocraft-api-go"
+	gocraft "github.com/GoCraft-MC/gocraft-api-go"
 )
 
 var metadata = gocraft.Metadata{

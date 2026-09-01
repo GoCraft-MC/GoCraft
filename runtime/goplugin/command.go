@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
 	"GoCraft/core/plugin"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // InvokeCommand runs one of the plugin's command executors in its process.

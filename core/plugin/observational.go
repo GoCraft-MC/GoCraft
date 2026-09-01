@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	abi "GoCraft/abi/v1"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // EmitObservational schedules an event without blocking the simulation tick.

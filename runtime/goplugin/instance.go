@@ -5,16 +5,16 @@ import (
 	"errors"
 	"sync"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/plugin"
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // Instance is one native plugin process.
 type Instance struct {
 	runtime    *Runtime
 	manifest   plugin.Manifest
-	supervisor *ipc.Supervisor
+	supervisor *link.Supervisor
 	cleanup    func()
 	unloadOnce sync.Once
 	unloadErr  error

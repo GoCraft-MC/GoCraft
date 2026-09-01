@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/config"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
 	"GoCraft/runtime/goplugin"
 	"GoCraft/runtime/jvm"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // pluginShutdownTimeout bounds how long unloading may take in total, matching

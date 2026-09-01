@@ -1,4 +1,4 @@
-package ipc
+package link
 
 import (
 	"context"
@@ -7,7 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/ipc"
 )
 
 // ErrConnClosed is returned to anyone still waiting when the connection ends
@@ -24,7 +25,7 @@ var ErrConnClosed = errors.New("ipc: connection closed")
 // One goroutine owns reading. Callers never touch the stream: they register a
 // pending sequence number, send, and wait on a channel.
 type Conn struct {
-	codec   *Codec
+	codec   *ipc.Codec
 	handler func(*wire.Envelope)
 	seq     atomic.Uint64
 	done    chan struct{}
@@ -45,7 +46,7 @@ type Conn struct {
 //
 // handler receives envelopes that answer no pending request. It runs on the
 // read goroutine, so it must not block: while it runs, nothing is being read.
-func NewConn(codec *Codec, handler func(*wire.Envelope)) *Conn {
+func NewConn(codec *ipc.Codec, handler func(*wire.Envelope)) *Conn {
 	conn := &Conn{
 		codec:   codec,
 		handler: handler,

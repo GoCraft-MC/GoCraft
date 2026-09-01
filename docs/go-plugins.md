@@ -20,7 +20,7 @@ Implement `gocraft.Plugin`. The import path does not end in the package name,
 so name it:
 
 ```go
-import gocraft "GoCraft/gocraft-api-go"
+import gocraft "github.com/GoCraft-MC/gocraft-api-go"
 
 type Plugin struct{}
 

@@ -77,7 +77,9 @@ func TestPermissionEditorUploadsAndApplies(t *testing.T) {
 	if err != nil || saveResp.StatusCode != http.StatusCreated {
 		t.Fatal("failed to upload save to mock bytebin")
 	}
-	var saveResult struct{ Key string `json:"key"` }
+	var saveResult struct {
+		Key string `json:"key"`
+	}
 	_ = json.NewDecoder(saveResp.Body).Decode(&saveResult)
 	saveResp.Body.Close()
 
@@ -99,7 +101,9 @@ func TestPermissionEditorRejectsWrongType(t *testing.T) {
 
 	bad, _ := json.Marshal(map[string]string{"type": "something-else", "data": "x"})
 	resp, _ := http.Post(bytebin.URL+"/post", "application/json", bytes.NewReader(bad))
-	var result struct{ Key string `json:"key"` }
+	var result struct {
+		Key string `json:"key"`
+	}
 	_ = json.NewDecoder(resp.Body).Decode(&result)
 	resp.Body.Close()
 

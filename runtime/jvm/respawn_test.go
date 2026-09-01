@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	wire "GoCraft/abi/v1/wire"
 	"GoCraft/core/plugin"
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/ipc"
 )
 
 const (
@@ -250,7 +251,7 @@ func fakeRuntime(t *testing.T, behaviour, lives string, onRespawn func([]string)
 		SocketDirectory:  shortTempDir(t),
 		ExtractDirectory: t.TempDir(),
 		StartTimeout:     20 * time.Second,
-		Liveness:         ipc.Liveness{Every: 50 * time.Millisecond, Timeout: 50 * time.Millisecond, Missed: 2},
+		Liveness:         link.Liveness{Every: 50 * time.Millisecond, Timeout: 50 * time.Millisecond, Missed: 2},
 		Respawn:          Respawn{Attempts: 3, Backoff: 10 * time.Millisecond},
 		OnRespawn:        onRespawn,
 		Stdout:           os.Stderr,

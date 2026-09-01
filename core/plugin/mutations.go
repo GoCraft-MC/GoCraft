@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	abi "GoCraft/abi/v1"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 var ErrMutationQueueClosed = errors.New("plugin mutation queue is closed")

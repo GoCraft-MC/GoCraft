@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {

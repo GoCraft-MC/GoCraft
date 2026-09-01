@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
 )
 
 // event is one native event, read out of the schema.

@@ -1,12 +1,12 @@
 // Package jvm drives the Java plugin runtime. It is Go, and it contains no
-// Java: the jar it spawns is built in the gocraft-java repository, so the Go
+// Java: the jar it spawns is built in the gocraft-jvm repository, so the Go
 // repository never needs a JDK to build or release.
 //
-// Everything below the process boundary — framing, correlation, liveness, the
-// abi/wire conversion — belongs to runtime/ipc and is not repeated here. What
-// is left is the part only Java has: finding a JDK, carrying the jar, and
-// building the command line. That is the whole of what a runtime package is
-// supposed to be.
+// Everything below the process boundary belongs elsewhere and is not repeated
+// here — correlation, liveness and respawn to runtime/link, framing and the
+// abi/wire conversion to the contract module both ends share. What is left is
+// the part only Java has: finding a JDK, carrying the jar, and building the
+// command line. That is the whole of what a runtime package is supposed to be.
 package jvm
 
 import (
@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
 	"GoCraft/core/plugin"
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // RuntimeName is what a plugin manifest writes in its runtime field.
@@ -59,7 +59,7 @@ type Config struct {
 	TickRate     uint32
 	EventBudget  time.Duration
 	StartTimeout time.Duration
-	Liveness     ipc.Liveness
+	Liveness     link.Liveness
 
 	// Respawn decides what happens when the JVM dies while players are online.
 	Respawn Respawn
@@ -92,7 +92,7 @@ type Config struct {
 	// and gets the java invocation below; the respawn tests supply a process
 	// that speaks the ABI and dies on demand, which is how a crash is exercised
 	// with no JDK anywhere near this repository's CI.
-	Spawn ipc.Spawn
+	Spawn link.Spawn
 }
 
 // Runtime hosts every Java plugin in one child process.
@@ -104,7 +104,7 @@ type Runtime struct {
 	config Config
 
 	mu         sync.RWMutex
-	supervisor *ipc.Supervisor
+	supervisor *link.Supervisor
 	java       string
 	host       plugin.Host
 
@@ -183,7 +183,7 @@ func (r *Runtime) Start(ctx context.Context, host plugin.Host) error {
 	r.host = host
 	r.mu.Unlock()
 
-	supervisor := ipc.NewSupervisor(ipc.Config{
+	supervisor := link.NewSupervisor(link.Config{
 		Runtime:      RuntimeName,
 		Directory:    r.socketDirectory(),
 		ABI:          abiVersion,
@@ -210,8 +210,8 @@ func (r *Runtime) Start(ctx context.Context, host plugin.Host) error {
 
 // spawn builds the command line, and is the only thing in this package that
 // runtime/python or runtime/go would write differently. Everything else they
-// share through ipc.
-func (r *Runtime) spawn(java, jar string) ipc.Spawn {
+// share through supervisor.
+func (r *Runtime) spawn(java, jar string) link.Spawn {
 	if r.config.Spawn != nil {
 		return r.config.Spawn
 	}
@@ -251,7 +251,7 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 	for _, subscription := range bundle.Manifest.Subscriptions {
 		events = append(events, subscription.Event)
 	}
-	if _, err := supervisor.Load(ctx, ipc.LoadRequest{
+	if _, err := supervisor.Load(ctx, link.LoadRequest{
 		ID:            bundle.Manifest.ID,
 		BundlePath:    bundle.Path,
 		Entry:         bundle.Manifest.Entry,
@@ -334,7 +334,7 @@ func (r *Runtime) Failed() <-chan struct{} {
 	return r.supervisor.Failed()
 }
 
-func (r *Runtime) running() (*ipc.Supervisor, error) {
+func (r *Runtime) running() (*link.Supervisor, error) {
 	r.mu.RLock()
 	supervisor := r.supervisor
 	r.mu.RUnlock()

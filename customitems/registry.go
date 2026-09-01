@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	cmdStart           = 30100 // start of the CustomModelData range (matches CustomiZer)
-	bedrockRIDStart    = 5000  // well above the highest vanilla Bedrock runtime ID (~750)
+	cmdStart        = 30100 // start of the CustomModelData range (matches CustomiZer)
+	bedrockRIDStart = 5000  // well above the highest vanilla Bedrock runtime ID (~750)
 )
 
 // registry persists "namespace:id" → {cmd, bedrockRID} assignments across
@@ -25,8 +25,8 @@ type registry struct {
 }
 
 type registryEntry struct {
-	CMD          int   `yaml:"cmd"`
-	BedrockRID   int16 `yaml:"bedrock_rid"`
+	CMD        int   `yaml:"cmd"`
+	BedrockRID int16 `yaml:"bedrock_rid"`
 }
 
 // registryFile is the on-disk YAML structure.

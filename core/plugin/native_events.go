@@ -3,10 +3,10 @@ package plugin
 import (
 	"sort"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // The hand-written half of the event system.

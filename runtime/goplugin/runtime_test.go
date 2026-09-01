@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
-	wire "GoCraft/abi/v1/wire"
 	"GoCraft/core/command"
 	"GoCraft/core/player"
 	"GoCraft/core/plugin"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
 
 	"google.golang.org/protobuf/proto"
 )

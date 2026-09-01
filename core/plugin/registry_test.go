@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	abi "GoCraft/abi/v1"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 type fakeInstance struct {

@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
 )
 
 // The payloads below are assembled byte by byte rather than with the generated

@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"GoCraft/core/plugin"
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
 )
 
 func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instance, error) {
@@ -26,7 +26,7 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 	for _, subscription := range bundle.Manifest.Subscriptions {
 		events = append(events, subscription.Event)
 	}
-	_, err = supervisor.Load(ctx, ipc.LoadRequest{
+	_, err = supervisor.Load(ctx, link.LoadRequest{
 		ID:            bundle.Manifest.ID,
 		BundlePath:    bundle.Path,
 		Entry:         bundle.Manifest.Entry,

@@ -5,10 +5,10 @@
 package plugin
 
 import (
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // Event types, as a manifest spells them.

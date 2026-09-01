@@ -24,9 +24,9 @@ func (m *Manager) BuildBedrockPack() ([]byte, error) {
 	zw := zip.NewWriter(&buf)
 
 	const (
-		rpUUID  = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+		rpUUID    = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 		rpModUUID = "c3d4e5f6-a7b8-9012-cdef-123456789012"
-		bpUUID  = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+		bpUUID    = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
 		bpModUUID = "d4e5f6a7-b8c9-0123-defa-234567890123"
 	)
 
@@ -123,8 +123,8 @@ func writeBedrockBP(zw *zip.Writer, uuid, modUUID, rpUUID string, items []*Resol
 					"identifier": item.Key(), "category": "items",
 				},
 				"components": map[string]any{
-					"minecraft:display_name": map[string]any{"value": stripTags(item.Def.DisplayName)},
-					"minecraft:icon":         map[string]any{"texture": item.Namespace + "_" + item.ID},
+					"minecraft:display_name":   map[string]any{"value": stripTags(item.Def.DisplayName)},
+					"minecraft:icon":           map[string]any{"texture": item.Namespace + "_" + item.ID},
 					"minecraft:max_stack_size": maxStack,
 					"minecraft:hand_equipped":  item.Def.HandEquipped,
 				},

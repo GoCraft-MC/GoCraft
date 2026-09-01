@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"GoCraft/core/plugin"
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
 )
 
 const (
@@ -23,11 +23,11 @@ type Config struct {
 	TickRate         uint32
 	EventBudget      time.Duration
 	StartTimeout     time.Duration
-	Liveness         ipc.Liveness
+	Liveness         link.Liveness
 	Stdout           io.Writer
 	Stderr           io.Writer
 	// Spawn replaces process creation in tests.
-	Spawn func(executable string) ipc.Spawn
+	Spawn func(executable string) link.Spawn
 }
 
 type Runtime struct {

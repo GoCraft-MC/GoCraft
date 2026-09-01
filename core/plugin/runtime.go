@@ -3,8 +3,8 @@ package plugin
 import (
 	"context"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // Host is the only mutation path exposed to a plugin runtime.

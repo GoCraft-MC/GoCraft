@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // EffectMessage delivers one line to whoever an effect names. It is the only

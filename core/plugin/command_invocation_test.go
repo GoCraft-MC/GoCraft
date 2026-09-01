@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 type fakeSender struct {

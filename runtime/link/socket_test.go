@@ -1,4 +1,4 @@
-package ipc
+package link
 
 import (
 	"net"

@@ -1,4 +1,4 @@
-package ipc
+package link
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
 )
 
 var (

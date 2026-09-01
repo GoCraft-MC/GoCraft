@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 // NewCommandInvocation converts one parsed command into the neutral form an

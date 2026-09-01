@@ -1,4 +1,4 @@
-package ipc
+package link
 
 import (
 	"context"
@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/ipc"
 )
 
 const (
@@ -41,7 +42,7 @@ func runFakeRuntime(behaviour, socket string) {
 		os.Exit(4)
 	}
 	defer stream.Close()
-	codec := NewCodec(stream)
+	codec := ipc.NewCodec(stream)
 
 	switch behaviour {
 	case "silent":

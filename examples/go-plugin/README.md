@@ -3,13 +3,22 @@
 This plugin logs joins and block breaks and provides `/greet`. Its callbacks
 run in a separate process; Java and Bedrock actions use the same event API.
 
-From the GoCraft repository root:
+This directory is its own Go module, and that is deliberate: it requires a
+published `gocraft-api-go` rather than the copy next door, so building it proves
+what a plugin author's build does. From here:
 
 ```sh
-go run examples/go-plugin/generate.go
-go build -o examples/go-plugin/bin/example-go ./examples/go-plugin
+go run generate.go
+go build -o bin/example-go .
+```
+
+Then, from the repository root, because the CLI is part of the server module:
+
+```sh
 go run ./cmd/gocraft-cli build -o example-go.gcpkg ./examples/go-plugin
 ```
+
+The CLI reads the directory, it does not compile it.
 
 Copy `example-go.gcpkg` into the server's `plugins/` directory and restart the
 server. GoCraft creates `plugins/example-go/` for configuration and plugin data.
@@ -19,7 +28,7 @@ system and architecture as the server. Cross-compilation also works, for
 example:
 
 ```sh
-GOOS=linux GOARCH=amd64 go build -o examples/go-plugin/bin/example-go ./examples/go-plugin
+GOOS=linux GOARCH=amd64 go build -o bin/example-go .
 ```
 
 The command tree is generated as `commands.pb`. `main.go` registers its handler

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
 )
 
 // Respawn tunes what happens when the JVM dies while the server is running.
@@ -147,7 +147,7 @@ func (r *Runtime) respawn() error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.config.StartTimeout)
 	defer cancel()
 
-	supervisor := ipc.NewSupervisor(ipc.Config{
+	supervisor := link.NewSupervisor(link.Config{
 		Runtime:      RuntimeName,
 		Directory:    r.socketDirectory(),
 		ABI:          abiVersion,
@@ -171,7 +171,7 @@ func (r *Runtime) respawn() error {
 	// from the dependency graph and a plugin may rely on an earlier one.
 	restored := make([]string, 0, len(r.remembered()))
 	for _, bundle := range r.remembered() {
-		if _, err := supervisor.Load(ctx, ipc.LoadRequest{
+		if _, err := supervisor.Load(ctx, link.LoadRequest{
 			ID: bundle.id, BundlePath: bundle.path,
 			Entry: bundle.entry, DataDirectory: bundle.data,
 			CommandTree: bundle.commandTree, Events: bundle.events,

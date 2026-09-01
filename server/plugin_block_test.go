@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
@@ -13,6 +12,7 @@ import (
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 type serverCancellingPlugin struct{}

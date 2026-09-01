@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 type cancellingPlugin struct{}

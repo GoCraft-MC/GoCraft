@@ -1,4 +1,4 @@
-package ipc
+package link
 
 import (
 	"context"
@@ -9,7 +9,8 @@ import (
 	"sync"
 	"time"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/ipc"
 )
 
 // Spawn builds the command that starts a runtime for a given socket path.
@@ -141,7 +142,7 @@ func accept(ctx context.Context, config Config, listener net.Listener, command *
 	// nothing is as broken as one that never connects, and equally able to hold
 	// the boot open forever.
 	stream.SetDeadline(deadline)
-	codec := NewCodec(stream)
+	codec := ipc.NewCodec(stream)
 
 	hello, err := codec.Receive()
 	if err != nil {

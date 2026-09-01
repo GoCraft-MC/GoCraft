@@ -3,7 +3,7 @@ package command
 import (
 	"fmt"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
 )
 
 const (

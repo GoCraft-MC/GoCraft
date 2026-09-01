@@ -7,16 +7,16 @@ import (
 	"os/exec"
 	"strconv"
 
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
 )
 
-func (r *Runtime) newSupervisor(pluginID, executable string) *ipc.Supervisor {
+func (r *Runtime) newSupervisor(pluginID, executable string) *link.Supervisor {
 	spawn := r.spawn(executable)
 	directory := r.config.SocketDirectory
 	if directory == "" {
 		directory = os.TempDir()
 	}
-	return ipc.NewSupervisor(ipc.Config{
+	return link.NewSupervisor(link.Config{
 		Runtime:      runtimeLabel(pluginID),
 		Directory:    directory,
 		ABI:          abiVersion,
@@ -27,7 +27,7 @@ func (r *Runtime) newSupervisor(pluginID, executable string) *ipc.Supervisor {
 	}, r.config.Liveness)
 }
 
-func (r *Runtime) spawn(executable string) ipc.Spawn {
+func (r *Runtime) spawn(executable string) link.Spawn {
 	if r.config.Spawn != nil {
 		return r.config.Spawn(executable)
 	}

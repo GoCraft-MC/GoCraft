@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"GoCraft/core/plugin"
-	"GoCraft/runtime/ipc"
+	"GoCraft/runtime/link"
 )
 
 func TestRuntimeCleansUpPluginFailures(t *testing.T) {
@@ -22,7 +22,7 @@ func TestRuntimeCleansUpPluginFailures(t *testing.T) {
 			runtime := New(Config{
 				ExtractDirectory: extractDirectory, SocketDirectory: socketDirectory,
 				StartTimeout: 3 * time.Second,
-				Spawn:        func(string) ipc.Spawn { return helperSpawnFailure(phase) },
+				Spawn:        func(string) link.Spawn { return helperSpawnFailure(phase) },
 			})
 			if err := runtime.Start(t.Context(), nil); err != nil {
 				t.Fatal(err)

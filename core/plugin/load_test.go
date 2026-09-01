@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/command"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 type recordingInstance struct {

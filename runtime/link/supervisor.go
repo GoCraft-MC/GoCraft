@@ -1,4 +1,15 @@
-package ipc
+// Package link is the host's end of a connection to an out-of-process runtime.
+//
+// Spawning the process, correlating replies by seq, watching liveness and
+// bringing a dead runtime back are things only a host does, so they live here
+// rather than in the contract both ends share. What crosses the wire — the
+// framing and the conversion between wire and ABI types — comes from that
+// contract instead, because a host and a plugin that implemented it twice would
+// agree right up until one of them handled a truncated read differently.
+//
+// A runtime package on top of this adds only what its language needs: finding
+// an interpreter, and building a command line.
+package link
 
 import (
 	"context"
@@ -7,8 +18,9 @@ import (
 	"strings"
 	"sync"
 
-	abi "GoCraft/abi/v1"
-	wire "GoCraft/abi/v1/wire"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/ipc"
 )
 
 // Supervisor is the whole of what an out-of-process runtime shares with every
@@ -256,7 +268,7 @@ func (s *Supervisor) Ready() error {
 // shared budget of §06, and when it expires the caller decides the outcome from
 // the event's own on_failure rather than from anything this returns.
 func (s *Supervisor) Dispatch(ctx context.Context, pluginID string, event *abi.Event) (abi.Verdict, error) {
-	encoded, err := encodeEvent(event)
+	encoded, err := ipc.EncodeEvent(event)
 	if err != nil {
 		return abi.Verdict{}, err
 	}
@@ -277,7 +289,7 @@ func (s *Supervisor) Dispatch(ctx context.Context, pluginID string, event *abi.E
 		return abi.Verdict{}, fmt.Errorf("ipc: %s: %w: answered DISPATCH with %T",
 			s.config.Runtime, ErrProtocol, reply.GetBody())
 	}
-	return decodeVerdict(verdict)
+	return ipc.DecodeVerdict(verdict)
 }
 
 // Invoke runs one command executor in the runtime that loaded it.
@@ -290,7 +302,7 @@ func (s *Supervisor) Dispatch(ctx context.Context, pluginID string, event *abi.E
 // command was delivered and answered, and telling those two apart is what lets
 // the caller show the sender a reason instead of a transport failure.
 func (s *Supervisor) Invoke(ctx context.Context, pluginID string, invocation abi.CommandInvocation) (abi.CommandResult, error) {
-	encoded, err := encodeCommandInvocation(invocation)
+	encoded, err := ipc.EncodeCommandInvocation(invocation)
 	if err != nil {
 		return abi.CommandResult{}, err
 	}
@@ -309,7 +321,7 @@ func (s *Supervisor) Invoke(ctx context.Context, pluginID string, invocation abi
 		return abi.CommandResult{}, fmt.Errorf("ipc: %s: %w: answered INVOKE with %T",
 			s.config.Runtime, ErrProtocol, reply.GetBody())
 	}
-	return decodeCommandResult(invoked)
+	return ipc.DecodeCommandResult(invoked)
 }
 
 // Unload asks the runtime to drop one plugin.

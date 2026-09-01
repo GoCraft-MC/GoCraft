@@ -1,4 +1,4 @@
-package ipc
+package link
 
 import (
 	"context"
@@ -9,21 +9,22 @@ import (
 	"testing"
 	"time"
 
-	wire "GoCraft/abi/v1/wire"
+	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/ipc"
 )
 
-// testPair wires a Conn to a bare Codec over net.Pipe, which is a real
+// testPair wires a Conn to a bare ipc.Codec over net.Pipe, which is a real
 // full-duplex stream rather than a buffer: a write blocks until the far side
 // reads it, so a test that forgets to drain deadlocks instead of passing.
-func testPair(t *testing.T, handler func(*wire.Envelope)) (*Conn, *Codec) {
+func testPair(t *testing.T, handler func(*wire.Envelope)) (*Conn, *ipc.Codec) {
 	t.Helper()
 	hostSide, peerSide := net.Pipe()
-	conn := NewConn(NewCodec(hostSide), handler)
+	conn := NewConn(ipc.NewCodec(hostSide), handler)
 	t.Cleanup(func() {
 		conn.Close()
 		peerSide.Close()
 	})
-	return conn, NewCodec(peerSide)
+	return conn, ipc.NewCodec(peerSide)
 }
 
 func loadEnvelope(pluginID string) *wire.Envelope {
@@ -209,7 +210,7 @@ func TestConnRefusesRequestsAfterClose(t *testing.T) {
 func TestConnCloseIsNeverReportedAsAFailure(t *testing.T) {
 	for attempt := range 50 {
 		hostSide, peerSide := net.Pipe()
-		conn := NewConn(NewCodec(hostSide), nil)
+		conn := NewConn(ipc.NewCodec(hostSide), nil)
 		conn.Close()
 		<-conn.Done()
 		if !errors.Is(conn.Err(), ErrConnClosed) {
