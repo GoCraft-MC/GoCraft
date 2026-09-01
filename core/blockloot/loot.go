@@ -556,5 +556,5 @@ func boolValue(value any) bool {
 // BreaksDecoratedPot reports whether the item is in vanilla's
 // #minecraft:breaks_decorated_pots item tag.
 func BreaksDecoratedPot(itemID string) bool {
-	return data().itemTagSets["minecraft:breaks_decorated_pots"][itemID]
+	return itemregistry.HasTag(itemID, "minecraft:breaks_decorated_pots")
 }
