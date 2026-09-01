@@ -1,10 +1,6 @@
 package player
 
-import (
-	"strings"
-
-	"GoCraft/core/itemregistry"
-)
+import "GoCraft/core/itemregistry"
 
 // InventorySize is the total number of slots in a Java Edition player inventory.
 //
@@ -250,48 +246,8 @@ func LegacyAttackDamage(itemID string) float32 {
 // AttackAttributes returns the 1.21.4 attack damage and speed shown by vanilla
 // for a tool or weapon. The bool is false for items without attack modifiers.
 func AttackAttributes(itemID string) (damage, speed float32, ok bool) {
-	materialDamage := func(material string) float32 {
-		switch material {
-		case "wooden", "golden":
-			return 0
-		case "stone":
-			return 1
-		case "iron":
-			return 2
-		case "diamond":
-			return 3
-		case "netherite":
-			return 4
-		}
-		return 0
-	}
-	for _, material := range []string{"wooden", "stone", "iron", "golden", "diamond", "netherite"} {
-		prefix := "minecraft:" + material + "_"
-		if !strings.HasPrefix(itemID, prefix) {
-			continue
-		}
-		bonus := materialDamage(material)
-		switch strings.TrimPrefix(itemID, prefix) {
-		case "sword":
-			return 4 + bonus, 1.6, true
-		case "shovel":
-			return 2.5 + bonus, 1, true
-		case "pickaxe":
-			return 2 + bonus, 1.2, true
-		case "axe":
-			damage = map[string]float32{"wooden": 7, "stone": 9, "iron": 9, "golden": 7, "diamond": 9, "netherite": 10}[material]
-			speed = map[string]float32{"wooden": 0.8, "stone": 0.8, "iron": 0.9, "golden": 1, "diamond": 1, "netherite": 1}[material]
-			return damage, speed, true
-		case "hoe":
-			speed = map[string]float32{"wooden": 1, "stone": 2, "iron": 3, "golden": 1, "diamond": 4, "netherite": 4}[material]
-			return 1, speed, true
-		}
-	}
-	switch itemID {
-	case "minecraft:trident":
-		return 9, 1.1, true
-	case "minecraft:mace":
-		return 6, 0.6, true
+	if definition, found := itemregistry.Lookup(itemID); found && definition.Combat != nil {
+		return definition.Combat.AttackDamage, definition.Combat.AttackSpeed, true
 	}
 	return 0, 0, false
 }
@@ -299,11 +255,13 @@ func AttackAttributes(itemID string) (damage, speed float32, ok bool) {
 // BlockUseDamage returns how much durability a successful block-breaking use
 // consumes. Swords take two durability when used to break blocks.
 func BlockUseDamage(itemID string) int {
-	if strings.HasSuffix(itemID, "_sword") {
-		return 2
-	}
-	if MaxDurability(itemID) > 0 {
-		return 1
+	if definition, ok := itemregistry.Lookup(itemID); ok {
+		if definition.Tool != nil {
+			return definition.Tool.BlockDamageCost
+		}
+		if definition.MaxDurability > 0 {
+			return 1
+		}
 	}
 	return 0
 }
