@@ -31,12 +31,19 @@ func (p *examplePlugin) OnLoad(context gocraft.Context) error {
 	}); err != nil {
 		return err
 	}
-	// The path, as commands.pb spells it. The executor id that tree assigns is
-	// the tree's business, not this file's.
-	return context.Commands().Register("greet", func(call *gocraft.CommandContext) error {
+	return nil
+}
+
+// Commands is asked twice and never by this file: once by the build, to put the
+// shape in the bundle, and once by the loader, to bind what runs. Declaring it
+// here is what makes the two agree.
+func (p *examplePlugin) Commands() *gocraft.CommandSet {
+	set := gocraft.NewCommandSet()
+	set.Command("greet").Permission("example.greet").Runs(func(call *gocraft.CommandContext) error {
 		call.Reply(fmt.Sprintf("Hello, %s!", call.SenderName))
 		return nil
 	})
+	return set
 }
 
 func (p *examplePlugin) OnEnable() error {

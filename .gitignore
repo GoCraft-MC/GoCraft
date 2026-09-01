@@ -3,6 +3,9 @@ gocraft-linux-amd64
 gocraft-windows-amd64.exe
 *.exe
 examples/go-plugin/bin/
+# What `-gocraft-dump-commands` writes; the bundle build reads it and the
+# packer skips it.
+examples/go-plugin/.gocraft/
 # `go build` with no -o names the binary after the directory.
 examples/go-plugin/go-plugin
 
