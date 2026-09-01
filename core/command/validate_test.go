@@ -50,13 +50,6 @@ func TestValidateRejectsInvalidTrees(t *testing.T) {
 			want: "greedy argument must be last",
 		},
 		{
-			name: "executable parent",
-			root: &Root{Children: []Node{Literal{Name: "shop", Exec: 1, Children: []Node{
-				Literal{Name: "sell", Exec: 2},
-			}}}},
-			want: "executable node has children",
-		},
-		{
 			name: "empty leaf",
 			root: &Root{Children: []Node{Literal{Name: "shop"}}},
 			want: "leaf has no executor",

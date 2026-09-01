@@ -250,3 +250,35 @@ func TestParseArgumentRefusesANegativeDuration(t *testing.T) {
 		}
 	}
 }
+
+// An executable node with children is how an optional argument is spelled.
+// Both /kill and /kill <player> have to reach an executor, and they are not the
+// same one.
+func TestResolveHandlesAnOptionalArgument(t *testing.T) {
+	registry := NewRegistry()
+	root := Root{Children: []Node{Literal{Name: "kill", Exec: 1, Children: []Node{
+		Argument{Name: "target", Type: ArgPlayer, Exec: 2},
+	}}}}
+	handlers := map[ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
+	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "kill"}, root, handlers); err != nil {
+		t.Fatal(err)
+	}
+	target := &player.Player{Username: "oreo"}
+	resolvers := Resolvers{Player: func(string) (*player.Player, bool) { return target, true }}
+	snapshot := registry.Snapshot(commandSender{})
+
+	bare, values, err := snapshot.Resolve("/kill", resolvers)
+	if err != nil || len(values) != 0 {
+		t.Fatalf("bare form = %v, %v", values, err)
+	}
+	aimed, values, err := snapshot.Resolve("/kill oreo", resolvers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bare == aimed {
+		t.Fatal("both forms reached the same executor")
+	}
+	if values["target"].Player != target {
+		t.Fatalf("target = %+v", values["target"])
+	}
+}

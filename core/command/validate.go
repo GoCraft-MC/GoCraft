@@ -61,9 +61,10 @@ func validateNode(parent string, node Node) error {
 	default:
 		return fmt.Errorf("command tree %s: root may only appear at the top", path)
 	}
-	if executor != 0 && len(children) != 0 {
-		return fmt.Errorf("command tree %s: executable node has children", path)
-	}
+	// An executable node may still have children, which is how an optional
+	// argument is spelled: /kill runs on its own and /kill <player> runs on
+	// someone else. Refusing that would make the IR unable to express half of
+	// what a vanilla command tree already does.
 	if executor == 0 && len(children) == 0 {
 		return fmt.Errorf("command tree %s: leaf has no executor", path)
 	}
