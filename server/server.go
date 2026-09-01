@@ -449,6 +449,10 @@ func New(cfg *config.Config) (*Server, error) {
 			s.spawnState.set(savedSpawn)
 		}
 	}
+	// Installed once s exists, and before any listener opens: the registry is
+	// empty until plugins load, so an early line simply finds nothing there.
+	cmds.SetPluginCommands(s.runPluginCommand)
+
 	s.registerSpawnCommands()
 	s.registerLifecycleCommands()
 	s.registerWorldSettingsCommands()
