@@ -3,12 +3,11 @@ module GoCraft
 go 1.26.0
 
 require (
-	github.com/GoCraft-MC/gocraft-abi v0.1.1-0.20260901130800-2820df633f8c
+	github.com/GoCraft-MC/gocraft-abi v0.2.0
 	github.com/GoCraft-MC/gocraft-api-go v0.1.0
 	github.com/df-mc/dragonfly v0.11.0
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
-	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -28,6 +27,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/nxadm/tail v1.4.11 // indirect
+	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.4 // indirect
 	github.com/pion/ice/v4 v4.2.7 // indirect

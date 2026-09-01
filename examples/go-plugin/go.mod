@@ -11,6 +11,6 @@ go 1.26.0
 require github.com/GoCraft-MC/gocraft-api-go v0.1.0
 
 require (
-	github.com/GoCraft-MC/gocraft-abi v0.1.0 // indirect
+	github.com/GoCraft-MC/gocraft-abi v0.2.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
