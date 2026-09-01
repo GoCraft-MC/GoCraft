@@ -38,7 +38,7 @@ func positionFrom(value abi.Value) (BlockPos, error) {
 			return BlockPos{}, fmt.Errorf("gocraft: block position coordinate is not an integer")
 		}
 	}
-	return BlockPos{X: int32(items[0].Int64), Y: int32(items[1].Int64), Z: int32(items[2].Int64)}, nil
+	return BlockPos{X: items[0].Int64, Y: items[1].Int64, Z: items[2].Int64}, nil
 }
 
 func blockFrom(value abi.Value) (Block, error) {

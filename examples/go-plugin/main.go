@@ -27,7 +27,7 @@ func (p *examplePlugin) OnLoad(context gocraft.Context) error {
 	}
 	if err := context.Events().OnBlockBreak(func(event *gocraft.BlockBreakEvent) {
 		context.Logger().Info("block broken", "player", event.Player.Username,
-			"block", event.Block.ID, "position", event.Position)
+			"block", event.Block.ID, "position", event.Pos)
 	}); err != nil {
 		return err
 	}

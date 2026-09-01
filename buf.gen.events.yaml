@@ -24,6 +24,14 @@ plugins:
     out: .
     opt: lang=go
 
+  # The plugin side of the Go runtime: what a compiled Go plugin receives.
+  # Separate from the host target above because they are two different views of
+  # the same event — one emits it, the other reads it — and the SDK used to be
+  # a transcription of the first, which is how it drifted.
+  - local: ["go", "run", "./cmd/protoc-gen-gocraft"]
+    out: .
+    opt: lang=gosdk
+
   # The Java runtime, in the sibling gocraft-jvm checkout. There is no shared
   # schema repository yet (§16 gives the ABI its own), so this is a path; it
   # becomes a real dependency when that repository exists.

@@ -40,9 +40,9 @@ type Player struct {
 
 // BlockPos is an integer position in a world.
 type BlockPos struct {
-	X int32
-	Y int32
-	Z int32
+	X int64
+	Y int64
+	Z int64
 }
 
 // Block is a namespaced block state snapshot.

@@ -1,45 +1,26 @@
 package gocraft
 
-const (
-	EventBlockBreak = "block.break"
-	EventPlayerJoin = "player.join"
-)
+// The contract every generated event satisfies.
+//
+// The events themselves live in events.gen.go, emitted from abi/v1/events.proto
+// alongside the host emitters and the Java classes. What stays here is the part
+// no schema describes: what it means to be an event at all.
 
-// Event is a protocol-independent gameplay fact.
+// Event is anything the host can dispatch to a handler.
 type Event interface {
 	Type() string
 }
 
-// CancellableEvent is implemented by events emitted before a mutation.
+// CancellableEvent is an event a handler may prevent.
+//
+// A separate interface rather than a method on every event, because an
+// observational event simply does not offer it: the tick never waits for one,
+// and a Cancel that silently did nothing would be worse than its absence.
 type CancellableEvent interface {
 	Event
 	Cancel()
 	Cancelled() bool
 }
 
-// EventHandler receives events serially for one plugin.
+// EventHandler receives an event by name, for a type this build does not know.
 type EventHandler func(Event)
-
-// PlayerJoinEvent is emitted after a player becomes reachable.
-type PlayerJoinEvent struct {
-	Player      Player
-	Permissions map[string]bool
-}
-
-func (*PlayerJoinEvent) Type() string { return EventPlayerJoin }
-
-// BlockBreakEvent is emitted before a block is removed.
-type BlockBreakEvent struct {
-	Player      Player
-	Position    BlockPos
-	Block       Block
-	Tool        string
-	Permissions map[string]bool
-	cancelled   bool
-}
-
-func (*BlockBreakEvent) Type() string { return EventBlockBreak }
-
-func (e *BlockBreakEvent) Cancel() { e.cancelled = true }
-
-func (e *BlockBreakEvent) Cancelled() bool { return e.cancelled }

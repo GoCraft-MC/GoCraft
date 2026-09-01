@@ -22,20 +22,6 @@ func (e *Events) On(eventType string, handler EventHandler) error {
 	return nil
 }
 
-func (e *Events) OnPlayerJoin(handler func(*PlayerJoinEvent)) error {
-	if handler == nil {
-		return fmt.Errorf("gocraft: player join handler is required")
-	}
-	return e.On(EventPlayerJoin, func(event Event) { handler(event.(*PlayerJoinEvent)) })
-}
-
-func (e *Events) OnBlockBreak(handler func(*BlockBreakEvent)) error {
-	if handler == nil {
-		return fmt.Errorf("gocraft: block break handler is required")
-	}
-	return e.On(EventBlockBreak, func(event Event) { handler(event.(*BlockBreakEvent)) })
-}
-
 func (e *Events) registeredTypes() []string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
