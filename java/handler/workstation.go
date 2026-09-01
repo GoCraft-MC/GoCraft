@@ -494,20 +494,14 @@ func repairedStack(first, second player.ItemStack, bonusPercent int) player.Item
 }
 
 func smithingOperation(slots []player.ItemStack) workstationOperation {
-	if slots[0].ItemID != "minecraft:netherite_upgrade_smithing_template" ||
-		slots[2].ItemID != "minecraft:netherite_ingot" || !strings.HasPrefix(slots[1].ItemID, "minecraft:diamond_") {
+	resultID, ok := smithingTransform(slots[0].ItemID, slots[1].ItemID, slots[2].ItemID)
+	if !ok {
 		return workstationOperation{}
 	}
-	suffix := strings.TrimPrefix(slots[1].ItemID, "minecraft:diamond_")
-	switch suffix {
-	case "helmet", "chestplate", "leggings", "boots", "sword", "pickaxe", "axe", "shovel", "hoe":
-		result := slots[1]
-		result.ItemID = "minecraft:netherite_" + suffix
-		result.Count = 1
-		return workstationOperation{result: result, consume: []int{1, 1, 1}}
-	default:
-		return workstationOperation{}
-	}
+	result := slots[1]
+	result.ItemID = resultID
+	result.Count = 1
+	return workstationOperation{result: result, consume: []int{1, 1, 1}}
 }
 
 func loomOperation(slots []player.ItemStack) workstationOperation {
