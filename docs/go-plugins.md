@@ -87,9 +87,14 @@ resolved before sending the invocation.
 
 Replies are queued as effects and delivered on the next tick, the same path an
 event handler's effects take, so they reach players on either edition and the
-console alike. Java clients receive the plugin's commands in their command graph
-and tab-complete them; a Bedrock player can type them, but this server does not
-yet advertise any command list to Bedrock, plugin or built-in.
+console alike.
+
+Both editions are told about the command. They are told differently — Java
+receives a Brigadier graph, Bedrock a flat signature per way of running it —
+because the host renders one neutral tree twice rather than asking a plugin to
+describe itself once per edition. Each player is sent only the branches their
+permissions allow, and the list is resent when a plugin loads or unloads while
+they are online.
 
 ## Build a bundle
 
