@@ -3,6 +3,7 @@ package main
 const (
 	minecraftVersion    = "1.21.4"
 	minecraftServerSHA1 = "4707d00eb834b446575d89a61a11b5d548d8c001"
+	pumpkinVersion      = "26.2@99989ba3b6a292fcdf36473065e4d365b6f89928"
 )
 
 // GoCraft already exposes these newer items through its Bedrock compatibility

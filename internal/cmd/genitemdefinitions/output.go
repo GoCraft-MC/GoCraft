@@ -18,8 +18,8 @@ func newCatalogue(items map[string]definition, tags map[string][]string, hashes 
 			{Name: "GoCraft Java item IDs", Version: minecraftVersion, InputSHA256: hashes.itemIDs, Description: "Exact base item coverage"},
 			{Name: "GoCraft flattened Java item tags", Version: minecraftVersion, InputSHA256: hashes.itemTags, Description: "Categories and repair ingredients"},
 			{Name: "GoCraft generated furnace fuels", Version: minecraftVersion, InputSHA256: hashes.fuels, Description: "Fuel burn duration in ticks"},
-			{Name: "Pumpkin generated item components", InputSHA256: hashes.pumpkinItems, Description: "Listed compatibility armor only"},
-			{Name: "Pumpkin generated item tags", InputSHA256: hashes.pumpkinTags, Description: "Compatibility armor tags only"},
+			{Name: "Pumpkin generated item components", Version: pumpkinVersion, InputSHA256: hashes.pumpkinItems, Description: "Listed compatibility armor only"},
+			{Name: "Pumpkin generated item tags", Version: pumpkinVersion, InputSHA256: hashes.pumpkinTags, Description: "Compatibility armor tags only"},
 		},
 		CompatibilityExtensions: extensions, Items: items, Tags: tags,
 	}
