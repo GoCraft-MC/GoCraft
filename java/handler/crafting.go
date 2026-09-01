@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"GoCraft/core/intent"
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -878,15 +879,18 @@ func consumePersonalCraftingIngredients(p *player.Player) {
 }
 
 func armorInventorySlot(itemID string) int {
-	switch {
-	case itemID == "minecraft:turtle_helmet", itemID == "minecraft:carved_pumpkin",
-		itemID == "minecraft:player_head", strings.HasSuffix(itemID, "_helmet"):
+	definition, ok := itemregistry.Lookup(itemID)
+	if !ok || definition.Equipment == nil {
+		return -1
+	}
+	switch definition.Equipment.Slot {
+	case "head":
 		return 5
-	case itemID == "minecraft:elytra", strings.HasSuffix(itemID, "_chestplate"):
+	case "chest":
 		return 6
-	case strings.HasSuffix(itemID, "_leggings"):
+	case "legs":
 		return 7
-	case strings.HasSuffix(itemID, "_boots"):
+	case "feet":
 		return 8
 	default:
 		return -1
