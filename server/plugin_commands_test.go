@@ -8,8 +8,8 @@ import (
 
 	"GoCraft/core/command"
 	corepermission "GoCraft/core/permission"
-	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 )
 
 // pluginCommandServer is the smallest server that can answer a plugin command:
