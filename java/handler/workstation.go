@@ -3,6 +3,7 @@ package handler
 import (
 	"strings"
 
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -450,7 +451,7 @@ func anvilOperation(slots []player.ItemStack) workstationOperation {
 			consume: []int{1, 1},
 		}
 	}
-	if anvilRepairMaterial(left.ItemID) != right.ItemID {
+	if !itemregistry.RepairsWith(left.ItemID, right.ItemID) {
 		return workstationOperation{}
 	}
 	result := left
@@ -460,32 +461,6 @@ func anvilOperation(slots []player.ItemStack) workstationOperation {
 		result.Damage = 0
 	}
 	return workstationOperation{result: result, consume: []int{1, 1}}
-}
-
-func anvilRepairMaterial(itemID string) string {
-	switch {
-	case strings.HasPrefix(itemID, "minecraft:wooden_"):
-		return "minecraft:oak_planks"
-	case strings.HasPrefix(itemID, "minecraft:stone_"):
-		return "minecraft:cobblestone"
-	case strings.HasPrefix(itemID, "minecraft:iron_"), itemID == "minecraft:chainmail_helmet",
-		itemID == "minecraft:chainmail_chestplate", itemID == "minecraft:chainmail_leggings", itemID == "minecraft:chainmail_boots":
-		return "minecraft:iron_ingot"
-	case strings.HasPrefix(itemID, "minecraft:golden_"):
-		return "minecraft:gold_ingot"
-	case strings.HasPrefix(itemID, "minecraft:diamond_"):
-		return "minecraft:diamond"
-	case strings.HasPrefix(itemID, "minecraft:netherite_"):
-		return "minecraft:netherite_ingot"
-	case strings.HasPrefix(itemID, "minecraft:leather_"):
-		return "minecraft:leather"
-	case itemID == "minecraft:turtle_helmet":
-		return "minecraft:turtle_scute"
-	case itemID == "minecraft:elytra":
-		return "minecraft:phantom_membrane"
-	default:
-		return ""
-	}
 }
 
 func grindstoneOperation(slots []player.ItemStack) workstationOperation {
