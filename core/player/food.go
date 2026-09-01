@@ -17,10 +17,11 @@ func FoodValue(itemID string) (nutrition int32, saturationModifier float32, ok b
 }
 
 // FoodUseDuration returns the vanilla time required to finish eating an item.
-// Most foods take 32 ticks; dried kelp is deliberately twice as fast.
+// Unknown items retain the historical 32-tick fallback.
 func FoodUseDuration(itemID string) time.Duration {
-	if itemID == "minecraft:dried_kelp" {
-		return 800 * time.Millisecond
+	definition, ok := itemregistry.Lookup(itemID)
+	if ok && definition.Food != nil && definition.Consumable != nil {
+		return time.Duration(definition.Consumable.UseDurationTicks) * 50 * time.Millisecond
 	}
 	return 1600 * time.Millisecond
 }
@@ -28,22 +29,15 @@ func FoodUseDuration(itemID string) time.Duration {
 // CanAlwaysEat reports foods whose vanilla component permits use with a full
 // hunger bar. Creative players are handled separately by the server.
 func CanAlwaysEat(itemID string) bool {
-	switch itemID {
-	case "minecraft:golden_apple", "minecraft:enchanted_golden_apple", "minecraft:chorus_fruit":
-		return true
-	default:
-		return false
-	}
+	definition, ok := itemregistry.Lookup(itemID)
+	return ok && definition.Food != nil && definition.Food.AlwaysEdible
 }
 
 // FoodRemainder returns the container left behind after a food item is eaten.
 func FoodRemainder(itemID string) string {
-	switch itemID {
-	case "minecraft:mushroom_stew", "minecraft:rabbit_stew", "minecraft:beetroot_soup", "minecraft:suspicious_stew":
-		return "minecraft:bowl"
-	case "minecraft:honey_bottle":
-		return "minecraft:glass_bottle"
-	default:
+	definition, ok := itemregistry.Lookup(itemID)
+	if !ok || definition.Food == nil || definition.Consumable == nil {
 		return ""
 	}
+	return definition.Consumable.Remainder
 }
