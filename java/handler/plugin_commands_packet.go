@@ -26,14 +26,15 @@ const (
 	boundMaximum byte = 0x02
 )
 
-// appendPluginCommands renders a plugin command tree into the Brigadier graph
-// and reports the root children it produced.
+// appendCommands renders a command tree into the Brigadier graph and reports
+// the root children it produced.
 //
 // The tree is data, which is what makes this possible at all: the host holds
-// the same structure a plugin's bundle shipped, so the client can be told about
-// a command before the runtime hosting it has answered anything. §07 is where
-// that pays off.
-func appendPluginCommands(nodes *[]commandGraphNode, root command.Root) []int32 {
+// the same structure a bundle shipped, so a client can be told about a plugin
+// command before the runtime hosting it has answered anything, and the
+// built-ins are described once instead of once per edition. §07 is where that
+// pays off.
+func appendCommands(nodes *[]commandGraphNode, root command.Root) []int32 {
 	return appendPluginChildren(nodes, root.Children)
 }
 

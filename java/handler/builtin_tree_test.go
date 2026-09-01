@@ -162,3 +162,22 @@ func TestRegisteringACommandRepublishesTheTree(t *testing.T) {
 		t.Fatal("a late registration never reached the tree")
 	}
 }
+
+// serverCommandTree is the graph a connected player receives: the built-ins the
+// handler package registers, plus the ones the server adds once it exists.
+//
+// The packet tests used to read a graph written by hand in this package, which
+// listed commands nothing here registers. Rendering from the tree means the
+// test has to register them, which is the point: the graph now says what the
+// server actually answers for.
+func serverCommandTree(t *testing.T) command.Root {
+	t.Helper()
+	dispatcher := NewDispatcher()
+	RegisterBuiltins(dispatcher)
+	for _, name := range []string{"timings", "tps", "mspt", "spawn", "setspawn", "gocraft"} {
+		dispatcher.Register(name, func(CommandContext) error { return nil })
+	}
+	registry := command.NewRegistry()
+	dispatcher.SetCommandRegistry(registry)
+	return registry.Snapshot(permissiveSender{}).Root
+}

@@ -134,7 +134,7 @@ func TestEverySummonCompletionBuildsAJavaSpawnPacket(t *testing.T) {
 }
 
 func TestCommandsPacketTabCompletesLocateSummonAndVersion(t *testing.T) {
-	nodes, root, err := parseCommandTestGraph(buildCommandsPacket().Data)
+	nodes, root, err := parseCommandTestGraph(buildCommandsPacket(serverCommandTree(t)).Data)
 	if err != nil {
 		t.Fatalf("parse Commands packet: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestHealAndEffectCommandsAreRegisteredAndCompletable(t *testing.T) {
 			t.Errorf(`command %q was not registered`, name)
 		}
 	}
-	nodes, root, err := parseCommandTestGraph(buildCommandsPacket().Data)
+	nodes, root, err := parseCommandTestGraph(buildCommandsPacket(serverCommandTree(t)).Data)
 	if err != nil {
 		t.Fatalf(`parse Commands packet: %v`, err)
 	}

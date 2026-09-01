@@ -171,8 +171,7 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		return fmt.Errorf("play: recipes: %w", err)
 	}
 	// Send command graph for tab completion.
-	if err := conn.WritePacket(buildCommandsPacketFor(cmds.PluginCommandTree(p),
-		func(name string) bool { return cmds.CanUse(p, name) })); err != nil {
+	if err := conn.WritePacket(buildCommandsPacket(cmds.CommandTree(p))); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
 	// Send the current time so the client shows the correct sky/lighting immediately.

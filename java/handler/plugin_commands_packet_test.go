@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"testing"
 
 	"GoCraft/core/command"
@@ -55,7 +56,7 @@ func childNamed(t *testing.T, nodes []commandTestNode, parent commandTestNode, n
 }
 
 func TestCommandsPacketCarriesPluginCommands(t *testing.T) {
-	nodes, rootIndex, err := parseCommandTestGraph(buildCommandsPacketFor(pluginGraph()).Data)
+	nodes, rootIndex, err := parseCommandTestGraph(buildCommandsPacket(pluginGraph()).Data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,24 +91,39 @@ func TestCommandsPacketCarriesPluginCommands(t *testing.T) {
 	childNamed(t, nodes, shop, "slot")
 }
 
-// A server with no plugins sends exactly the graph it always sent.
-func TestCommandsPacketIsUnchangedWithoutPlugins(t *testing.T) {
-	withoutPlugins := buildCommandsPacket()
-	empty := buildCommandsPacketFor(command.Root{})
-	if string(withoutPlugins.Data) != string(empty.Data) {
-		t.Fatal("an empty plugin tree changed the command graph")
+// A dispatcher nobody gave a registry to answers with an empty tree rather than
+// nil-panicking, which is what keeps a dispatcher used on its own in a test
+// from needing one.
+func TestCommandTreeDefaultsToEmpty(t *testing.T) {
+	dispatcher := NewDispatcher()
+	if got := dispatcher.CommandTree(nil); len(got.Children) != 0 {
+		t.Fatalf("unset tree = %v", got)
+	}
+	if got := dispatcher.TreeVersion(); got != 0 {
+		t.Fatalf("unset version = %d", got)
 	}
 }
 
-// The tree a client is sent comes from the dispatcher, and a dispatcher nobody
-// gave one to answers with an empty tree rather than nil-panicking.
-func TestPluginCommandTreeDefaultsToEmpty(t *testing.T) {
+// Built-ins and plugin commands reach a client in one graph, from one snapshot.
+func TestCommandsPacketCarriesBothSources(t *testing.T) {
 	dispatcher := NewDispatcher()
-	if got := dispatcher.PluginCommandTree(nil); len(got.Children) != 0 {
-		t.Fatalf("unset tree = %v", got)
+	RegisterBuiltins(dispatcher)
+	registry := command.NewRegistry()
+	dispatcher.SetCommandRegistry(registry)
+	noop := func(context.Context, *command.Context) error { return nil }
+	handlers := map[command.ExecID]command.Handler{1: noop, 2: noop, 3: noop, 4: noop}
+	if err := registry.Register(command.Source{Kind: command.SourcePlugin, PluginID: "shop"},
+		pluginGraph(), handlers); err != nil {
+		t.Fatal(err)
 	}
-	dispatcher.SetPluginCommandTree(func(*player.Player) command.Root { return pluginGraph() })
-	if got := dispatcher.PluginCommandTree(nil); len(got.Children) != 1 {
-		t.Fatalf("installed tree = %v", got)
+	operator := player.New([16]byte{9}, "admin", player.ClientEditionJava)
+	operator.Operator = true
+	nodes, rootIndex, err := parseCommandTestGraph(
+		buildCommandsPacket(dispatcher.CommandTree(operator)).Data)
+	if err != nil {
+		t.Fatal(err)
 	}
+	root := nodes[rootIndex]
+	childNamed(t, nodes, root, "shop")
+	childNamed(t, nodes, root, "gamemode")
 }

@@ -129,7 +129,6 @@ type Dispatcher struct {
 	permission           PermissionChecker
 	registry             *command.Registry
 	pluginCommands       PluginCommands
-	pluginTree           func(*player.Player) command.Root
 	messenger            func(*player.Player, string) error
 	linkMessenger        func(*player.Player, string, string) error
 	syncAbilities        func(*player.Player)
@@ -179,8 +178,12 @@ func (d *Dispatcher) RequireOperator(names ...string) {
 	d.publishTree()
 }
 
+// builtinPermissionPrefix namespaces every built-in's permission node, and is
+// what lets a node be read back as the command it guards.
+const builtinPermissionPrefix = "gocraft.command."
+
 func commandPermissionNode(name string) string {
-	return "gocraft.command." + strings.ToLower(strings.TrimSpace(name))
+	return builtinPermissionPrefix + strings.ToLower(strings.TrimSpace(name))
 }
 
 func (d *Dispatcher) SetPermissionChecker(check PermissionChecker) {
@@ -200,29 +203,6 @@ func (d *Dispatcher) SetPluginCommands(run PluginCommands) {
 	d.mu.Lock()
 	d.pluginCommands = run
 	d.mu.Unlock()
-}
-
-// SetPluginCommandTree installs the source of the command tree sent to a
-// client, pruned to what that client may use.
-func (d *Dispatcher) SetPluginCommandTree(tree func(*player.Player) command.Root) {
-	d.mu.Lock()
-	d.pluginTree = tree
-	d.mu.Unlock()
-}
-
-// PluginCommandTree returns the plugin commands to advertise to one player.
-//
-// Empty until plugins load, and empty forever on a server that has none, which
-// is what keeps the graph a client receives identical to today's when nothing
-// is installed.
-func (d *Dispatcher) PluginCommandTree(p *player.Player) command.Root {
-	d.mu.RLock()
-	tree := d.pluginTree
-	d.mu.RUnlock()
-	if tree == nil {
-		return command.Root{}
-	}
-	return tree(p)
 }
 
 // SetChatFormatter installs the function used to build chat lines.

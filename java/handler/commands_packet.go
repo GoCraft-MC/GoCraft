@@ -2,11 +2,12 @@ package handler
 
 // Commands packet builder for Minecraft Java Edition 1.21.4.
 //
-// The command graph uses vanilla Brigadier argument parsers wherever they can
-// provide richer client-side completion: game_profile for online players and
-// item_stack for item/block registry names. Dynamic GoCraft-only sets such as
-// generated biomes, summonable mobs, villager jobs, and potion effects are
-// represented as literal children so every value appears in tab completion.
+// The graph is rendered from the neutral command tree rather than built here.
+// It used to be written by hand, beside a dispatcher that routed on names it
+// knew nothing about, so the two could disagree about which commands existed —
+// and a Bedrock client got neither, because a Brigadier graph is not something
+// the other edition can read. §18 makes the tree the one description both
+// editions render.
 
 import (
 	"GoCraft/core/command"
@@ -19,7 +20,6 @@ const (
 	commandNodeArgument byte = 0x02
 	commandExecutable   byte = 0x04
 
-	parserFloat       int32 = 1
 	parserDouble      int32 = 2
 	parserInteger     int32 = 3
 	parserString      int32 = 5
@@ -35,183 +35,14 @@ type commandGraphNode struct {
 	parserData func(*protocol.Builder)
 }
 
-// buildCommandsPacket renders the built-in graph alone.
-func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
-	return buildCommandsPacketFor(command.Root{}, filters...)
-}
-
-// buildCommandsPacketFor renders the built-in graph plus the plugin commands
-// this client may use.
+// buildCommandsPacket renders one tree, already pruned to its recipient.
 //
-// The plugin tree arrives already pruned to its sender, so the filter below
-// never touches it: built-ins are hidden by name here, and plugin branches were
-// hidden by permission when the snapshot was taken. Two mechanisms because the
-// two registries answer to different things — and merging them would mean
-// teaching this file what a plugin permission is.
-func buildCommandsPacketFor(plugins command.Root, filters ...func(string) bool) *protocol.Packet {
+// Pruning happens where permissions are understood — the registry snapshot —
+// rather than through a filter passed down here. A node that reaches this
+// function is one the player may use.
+func buildCommandsPacket(root command.Root) *protocol.Packet {
 	nodes := []commandGraphNode{{flags: commandNodeRoot}}
-	addLiteral := func(name string, executable bool, children ...int32) int32 {
-		flags := commandNodeLiteral
-		if executable {
-			flags |= commandExecutable
-		}
-		index := int32(len(nodes))
-		nodes = append(nodes, commandGraphNode{flags: flags, children: children, name: name})
-		return index
-	}
-	addArgument := func(name string, parser int32, executable bool, parserData func(*protocol.Builder), children ...int32) int32 {
-		flags := commandNodeArgument
-		if executable {
-			flags |= commandExecutable
-		}
-		index := int32(len(nodes))
-		nodes = append(nodes, commandGraphNode{
-			flags: flags, children: children, name: name,
-			parser: parser, parserData: parserData,
-		})
-		return index
-	}
-
-	var rootChildren []int32
-
-	modeChildren := make([]int32, 0, 4)
-	for _, mode := range []string{"survival", "creative", "adventure", "spectator"} {
-		modeChildren = append(modeChildren, addLiteral(mode, true))
-	}
-	rootChildren = append(rootChildren,
-		addLiteral("gamemode", false, modeChildren...),
-		addLiteral("gm", false, modeChildren...),
-	)
-	applyEditsLink := addArgument("link", parserString, true, stringParser(2))
-	rootChildren = append(rootChildren, addLiteral("gocraft", true,
-		addLiteral("peditor", true), addLiteral("applyedits", false, applyEditsLink)))
-
-	tpZ := addArgument("z", parserDouble, true, noNumberBounds)
-	tpY := addArgument("y", parserDouble, false, noNumberBounds, tpZ)
-	tpX := addArgument("x", parserDouble, false, noNumberBounds, tpY)
-	tpTarget := addArgument("target", parserGameProfile, true, nil)
-	rootChildren = append(rootChildren, addLiteral("tp", false, tpX, tpTarget))
-	rootChildren = append(rootChildren, addLiteral("world", true,
-		addLiteral("overworld", true), addLiteral("nether", true), addLiteral("end", true)))
-	tpHereTarget := addArgument("player", parserGameProfile, true, nil)
-	rootChildren = append(rootChildren, addLiteral("tphere", false, tpHereTarget))
-
-	giveCount := addArgument("count", parserInteger, true, integerBounds(1, 64))
-	giveItem := addArgument("item", parserItemStack, true, nil, giveCount)
-	giveTarget := addArgument("player", parserGameProfile, false, nil, giveItem)
-	rootChildren = append(rootChildren, addLiteral("give", false, giveTarget))
-
-	getCount := addArgument("count", parserInteger, true, integerBounds(1, 64))
-	getItem := addArgument("item", parserItemStack, true, nil, getCount)
-	rootChildren = append(rootChildren, addLiteral("get", false, getItem))
-
-	kickReason := addArgument("reason", parserString, true, stringParser(2))
-	kickTarget := addArgument("player", parserGameProfile, true, nil, kickReason)
-	rootChildren = append(rootChildren, addLiteral("kick", false, kickTarget))
-
-	killTarget := addArgument("player", parserGameProfile, true, nil)
-	rootChildren = append(rootChildren, addLiteral("kill", true, killTarget))
-
-	for _, name := range []string{"help", "list", "xyz", "version", "ver", "fly"} {
-		rootChildren = append(rootChildren, addLiteral(name, true))
-	}
-
-	locateChildren := make([]int32, 0, len(locatableTargets))
-	opTarget := addArgument(`player`, parserGameProfile, true, nil)
-	rootChildren = append(rootChildren, addLiteral(`op`, false, opTarget))
-	for _, name := range []string{`god`, `ungod`} {
-		target := addArgument(`player`, parserGameProfile, true, nil)
-		rootChildren = append(rootChildren, addLiteral(name, true, target))
-	}
-
-	for _, target := range locatableTargets {
-		locateChildren = append(locateChildren, addLiteral(target, true))
-	}
-	rootChildren = append(rootChildren, addLiteral("locate", false, locateChildren...))
-
-	professionChildren := make([]int32, 0, len(villagerProfessionNames))
-	for _, profession := range villagerProfessionNames {
-		professionChildren = append(professionChildren, addLiteral(profession, true))
-	}
-	summonChildren := make([]int32, 0, len(summonableMobNames))
-	for _, mob := range summonableMobNames {
-		if mob == "villager" {
-			summonChildren = append(summonChildren, addLiteral(mob, true, professionChildren...))
-		} else {
-			summonChildren = append(summonChildren, addLiteral(mob, true))
-		}
-	}
-	rootChildren = append(rootChildren, addLiteral("summon", false, summonChildren...))
-
-	effectSeconds := addArgument("seconds", parserInteger, true, integerBounds(1, 1_000_000))
-	effectChildren := make([]int32, 0, len(potionEffectNames))
-	for _, effect := range potionEffectNames {
-		effectChildren = append(effectChildren, addLiteral(effect, false, effectSeconds))
-	}
-	effectTarget := addArgument("player", parserGameProfile, false, nil, effectChildren...)
-	rootChildren = append(rootChildren, addLiteral("potioneffect", false, effectTarget))
-
-	rootChildren = append(rootChildren, addLiteral(`effect`, false, effectTarget))
-	healTarget := addArgument(`player`, parserGameProfile, true, nil)
-	rootChildren = append(rootChildren, addLiteral(`heal`, true, healTarget))
-
-	speedValue := func() int32 {
-		return addArgument("value", parserFloat, true, floatBounds(0.001, 1))
-	}
-	speedReset := func() int32 { return addLiteral("reset", true) }
-	for _, command := range []string{"walkspeed", "walkspeen", "flyspeed", "flyyspeed"} {
-		rootChildren = append(rootChildren, addLiteral(command, false, speedValue(), speedReset()))
-	}
-
-	timeSetValue := addArgument("value", parserInteger, true, integerBounds(0, 23999))
-	timeSetLiteral := addLiteral("set", false, timeSetValue)
-	rootChildren = append(rootChildren,
-		addLiteral("time", true,
-			addLiteral("day", true),
-			addLiteral("night", true),
-			timeSetLiteral,
-		),
-	)
-
-	rootChildren = append(rootChildren,
-		addLiteral(`timings`, true),
-		addLiteral(`tps`, true),
-		addLiteral(`mspt`, true),
-		addLiteral(`spawn`, true),
-		addLiteral(`setspawn`, true),
-	)
-
-	whitelistAddName := addArgument("player", parserString, true, stringParser(0))
-	whitelistRemoveName := addArgument("player", parserString, true, stringParser(0))
-	rootChildren = append(rootChildren, addLiteral("whitelist", true,
-		addLiteral("on", true),
-		addLiteral("off", true),
-		addLiteral("list", true),
-		addLiteral("add", false, whitelistAddName),
-		addLiteral("remove", false, whitelistRemoveName),
-	))
-
-	for _, name := range []string{
-		"ban", "ban-ip", "banlist", "pardon", "pardon-ip", "deop",
-		"save-all", "save-off", "save-on", "stop", "defaultgamemode", "difficulty", "setidletimeout",
-		"setblock", "fill", "clone", "spawnpoint", "setworldspawn", "weather",
-		"clear", "damage", "experience", "xp", "rotate", "tag", "me", "say", "msg", "tell", "w", "random", "reload",
-	} {
-		arguments := addArgument("arguments", parserString, true, stringParser(2))
-		rootChildren = append(rootChildren, addLiteral(name, true, arguments))
-	}
-
-	if len(filters) != 0 && filters[0] != nil {
-		visible := rootChildren[:0]
-		for _, index := range rootChildren {
-			if filters[0](nodes[index].name) {
-				visible = append(visible, index)
-			}
-		}
-		rootChildren = visible
-	}
-	rootChildren = append(rootChildren, appendPluginCommands(&nodes, plugins)...)
-	nodes[0].children = rootChildren
+	nodes[0].children = appendCommands(&nodes, root)
 
 	b := protocol.NewBuilder(packetIDCommands).VarInt(int32(len(nodes)))
 	for _, node := range nodes {
@@ -229,22 +60,6 @@ func buildCommandsPacketFor(plugins command.Root, filters ...func(string) bool) 
 	}
 	b.VarInt(0) // root node index
 	return b.Build()
-}
-
-func noNumberBounds(b *protocol.Builder) {
-	b.Byte(0x00)
-}
-
-func integerBounds(minimum, maximum int32) func(*protocol.Builder) {
-	return func(b *protocol.Builder) {
-		b.Byte(0x03).Int(minimum).Int(maximum)
-	}
-}
-
-func floatBounds(minimum, maximum float32) func(*protocol.Builder) {
-	return func(b *protocol.Builder) {
-		b.Byte(0x03).Float(minimum).Float(maximum)
-	}
 }
 
 func stringParser(kind int32) func(*protocol.Builder) {

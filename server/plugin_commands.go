@@ -44,20 +44,6 @@ func (s *Server) runPluginCommand(sender *player.Player, line string) (bool, err
 	return true, err
 }
 
-// pluginCommandTree is what a client is told it may use.
-//
-// It is a snapshot taken for that player, so the graph they receive holds
-// exactly the branches they are allowed to run — a command guarded by a
-// permission they lack is not greyed out, it is absent. The same snapshot is
-// what the parser resolves against, so a client can never be shown a command
-// the server would then refuse.
-func (s *Server) pluginCommandTree(p *player.Player) command.Root {
-	if s.pluginRegistry == nil {
-		return command.Root{}
-	}
-	return s.pluginRegistry.Commands().Snapshot(s.commandSenderFor(p)).Root
-}
-
 // commandResolvers supplies the lookups core/command cannot make for itself.
 //
 // Player is answered from the edition-neutral registry rather than from the

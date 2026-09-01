@@ -452,7 +452,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// Installed once s exists, and before any listener opens: the registry is
 	// empty until plugins load, so an early line simply finds nothing there.
 	cmds.SetPluginCommands(s.runPluginCommand)
-	cmds.SetPluginCommandTree(s.pluginCommandTree)
+	cmds.SetCommandRegistry(pluginRegistry.Commands())
 
 	s.registerSpawnCommands()
 	s.registerLifecycleCommands()
