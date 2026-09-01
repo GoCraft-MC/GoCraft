@@ -8,7 +8,10 @@ package handler
 // generated biomes, summonable mobs, villager jobs, and potion effects are
 // represented as literal children so every value appears in tab completion.
 
-import "GoCraft/java/protocol"
+import (
+	"GoCraft/core/command"
+	"GoCraft/java/protocol"
+)
 
 const (
 	commandNodeRoot     byte = 0x00
@@ -32,7 +35,20 @@ type commandGraphNode struct {
 	parserData func(*protocol.Builder)
 }
 
+// buildCommandsPacket renders the built-in graph alone.
 func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
+	return buildCommandsPacketFor(command.Root{}, filters...)
+}
+
+// buildCommandsPacketFor renders the built-in graph plus the plugin commands
+// this client may use.
+//
+// The plugin tree arrives already pruned to its sender, so the filter below
+// never touches it: built-ins are hidden by name here, and plugin branches were
+// hidden by permission when the snapshot was taken. Two mechanisms because the
+// two registries answer to different things — and merging them would mean
+// teaching this file what a plugin permission is.
+func buildCommandsPacketFor(plugins command.Root, filters ...func(string) bool) *protocol.Packet {
 	nodes := []commandGraphNode{{flags: commandNodeRoot}}
 	addLiteral := func(name string, executable bool, children ...int32) int32 {
 		flags := commandNodeLiteral
@@ -194,6 +210,7 @@ func buildCommandsPacket(filters ...func(string) bool) *protocol.Packet {
 		}
 		rootChildren = visible
 	}
+	rootChildren = append(rootChildren, appendPluginCommands(&nodes, plugins)...)
 	nodes[0].children = rootChildren
 
 	b := protocol.NewBuilder(packetIDCommands).VarInt(int32(len(nodes)))

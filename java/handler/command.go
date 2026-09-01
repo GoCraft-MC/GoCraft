@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"GoCraft/core/command"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
@@ -127,6 +128,7 @@ type Dispatcher struct {
 	disconnectPlayer     func(*player.Player, string) error
 	permission           PermissionChecker
 	pluginCommands       PluginCommands
+	pluginTree           func(*player.Player) command.Root
 	messenger            func(*player.Player, string) error
 	linkMessenger        func(*player.Player, string, string) error
 	syncAbilities        func(*player.Player)
@@ -163,11 +165,11 @@ func (d *Dispatcher) RequireOperator(names ...string) {
 	d.mu.Lock()
 	for _, name := range names {
 		key := strings.ToLower(name)
-		command, ok := d.cmds[key]
+		registered, ok := d.cmds[key]
 		if ok {
-			command.operatorOnly = true
-			command.defaultAllow = false
-			d.cmds[key] = command
+			registered.operatorOnly = true
+			registered.defaultAllow = false
+			d.cmds[key] = registered
 		}
 	}
 	d.mu.Unlock()
@@ -194,6 +196,29 @@ func (d *Dispatcher) SetPluginCommands(run PluginCommands) {
 	d.mu.Lock()
 	d.pluginCommands = run
 	d.mu.Unlock()
+}
+
+// SetPluginCommandTree installs the source of the command tree sent to a
+// client, pruned to what that client may use.
+func (d *Dispatcher) SetPluginCommandTree(tree func(*player.Player) command.Root) {
+	d.mu.Lock()
+	d.pluginTree = tree
+	d.mu.Unlock()
+}
+
+// PluginCommandTree returns the plugin commands to advertise to one player.
+//
+// Empty until plugins load, and empty forever on a server that has none, which
+// is what keeps the graph a client receives identical to today's when nothing
+// is installed.
+func (d *Dispatcher) PluginCommandTree(p *player.Player) command.Root {
+	d.mu.RLock()
+	tree := d.pluginTree
+	d.mu.RUnlock()
+	if tree == nil {
+		return command.Root{}
+	}
+	return tree(p)
 }
 
 // SetChatFormatter installs the function used to build chat lines.
