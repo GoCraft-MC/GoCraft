@@ -53,7 +53,8 @@ func generate(paths options) catalogue {
 		if !ok {
 			panic(fmt.Sprintf("fuel references unknown item %s", itemID))
 		}
-		value.FuelTicks, items[itemID] = ticks, value
+		value.FuelTicks = ticks
+		items[itemID] = value
 	}
 	for tag, values := range tags {
 		sort.Strings(values)
