@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,11 +25,17 @@ func buildCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("build", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	output := flags.String("o", "", "output path (default: <id>.gcpkg in the current directory)")
+	commands := flags.String("commands", "",
+		"command trees a compiler extracted, written into the bundle at the manifest's [commands] tree")
 	flags.Usage = func() {
 		fmt.Fprint(stderr, `Usage: gocraft-cli build [-o <file>.gcpkg] <dir>
 
 Packs a plugin source directory into a bundle, then reopens the result with the
 host's own loader. A bundle that builds is a bundle that loads.
+
+With -commands, the trees an annotation processor extracted are encoded and
+added at the path the manifest's [commands] tree names. Executor ids are minted
+here: they belong to the tree, and nothing that ran earlier has to guess them.
 
 Flags must come before the directory.
 `)
@@ -54,7 +61,13 @@ Flags must come before the directory.
 		path = manifest.ID + ".gcpkg"
 	}
 
-	written, err := writeBundle(directory, path)
+	generated, err := generatedEntries(manifest, *commands)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitFailure
+	}
+
+	written, err := writeBundle(directory, path, generated)
 	if err != nil {
 		os.Remove(path)
 		fmt.Fprintln(stderr, err)
@@ -109,20 +122,55 @@ func collectEntries(directory string) ([]string, error) {
 	return names, nil
 }
 
-func writeBundle(directory, path string) ([]string, error) {
+// generatedEntries is what the build produces rather than copies.
+//
+// The manifest decides where it goes: the path is already declared there for
+// the host to read, so naming it again on the command line would be a second
+// place it lives.
+func generatedEntries(manifest plugin.Manifest, commands string) (map[string][]byte, error) {
+	if commands == "" {
+		return nil, nil
+	}
+	if manifest.CommandTree == "" {
+		return nil, fmt.Errorf("-commands was given and %s declares no [commands] tree",
+			plugin.ManifestFileName)
+	}
+	encoded, err := readCommandTree(commands)
+	if err != nil {
+		return nil, err
+	}
+	return map[string][]byte{manifest.CommandTree: encoded}, nil
+}
+
+func writeBundle(directory, path string, generated map[string][]byte) ([]string, error) {
 	// Listed before the output file is created, so building into the source
 	// directory cannot pack the bundle into itself.
 	names, err := collectEntries(directory)
 	if err != nil {
 		return nil, err
 	}
+	for name := range generated {
+		if slices.Contains(names, name) {
+			return nil, fmt.Errorf("%s is both in the source directory and generated; "+
+				"one of them would be lost", name)
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	file, err := os.Create(path)
 	if err != nil {
 		return nil, err
 	}
 	archive := zip.NewWriter(file)
 	for _, name := range names {
-		if err := packEntry(archive, directory, name); err != nil {
+		var err error
+		if contents, ok := generated[name]; ok {
+			err = packBytes(archive, name, contents)
+		} else {
+			err = packEntry(archive, directory, name)
+		}
+		if err != nil {
 			archive.Close()
 			file.Close()
 			return nil, err
@@ -153,6 +201,23 @@ func packEntry(archive *zip.Writer, directory, name string) error {
 		return fmt.Errorf("add %s: %w", name, err)
 	}
 	if _, err := io.Copy(writer, source); err != nil {
+		return fmt.Errorf("add %s: %w", name, err)
+	}
+	return nil
+}
+
+// packBytes writes something the build produced, stamped with the same fixed
+// epoch as every copied file so the bundle stays byte-identical across runs.
+func packBytes(archive *zip.Writer, name string, contents []byte) error {
+	writer, err := archive.CreateHeader(&zip.FileHeader{
+		Name:     name,
+		Method:   zip.Deflate,
+		Modified: zipEpoch,
+	})
+	if err != nil {
+		return fmt.Errorf("add %s: %w", name, err)
+	}
+	if _, err := writer.Write(contents); err != nil {
 		return fmt.Errorf("add %s: %w", name, err)
 	}
 	return nil
