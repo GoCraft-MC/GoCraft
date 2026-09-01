@@ -79,70 +79,6 @@ type ItemStack struct {
 	Fireworks    FireworkData `json:",omitempty"`
 }
 
-type armorItemStats struct {
-	maxDurability       int
-	armor               int
-	toughness           float32
-	knockbackResistance float32
-}
-
-// armorItemStatsByID mirrors Pumpkin's generated MaxDamage and
-// AttributeModifiers components. Keeping player and mount armour together
-// makes stack limits and future entity-equipment handling use the same source
-// of truth as player combat.
-var armorItemStatsByID = map[string]armorItemStats{
-	"minecraft:leather_helmet":     {maxDurability: 55, armor: 1},
-	"minecraft:leather_chestplate": {maxDurability: 80, armor: 3},
-	"minecraft:leather_leggings":   {maxDurability: 75, armor: 2},
-	"minecraft:leather_boots":      {maxDurability: 65, armor: 1},
-
-	"minecraft:chainmail_helmet":     {maxDurability: 165, armor: 2},
-	"minecraft:chainmail_chestplate": {maxDurability: 240, armor: 5},
-	"minecraft:chainmail_leggings":   {maxDurability: 225, armor: 4},
-	"minecraft:chainmail_boots":      {maxDurability: 195, armor: 1},
-
-	"minecraft:copper_helmet":     {maxDurability: 121, armor: 2},
-	"minecraft:copper_chestplate": {maxDurability: 176, armor: 4},
-	"minecraft:copper_leggings":   {maxDurability: 165, armor: 3},
-	"minecraft:copper_boots":      {maxDurability: 143, armor: 1},
-
-	"minecraft:golden_helmet":     {maxDurability: 77, armor: 2},
-	"minecraft:golden_chestplate": {maxDurability: 112, armor: 5},
-	"minecraft:golden_leggings":   {maxDurability: 105, armor: 3},
-	"minecraft:golden_boots":      {maxDurability: 91, armor: 1},
-
-	"minecraft:iron_helmet":     {maxDurability: 165, armor: 2},
-	"minecraft:iron_chestplate": {maxDurability: 240, armor: 6},
-	"minecraft:iron_leggings":   {maxDurability: 225, armor: 5},
-	"minecraft:iron_boots":      {maxDurability: 195, armor: 2},
-
-	"minecraft:diamond_helmet":     {maxDurability: 363, armor: 3, toughness: 2},
-	"minecraft:diamond_chestplate": {maxDurability: 528, armor: 8, toughness: 2},
-	"minecraft:diamond_leggings":   {maxDurability: 495, armor: 6, toughness: 2},
-	"minecraft:diamond_boots":      {maxDurability: 429, armor: 3, toughness: 2},
-
-	"minecraft:netherite_helmet":     {maxDurability: 407, armor: 3, toughness: 3, knockbackResistance: 0.1},
-	"minecraft:netherite_chestplate": {maxDurability: 592, armor: 8, toughness: 3, knockbackResistance: 0.1},
-	"minecraft:netherite_leggings":   {maxDurability: 555, armor: 6, toughness: 3, knockbackResistance: 0.1},
-	"minecraft:netherite_boots":      {maxDurability: 481, armor: 3, toughness: 3, knockbackResistance: 0.1},
-
-	"minecraft:turtle_helmet": {maxDurability: 275, armor: 2},
-	"minecraft:wolf_armor":    {maxDurability: 64, armor: 11},
-
-	"minecraft:leather_horse_armor":   {armor: 3},
-	"minecraft:copper_horse_armor":    {armor: 4},
-	"minecraft:iron_horse_armor":      {armor: 5},
-	"minecraft:golden_horse_armor":    {armor: 7},
-	"minecraft:diamond_horse_armor":   {armor: 11, toughness: 2},
-	"minecraft:netherite_horse_armor": {armor: 19, toughness: 3, knockbackResistance: 0.1},
-
-	"minecraft:copper_nautilus_armor":    {armor: 4},
-	"minecraft:iron_nautilus_armor":      {armor: 5},
-	"minecraft:golden_nautilus_armor":    {armor: 7},
-	"minecraft:diamond_nautilus_armor":   {armor: 11, toughness: 2},
-	"minecraft:netherite_nautilus_armor": {armor: 19, toughness: 3, knockbackResistance: 0.1},
-}
-
 // IsEmpty reports whether the slot contains no item.
 func (s ItemStack) IsEmpty() bool {
 	return s.Count <= 0 || s.ItemID == ""
@@ -255,18 +191,27 @@ func (s *ItemStack) ApplyDamage(amount int) bool {
 
 // ArmorPoints returns the vanilla armour value contributed by an armour item.
 func ArmorPoints(itemID string) int {
-	return armorItemStatsByID[itemID].armor
+	if definition, ok := itemregistry.Lookup(itemID); ok && definition.Equipment != nil {
+		return definition.Equipment.Armor
+	}
+	return 0
 }
 
 // ArmorToughness returns the vanilla toughness supplied by one armour piece.
 func ArmorToughness(itemID string) float32 {
-	return armorItemStatsByID[itemID].toughness
+	if definition, ok := itemregistry.Lookup(itemID); ok && definition.Equipment != nil {
+		return definition.Equipment.Toughness
+	}
+	return 0
 }
 
 // ArmorKnockbackResistance returns the vanilla knockback resistance supplied
 // by one armour piece. Netherite contributes 0.1 per equipped piece.
 func ArmorKnockbackResistance(itemID string) float32 {
-	return armorItemStatsByID[itemID].knockbackResistance
+	if definition, ok := itemregistry.Lookup(itemID); ok && definition.Equipment != nil {
+		return definition.Equipment.KnockbackResistance
+	}
+	return 0
 }
 
 // LegacyAttackDamage returns total melee damage for pre-1.9-style combat.
