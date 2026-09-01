@@ -2,6 +2,21 @@ package itemregistry
 
 import "testing"
 
+func TestNewRegistryDetachesDefinitions(t *testing.T) {
+	food := &FoodProperties{Nutrition: 4, Saturation: 2.4}
+	definitions := []Definition{{ID: "custom:fruit", MaxStackSize: 16, Food: food, Tags: []string{"custom:food"}}}
+	registry, err := NewRegistry(definitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	food.Nutrition = 1
+	definitions[0].Tags[0] = "custom:changed"
+	got, _ := registry.Lookup("custom:fruit")
+	if got.Food.Nutrition != 4 || !registry.HasTag(got.ID, "custom:food") {
+		t.Fatalf("registered definition changed through source: %+v", got)
+	}
+}
+
 func TestRepresentativeDefinitions(t *testing.T) {
 	tests := []struct {
 		itemID     string
