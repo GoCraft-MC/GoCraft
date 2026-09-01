@@ -127,6 +127,7 @@ type Dispatcher struct {
 	teleportPlayer       func(*player.Player, float64, float64, float64) error
 	disconnectPlayer     func(*player.Player, string) error
 	permission           PermissionChecker
+	registry             *command.Registry
 	pluginCommands       PluginCommands
 	pluginTree           func(*player.Player) command.Root
 	messenger            func(*player.Player, string) error
@@ -150,6 +151,7 @@ func (d *Dispatcher) Register(name string, fn CommandFunc) {
 	name = strings.ToLower(name)
 	d.cmds[name] = registeredCommand{fn: fn, permission: commandPermissionNode(name), defaultAllow: true}
 	d.mu.Unlock()
+	d.publishTree()
 }
 
 // RegisterOperator adds a command that may only be used by server operators.
@@ -158,6 +160,7 @@ func (d *Dispatcher) RegisterOperator(name string, fn CommandFunc) {
 	name = strings.ToLower(name)
 	d.cmds[name] = registeredCommand{fn: fn, operatorOnly: true, permission: commandPermissionNode(name)}
 	d.mu.Unlock()
+	d.publishTree()
 }
 
 // RequireOperator upgrades already-registered commands to operator-only.
@@ -173,6 +176,7 @@ func (d *Dispatcher) RequireOperator(names ...string) {
 		}
 	}
 	d.mu.Unlock()
+	d.publishTree()
 }
 
 func commandPermissionNode(name string) string {
