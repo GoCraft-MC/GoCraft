@@ -51,7 +51,7 @@ func TestRepresentativeDefinitions(t *testing.T) {
 		{"minecraft:flint_and_steel", 64, 1, 0, 0, 0, 0, "", ToolFlintAndSteel},
 		{"minecraft:bow", 384, 1, 0, 0, 0, 0, "", ""},
 		{"minecraft:crossbow", 465, 1, 0, 0, 0, 0, "", ""},
-		{"minecraft:shield", 336, 1, 0, 0, 0, 0, "", ""},
+		{"minecraft:shield", 336, 1, 0, 0, 0, 0, "offhand", ""},
 		{"minecraft:elytra", 432, 1, 0, 0, 0, 0, "chest", ""},
 		{"minecraft:diamond_horse_armor", 0, 1, 11, 2, 0, 0, "body", ""},
 	}
