@@ -67,6 +67,18 @@ func TestRepresentativeDefinitions(t *testing.T) {
 }
 
 func TestFoodStackSizesTagsAndExtensions(t *testing.T) {
+	netherite, _ := Lookup("minecraft:netherite_pickaxe")
+	if !netherite.FireResistant || netherite.Enchantability != 15 || netherite.Tool.MiningSpeed != 9 || netherite.Tool.Tier != TierNetherite {
+		t.Fatalf("netherite pickaxe static metadata = %+v", netherite)
+	}
+	boots, _ := Lookup("minecraft:netherite_boots")
+	if boots.Equipment.KnockbackResistance != 0.1 {
+		t.Fatalf("netherite boots knockback resistance = %v, want 0.1", boots.Equipment.KnockbackResistance)
+	}
+	coal, _ := Lookup("minecraft:coal")
+	if coal.FuelTicks != 1600 {
+		t.Fatalf("coal fuel ticks = %d, want 1600", coal.FuelTicks)
+	}
 	apple, ok := Lookup("minecraft:apple")
 	if !ok || apple.Food == nil || apple.Food.Nutrition != 4 || apple.Food.SaturationModifier() != 0.3 || apple.MaxStackSize != 64 {
 		t.Fatalf("apple = %+v", apple)
