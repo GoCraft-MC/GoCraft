@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"strings"
 
 	"GoCraft/core/intent"
 	"GoCraft/core/itemregistry"
