@@ -8,20 +8,23 @@ import (
 	"strings"
 	"testing"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/command"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 type recordingInstance struct {
-	manifest Manifest
+	manifest gcpkg.Manifest
 	order    *[]string
 }
 
-func (i *recordingInstance) Manifest() Manifest { return i.manifest }
+func (i *recordingInstance) Manifest() gcpkg.Manifest { return i.manifest }
 func (i *recordingInstance) Dispatch(context.Context, *abi.Event) (abi.Verdict, error) {
 	return abi.Verdict{}, nil
 }
-func (i *recordingInstance) InvokeCommand(_ context.Context, executor command.ExecID, _ command.Sender, _ command.Values) (abi.CommandResult, error) {
+func (i *recordingInstance) InvokeCommand(_ context.Context, executor command.ExecID, _ dispatch.Sender, _ dispatch.Values) (abi.CommandResult, error) {
 	*i.order = append(*i.order, fmt.Sprintf("command:%d", executor))
 	return abi.CommandResult{}, nil
 }
@@ -120,7 +123,7 @@ func (r *recordingRuntime) Stop(context.Context) error {
 }
 
 func testBundle(id string) Bundle {
-	return Bundle{Manifest: Manifest{ID: id, Version: "1.0.0", APIVersion: 1, Runtime: "recording"}}
+	return Bundle{Bundle: gcpkg.Bundle{Manifest: gcpkg.Manifest{ID: id, Version: "1.0.0", APIVersion: 1, Runtime: "recording"}}}
 }
 
 func TestLoadAllAndStopUseDeterministicReverseOrder(t *testing.T) {

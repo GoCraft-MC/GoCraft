@@ -3,11 +3,11 @@ package server
 import (
 	"log/slog"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 )
 
-// pluginCommandSender is whoever typed a plugin command, as core/command sees
+// pluginCommandSender is whoever typed a plugin command, as core/dispatch sees
 // them.
 //
 // It carries the player rather than a connection on purpose: that is the
@@ -24,13 +24,13 @@ type pluginCommandSender struct {
 // behind the command.
 const consoleSenderName = "Console"
 
-func (s *Server) commandSenderFor(p *player.Player) command.Sender {
+func (s *Server) commandSenderFor(p *player.Player) dispatch.Sender {
 	return pluginCommandSender{server: s, player: p}
 }
 
 // consoleCommandSender is the server itself: no player, every permission, and
 // output to the log.
-func (s *Server) consoleCommandSender() command.Sender {
+func (s *Server) consoleCommandSender() dispatch.Sender {
 	return pluginCommandSender{server: s}
 }
 

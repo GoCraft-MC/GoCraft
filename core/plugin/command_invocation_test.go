@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 type fakeSender struct {
@@ -34,39 +35,39 @@ func (s *fakeSender) Player() (*player.Player, bool) {
 func TestNewCommandInvocationConvertsEveryArgumentType(t *testing.T) {
 	tests := []struct {
 		name  string
-		value command.Value
+		value dispatch.Value
 		want  abi.Value
 	}{
-		{"integer", command.Value{Type: command.ArgInteger, Integer: 42}, abi.Int64(42)},
-		{"decimal", command.Value{Type: command.ArgDecimal, Decimal: 1.5}, abi.Double(1.5)},
-		{"string", command.Value{Type: command.ArgString, String: "spawn"}, abi.String("spawn")},
-		{"greedy", command.Value{Type: command.ArgGreedy, String: "a b c"}, abi.String("a b c")},
-		{"enum", command.Value{Type: command.ArgEnum, String: "deny"}, abi.String("deny")},
-		{"custom", command.Value{Type: command.ArgCustom, String: "x"}, abi.String("x")},
+		{"integer", dispatch.Value{Type: command.ArgInteger, Integer: 42}, abi.Int64(42)},
+		{"decimal", dispatch.Value{Type: command.ArgDecimal, Decimal: 1.5}, abi.Double(1.5)},
+		{"string", dispatch.Value{Type: command.ArgString, String: "spawn"}, abi.String("spawn")},
+		{"greedy", dispatch.Value{Type: command.ArgGreedy, String: "a b c"}, abi.String("a b c")},
+		{"enum", dispatch.Value{Type: command.ArgEnum, String: "deny"}, abi.String("deny")},
+		{"custom", dispatch.Value{Type: command.ArgCustom, String: "x"}, abi.String("x")},
 		{
 			"blockpos",
-			command.Value{Type: command.ArgBlockPos, Position: spatial.BlockPos{X: 1, Y: -2, Z: 3}},
+			dispatch.Value{Type: command.ArgBlockPos, Position: spatial.BlockPos{X: 1, Y: -2, Z: 3}},
 			abi.List(abi.Int64(1), abi.Int64(-2), abi.Int64(3)),
 		},
 		{
 			"duration",
-			command.Value{Type: command.ArgDuration, Duration: 2 * time.Second},
+			dispatch.Value{Type: command.ArgDuration, Duration: 2 * time.Second},
 			abi.Int64(2000),
 		},
 		{
 			"item",
-			command.Value{Type: command.ArgItem, Item: player.ItemStack{ItemID: "minecraft:stone", Count: 3, Damage: 1}},
+			dispatch.Value{Type: command.ArgItem, Item: player.ItemStack{ItemID: "minecraft:stone", Count: 3, Damage: 1}},
 			abi.List(abi.String("minecraft:stone"), abi.Int64(3), abi.Int64(1)),
 		},
 		{
 			"blockstate",
-			command.Value{Type: command.ArgBlockState, Block: coreworld.Block{Name: "minecraft:stone"}},
+			dispatch.Value{Type: command.ArgBlockState, Block: coreworld.Block{Name: "minecraft:stone"}},
 			blockValue(coreworld.Block{Name: "minecraft:stone"}),
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			invocation, err := NewCommandInvocation(1, nil, command.Values{"arg": test.value}, nil)
+			invocation, err := NewCommandInvocation(1, nil, dispatch.Values{"arg": test.value}, nil)
 			if err != nil {
 				t.Fatalf("NewCommandInvocation() = %v", err)
 			}
@@ -83,7 +84,7 @@ func TestNewCommandInvocationConvertsEveryArgumentType(t *testing.T) {
 // The wire carries the declared type beside the value so a runtime asking for
 // the wrong one is refused rather than handed a zero.
 func TestNewCommandInvocationCarriesTheArgumentType(t *testing.T) {
-	invocation, err := NewCommandInvocation(3, nil, command.Values{
+	invocation, err := NewCommandInvocation(3, nil, dispatch.Values{
 		"radius": {Type: command.ArgInteger, Integer: 8},
 	}, nil)
 	if err != nil {
@@ -100,7 +101,7 @@ func TestNewCommandInvocationCarriesTheArgumentType(t *testing.T) {
 // An argument with no type never reaches the socket. It would arrive as
 // UNSPECIFIED and the runtime would have to guess which field to read.
 func TestNewCommandInvocationRefusesAnUntypedArgument(t *testing.T) {
-	_, err := NewCommandInvocation(1, nil, command.Values{"broken": {}}, nil)
+	_, err := NewCommandInvocation(1, nil, dispatch.Values{"broken": {}}, nil)
 	if err == nil {
 		t.Fatal("NewCommandInvocation() accepted an argument with no type")
 	}
@@ -109,7 +110,7 @@ func TestNewCommandInvocationRefusesAnUntypedArgument(t *testing.T) {
 // Arguments come out in name order. The map they arrive in has none, so without
 // this the same command serialises differently from one invocation to the next.
 func TestNewCommandInvocationOrdersArgumentsByName(t *testing.T) {
-	invocation, err := NewCommandInvocation(1, nil, command.Values{
+	invocation, err := NewCommandInvocation(1, nil, dispatch.Values{
 		"zulu":  {Type: command.ArgString, String: "z"},
 		"alpha": {Type: command.ArgString, String: "a"},
 		"mike":  {Type: command.ArgString, String: "m"},

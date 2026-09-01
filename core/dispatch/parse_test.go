@@ -1,4 +1,4 @@
-package command
+package dispatch
 
 import (
 	"errors"
@@ -9,6 +9,8 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 func decimal(value float64) *float64 { return &value }
@@ -17,17 +19,17 @@ func integer(value int64) *int64 { return &value }
 
 // shopTree is the worked example from §07: one command, a literal branch, a
 // bounded decimal and a permission-guarded sibling.
-func shopTree() Root {
-	return Root{Children: []Node{Literal{Name: "shop", Children: []Node{
-		Literal{Name: "sell", Children: []Node{
-			Argument{
-				Name: "price", Type: ArgDecimal,
+func shopTree() command.Root {
+	return command.Root{Children: []command.Node{command.Literal{Name: "shop", Children: []command.Node{
+		command.Literal{Name: "sell", Children: []command.Node{
+			command.Argument{
+				Name: "price", Type: command.ArgDecimal,
 				DecimalMin: decimal(0.01), DecimalMax: decimal(1000),
 				Exec: 1,
 			},
 		}},
-		Literal{Name: "admin", Permission: "shop.admin", Children: []Node{
-			Literal{Name: "reload", Exec: 2},
+		command.Literal{Name: "admin", Permission: "shop.admin", Children: []command.Node{
+			command.Literal{Name: "reload", Exec: 2},
 		}},
 	}}}}
 }
@@ -35,7 +37,7 @@ func shopTree() Root {
 func shopSnapshot(t *testing.T, sender Sender) Snapshot {
 	t.Helper()
 	registry := NewRegistry()
-	handlers := map[ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
+	handlers := map[command.ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
 	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "shop"}, shopTree(), handlers); err != nil {
 		t.Fatal(err)
 	}
@@ -120,13 +122,13 @@ func TestResolveReportsIncompleteAndOverlongLines(t *testing.T) {
 // say which branch was meant.
 func TestResolveBacktracksBetweenSiblings(t *testing.T) {
 	registry := NewRegistry()
-	root := Root{Children: []Node{Literal{Name: "warp", Children: []Node{
-		Literal{Name: "home", Children: []Node{
-			Literal{Name: "set", Exec: 1},
+	root := command.Root{Children: []command.Node{command.Literal{Name: "warp", Children: []command.Node{
+		command.Literal{Name: "home", Children: []command.Node{
+			command.Literal{Name: "set", Exec: 1},
 		}},
-		Argument{Name: "target", Type: ArgString, Exec: 2},
+		command.Argument{Name: "target", Type: command.ArgString, Exec: 2},
 	}}}}
-	handlers := map[ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
+	handlers := map[command.ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
 	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "warp"}, root, handlers); err != nil {
 		t.Fatal(err)
 	}
@@ -151,13 +153,13 @@ func TestResolveBacktracksBetweenSiblings(t *testing.T) {
 // A branch abandoned after it wrote an argument must leave nothing behind.
 func TestResolveKeepsNoArgumentFromAFailedBranch(t *testing.T) {
 	registry := NewRegistry()
-	root := Root{Children: []Node{Literal{Name: "pay", Children: []Node{
-		Argument{Name: "amount", Type: ArgInteger, Children: []Node{
-			Literal{Name: "to", Exec: 1},
+	root := command.Root{Children: []command.Node{command.Literal{Name: "pay", Children: []command.Node{
+		command.Argument{Name: "amount", Type: command.ArgInteger, Children: []command.Node{
+			command.Literal{Name: "to", Exec: 1},
 		}},
-		Argument{Name: "everyone", Type: ArgString, Exec: 2},
+		command.Argument{Name: "everyone", Type: command.ArgString, Exec: 2},
 	}}}}
-	handlers := map[ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
+	handlers := map[command.ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
 	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "pay"}, root, handlers); err != nil {
 		t.Fatal(err)
 	}
@@ -186,32 +188,32 @@ func TestParseArgumentReadsEveryDeclaredType(t *testing.T) {
 	}
 	cases := []struct {
 		name     string
-		argument Argument
+		argument command.Argument
 		tokens   []string
 		consumed int
 		check    func(Value) bool
 	}{
-		{"integer", Argument{Name: "n", Type: ArgInteger, IntegerMin: integer(1), IntegerMax: integer(9)},
+		{"integer", command.Argument{Name: "n", Type: command.ArgInteger, IntegerMin: integer(1), IntegerMax: integer(9)},
 			[]string{"4"}, 1, func(v Value) bool { return v.Integer == 4 }},
-		{"string", Argument{Name: "s", Type: ArgString}, []string{"one", "two"}, 1,
+		{"string", command.Argument{Name: "s", Type: command.ArgString}, []string{"one", "two"}, 1,
 			func(v Value) bool { return v.String == "one" }},
-		{"greedy", Argument{Name: "s", Type: ArgGreedy}, []string{"hello", "there"}, 2,
+		{"greedy", command.Argument{Name: "s", Type: command.ArgGreedy}, []string{"hello", "there"}, 2,
 			func(v Value) bool { return v.String == "hello there" }},
-		{"enum", Argument{Name: "e", Type: ArgEnum, Enum: []string{"red", "blue"}}, []string{"blue"}, 1,
+		{"enum", command.Argument{Name: "e", Type: command.ArgEnum, Enum: []string{"red", "blue"}}, []string{"blue"}, 1,
 			func(v Value) bool { return v.String == "blue" }},
-		{"player", Argument{Name: "p", Type: ArgPlayer}, []string{"oreo"}, 1,
+		{"player", command.Argument{Name: "p", Type: command.ArgPlayer}, []string{"oreo"}, 1,
 			func(v Value) bool { return v.Player == target }},
-		{"position", Argument{Name: "at", Type: ArgBlockPos}, []string{"10", "-64", "3"}, 3,
+		{"position", command.Argument{Name: "at", Type: command.ArgBlockPos}, []string{"10", "-64", "3"}, 3,
 			func(v Value) bool { return v.Position == spatial.BlockPos{X: 10, Y: -64, Z: 3} }},
-		{"block", Argument{Name: "b", Type: ArgBlockState}, []string{"minecraft:stone"}, 1,
+		{"block", command.Argument{Name: "b", Type: command.ArgBlockState}, []string{"minecraft:stone"}, 1,
 			func(v Value) bool { return v.Block.ResourceLocation() == "minecraft:stone" }},
-		{"item", Argument{Name: "i", Type: ArgItem}, []string{"minecraft:diamond"}, 1,
+		{"item", command.Argument{Name: "i", Type: command.ArgItem}, []string{"minecraft:diamond"}, 1,
 			func(v Value) bool { return v.Item.ItemID == "minecraft:diamond" }},
-		{"duration seconds", Argument{Name: "d", Type: ArgDuration}, []string{"30s"}, 1,
+		{"duration seconds", command.Argument{Name: "d", Type: command.ArgDuration}, []string{"30s"}, 1,
 			func(v Value) bool { return v.Duration == 30*time.Second }},
-		{"duration ticks", Argument{Name: "d", Type: ArgDuration}, []string{"40"}, 1,
+		{"duration ticks", command.Argument{Name: "d", Type: command.ArgDuration}, []string{"40"}, 1,
 			func(v Value) bool { return v.Duration == 2*time.Second }},
-		{"duration tick suffix", Argument{Name: "d", Type: ArgDuration}, []string{"20t"}, 1,
+		{"duration tick suffix", command.Argument{Name: "d", Type: command.ArgDuration}, []string{"20t"}, 1,
 			func(v Value) bool { return v.Duration == time.Second }},
 	}
 	for _, testCase := range cases {
@@ -234,8 +236,8 @@ func TestParseArgumentReadsEveryDeclaredType(t *testing.T) {
 // something invented: a handler reading a made-up player is worse than a
 // command that says it cannot run.
 func TestParseArgumentRefusesWhatItCannotResolve(t *testing.T) {
-	for _, kind := range []ArgType{ArgPlayer, ArgBlockState, ArgItem} {
-		argument := Argument{Name: "target", Type: kind}
+	for _, kind := range []command.ArgType{command.ArgPlayer, command.ArgBlockState, command.ArgItem} {
+		argument := command.Argument{Name: "target", Type: kind}
 		if _, _, err := parseArgument(argument, []string{"anything"}, Resolvers{}); err == nil {
 			t.Fatalf("argument type %d resolved with no resolver installed", kind)
 		}
@@ -243,7 +245,7 @@ func TestParseArgumentRefusesWhatItCannotResolve(t *testing.T) {
 }
 
 func TestParseArgumentRefusesANegativeDuration(t *testing.T) {
-	argument := Argument{Name: "d", Type: ArgDuration}
+	argument := command.Argument{Name: "d", Type: command.ArgDuration}
 	for _, raw := range []string{"-5s", "-20"} {
 		if _, _, err := parseArgument(argument, []string{raw}, Resolvers{}); err == nil {
 			t.Fatalf("duration %q accepted", raw)
@@ -256,10 +258,10 @@ func TestParseArgumentRefusesANegativeDuration(t *testing.T) {
 // same one.
 func TestResolveHandlesAnOptionalArgument(t *testing.T) {
 	registry := NewRegistry()
-	root := Root{Children: []Node{Literal{Name: "kill", Exec: 1, Children: []Node{
-		Argument{Name: "target", Type: ArgPlayer, Exec: 2},
+	root := command.Root{Children: []command.Node{command.Literal{Name: "kill", Exec: 1, Children: []command.Node{
+		command.Argument{Name: "target", Type: command.ArgPlayer, Exec: 2},
 	}}}}
-	handlers := map[ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
+	handlers := map[command.ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
 	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "kill"}, root, handlers); err != nil {
 		t.Fatal(err)
 	}

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"GoCraft/core/command"
-	"GoCraft/core/plugin"
+	"github.com/GoCraft-MC/gocraft-abi/command"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // writeFile puts one file where a test wants it, creating what it needs to.
@@ -217,7 +217,7 @@ tree = "commands.pb"
 	}
 
 	// Opened by the host's own loader, which decodes the tree it just wrote.
-	bundle, err := plugin.OpenBundle(bundlePath)
+	bundle, err := gcpkg.Open(bundlePath)
 	if err != nil {
 		t.Fatal(err)
 	}

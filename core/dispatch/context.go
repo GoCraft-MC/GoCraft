@@ -1,4 +1,4 @@
-package command
+package dispatch
 
 import (
 	"context"
@@ -7,11 +7,13 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // Value is one argument after host-side parsing and validation.
 type Value struct {
-	Type     ArgType
+	Type     command.ArgType
 	Integer  int64
 	Decimal  float64
 	String   string
@@ -31,7 +33,7 @@ func (v Values) Get(name string) (Value, bool) {
 
 func (v Values) String(name string) (string, bool) {
 	value, ok := v[name]
-	if !ok || value.Type != ArgString && value.Type != ArgGreedy && value.Type != ArgEnum && value.Type != ArgCustom {
+	if !ok || value.Type != command.ArgString && value.Type != command.ArgGreedy && value.Type != command.ArgEnum && value.Type != command.ArgCustom {
 		return "", false
 	}
 	return value.String, true
@@ -39,7 +41,7 @@ func (v Values) String(name string) (string, bool) {
 
 func (v Values) Integer(name string) (int64, bool) {
 	value, ok := v[name]
-	if !ok || value.Type != ArgInteger {
+	if !ok || value.Type != command.ArgInteger {
 		return 0, false
 	}
 	return value.Integer, true
@@ -47,7 +49,7 @@ func (v Values) Integer(name string) (int64, bool) {
 
 func (v Values) Decimal(name string) (float64, bool) {
 	value, ok := v[name]
-	if !ok || value.Type != ArgDecimal {
+	if !ok || value.Type != command.ArgDecimal {
 		return 0, false
 	}
 	return value.Decimal, true
@@ -56,7 +58,7 @@ func (v Values) Decimal(name string) (float64, bool) {
 type Context struct {
 	Sender Sender
 	Args   Values
-	Node   ExecID
+	Node   command.ExecID
 
 	// Raw is what followed the command name, split on whitespace.
 	//

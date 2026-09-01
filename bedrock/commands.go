@@ -6,8 +6,8 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
-	"GoCraft/core/command"
 	"GoCraft/core/player"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // Bedrock's view of the command tree.

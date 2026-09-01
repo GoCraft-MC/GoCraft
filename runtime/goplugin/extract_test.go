@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"GoCraft/core/plugin"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 func TestExtractExecutableAndCleanup(t *testing.T) {
 	bundlePath := writeTestBundle(t, "bin/example", []byte("native plugin"))
 	runtime := New(Config{ExtractDirectory: t.TempDir()})
-	bundle := plugin.Bundle{Path: bundlePath, Manifest: plugin.Manifest{ID: "example", Entry: "bin/example"}}
+	bundle := plugin.Bundle{Bundle: gcpkg.Bundle{Path: bundlePath, Manifest: gcpkg.Manifest{ID: "example", Entry: "bin/example"}}}
 	executable, cleanup, err := runtime.extract(bundle)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +33,7 @@ func TestExtractRejectsUnsafeOrMissingEntry(t *testing.T) {
 	bundlePath := writeTestBundle(t, "bin/example", []byte("plugin"))
 	runtime := New(Config{ExtractDirectory: t.TempDir()})
 	for _, entry := range []string{"", "../example", `bin\example`, "bin/missing"} {
-		bundle := plugin.Bundle{Path: bundlePath, Manifest: plugin.Manifest{ID: "example", Entry: entry}}
+		bundle := plugin.Bundle{Bundle: gcpkg.Bundle{Path: bundlePath, Manifest: gcpkg.Manifest{ID: "example", Entry: entry}}}
 		if _, _, err := runtime.extract(bundle); err == nil {
 			t.Fatalf("entry %q was accepted", entry)
 		}

@@ -1,19 +1,21 @@
-package command
+package dispatch
 
-func remapRoot(root Root, allocate func() ExecID) (Root, map[ExecID]ExecID) {
-	remapped := make(map[ExecID]ExecID)
-	return Root{Children: remapNodes(root.Children, allocate, remapped)}, remapped
+import "github.com/GoCraft-MC/gocraft-abi/command"
+
+func remapRoot(root command.Root, allocate func() command.ExecID) (command.Root, map[command.ExecID]command.ExecID) {
+	remapped := make(map[command.ExecID]command.ExecID)
+	return command.Root{Children: remapNodes(root.Children, allocate, remapped)}, remapped
 }
 
-func remapNodes(nodes []Node, allocate func() ExecID, remapped map[ExecID]ExecID) []Node {
-	cloned := make([]Node, 0, len(nodes))
+func remapNodes(nodes []command.Node, allocate func() command.ExecID, remapped map[command.ExecID]command.ExecID) []command.Node {
+	cloned := make([]command.Node, 0, len(nodes))
 	for _, node := range nodes {
 		switch typed := node.(type) {
-		case Literal:
+		case command.Literal:
 			typed.Children = remapNodes(typed.Children, allocate, remapped)
 			typed.Exec = remapExecutor(typed.Exec, allocate, remapped)
 			cloned = append(cloned, typed)
-		case Argument:
+		case command.Argument:
 			typed = cloneArgument(typed)
 			typed.Children = remapNodes(typed.Children, allocate, remapped)
 			typed.Exec = remapExecutor(typed.Exec, allocate, remapped)
@@ -23,7 +25,7 @@ func remapNodes(nodes []Node, allocate func() ExecID, remapped map[ExecID]ExecID
 	return cloned
 }
 
-func cloneArgument(argument Argument) Argument {
+func cloneArgument(argument command.Argument) command.Argument {
 	argument.Enum = append([]string(nil), argument.Enum...)
 	if argument.IntegerMin != nil {
 		value := *argument.IntegerMin
@@ -44,7 +46,7 @@ func cloneArgument(argument Argument) Argument {
 	return argument
 }
 
-func remapExecutor(executor ExecID, allocate func() ExecID, remapped map[ExecID]ExecID) ExecID {
+func remapExecutor(executor command.ExecID, allocate func() command.ExecID, remapped map[command.ExecID]command.ExecID) command.ExecID {
 	if executor == 0 {
 		return 0
 	}

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"GoCraft/core/plugin"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // validateCommand checks a plugin source directory without producing anything.
@@ -45,22 +45,22 @@ same decoder the server uses when it opens a built bundle.
 // readSourceManifest decodes the manifest of an unpacked plugin directory. It
 // calls the very decoder the host runs against a packed bundle, so a manifest
 // this accepts is a manifest the server accepts.
-func readSourceManifest(directory string) (plugin.Manifest, error) {
-	file, err := os.Open(filepath.Join(directory, plugin.ManifestFileName))
+func readSourceManifest(directory string) (gcpkg.Manifest, error) {
+	file, err := os.Open(filepath.Join(directory, gcpkg.ManifestFileName))
 	if err != nil {
-		return plugin.Manifest{}, err
+		return gcpkg.Manifest{}, err
 	}
 	defer file.Close()
-	manifest, err := plugin.DecodeManifest(file)
+	manifest, err := gcpkg.DecodeManifest(file)
 	if err != nil {
 		// The decoder already reports plugin.toml and a line; only the
 		// directory is missing, and it is what disambiguates several plugins.
-		return plugin.Manifest{}, fmt.Errorf("%s: %w", directory, err)
+		return gcpkg.Manifest{}, fmt.Errorf("%s: %w", directory, err)
 	}
 	return manifest, nil
 }
 
-func describeManifest(w io.Writer, directory string, manifest plugin.Manifest) {
+func describeManifest(w io.Writer, directory string, manifest gcpkg.Manifest) {
 	fmt.Fprintf(w, "%s: ok\n", directory)
 	fmt.Fprintf(w, "  id       %s\n", manifest.ID)
 	fmt.Fprintf(w, "  version  %s\n", manifest.Version)

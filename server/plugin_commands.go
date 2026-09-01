@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/handler"
@@ -36,16 +36,16 @@ func (s *Server) runPluginCommand(sender *player.Player, line string) (bool, err
 	// server's fault and is logged rather than shown, because there is nothing
 	// they could do about it.
 	switch {
-	case errors.Is(err, command.ErrPermission):
+	case errors.Is(err, dispatch.ErrPermission):
 		return true, errors.New("You do not have permission to use this command")
-	case errors.Is(err, command.ErrUnknownExecutor):
+	case errors.Is(err, dispatch.ErrUnknownExecutor):
 		slog.Warn("plugin command has no handler", "line", line)
 		return true, errors.New("That command is not available right now")
 	}
 	return true, err
 }
 
-// commandResolvers supplies the lookups core/command cannot make for itself.
+// commandResolvers supplies the lookups core/dispatch cannot make for itself.
 //
 // Player is answered from the edition-neutral registry rather than from the
 // Java session manager, so a Bedrock player is as nameable as a Java one.
@@ -54,8 +54,8 @@ func (s *Server) runPluginCommand(sender *player.Player, line string) (bool, err
 // against a registry: internal/gamedata exposes no lookup to check them with
 // today. A handler therefore receives a well-formed identifier, not a proven
 // one — worth tightening the moment that lookup exists.
-func (s *Server) commandResolvers() command.Resolvers {
-	return command.Resolvers{
+func (s *Server) commandResolvers() dispatch.Resolvers {
+	return dispatch.Resolvers{
 		Player: func(name string) (*player.Player, bool) {
 			var found *player.Player
 			s.game.OnlinePlayers(func(candidate *player.Player) {

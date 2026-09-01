@@ -46,7 +46,6 @@ import (
 
 	bedrockworld "GoCraft/bedrock/world"
 	"GoCraft/config"
-	"GoCraft/core/command"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
@@ -54,6 +53,7 @@ import (
 	coreworld "GoCraft/core/world"
 	"GoCraft/internal/debuglog"
 	"GoCraft/java/handler"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 const bedrockChunkRadius int32 = 4

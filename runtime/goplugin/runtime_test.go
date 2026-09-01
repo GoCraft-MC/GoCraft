@@ -6,12 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 	"GoCraft/core/plugin"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -62,16 +64,12 @@ func TestRuntimeLoadsDispatchesCommandsAndStops(t *testing.T) {
 	if err := runtime.Start(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
-	bundle := plugin.Bundle{
-		Path:          writeTestBundleWith(t, "bin/example", []byte("placeholder"), helperCommandTree(t)),
-		DataDirectory: t.TempDir(),
-		Manifest: plugin.Manifest{
-			ID: "example", Version: "1.0.0", APIVersion: 1,
-			Runtime: RuntimeName, Entry: "bin/example",
-			CommandTree:   commandTreeEntry,
-			Subscriptions: []plugin.Subscription{{Event: "block.break"}},
-		},
-	}
+	bundle := plugin.Bundle{Bundle: gcpkg.Bundle{Path: writeTestBundleWith(t, "bin/example", []byte("placeholder"), helperCommandTree(t)), Manifest: gcpkg.Manifest{
+		ID: "example", Version: "1.0.0", APIVersion: 1,
+		Runtime: RuntimeName, Entry: "bin/example",
+		CommandTree:   commandTreeEntry,
+		Subscriptions: []gcpkg.Subscription{{Event: "block.break"}},
+	}}, DataDirectory: t.TempDir()}
 	loaded, err := runtime.Load(t.Context(), bundle)
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +83,7 @@ func TestRuntimeLoadsDispatchesCommandsAndStops(t *testing.T) {
 	}
 	sender := &testSender{}
 	commands := loaded.(plugin.CommandInstance)
-	result, err := commands.InvokeCommand(t.Context(), 7, sender, command.Values{
+	result, err := commands.InvokeCommand(t.Context(), 7, sender, dispatch.Values{
 		"amount": {Type: command.ArgInteger, Integer: 4},
 	})
 	if err != nil {

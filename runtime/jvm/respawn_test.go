@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"GoCraft/core/plugin"
 	"GoCraft/runtime/link"
 	wire "github.com/GoCraft-MC/gocraft-abi/abi/v1/wire"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 	"github.com/GoCraft-MC/gocraft-abi/ipc"
 )
 
@@ -107,7 +107,7 @@ func TestInstanceFollowsTheRuntimeAcrossARespawn(t *testing.T) {
 	}
 	defer runtime.Stop(context.Background())
 
-	instance := &Instance{runtime: runtime, manifest: plugin.Manifest{ID: "dev.example.shop"}}
+	instance := &Instance{runtime: runtime, manifest: gcpkg.Manifest{ID: "dev.example.shop"}}
 	before, err := runtime.running()
 	if err != nil {
 		t.Fatal(err)

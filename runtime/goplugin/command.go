@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/plugin"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // InvokeCommand runs one of the plugin's command executors in its process.
@@ -20,7 +21,7 @@ import (
 // chat.message the tick delivers, exactly as a verdict's effects do, so a
 // command handler and an event handler reach the world by one path.
 func (i *Instance) InvokeCommand(ctx context.Context, executor command.ExecID,
-	sender command.Sender, values command.Values) (abi.CommandResult, error) {
+	sender dispatch.Sender, values dispatch.Values) (abi.CommandResult, error) {
 	if sender == nil {
 		return abi.CommandResult{}, fmt.Errorf("go runtime: command sender is required")
 	}

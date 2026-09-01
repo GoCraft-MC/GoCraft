@@ -3,8 +3,11 @@ package plugin
 import (
 	"context"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/command"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // Host is the only mutation path exposed to a plugin runtime.
@@ -38,7 +41,7 @@ type Runtime interface {
 
 // Instance is one loaded plugin, regardless of its runtime.
 type Instance interface {
-	Manifest() Manifest
+	Manifest() gcpkg.Manifest
 	Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict, error)
 	Unload(ctx context.Context) error
 }
@@ -50,7 +53,7 @@ type Instance interface {
 // not by the runtime, so a runtime stays a forward and every effect in the
 // system passes through one queue.
 type CommandInstance interface {
-	InvokeCommand(context.Context, command.ExecID, command.Sender, command.Values) (abi.CommandResult, error)
+	InvokeCommand(context.Context, command.ExecID, dispatch.Sender, dispatch.Values) (abi.CommandResult, error)
 }
 
 // ReadyRuntime is implemented by runtimes that have to be told the load phase

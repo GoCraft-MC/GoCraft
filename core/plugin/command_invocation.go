@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"sort"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // NewCommandInvocation converts one parsed command into the neutral form an
@@ -23,8 +24,8 @@ import (
 // work around, and cheap to over-supply at typing speed.
 func NewCommandInvocation(
 	executor command.ExecID,
-	sender command.Sender,
-	arguments command.Values,
+	sender dispatch.Sender,
+	arguments dispatch.Values,
 	permissions []string,
 ) (abi.CommandInvocation, error) {
 	converted, err := commandArguments(arguments)
@@ -43,7 +44,7 @@ func NewCommandInvocation(
 // A nil sender is the console in every way that matters here: no player, no
 // name, and no permission it holds. It is not an error — the registry already
 // refused the invocation if the path needed one.
-func commandSender(sender command.Sender, permissions []string) abi.CommandSender {
+func commandSender(sender dispatch.Sender, permissions []string) abi.CommandSender {
 	resolved := abi.CommandSender{Player: playerReference(nil)}
 	if sender != nil {
 		player, _ := sender.Player()
@@ -76,7 +77,7 @@ func commandSender(sender command.Sender, permissions []string) abi.CommandSende
 // differently from one invocation to the next. Nothing depends on the order —
 // the arguments carry their names — but a payload that varies for identical
 // input is one nobody can compare in a log or a test.
-func commandArguments(arguments command.Values) ([]abi.CommandArgument, error) {
+func commandArguments(arguments dispatch.Values) ([]abi.CommandArgument, error) {
 	names := make([]string, 0, len(arguments))
 	for name := range arguments {
 		names = append(names, name)
@@ -133,7 +134,7 @@ func commandArgumentType(kind command.ArgType) (abi.CommandArgumentType, error) 
 // Value carries every parsed shape at once and only one of them is meaningful,
 // so reading the wrong field yields a zero rather than a failure. Switching on
 // the declared type is what keeps that from crossing the socket unnoticed.
-func commandArgumentValue(argument command.Value) (abi.Value, error) {
+func commandArgumentValue(argument dispatch.Value) (abi.Value, error) {
 	switch argument.Type {
 	case command.ArgInteger:
 		return abi.Int64(argument.Integer), nil

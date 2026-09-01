@@ -19,10 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/plugin"
 	"GoCraft/runtime/link"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/command"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // RuntimeName is what a plugin manifest writes in its runtime field.
@@ -348,10 +350,10 @@ func (r *Runtime) running() (*link.Supervisor, error) {
 // plugin, this holds nothing but its name.
 type Instance struct {
 	runtime  *Runtime
-	manifest plugin.Manifest
+	manifest gcpkg.Manifest
 }
 
-func (i *Instance) Manifest() plugin.Manifest { return i.manifest }
+func (i *Instance) Manifest() gcpkg.Manifest { return i.manifest }
 
 // Dispatch resolves the live supervisor rather than holding one.
 //
@@ -376,8 +378,8 @@ func (i *Instance) Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict,
 func (i *Instance) InvokeCommand(
 	ctx context.Context,
 	executor command.ExecID,
-	sender command.Sender,
-	arguments command.Values,
+	sender dispatch.Sender,
+	arguments dispatch.Values,
 ) (abi.CommandResult, error) {
 	invocation, err := plugin.NewCommandInvocation(executor, sender, arguments, i.manifest.Permissions)
 	if err != nil {

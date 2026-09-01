@@ -6,7 +6,8 @@ import (
 	"log/slog"
 	"sort"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // The built-in command tree, as data.
@@ -183,7 +184,7 @@ func builtinArguments() map[string]builtinCommand {
 // Every command appears, including the ones the hand-built graph never
 // mentioned: a command that is dispatchable and unadvertised is one a player
 // can only find by being told about it, which is not a feature.
-func (d *Dispatcher) commandTree() (command.Root, map[command.ExecID]command.Handler) {
+func (d *Dispatcher) commandTree() (command.Root, map[command.ExecID]dispatch.Handler) {
 	d.mu.RLock()
 	names := make([]string, 0, len(d.cmds))
 	registered := make(map[string]registeredCommand, len(d.cmds))
@@ -196,7 +197,7 @@ func (d *Dispatcher) commandTree() (command.Root, map[command.ExecID]command.Han
 
 	table := builtinArguments()
 	root := command.Root{}
-	handlers := make(map[command.ExecID]command.Handler, len(names))
+	handlers := make(map[command.ExecID]dispatch.Handler, len(names))
 	for index, name := range names {
 		shape, described := table[name]
 		children := shape.children
@@ -252,8 +253,8 @@ func retarget(nodes []command.Node, executor command.ExecID) []command.Node {
 //
 // The handler runs when that stops being true, and says so rather than
 // pretending a command took no arguments.
-func (d *Dispatcher) builtinHandler(name string) command.Handler {
-	return func(context.Context, *command.Context) error {
+func (d *Dispatcher) builtinHandler(name string) dispatch.Handler {
+	return func(context.Context, *dispatch.Context) error {
 		return fmt.Errorf("/%s is dispatched by the server, not through the registry", name)
 	}
 }
@@ -263,7 +264,7 @@ func (d *Dispatcher) builtinHandler(name string) command.Handler {
 // Publishing is not optional once set: every later registration republishes, so
 // a command added while players are online reaches them by the same path a
 // plugin's does.
-func (d *Dispatcher) SetCommandRegistry(registry *command.Registry) {
+func (d *Dispatcher) SetCommandRegistry(registry *dispatch.Registry) {
 	d.mu.Lock()
 	d.registry = registry
 	d.mu.Unlock()
@@ -284,7 +285,7 @@ func (d *Dispatcher) publishTree() {
 	if len(root.Children) == 0 {
 		return
 	}
-	if err := registry.Replace(command.Source{Kind: command.SourceCore}, root, handlers); err != nil {
+	if err := registry.Replace(dispatch.Source{Kind: dispatch.SourceCore}, root, handlers); err != nil {
 		slog.Error("publishing the built-in command tree failed", "err", err)
 	}
 }

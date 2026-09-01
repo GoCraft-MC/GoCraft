@@ -3,8 +3,9 @@ package handler
 import (
 	"strings"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // dispatcherSender is a player as the command registry judges them.
@@ -64,7 +65,7 @@ func (s dispatcherSender) Player() (*player.Player, bool) {
 }
 
 // Sender wraps a player so the command registry can judge what they may see.
-func (d *Dispatcher) Sender(p *player.Player) command.Sender {
+func (d *Dispatcher) Sender(p *player.Player) dispatch.Sender {
 	return dispatcherSender{dispatcher: d, player: p}
 }
 

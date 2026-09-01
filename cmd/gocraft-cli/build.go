@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"GoCraft/core/plugin"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // zipEpoch keeps bundles byte-identical across machines and runs. The zip
@@ -77,7 +77,7 @@ Flags must come before the directory.
 	// server runs at boot, so build-time and load-time validation cannot
 	// disagree. This is also what catches a [commands] tree that names a file
 	// the source directory does not contain.
-	bundle, err := plugin.OpenBundle(path)
+	bundle, err := gcpkg.Open(path)
 	if err != nil {
 		os.Remove(path)
 		fmt.Fprintln(stderr, err)
@@ -127,13 +127,13 @@ func collectEntries(directory string) ([]string, error) {
 // The manifest decides where it goes: the path is already declared there for
 // the host to read, so naming it again on the command line would be a second
 // place it lives.
-func generatedEntries(manifest plugin.Manifest, commands string) (map[string][]byte, error) {
+func generatedEntries(manifest gcpkg.Manifest, commands string) (map[string][]byte, error) {
 	if commands == "" {
 		return nil, nil
 	}
 	if manifest.CommandTree == "" {
 		return nil, fmt.Errorf("-commands was given and %s declares no [commands] tree",
-			plugin.ManifestFileName)
+			gcpkg.ManifestFileName)
 	}
 	encoded, err := readCommandTree(commands)
 	if err != nil {
@@ -223,7 +223,7 @@ func packBytes(archive *zip.Writer, name string, contents []byte) error {
 	return nil
 }
 
-func describeBundle(w io.Writer, path string, manifest plugin.Manifest, names []string) {
+func describeBundle(w io.Writer, path string, manifest gcpkg.Manifest, names []string) {
 	size := int64(-1)
 	if info, err := os.Stat(path); err == nil {
 		size = info.Size()

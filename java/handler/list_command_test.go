@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 )
 
@@ -54,7 +54,7 @@ func TestCommandTreeHidesCommandsWithoutPermission(t *testing.T) {
 	dispatcher := NewDispatcher()
 	RegisterBuiltins(dispatcher)
 	nonOperator := player.New([16]byte{4}, "viewer", player.ClientEditionJava)
-	dispatcher.SetCommandRegistry(command.NewRegistry())
+	dispatcher.SetCommandRegistry(dispatch.NewRegistry())
 	packet := buildCommandsPacket(dispatcher.CommandTree(nonOperator))
 	nodes, root, err := parseCommandTestGraph(packet.Data)
 	if err != nil {

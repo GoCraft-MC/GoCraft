@@ -1,19 +1,21 @@
-package command
+package dispatch
 
 import (
 	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 func TestExecuteRunsTheHandlerItResolved(t *testing.T) {
 	registry := NewRegistry()
 	var received Values
-	root := Root{Children: []Node{Literal{Name: "shop", Children: []Node{
-		Argument{Name: "price", Type: ArgDecimal, Exec: 1},
+	root := command.Root{Children: []command.Node{command.Literal{Name: "shop", Children: []command.Node{
+		command.Argument{Name: "price", Type: command.ArgDecimal, Exec: 1},
 	}}}}
-	handlers := map[ExecID]Handler{1: func(_ context.Context, call *Context) error {
+	handlers := map[command.ExecID]Handler{1: func(_ context.Context, call *Context) error {
 		received = call.Args
 		return nil
 	}}
@@ -46,8 +48,8 @@ func TestExecuteLeavesAnUnknownLineToTheCaller(t *testing.T) {
 
 func TestExecuteReportsAResolutionFailureAsItsOwn(t *testing.T) {
 	registry := NewRegistry()
-	root := Root{Children: []Node{Literal{Name: "shop", Children: []Node{
-		Argument{Name: "price", Type: ArgDecimal, Exec: 1},
+	root := command.Root{Children: []command.Node{command.Literal{Name: "shop", Children: []command.Node{
+		command.Argument{Name: "price", Type: command.ArgDecimal, Exec: 1},
 	}}}}
 	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "shop"}, root, commandHandlers(1)); err != nil {
 		t.Fatal(err)
@@ -66,8 +68,8 @@ func TestExecuteReportsAResolutionFailureAsItsOwn(t *testing.T) {
 // alone survives a change to the other.
 func TestExecuteStillChecksPermissionOnInvoke(t *testing.T) {
 	registry := NewRegistry()
-	root := Root{Children: []Node{Literal{
-		Name: "admin", Permission: "server.admin", Children: []Node{Literal{Name: "reload", Exec: 1}},
+	root := command.Root{Children: []command.Node{command.Literal{
+		Name: "admin", Permission: "server.admin", Children: []command.Node{command.Literal{Name: "reload", Exec: 1}},
 	}}}
 	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "admin"}, root, commandHandlers(1)); err != nil {
 		t.Fatal(err)
@@ -87,10 +89,10 @@ func TestExecuteStillChecksPermissionOnInvoke(t *testing.T) {
 func TestExecuteCarriesTheRawTokens(t *testing.T) {
 	registry := NewRegistry()
 	var raw []string
-	root := Root{Children: []Node{Literal{Name: "time", Children: []Node{
-		Argument{Name: "arguments", Type: ArgGreedy, Exec: 1},
+	root := command.Root{Children: []command.Node{command.Literal{Name: "time", Children: []command.Node{
+		command.Argument{Name: "arguments", Type: command.ArgGreedy, Exec: 1},
 	}}}}
-	handlers := map[ExecID]Handler{1: func(_ context.Context, call *Context) error {
+	handlers := map[command.ExecID]Handler{1: func(_ context.Context, call *Context) error {
 		raw = call.Raw
 		return nil
 	}}
@@ -111,7 +113,7 @@ func TestInvokeCarriesNoRawTokens(t *testing.T) {
 	registry := NewRegistry()
 	var seen []string
 	called := false
-	handlers := map[ExecID]Handler{1: func(_ context.Context, call *Context) error {
+	handlers := map[command.ExecID]Handler{1: func(_ context.Context, call *Context) error {
 		seen, called = call.Raw, true
 		return nil
 	}}

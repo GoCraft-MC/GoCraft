@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"GoCraft/core/command"
 	"GoCraft/java/protocol"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // Brigadier parser indices, continuing the registry the constants in

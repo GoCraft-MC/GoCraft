@@ -1,17 +1,19 @@
-package command
+package dispatch
 
 import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
-func commandRoot(name string, executor ExecID) Root {
-	return Root{Children: []Node{Literal{Name: name, Exec: executor}}}
+func commandRoot(name string, executor command.ExecID) command.Root {
+	return command.Root{Children: []command.Node{command.Literal{Name: name, Exec: executor}}}
 }
 
-func commandHandlers(executor ExecID) map[ExecID]Handler {
-	return map[ExecID]Handler{executor: func(context.Context, *Context) error { return nil }}
+func commandHandlers(executor command.ExecID) map[command.ExecID]Handler {
+	return map[command.ExecID]Handler{executor: func(context.Context, *Context) error { return nil }}
 }
 
 func TestRegistryRefusesCoreCommandOverride(t *testing.T) {
@@ -32,7 +34,7 @@ func TestRegistryAllowsPluginCollisionForNamespacing(t *testing.T) {
 	registry := NewRegistry()
 	for _, tc := range []struct {
 		id   string
-		exec ExecID
+		exec command.ExecID
 	}{{"shop-one", 1}, {"shop-two", 2}} {
 		err := registry.Register(Source{Kind: SourcePlugin, PluginID: tc.id}, commandRoot("shop", tc.exec), commandHandlers(tc.exec))
 		if err != nil {
@@ -74,8 +76,8 @@ func TestRegistryRemapsLocalExecutorIDs(t *testing.T) {
 			t.Fatalf("Register(%s): %v", id, err)
 		}
 	}
-	one := registry.entries["one"].root.Children[0].(Literal).Exec
-	two := registry.entries["two"].root.Children[0].(Literal).Exec
+	one := registry.entries["one"].root.Children[0].(command.Literal).Exec
+	two := registry.entries["two"].root.Children[0].(command.Literal).Exec
 	if one == 0 || two == 0 || one == two {
 		t.Fatalf("global executors = %d, %d", one, two)
 	}
@@ -107,16 +109,16 @@ func TestRegistryDoesNotRevokeCoreAsPlugin(t *testing.T) {
 
 func TestReplaceSwapsATreeAndItsHandlers(t *testing.T) {
 	registry := NewRegistry()
-	first := Root{Children: []Node{Literal{Name: "time", Exec: 1}}}
+	first := command.Root{Children: []command.Node{command.Literal{Name: "time", Exec: 1}}}
 	if err := registry.Replace(Source{Kind: SourceCore}, first, commandHandlers(1)); err != nil {
 		t.Fatal(err)
 	}
 	version := registry.Version()
 
-	second := Root{Children: []Node{
-		Literal{Name: "time", Exec: 1}, Literal{Name: "weather", Exec: 2},
+	second := command.Root{Children: []command.Node{
+		command.Literal{Name: "time", Exec: 1}, command.Literal{Name: "weather", Exec: 2},
 	}}
-	handlers := map[ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
+	handlers := map[command.ExecID]Handler{1: commandHandlers(1)[1], 2: commandHandlers(2)[2]}
 	if err := registry.Replace(Source{Kind: SourceCore}, second, handlers); err != nil {
 		t.Fatal(err)
 	}

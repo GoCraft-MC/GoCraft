@@ -8,6 +8,7 @@ import (
 
 	"GoCraft/core/plugin"
 	"GoCraft/runtime/link"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 func TestRuntimeCleansUpPluginFailures(t *testing.T) {
@@ -27,13 +28,9 @@ func TestRuntimeCleansUpPluginFailures(t *testing.T) {
 			if err := runtime.Start(t.Context(), nil); err != nil {
 				t.Fatal(err)
 			}
-			bundle := plugin.Bundle{
-				Path:          writeTestBundleWith(t, "bin/example", []byte("placeholder"), helperCommandTree(t)),
-				DataDirectory: t.TempDir(),
-				Manifest: plugin.Manifest{
-					ID: "example", Entry: "bin/example", CommandTree: commandTreeEntry,
-				},
-			}
+			bundle := plugin.Bundle{Bundle: gcpkg.Bundle{Path: writeTestBundleWith(t, "bin/example", []byte("placeholder"), helperCommandTree(t)), Manifest: gcpkg.Manifest{
+				ID: "example", Entry: "bin/example", CommandTree: commandTreeEntry,
+			}}, DataDirectory: t.TempDir()}
 			if _, err := runtime.Load(t.Context(), bundle); err == nil ||
 				!strings.Contains(err.Error(), phase+" failure") {
 				t.Fatalf("Load() error = %v", err)

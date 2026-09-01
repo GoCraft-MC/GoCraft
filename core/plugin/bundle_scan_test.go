@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 func writeBundle(t *testing.T, directory, name, manifest string, extra map[string]string) {
@@ -66,7 +68,7 @@ runtime = "go"
 		t.Fatalf("bundle order = %s, %s", bundles[0].Manifest.ID, bundles[1].Manifest.ID)
 	}
 	shop := bundles[1].Manifest
-	if len(shop.Subscriptions) != 2 || shop.Subscriptions[0].Priority != PriorityNormal {
+	if len(shop.Subscriptions) != 2 || shop.Subscriptions[0].Priority != gcpkg.PriorityNormal {
 		t.Fatalf("subscriptions = %+v", shop.Subscriptions)
 	}
 	if len(shop.Permissions) != 1 || shop.Permissions[0] != "shop.use" {

@@ -1,9 +1,11 @@
-package command
+package dispatch
 
 import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 var (
@@ -35,11 +37,11 @@ func (r *Registry) Execute(ctx context.Context, sender Sender, line string, reso
 	return true, r.invoke(ctx, executor, sender, args, tokensAfterName(line))
 }
 
-func (r *Registry) Invoke(ctx context.Context, executor ExecID, sender Sender, args Values) error {
+func (r *Registry) Invoke(ctx context.Context, executor command.ExecID, sender Sender, args Values) error {
 	return r.invoke(ctx, executor, sender, args, nil)
 }
 
-func (r *Registry) invoke(ctx context.Context, executor ExecID, sender Sender, args Values, raw []string) error {
+func (r *Registry) invoke(ctx context.Context, executor command.ExecID, sender Sender, args Values, raw []string) error {
 	r.mu.RLock()
 	registered, ok := r.handlers[executor]
 	key, _ := sourceKey(registered.source)
@@ -55,11 +57,11 @@ func (r *Registry) invoke(ctx context.Context, executor ExecID, sender Sender, a
 	return registered.handler(ctx, &Context{Sender: sender, Args: args, Node: executor, Raw: raw})
 }
 
-func executorAllowed(nodes []Node, executor ExecID, sender Sender, parentAllowed bool) bool {
+func executorAllowed(nodes []command.Node, executor command.ExecID, sender Sender, parentAllowed bool) bool {
 	for _, node := range nodes {
 		allowed := parentAllowed
 		switch typed := node.(type) {
-		case Literal:
+		case command.Literal:
 			if typed.Permission != "" {
 				allowed = allowed && sender != nil && sender.Has(typed.Permission)
 			}
@@ -69,7 +71,7 @@ func executorAllowed(nodes []Node, executor ExecID, sender Sender, parentAllowed
 			if executorAllowed(typed.Children, executor, sender, allowed) {
 				return true
 			}
-		case Argument:
+		case command.Argument:
 			if allowed && typed.Exec == executor {
 				return true
 			}

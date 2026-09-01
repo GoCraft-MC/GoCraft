@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 	"GoCraft/core/plugin"
+	"github.com/GoCraft-MC/gocraft-abi/command"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 func TestNameIsWhatAManifestWrites(t *testing.T) {
@@ -33,9 +35,7 @@ func TestWorkBeforeStartIsRefused(t *testing.T) {
 	runtime := New(Config{})
 	for name, call := range map[string]func() error{
 		"Load": func() error {
-			_, err := runtime.Load(t.Context(), plugin.Bundle{
-				Manifest: plugin.Manifest{ID: "dev.example.shop"},
-			})
+			_, err := runtime.Load(t.Context(), plugin.Bundle{Bundle: gcpkg.Bundle{Manifest: gcpkg.Manifest{ID: "dev.example.shop"}}})
 			return err
 		},
 		"Ready": func() error { return runtime.Ready(t.Context()) },
@@ -65,10 +65,7 @@ func TestStopBeforeStartIsNotAnError(t *testing.T) {
 // ordinary failure — the runtime is not running — and it has to name that
 // rather than the commands, or an admin chases a gap that closed.
 func TestLoadNoLongerRefusesABundleWithCommands(t *testing.T) {
-	_, err := New(Config{}).Load(t.Context(), plugin.Bundle{
-		Manifest: plugin.Manifest{ID: "dev.example.shop"},
-		Commands: &command.Root{},
-	})
+	_, err := New(Config{}).Load(t.Context(), plugin.Bundle{Bundle: gcpkg.Bundle{Manifest: gcpkg.Manifest{ID: "dev.example.shop"}, Commands: &command.Root{}}})
 	if err == nil {
 		t.Fatal("Load() succeeded with no runtime running")
 	}
@@ -152,7 +149,7 @@ func TestInstanceClaimsCommandSupport(t *testing.T) {
 }
 
 func TestInstanceReportsItsManifest(t *testing.T) {
-	manifest := plugin.Manifest{ID: "dev.example.shop", Version: "1.2.0", Runtime: "jvm"}
+	manifest := gcpkg.Manifest{ID: "dev.example.shop", Version: "1.2.0", Runtime: "jvm"}
 	instance := &Instance{manifest: manifest}
 	if instance.Manifest().ID != manifest.ID {
 		t.Fatalf("Manifest() = %+v", instance.Manifest())
@@ -166,14 +163,10 @@ func TestInvokeCommandReachesTheJVM(t *testing.T) {
 	if err := runtime.Start(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := runtime.Load(t.Context(), plugin.Bundle{
-		Path: "plugins/shop.gcpkg",
-		Manifest: plugin.Manifest{
-			ID: "dev.example.shop", Entry: "dev.example.shop.Shop",
-			Permissions: []string{"shop.admin"},
-		},
-		Commands: &command.Root{Children: []command.Node{command.Literal{Name: "shop", Exec: 4}}},
-	})
+	loaded, err := runtime.Load(t.Context(), plugin.Bundle{Bundle: gcpkg.Bundle{Path: "plugins/shop.gcpkg", Manifest: gcpkg.Manifest{
+		ID: "dev.example.shop", Entry: "dev.example.shop.Shop",
+		Permissions: []string{"shop.admin"},
+	}, Commands: &command.Root{Children: []command.Node{command.Literal{Name: "shop", Exec: 4}}}}})
 	if err != nil {
 		t.Fatalf("Load() = %v", err)
 	}
@@ -187,7 +180,7 @@ func TestInvokeCommandReachesTheJVM(t *testing.T) {
 		held:   map[string]bool{"shop.admin": true},
 		player: player.New([16]byte{9}, "oreo", player.ClientEditionJava),
 	}
-	result, err := commands.InvokeCommand(t.Context(), 4, sender, command.Values{
+	result, err := commands.InvokeCommand(t.Context(), 4, sender, dispatch.Values{
 		"item": {Type: command.ArgString, String: "bread"},
 	})
 	if err != nil {
@@ -213,7 +206,7 @@ func TestInvokeCommandReachesTheJVM(t *testing.T) {
 // A command typed while the JVM is down is refused, not queued. The sender is
 // waiting on the answer, so an error they can read beats a silence.
 func TestInvokeCommandWithoutARuntimeFails(t *testing.T) {
-	instance := &Instance{runtime: New(Config{}), manifest: plugin.Manifest{ID: "dev.example.shop"}}
+	instance := &Instance{runtime: New(Config{}), manifest: gcpkg.Manifest{ID: "dev.example.shop"}}
 	if _, err := instance.InvokeCommand(t.Context(), 1, nil, nil); err == nil {
 		t.Fatal("InvokeCommand() succeeded with no runtime running")
 	}

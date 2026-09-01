@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"GoCraft/core/command"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // The command trees a compiler handed over, turned into what a bundle ships.

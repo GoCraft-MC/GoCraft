@@ -10,8 +10,8 @@ package handler
 // editions render.
 
 import (
-	"GoCraft/core/command"
 	"GoCraft/java/protocol"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 const (

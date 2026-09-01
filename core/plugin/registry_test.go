@@ -6,14 +6,16 @@ import (
 	"testing"
 
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 type fakeInstance struct {
-	manifest Manifest
+	manifest gcpkg.Manifest
 	dispatch func(context.Context, *abi.Event) (abi.Verdict, error)
 }
 
-func (f *fakeInstance) Manifest() Manifest           { return f.manifest }
+func (f *fakeInstance) Manifest() gcpkg.Manifest     { return f.manifest }
 func (f *fakeInstance) Unload(context.Context) error { return nil }
 func (f *fakeInstance) Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict, error) {
 	if f.dispatch == nil {
@@ -25,10 +27,10 @@ func (f *fakeInstance) Dispatch(ctx context.Context, event *abi.Event) (abi.Verd
 func TestAttachOrdersSubscriptions(t *testing.T) {
 	bus := NewBus(context.Background(), 0)
 	plugins := []*fakeInstance{
-		{manifest: Manifest{ID: "low", Subscriptions: []Subscription{{Event: "block.break", Priority: PriorityLow}}}},
-		{manifest: Manifest{ID: "bravo", Subscriptions: []Subscription{{Event: "block.break", Priority: PriorityHigh}}}},
-		{manifest: Manifest{ID: "monitor", Subscriptions: []Subscription{{Event: "block.break", Priority: PriorityMonitor}}}},
-		{manifest: Manifest{ID: "alpha", Subscriptions: []Subscription{{Event: "block.break", Priority: PriorityHigh}}}},
+		{manifest: gcpkg.Manifest{ID: "low", Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: gcpkg.PriorityLow}}}},
+		{manifest: gcpkg.Manifest{ID: "bravo", Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: gcpkg.PriorityHigh}}}},
+		{manifest: gcpkg.Manifest{ID: "monitor", Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: gcpkg.PriorityMonitor}}}},
+		{manifest: gcpkg.Manifest{ID: "alpha", Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: gcpkg.PriorityHigh}}}},
 	}
 	for _, instance := range plugins {
 		if err := bus.Attach(instance); err != nil {
@@ -47,7 +49,7 @@ func TestAttachOrdersSubscriptions(t *testing.T) {
 
 func TestAttachRejectsDuplicateWithoutPartialRegistration(t *testing.T) {
 	bus := NewBus(context.Background(), 0)
-	instance := &fakeInstance{manifest: Manifest{ID: "shop", Subscriptions: []Subscription{
+	instance := &fakeInstance{manifest: gcpkg.Manifest{ID: "shop", Subscriptions: []gcpkg.Subscription{
 		{Event: "block.break"}, {Event: "block.break"},
 	}}}
 	if err := bus.Attach(instance); err == nil {
@@ -60,7 +62,7 @@ func TestAttachRejectsDuplicateWithoutPartialRegistration(t *testing.T) {
 
 func TestDetachRevokesPluginSubscriptions(t *testing.T) {
 	bus := NewBus(context.Background(), 0)
-	instance := &fakeInstance{manifest: Manifest{ID: "shop", Subscriptions: []Subscription{
+	instance := &fakeInstance{manifest: gcpkg.Manifest{ID: "shop", Subscriptions: []gcpkg.Subscription{
 		{Event: "block.break"}, {Event: "player.join"},
 	}}}
 	if err := bus.Attach(instance); err != nil {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
@@ -127,7 +127,7 @@ type Dispatcher struct {
 	teleportPlayer       func(*player.Player, float64, float64, float64) error
 	disconnectPlayer     func(*player.Player, string) error
 	permission           PermissionChecker
-	registry             *command.Registry
+	registry             *dispatch.Registry
 	pluginCommands       PluginCommands
 	messenger            func(*player.Player, string) error
 	linkMessenger        func(*player.Player, string, string) error

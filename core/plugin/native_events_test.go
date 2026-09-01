@@ -9,15 +9,17 @@ import (
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {
 	bus := NewBus(context.Background(), time.Second)
 	var received *abi.Event
 	instance := &fakeInstance{
-		manifest: Manifest{
+		manifest: gcpkg.Manifest{
 			ID: "protect", Permissions: []string{"zone.trusted", "zone.build"},
-			Subscriptions: []Subscription{{Event: EventBlockBreak}},
+			Subscriptions: []gcpkg.Subscription{{Event: EventBlockBreak}},
 		},
 		dispatch: func(_ context.Context, event *abi.Event) (abi.Verdict, error) {
 			received = event

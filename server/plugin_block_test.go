@@ -13,12 +13,13 @@ import (
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 type serverCancellingPlugin struct{}
 
-func (serverCancellingPlugin) Manifest() coreplugin.Manifest {
-	return coreplugin.Manifest{ID: "protect", Subscriptions: []coreplugin.Subscription{{Event: coreplugin.EventBlockBreak}}}
+func (serverCancellingPlugin) Manifest() gcpkg.Manifest {
+	return gcpkg.Manifest{ID: "protect", Subscriptions: []gcpkg.Subscription{{Event: coreplugin.EventBlockBreak}}}
 }
 func (serverCancellingPlugin) Dispatch(context.Context, *abi.Event) (abi.Verdict, error) {
 	return abi.Verdict{Cancelled: true}, nil

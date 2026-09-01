@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
 	"GoCraft/java/handler"
 	"GoCraft/java/session"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // pluginCommandServer is the smallest server that can answer a plugin command:
@@ -22,15 +23,15 @@ func pluginCommandServer(t *testing.T) *Server {
 	return &Server{pluginRegistry: registry, permissions: corepermission.NewMemory()}
 }
 
-func registerShopCommand(t *testing.T, server *Server, handler command.Handler) {
+func registerShopCommand(t *testing.T, server *Server, handler dispatch.Handler) {
 	t.Helper()
 	root := command.Root{Children: []command.Node{command.Literal{
 		Name: "shop", Children: []command.Node{
 			command.Argument{Name: "price", Type: command.ArgDecimal, Exec: 1},
 		},
 	}}}
-	source := command.Source{Kind: command.SourcePlugin, PluginID: "shop"}
-	handlers := map[command.ExecID]command.Handler{1: handler}
+	source := dispatch.Source{Kind: dispatch.SourcePlugin, PluginID: "shop"}
+	handlers := map[command.ExecID]dispatch.Handler{1: handler}
 	if err := server.pluginRegistry.Commands().Register(source, root, handlers); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestRunPluginCommandReachesTheHandler(t *testing.T) {
 	server := pluginCommandServer(t)
 	var price float64
 	var senderName string
-	registerShopCommand(t, server, func(_ context.Context, call *command.Context) error {
+	registerShopCommand(t, server, func(_ context.Context, call *dispatch.Context) error {
 		price, _ = call.Args.Decimal("price")
 		senderName = call.Sender.Name()
 		return nil
@@ -57,7 +58,7 @@ func TestRunPluginCommandReachesTheHandler(t *testing.T) {
 
 func TestRunPluginCommandIgnoresALineItDoesNotOwn(t *testing.T) {
 	server := pluginCommandServer(t)
-	registerShopCommand(t, server, func(context.Context, *command.Context) error { return nil })
+	registerShopCommand(t, server, func(context.Context, *dispatch.Context) error { return nil })
 
 	handled, err := server.runPluginCommand(nil, "gamemode creative")
 	if handled || err != nil {
@@ -74,7 +75,7 @@ func TestRunPluginCommandToleratesNoRegistry(t *testing.T) {
 	}
 }
 
-// A permission refusal is rewritten into a sentence: core/command's sentinel
+// A permission refusal is rewritten into a sentence: core/dispatch's sentinel
 // says what happened, not what to show someone.
 func TestRunPluginCommandRewritesAPermissionRefusal(t *testing.T) {
 	server := pluginCommandServer(t)
@@ -82,9 +83,9 @@ func TestRunPluginCommandRewritesAPermissionRefusal(t *testing.T) {
 		Name: "admin", Permission: "shop.admin",
 		Children: []command.Node{command.Literal{Name: "reload", Exec: 1}},
 	}}}
-	source := command.Source{Kind: command.SourcePlugin, PluginID: "shop"}
-	handlers := map[command.ExecID]command.Handler{
-		1: func(context.Context, *command.Context) error { return nil },
+	source := dispatch.Source{Kind: dispatch.SourcePlugin, PluginID: "shop"}
+	handlers := map[command.ExecID]dispatch.Handler{
+		1: func(context.Context, *dispatch.Context) error { return nil },
 	}
 	if err := server.pluginRegistry.Commands().Register(source, root, handlers); err != nil {
 		t.Fatal(err)
@@ -105,7 +106,7 @@ func TestRunPluginCommandRewritesAPermissionRefusal(t *testing.T) {
 
 func TestRunPluginCommandReportsAnArgumentFailure(t *testing.T) {
 	server := pluginCommandServer(t)
-	registerShopCommand(t, server, func(context.Context, *command.Context) error { return nil })
+	registerShopCommand(t, server, func(context.Context, *dispatch.Context) error { return nil })
 
 	handled, err := server.runPluginCommand(&player.Player{Username: "oreo"}, "shop cheap")
 	if !handled {
@@ -146,7 +147,7 @@ func TestSplitIdentifierDefaultsAndRefuses(t *testing.T) {
 // times a second to everyone.
 func TestResendChangedCommandsOnlyFollowsTheVersion(t *testing.T) {
 	dispatcher := handler.NewDispatcher()
-	registry := command.NewRegistry()
+	registry := dispatch.NewRegistry()
 	dispatcher.SetCommandRegistry(registry)
 	server := &Server{cmds: dispatcher, sessions: session.NewManager()}
 

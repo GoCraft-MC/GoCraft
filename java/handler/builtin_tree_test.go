@@ -5,8 +5,9 @@ import (
 	"sort"
 	"testing"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 type permissiveSender struct{}
@@ -17,11 +18,11 @@ func (permissiveSender) Has(string) bool                { return true }
 func (permissiveSender) SendMessage(string) error       { return nil }
 func (permissiveSender) Player() (*player.Player, bool) { return nil, false }
 
-func builtinRegistry(t *testing.T) (*Dispatcher, *command.Registry) {
+func builtinRegistry(t *testing.T) (*Dispatcher, *dispatch.Registry) {
 	t.Helper()
 	dispatcher := NewDispatcher()
 	RegisterBuiltins(dispatcher)
-	registry := command.NewRegistry()
+	registry := dispatch.NewRegistry()
 	dispatcher.SetCommandRegistry(registry)
 	return dispatcher, registry
 }
@@ -137,10 +138,10 @@ func TestBuiltinTreeGivesEachCommandOneExecutor(t *testing.T) {
 func TestPublishedTreeProtectsBuiltinNames(t *testing.T) {
 	_, registry := builtinRegistry(t)
 	root := command.Root{Children: []command.Node{command.Literal{Name: "tp", Exec: 1}}}
-	handlers := map[command.ExecID]command.Handler{
-		1: func(ctx context.Context, call *command.Context) error { return nil },
+	handlers := map[command.ExecID]dispatch.Handler{
+		1: func(ctx context.Context, call *dispatch.Context) error { return nil },
 	}
-	if err := registry.Register(command.Source{Kind: command.SourcePlugin, PluginID: "x"}, root, handlers); err == nil {
+	if err := registry.Register(dispatch.Source{Kind: dispatch.SourcePlugin, PluginID: "x"}, root, handlers); err == nil {
 		t.Fatal("a plugin took /tp")
 	}
 }
@@ -177,7 +178,7 @@ func serverCommandTree(t *testing.T) command.Root {
 	for _, name := range []string{"timings", "tps", "mspt", "spawn", "setspawn", "gocraft"} {
 		dispatcher.Register(name, func(CommandContext) error { return nil })
 	}
-	registry := command.NewRegistry()
+	registry := dispatch.NewRegistry()
 	dispatcher.SetCommandRegistry(registry)
 	return registry.Snapshot(permissiveSender{}).Root
 }

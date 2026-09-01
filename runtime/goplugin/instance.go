@@ -5,22 +5,22 @@ import (
 	"errors"
 	"sync"
 
-	"GoCraft/core/plugin"
 	"GoCraft/runtime/link"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // Instance is one native plugin process.
 type Instance struct {
 	runtime    *Runtime
-	manifest   plugin.Manifest
+	manifest   gcpkg.Manifest
 	supervisor *link.Supervisor
 	cleanup    func()
 	unloadOnce sync.Once
 	unloadErr  error
 }
 
-func (i *Instance) Manifest() plugin.Manifest { return i.manifest }
+func (i *Instance) Manifest() gcpkg.Manifest { return i.manifest }
 
 func (i *Instance) Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict, error) {
 	return i.supervisor.Dispatch(ctx, i.manifest.ID, event)

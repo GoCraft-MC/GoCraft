@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // The three calls below are the sequence the server performs at boot, spelled
@@ -60,11 +62,11 @@ version = "1.0.0"
 api = 1
 runtime = "recording"
 `, map[string]string{"config/config.yml": "from bundle\n"})
-	bundle, err := OpenBundle(filepath.Join(directory, "settings.gcpkg"))
+	opened, err := gcpkg.Open(filepath.Join(directory, "settings.gcpkg"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := prepareBundleData(bundle)
+	prepared, err := prepareBundleData(Bundle{Bundle: opened})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +74,7 @@ runtime = "recording"
 	if err := os.WriteFile(configPath, []byte("server owner\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareBundleData(bundle); err != nil {
+	if _, err := prepareBundleData(Bundle{Bundle: opened}); err != nil {
 		t.Fatal(err)
 	}
 	assertFileContents(t, configPath, "server owner\n")

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 type channelHost struct{ calls chan abi.HostCall }
@@ -21,7 +23,7 @@ func TestObservationalEventDoesNotBlockOrSharePayload(t *testing.T) {
 	host := channelHost{calls: make(chan abi.HostCall, 1)}
 	bus := newBus(context.Background(), time.Second, host)
 	instance := &fakeInstance{
-		manifest: Manifest{ID: "audit", Subscriptions: []Subscription{{Event: "player.join"}}},
+		manifest: gcpkg.Manifest{ID: "audit", Subscriptions: []gcpkg.Subscription{{Event: "player.join"}}},
 		dispatch: func(_ context.Context, event *abi.Event) (abi.Verdict, error) {
 			close(started)
 			<-release

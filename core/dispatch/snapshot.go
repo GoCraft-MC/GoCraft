@@ -1,10 +1,14 @@
-package command
+package dispatch
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/GoCraft-MC/gocraft-abi/command"
+)
 
 // Snapshot is an immutable command view for one sender.
 type Snapshot struct {
-	Root    Root
+	Root    command.Root
 	Version uint64
 }
 
@@ -23,7 +27,7 @@ func (r *Registry) Snapshot(sender Sender) Snapshot {
 		keys = append(keys, key)
 		if entry.source.Kind == SourcePlugin {
 			for _, node := range entry.root.Children {
-				pluginClaims[node.(Literal).Name]++
+				pluginClaims[node.(command.Literal).Name]++
 			}
 		}
 	}
@@ -35,11 +39,11 @@ func (r *Registry) Snapshot(sender Sender) Snapshot {
 		return keys[i] < keys[j]
 	})
 
-	root := Root{}
+	root := command.Root{}
 	for _, key := range keys {
 		entry := entries[key]
 		for _, node := range entry.root.Children {
-			literal := node.(Literal)
+			literal := node.(command.Literal)
 			if entry.source.Kind == SourcePlugin && pluginClaims[literal.Name] > 1 {
 				literal.Name = key + ":" + literal.Name
 			}
@@ -51,9 +55,9 @@ func (r *Registry) Snapshot(sender Sender) Snapshot {
 	return Snapshot{Root: root, Version: version}
 }
 
-func visibleNode(node Node, sender Sender) (Node, bool) {
+func visibleNode(node command.Node, sender Sender) (command.Node, bool) {
 	switch typed := node.(type) {
-	case Literal:
+	case command.Literal:
 		if typed.Permission != "" && (sender == nil || !sender.Has(typed.Permission)) {
 			return nil, false
 		}
@@ -62,7 +66,7 @@ func visibleNode(node Node, sender Sender) (Node, bool) {
 			return nil, false
 		}
 		return typed, true
-	case Argument:
+	case command.Argument:
 		typed = cloneArgument(typed)
 		typed.Children = visibleNodes(typed.Children, sender)
 		if typed.Exec == 0 && len(typed.Children) == 0 {
@@ -74,8 +78,8 @@ func visibleNode(node Node, sender Sender) (Node, bool) {
 	}
 }
 
-func visibleNodes(nodes []Node, sender Sender) []Node {
-	visible := make([]Node, 0, len(nodes))
+func visibleNodes(nodes []command.Node, sender Sender) []command.Node {
+	visible := make([]command.Node, 0, len(nodes))
 	for _, node := range nodes {
 		if cloned, ok := visibleNode(node, sender); ok {
 			visible = append(visible, cloned)

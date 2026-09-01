@@ -1,4 +1,4 @@
-package command
+package dispatch
 
 import (
 	"errors"
@@ -10,6 +10,8 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // ErrNoSuchCommand means the line names no command this snapshot holds. It is
@@ -57,13 +59,13 @@ type Resolvers struct {
 //
 // The leading slash is optional: both editions hand this over with and without
 // one depending on where the line came from.
-func (s Snapshot) Resolve(line string, resolvers Resolvers) (ExecID, Values, error) {
+func (s Snapshot) Resolve(line string, resolvers Resolvers) (command.ExecID, Values, error) {
 	tokens := strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "/"))
 	if len(tokens) == 0 {
 		return 0, nil, ErrNoSuchCommand
 	}
 	for _, child := range s.Root.Children {
-		literal, ok := child.(Literal)
+		literal, ok := child.(command.Literal)
 		if !ok || literal.Name != tokens[0] {
 			continue
 		}
@@ -81,7 +83,7 @@ func (s Snapshot) Resolve(line string, resolvers Resolvers) (ExecID, Values, err
 // The values map is built at the leaf and filled on the way back out, so a
 // branch that fails half way never has to undo what it wrote. Backtracking is
 // then simply returning an error.
-func descend(children []Node, executor ExecID, tokens []string, resolvers Resolvers) (ExecID, Values, error) {
+func descend(children []command.Node, executor command.ExecID, tokens []string, resolvers Resolvers) (command.ExecID, Values, error) {
 	if len(tokens) == 0 {
 		if executor != 0 {
 			return executor, Values{}, nil
@@ -116,14 +118,14 @@ func descend(children []Node, executor ExecID, tokens []string, resolvers Resolv
 	return 0, nil, fmt.Errorf("unexpected %q, expected %s", tokens[0], expectation(children))
 }
 
-func match(node Node, tokens []string, resolvers Resolvers) (ExecID, Values, error) {
+func match(node command.Node, tokens []string, resolvers Resolvers) (command.ExecID, Values, error) {
 	switch typed := node.(type) {
-	case Literal:
+	case command.Literal:
 		if tokens[0] != typed.Name {
 			return 0, nil, errNoMatch
 		}
 		return descend(typed.Children, typed.Exec, tokens[1:], resolvers)
-	case Argument:
+	case command.Argument:
 		consumed, value, err := parseArgument(typed, tokens, resolvers)
 		if err != nil {
 			return 0, nil, err
@@ -141,10 +143,10 @@ func match(node Node, tokens []string, resolvers Resolvers) (ExecID, Values, err
 // parseArgument reads one argument off the front of tokens and reports how many
 // it consumed. Every failure it returns is a sentence for whoever typed the
 // line, not a diagnostic: they are the only person who can fix it.
-func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int, Value, error) {
+func parseArgument(argument command.Argument, tokens []string, resolvers Resolvers) (int, Value, error) {
 	value := Value{Type: argument.Type}
 	switch argument.Type {
-	case ArgInteger:
+	case command.ArgInteger:
 		number, err := strconv.ParseInt(tokens[0], 10, 64)
 		if err != nil {
 			return 0, Value{}, fmt.Errorf("%s must be a whole number", argument.Name)
@@ -156,7 +158,7 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		value.Integer = number
 		return 1, value, nil
 
-	case ArgDecimal:
+	case command.ArgDecimal:
 		number, err := strconv.ParseFloat(tokens[0], 64)
 		if err != nil {
 			return 0, Value{}, fmt.Errorf("%s must be a number", argument.Name)
@@ -168,14 +170,14 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		value.Decimal = number
 		return 1, value, nil
 
-	case ArgString, ArgCustom:
+	case command.ArgString, command.ArgCustom:
 		// A custom type is handed over as it was typed. Resolving it needs the
 		// plugin's own resolver, which the ABI has no frame for yet, so the
 		// honest thing is to pass the word through rather than guess at it.
 		value.String = tokens[0]
 		return 1, value, nil
 
-	case ArgGreedy:
+	case command.ArgGreedy:
 		// Rejoined on single spaces rather than sliced out of the original
 		// line: the tree is what says an argument is greedy, and by the time we
 		// know that the line has already been split. Runs of whitespace inside
@@ -183,7 +185,7 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		value.String = strings.Join(tokens, " ")
 		return len(tokens), value, nil
 
-	case ArgEnum:
+	case command.ArgEnum:
 		for _, allowed := range argument.Enum {
 			if allowed == tokens[0] {
 				value.String = allowed
@@ -193,7 +195,7 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		return 0, Value{}, fmt.Errorf("%s must be one of %s",
 			argument.Name, strings.Join(argument.Enum, ", "))
 
-	case ArgPlayer:
+	case command.ArgPlayer:
 		if resolvers.Player == nil {
 			return 0, Value{}, unsupported(argument)
 		}
@@ -204,7 +206,7 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		value.Player = found
 		return 1, value, nil
 
-	case ArgBlockPos:
+	case command.ArgBlockPos:
 		if len(tokens) < 3 {
 			return 0, Value{}, fmt.Errorf("%s needs three coordinates", argument.Name)
 		}
@@ -219,7 +221,7 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		value.Position = spatial.BlockPos{X: coordinates[0], Y: coordinates[1], Z: coordinates[2]}
 		return 3, value, nil
 
-	case ArgBlockState:
+	case command.ArgBlockState:
 		if resolvers.Block == nil {
 			return 0, Value{}, unsupported(argument)
 		}
@@ -230,7 +232,7 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		value.Block = block
 		return 1, value, nil
 
-	case ArgItem:
+	case command.ArgItem:
 		if resolvers.Item == nil {
 			return 0, Value{}, unsupported(argument)
 		}
@@ -241,7 +243,7 @@ func parseArgument(argument Argument, tokens []string, resolvers Resolvers) (int
 		value.Item = item
 		return 1, value, nil
 
-	case ArgDuration:
+	case command.ArgDuration:
 		duration, err := parseDuration(tokens[0])
 		if err != nil {
 			return 0, Value{}, fmt.Errorf("%s must be a duration such as 30s or 5m", argument.Name)
@@ -277,11 +279,11 @@ func positive(duration time.Duration) (time.Duration, error) {
 
 // unsupported names the argument rather than its type number: whoever reads
 // this is a player, and the type is the server's problem, not theirs.
-func unsupported(argument Argument) error {
+func unsupported(argument command.Argument) error {
 	return fmt.Errorf("%s uses an argument this server cannot read", argument.Name)
 }
 
-func integerRange(argument Argument) string {
+func integerRange(argument command.Argument) string {
 	switch {
 	case argument.IntegerMin != nil && argument.IntegerMax != nil:
 		return fmt.Sprintf("between %d and %d", *argument.IntegerMin, *argument.IntegerMax)
@@ -292,7 +294,7 @@ func integerRange(argument Argument) string {
 	}
 }
 
-func decimalRange(argument Argument) string {
+func decimalRange(argument command.Argument) string {
 	switch {
 	case argument.DecimalMin != nil && argument.DecimalMax != nil:
 		return fmt.Sprintf("between %g and %g", *argument.DecimalMin, *argument.DecimalMax)
@@ -305,13 +307,13 @@ func decimalRange(argument Argument) string {
 
 // expectation lists what could come next, so an incomplete line says what is
 // missing instead of only that something is.
-func expectation(children []Node) string {
+func expectation(children []command.Node) string {
 	names := make([]string, 0, len(children))
 	for _, child := range children {
 		switch typed := child.(type) {
-		case Literal:
+		case command.Literal:
 			names = append(names, typed.Name)
-		case Argument:
+		case command.Argument:
 			names = append(names, "<"+typed.Name+">")
 		}
 	}

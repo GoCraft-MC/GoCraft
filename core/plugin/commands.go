@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 // EffectMessage delivers one line to whoever an effect names. It is the only
@@ -32,7 +33,7 @@ const EffectMessage = "chat.message"
 // and dropping the tail because the head was malformed would turn one bad call
 // into a handler that appears to have done nothing.
 func (r *Registry) deliverCommandEffects(pluginID string, executor command.ExecID,
-	sender command.Sender, effects []abi.HostCall) {
+	sender dispatch.Sender, effects []abi.HostCall) {
 	for _, effect := range effects {
 		if text, ok := consoleReply(effect, sender); ok {
 			if err := sender.SendMessage(text); err != nil {
@@ -50,7 +51,7 @@ func (r *Registry) deliverCommandEffects(pluginID string, executor command.ExecI
 
 // consoleReply reports whether an effect is a reply the tick would silently
 // drop, and returns the line to send instead.
-func consoleReply(effect abi.HostCall, sender command.Sender) (string, bool) {
+func consoleReply(effect abi.HostCall, sender dispatch.Sender) (string, bool) {
 	if effect.Type != EffectMessage || sender == nil || len(effect.Fields) != 2 {
 		return "", false
 	}
@@ -67,7 +68,7 @@ func (r *Registry) registerBundleCommands(bundles []Bundle) error {
 			continue
 		}
 		handlers := r.commandHandlers(bundle.Manifest.ID, *bundle.Commands)
-		source := command.Source{Kind: command.SourcePlugin, PluginID: bundle.Manifest.ID}
+		source := dispatch.Source{Kind: dispatch.SourcePlugin, PluginID: bundle.Manifest.ID}
 		if err := r.commands.Register(source, *bundle.Commands, handlers); err != nil {
 			for _, pluginID := range registered {
 				r.commands.RevokeAll(pluginID)
@@ -79,11 +80,11 @@ func (r *Registry) registerBundleCommands(bundles []Bundle) error {
 	return nil
 }
 
-func (r *Registry) commandHandlers(pluginID string, root command.Root) map[command.ExecID]command.Handler {
-	handlers := make(map[command.ExecID]command.Handler)
+func (r *Registry) commandHandlers(pluginID string, root command.Root) map[command.ExecID]dispatch.Handler {
+	handlers := make(map[command.ExecID]dispatch.Handler)
 	for _, executor := range command.Executors(root) {
 		localExecutor := executor
-		handlers[executor] = func(ctx context.Context, call *command.Context) error {
+		handlers[executor] = func(ctx context.Context, call *dispatch.Context) error {
 			instance, loaded := r.Instance(pluginID)
 			if !loaded {
 				return fmt.Errorf("plugin %s is not loaded", pluginID)

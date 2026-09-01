@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 func decimalBound(value float64) *float64 { return &value }
@@ -108,11 +109,11 @@ func TestCommandTreeDefaultsToEmpty(t *testing.T) {
 func TestCommandsPacketCarriesBothSources(t *testing.T) {
 	dispatcher := NewDispatcher()
 	RegisterBuiltins(dispatcher)
-	registry := command.NewRegistry()
+	registry := dispatch.NewRegistry()
 	dispatcher.SetCommandRegistry(registry)
-	noop := func(context.Context, *command.Context) error { return nil }
-	handlers := map[command.ExecID]command.Handler{1: noop, 2: noop, 3: noop, 4: noop}
-	if err := registry.Register(command.Source{Kind: command.SourcePlugin, PluginID: "shop"},
+	noop := func(context.Context, *dispatch.Context) error { return nil }
+	handlers := map[command.ExecID]dispatch.Handler{1: noop, 2: noop, 3: noop, 4: noop}
+	if err := registry.Register(dispatch.Source{Kind: dispatch.SourcePlugin, PluginID: "shop"},
 		pluginGraph(), handlers); err != nil {
 		t.Fatal(err)
 	}

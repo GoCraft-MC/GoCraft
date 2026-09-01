@@ -5,7 +5,7 @@ import (
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
-	"GoCraft/core/command"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 func decimalBound(value float64) *float64 { return &value }
