@@ -97,6 +97,9 @@ func TestFoodStackSizesTagsAndExtensions(t *testing.T) {
 	if !HasTag("minecraft:diamond_sword", "minecraft:enchantable/sharp_weapon") || HasTag("minecraft:bow", "minecraft:enchantable/sharp_weapon") {
 		t.Fatal("sharp-weapon tag membership is wrong")
 	}
+	if !HasTag("minecraft:light_blue_dye", "gocraft:dyes") || !HasTag("minecraft:creeper_banner_pattern", "gocraft:banner_patterns") {
+		t.Fatal("supplemental canonical categories are incomplete")
+	}
 	if !RepairsWith("minecraft:wooden_pickaxe", "minecraft:cherry_planks") || RepairsWith("minecraft:wooden_pickaxe", "minecraft:iron_ingot") {
 		t.Fatal("wooden tool repair tag membership is wrong")
 	}
