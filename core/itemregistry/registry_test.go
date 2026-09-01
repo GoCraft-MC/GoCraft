@@ -94,6 +94,11 @@ func TestFoodStackSizesTagsAndExtensions(t *testing.T) {
 	if coal.FuelTicks != 1600 {
 		t.Fatalf("coal fuel ticks = %d, want 1600", coal.FuelTicks)
 	}
+	potion, _ := Lookup("minecraft:potion")
+	if potion.Consumable == nil || potion.Consumable.Animation != "drink" ||
+		potion.Consumable.UseDurationTicks != 32 || potion.Consumable.Remainder != "minecraft:glass_bottle" {
+		t.Fatalf("potion consumable metadata = %+v", potion.Consumable)
+	}
 	apple, ok := Lookup("minecraft:apple")
 	if !ok || apple.Food == nil || apple.Food.Nutrition != 4 || apple.Food.SaturationModifier() != 0.3 || apple.MaxStackSize != 64 {
 		t.Fatalf("apple = %+v", apple)
