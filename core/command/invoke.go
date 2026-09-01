@@ -10,6 +10,30 @@ var (
 	ErrPermission      = errors.New("command permission denied")
 )
 
+// Execute resolves one typed line against what this sender can see and runs it.
+//
+// The boolean is the whole point of the signature: false means the line names
+// nothing here, so a caller that also owns other commands can fall through to
+// them instead of answering "unknown command" on behalf of a registry that was
+// never asked. True with an error is the other case — this registry owns the
+// line and something about it was wrong, and the error is a sentence to show
+// whoever typed it.
+//
+// Resolution runs against a snapshot, so a branch guarded by a permission the
+// sender lacks is invisible rather than refused. Invoke checks permissions
+// again on the executor it reached: the snapshot decides what can be seen, the
+// registry decides what can be run, and neither trusts the other.
+func (r *Registry) Execute(ctx context.Context, sender Sender, line string, resolvers Resolvers) (bool, error) {
+	executor, args, err := r.Snapshot(sender).Resolve(line, resolvers)
+	switch {
+	case errors.Is(err, ErrNoSuchCommand):
+		return false, nil
+	case err != nil:
+		return true, err
+	}
+	return true, r.Invoke(ctx, executor, sender, args)
+}
+
 func (r *Registry) Invoke(ctx context.Context, executor ExecID, sender Sender, args Values) error {
 	r.mu.RLock()
 	registered, ok := r.handlers[executor]
