@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"strings"
-
 	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
@@ -262,8 +260,7 @@ func canPlaceWorkstationSlot(kind string, index int, stack player.ItemStack) boo
 			(index == 1 && itemregistry.HasTag(stack.ItemID, "gocraft:dyes")) ||
 			(index == 2 && itemregistry.HasTag(stack.ItemID, "gocraft:banner_patterns"))
 	case "minecraft:smithing_table":
-		return (index == 0 && strings.HasSuffix(stack.ItemID, "_smithing_template")) ||
-			(index == 1 && player.MaxDurability(stack.ItemID) > 0) || index == 2
+		return smithingAccepts(index, stack.ItemID)
 	case "minecraft:stonecutter":
 		return index == 0
 	case "minecraft:cartography_table":
