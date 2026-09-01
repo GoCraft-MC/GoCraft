@@ -31,6 +31,7 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 		BundlePath:    bundle.Path,
 		Entry:         bundle.Manifest.Entry,
 		DataDirectory: bundle.DataDirectory,
+		CommandTree:   bundle.Manifest.CommandTree,
 		Events:        events,
 	})
 	if err != nil {
