@@ -101,6 +101,15 @@ type registeredCommand struct {
 
 type PermissionChecker func(player *player.Player, node string, defaultAllowed bool) bool
 
+// PluginCommands runs one line against the commands plugins registered.
+//
+// It reports whether the line named one at all, which is what lets the two
+// command systems live side by side while §18's extraction is unfinished: a
+// line this returns false for was never a plugin's, and the dispatcher answers
+// for it as it always did. A returned error is a sentence for whoever typed the
+// line, not a server fault.
+type PluginCommands func(sender *player.Player, line string) (handled bool, err error)
+
 // ChatFormatter formats a single chat line.  prefix is the player's
 // highest-weight group prefix (may be ""), username is the speaker, message is
 // the raw chat text.
@@ -117,6 +126,7 @@ type Dispatcher struct {
 	teleportPlayer       func(*player.Player, float64, float64, float64) error
 	disconnectPlayer     func(*player.Player, string) error
 	permission           PermissionChecker
+	pluginCommands       PluginCommands
 	messenger            func(*player.Player, string) error
 	linkMessenger        func(*player.Player, string, string) error
 	syncAbilities        func(*player.Player)
@@ -170,6 +180,19 @@ func commandPermissionNode(name string) string {
 func (d *Dispatcher) SetPermissionChecker(check PermissionChecker) {
 	d.mu.Lock()
 	d.permission = check
+	d.mu.Unlock()
+}
+
+// SetPluginCommands installs the bridge to the plugin command registry.
+//
+// One hook rather than a merged table: the two registries validate, namespace
+// and check permissions differently, and copying plugin commands in here would
+// be a second place they are written down. Built-in names are refused to
+// plugins at registration, so there is no precedence to invent — a line is one
+// or the other, never both.
+func (d *Dispatcher) SetPluginCommands(run PluginCommands) {
+	d.mu.Lock()
+	d.pluginCommands = run
 	d.mu.Unlock()
 }
 
@@ -354,6 +377,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	disconnectPlayer := d.disconnectPlayer
 	maxPlayers := d.maxPlayers
 	checkPermission := d.permission
+	runPluginCommand := d.pluginCommands
 	messenger := d.messenger
 	linkMessenger := d.linkMessenger
 	syncAbilities := d.syncAbilities
@@ -368,6 +392,17 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	fillFeedback(&ctx, messenger, linkMessenger, syncAbilities)
 
 	if !ok {
+		// Plugins are asked only once no built-in answers to the name. That
+		// ordering costs nothing — the two sets cannot overlap — and it keeps
+		// a plugin from being consulted on every /gamemode ever typed.
+		if runPluginCommand != nil {
+			if handled, err := runPluginCommand(ctx.Player, input); handled {
+				if err != nil {
+					_ = sendCommandMessage(ctx, err.Error())
+				}
+				return
+			}
+		}
 		_ = sendCommandMessage(ctx, fmt.Sprintf("Unknown command: /%s", name))
 		return
 	}
