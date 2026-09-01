@@ -32,9 +32,12 @@ plugins:
     out: .
     opt: lang=gosdk
 
-  # The Java runtime, in the sibling gocraft-jvm checkout. There is no shared
-  # schema repository yet (§16 gives the ABI its own), so this is a path; it
-  # becomes a real dependency when that repository exists.
+  # The Java plugin API, in the sibling gocraft-jvm checkout. It lands in
+  # gocraft-api-jvm rather than the runtime: an event class is what a plugin
+  # subscribes to, and the artefact the runtime ships does not go on a plugin's
+  # classpath. There is no shared schema repository yet (§16 gives the ABI its
+  # own), so this is a path; it becomes a real dependency when that repository
+  # exists.
   - local: ["go", "run", "./cmd/protoc-gen-gocraft"]
-    out: ../gocraft-jvm/src/main/generated
+    out: ../gocraft-jvm/gocraft-api-jvm/src/main/generated
     opt: lang=java
