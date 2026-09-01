@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
 	"GoCraft/internal/gamedata"
@@ -158,25 +159,29 @@ func sets(tags map[string][]string) map[string]map[string]bool {
 }
 
 func (db *database) correctTool(blockID, toolID string) bool {
-	if toolID == "minecraft:shears" || strings.HasSuffix(toolID, "_sword") {
-		return blockID == "minecraft:cobweb"
-	}
-	name := strings.TrimPrefix(toolID, "minecraft:")
-	parts := strings.SplitN(name, "_", 2)
-	if len(parts) != 2 {
+	definition, ok := itemregistry.Lookup(toolID)
+	if !ok || definition.Tool == nil {
 		return false
 	}
-	material, kind := parts[0], parts[1]
-	if kind != "pickaxe" && kind != "axe" && kind != "shovel" && kind != "hoe" {
+	category := definition.Tool.Category
+	if category == itemregistry.ToolShears || category == itemregistry.ToolSword {
+		return blockID == "minecraft:cobweb"
+	}
+	var kind string
+	switch category {
+	case itemregistry.ToolPickaxe, itemregistry.ToolAxe, itemregistry.ToolShovel, itemregistry.ToolHoe:
+		kind = string(category)
+	default:
 		return false
 	}
 	if !db.blockTagSets["minecraft:mineable/"+kind][blockID] {
 		return false
 	}
-	if material == "golden" {
-		material = "gold"
+	tier := string(definition.Tool.Tier)
+	if definition.Tool.Tier == itemregistry.TierGolden {
+		tier = "gold"
 	}
-	return !db.blockTagSets["minecraft:incorrect_for_"+material+"_tool"][blockID]
+	return !db.blockTagSets["minecraft:incorrect_for_"+tier+"_tool"][blockID]
 }
 
 func eligibleEntries(values []any, ctx Context, db *database) []map[string]any {
