@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 var (
@@ -31,10 +32,14 @@ func (r *Registry) Execute(ctx context.Context, sender Sender, line string, reso
 	case err != nil:
 		return true, err
 	}
-	return true, r.Invoke(ctx, executor, sender, args)
+	return true, r.invoke(ctx, executor, sender, args, tokensAfterName(line))
 }
 
 func (r *Registry) Invoke(ctx context.Context, executor ExecID, sender Sender, args Values) error {
+	return r.invoke(ctx, executor, sender, args, nil)
+}
+
+func (r *Registry) invoke(ctx context.Context, executor ExecID, sender Sender, args Values, raw []string) error {
 	r.mu.RLock()
 	registered, ok := r.handlers[executor]
 	key, _ := sourceKey(registered.source)
@@ -47,7 +52,7 @@ func (r *Registry) Invoke(ctx context.Context, executor ExecID, sender Sender, a
 	if !allowed {
 		return ErrPermission
 	}
-	return registered.handler(ctx, &Context{Sender: sender, Args: args, Node: executor})
+	return registered.handler(ctx, &Context{Sender: sender, Args: args, Node: executor, Raw: raw})
 }
 
 func executorAllowed(nodes []Node, executor ExecID, sender Sender, parentAllowed bool) bool {
@@ -74,4 +79,14 @@ func executorAllowed(nodes []Node, executor ExecID, sender Sender, parentAllowed
 		}
 	}
 	return false
+}
+
+// tokensAfterName is the line as an unmigrated handler expects to read it: the
+// words after the command name, with the leading slash gone.
+func tokensAfterName(line string) []string {
+	tokens := strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "/"))
+	if len(tokens) == 0 {
+		return nil
+	}
+	return tokens[1:]
 }

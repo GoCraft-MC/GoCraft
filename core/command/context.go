@@ -57,6 +57,16 @@ type Context struct {
 	Sender Sender
 	Args   Values
 	Node   ExecID
+
+	// Raw is what followed the command name, split on whitespace.
+	//
+	// Args is the contract: the host parsed the line against the tree and every
+	// argument here is of the type its node declared. Raw exists beside it for
+	// a handler written before that was true, so the built-ins can move onto
+	// this registry one at a time instead of in one commit that touches fifty
+	// commands at once. Empty when an executor was invoked without a line —
+	// a plugin command called by id has no tokens to report.
+	Raw []string
 }
 
 type Handler func(context.Context, *Context) error

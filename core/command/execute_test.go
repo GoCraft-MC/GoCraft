@@ -81,3 +81,52 @@ func TestExecuteStillChecksPermissionOnInvoke(t *testing.T) {
 		t.Fatalf("invoke by a denied sender = %v, want ErrPermission", err)
 	}
 }
+
+// Raw is what lets a handler written against the old dispatcher move onto this
+// registry without being rewritten first.
+func TestExecuteCarriesTheRawTokens(t *testing.T) {
+	registry := NewRegistry()
+	var raw []string
+	root := Root{Children: []Node{Literal{Name: "time", Children: []Node{
+		Argument{Name: "arguments", Type: ArgGreedy, Exec: 1},
+	}}}}
+	handlers := map[ExecID]Handler{1: func(_ context.Context, call *Context) error {
+		raw = call.Raw
+		return nil
+	}}
+	if err := registry.Register(Source{Kind: SourceCore}, root, handlers); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Execute(context.Background(), commandSender{}, "/time set 5", Resolvers{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 2 || raw[0] != "set" || raw[1] != "5" {
+		t.Fatalf("raw = %q", raw)
+	}
+}
+
+// An executor invoked by id has no line behind it, so there are no tokens to
+// invent.
+func TestInvokeCarriesNoRawTokens(t *testing.T) {
+	registry := NewRegistry()
+	var seen []string
+	called := false
+	handlers := map[ExecID]Handler{1: func(_ context.Context, call *Context) error {
+		seen, called = call.Raw, true
+		return nil
+	}}
+	if err := registry.Register(Source{Kind: SourcePlugin, PluginID: "shop"},
+		commandRoot("shop", 1), handlers); err != nil {
+		t.Fatal(err)
+	}
+	executor, _, err := registry.Snapshot(commandSender{}).Resolve("/shop", Resolvers{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Invoke(context.Background(), executor, commandSender{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !called || seen != nil {
+		t.Fatalf("invoke raw = %q", seen)
+	}
+}
