@@ -27,9 +27,13 @@ go run ./internal/cmd/genitemdefinitions \
 
 The generator also consumes the checked-in 1.21.4 item ID, network-tag, and
 fuel catalogues. It records SHA-256 hashes for every input in its output.
+Where Mojang exposes no matching item tag, the generator adds supplemental
+`gocraft:` categories (currently dyes and banner patterns) to the same tag
+index; gameplay never infers those categories from item names.
 
 GoCraft currently exposes eleven post-1.21.4 armor items through its newer
 Bedrock compatibility data. Those exact IDs are an explicit extension sourced
-from Pumpkin's generated components and tags; they are listed in the output's
-`_compatibility_extensions` field. No other newer items are mixed into the
-1.21.4 base set.
+from Pumpkin's generated components and 26.2 tags at revision
+`99989ba3b6a292fcdf36473065e4d365b6f89928`; they are listed in the output's
+`_compatibility_extensions` field. The output records hashes of both generated
+inputs. No other newer items are mixed into the 1.21.4 base set.
