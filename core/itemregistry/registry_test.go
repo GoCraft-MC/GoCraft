@@ -22,8 +22,12 @@ func TestRepresentativeDefinitions(t *testing.T) {
 		{"minecraft:wolf_armor", 64, 1, 11, 0, 0, 0, "body", ""},
 		{"minecraft:wooden_sword", 59, 1, 0, 0, 4, 1.6, "", ToolSword},
 		{"minecraft:iron_sword", 250, 1, 0, 0, 6, 1.6, "", ToolSword},
+		{"minecraft:diamond_sword", 1561, 1, 0, 0, 7, 1.6, "", ToolSword},
+		{"minecraft:netherite_sword", 2031, 1, 0, 0, 8, 1.6, "", ToolSword},
 		{"minecraft:diamond_axe", 1561, 1, 0, 0, 9, 1, "", ToolAxe},
 		{"minecraft:netherite_pickaxe", 2031, 1, 0, 0, 6, 1.2, "", ToolPickaxe},
+		{"minecraft:iron_shovel", 250, 1, 0, 0, 4.5, 1, "", ToolShovel},
+		{"minecraft:diamond_hoe", 1561, 1, 0, 0, 1, 4, "", ToolHoe},
 		{"minecraft:trident", 250, 1, 0, 0, 9, 1.1, "", ToolTrident},
 		{"minecraft:mace", 500, 1, 0, 0, 6, 0.6, "", ToolMace},
 		{"minecraft:shears", 238, 1, 0, 0, 0, 0, "", ToolShears},
@@ -34,6 +38,7 @@ func TestRepresentativeDefinitions(t *testing.T) {
 		{"minecraft:crossbow", 465, 1, 0, 0, 0, 0, "", ""},
 		{"minecraft:shield", 336, 1, 0, 0, 0, 0, "", ""},
 		{"minecraft:elytra", 432, 1, 0, 0, 0, 0, "chest", ""},
+		{"minecraft:diamond_horse_armor", 0, 1, 11, 2, 0, 0, "body", ""},
 	}
 	for _, test := range tests {
 		t.Run(test.itemID, func(t *testing.T) {
