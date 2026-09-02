@@ -857,15 +857,11 @@ func cmdPotionEffect(ctx CommandContext) error {
 	if err != nil || seconds < 1 || seconds > 1_000_000 {
 		return fmt.Errorf("effect time must be between 1 and 1000000 seconds")
 	}
-	pkt := protocol.NewBuilder(packetIDUpdateMobEffect).
-		VarInt(target.EntityID).
-		VarInt(effectID).
-		VarInt(0). // amplifier: level I
-		VarInt(int32(seconds * 20)).
-		Byte(0x06). // show particles and icon
-		Build()
-	for _, viewer := range ctx.Manager.SnapshotAll() {
-		_ = viewer.Conn.WritePacket(pkt)
+	effect, changed := target.AddStatusEffect(player.StatusEffect{
+		ID: effectName, Duration: int32(seconds * 20), ShowParticles: true, ShowIcon: true,
+	})
+	if changed && ctx.SyncStatusEffect != nil {
+		ctx.SyncStatusEffect(target, effect)
 	}
 	_ = sendCommandMessage(ctx, fmt.Sprintf(
 		"Applied %s to %s for %d seconds", effectName, target.Username, seconds))
