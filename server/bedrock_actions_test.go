@@ -604,6 +604,18 @@ func TestBedrockHarvestsFullBeehive(t *testing.T) {
 	}
 }
 
+func TestBedrockAddsCandleToCake(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("cake", map[string]string{"bites": "0"}))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:red_candle", Count: 1}
+	if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}}, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("candle was not added to cake")
+	}
+	if got := s.world.GetBlock(1, 64, 0); got.ResourceLocation() != "minecraft:red_candle_cake" || got.Properties["lit"] != "false" {
+		t.Fatalf("candle cake = %+v", got)
+	}
+}
+
 func TestBedrockBucketFillsAndEmptiesCauldron(t *testing.T) {
 	s, p := newBedrockActionTestServer(t)
 	s.world.SetBlock(1, 64, 0, bedrockBlock("cauldron", nil))

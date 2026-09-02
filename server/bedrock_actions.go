@@ -150,12 +150,8 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 		return true
 	}
 
-	if name == "minecraft:cake" && bedrockIsCandleItem(item) {
-		candleCake := strings.TrimPrefix(item, "minecraft:") + "_cake"
-		if item == "minecraft:candle" {
-			candleCake = "candle_cake"
-		}
-		s.setBedrockActionBlock(x, y, z, bedrockBlock(candleCake, map[string]string{"lit": "false"}))
+	if candleCake, ok := coreworld.AddCandleToCake(target, item); ok {
+		s.setBedrockActionBlock(x, y, z, candleCake)
 		s.consumeBedrockHeldItem(p, 1)
 		return true
 	}
@@ -1099,10 +1095,6 @@ func bedrockCropForItem(item, target string) (coreworld.Block, bool) {
 
 func bedrockCropMaxAge(name string) (int, bool) {
 	return coreworld.CropMaxAge(name)
-}
-
-func bedrockIsCandleItem(item string) bool {
-	return item == "minecraft:candle" || strings.HasSuffix(item, "_candle")
 }
 
 func bedrockPottedBlock(item string) (string, bool) {
