@@ -401,6 +401,28 @@ func TestJavaShearsCarvePumpkin(t *testing.T) {
 	}
 }
 
+func TestJavaBottleHarvestsFullBeehive(t *testing.T) {
+	p := player.New([16]byte{}, "beekeeper", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:glass_bottle", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(6, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "bee_nest", Properties: map[string]string{"honey_level": "5", "facing": "west"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(6, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(4).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	nest := w.GetBlock(6, 64, 0)
+	if nest.Properties["honey_level"] != "0" || nest.Properties["facing"] != "west" {
+		t.Fatalf("harvested nest = %+v", nest)
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:honey_bottle" || stack.Count != 1 {
+		t.Fatalf("harvest result = %+v", stack)
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival

@@ -694,6 +694,34 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			return nil
 		}
 	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if harvested, output, ok := coreworld.HarvestBeehive(targetBlock, held.ItemID); ok {
+			applyBlockChange(int(bx), int(by), int(bz), harvested, w, mgr)
+			sound := "minecraft:item.bottle.fill"
+			if held.ItemID == "minecraft:shears" {
+				sound = "minecraft:block.beehive.shear"
+				if !p.GiveItem(output) {
+					spawnBlockDrop(w, nextEntityID, p.Position, output, 0, mgr, p.Dimension)
+				}
+				if damageHeldItem(p, conn, 1) {
+					output = player.ItemStack{}
+				}
+			} else {
+				replaceJavaBucket(p, output.ItemID)
+			}
+			if !output.IsEmpty() {
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, sound, soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 
 	// Sneaking with an item bypasses block activation so a block can be placed
 	// against doors, containers, workstations, composters, and other UIs.
