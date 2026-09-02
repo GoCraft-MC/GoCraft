@@ -83,10 +83,15 @@ func handle(conn *minecraft.Conn) {
 
 	for dx := int32(-4); dx <= 4; dx++ {
 		for dz := int32(-4); dz <= 4; dz++ {
+			// No sub-chunks in the payload: the biome section above is
+			// the whole of it. This used to say
+			// SubChunkRequestModeLimited, which the pinned gophertunnel
+			// fork no longer has — it caps SubChunkCount at 64 and has
+			// dropped the sentinels that used to select request mode.
 			if err := conn.WritePacket(&packet.LevelChunk{
 				Position:      protocol.ChunkPos{dx, dz},
 				Dimension:     0,
-				SubChunkCount: protocol.SubChunkRequestModeLimited,
+				SubChunkCount: 0,
 				SubChunkLimit: protocol.Option[int32](19),
 				CacheEnabled:  false,
 				RawPayload:    biome,
