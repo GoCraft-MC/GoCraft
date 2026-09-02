@@ -149,7 +149,8 @@ func (s *Server) collectDroppedItemIntoHopper(world *coreworld.World, dimension 
 			math.Abs(entity.Position.Z-centreZ) > 0.75 {
 			continue
 		}
-		item := player.ItemStack{ItemID: entity.ItemID, Count: 1, Damage: entity.ItemDamage}
+		item := entity.DroppedItem()
+		item.Count = 1
 		if !insertOneAutomationItem(kind, stacks, item, hopperPosition, [3]int{hopperPosition[0], hopperPosition[1] + 1, hopperPosition[2]}) {
 			continue
 		}
@@ -213,7 +214,7 @@ func loadAutomationContainer(world *coreworld.World, position [3]int) (string, [
 	stacks := make([]player.ItemStack, size)
 	for _, item := range world.ContainerItems(position[0], position[1], position[2]) {
 		if item.Slot >= 0 && item.Slot < size && item.ItemID != "" && item.Count > 0 {
-			stacks[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+			stacks[item.Slot] = item.Stack()
 		}
 	}
 	return kind, stacks, true
@@ -223,7 +224,7 @@ func saveAutomationContainer(world *coreworld.World, position [3]int, kind strin
 	items := make([]coreworld.ContainerItem, 0, len(stacks))
 	for slot, stack := range stacks {
 		if !stack.IsEmpty() {
-			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+			items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 		}
 	}
 	world.SetContainerItems(position[0], position[1], position[2], kind, items)
@@ -289,7 +290,8 @@ func insertOneAutomationItem(kind string, destination []player.ItemStack, item p
 	}
 	for _, slot := range slots {
 		if destination[slot].IsEmpty() {
-			destination[slot] = player.ItemStack{ItemID: item.ItemID, Count: 1, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+			destination[slot] = item
+			destination[slot].Count = 1
 			return true
 		}
 	}
@@ -554,7 +556,9 @@ func (s *Server) dispenseSpecialItem(world *coreworld.World, dimension int32, ta
 		world.SetBlock(target[0], target[1], target[2], fire)
 		world.BlockPhysics.ScheduleFire(target[0], target[1], target[2], s.worldAge, 20)
 		*changes = append(*changes, coreworld.BlockChange{X: target[0], Y: target[1], Z: target[2], Block: fire})
-		damaged := player.ItemStack{ItemID: item.ItemID, Count: 1, Damage: item.Damage + 1}
+		damaged := item
+		damaged.Count = 1
+		damaged.Damage++
 		if maximum := player.MaxDurability(item.ItemID); maximum > 0 && damaged.Damage >= maximum {
 			damaged = player.ItemStack{}
 		}
@@ -592,7 +596,9 @@ func (s *Server) dispenseDroppedItem(world *coreworld.World, stack player.ItemSt
 		return
 	}
 	position := spatial.Vec3{X: float64(target[0]) + 0.5, Y: float64(target[1]) + 0.25, Z: float64(target[2]) + 0.5}
-	dropped := s.newDroppedItemInWorld(world, player.ItemStack{ItemID: stack.ItemID, Count: 1, Damage: stack.Damage}, position, 0)
+	dropStack := stack
+	dropStack.Count = 1
+	dropped := s.newDroppedItemInWorld(world, dropStack, position, 0)
 	if dropped == nil {
 		return
 	}

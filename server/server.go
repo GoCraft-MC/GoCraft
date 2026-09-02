@@ -1797,9 +1797,7 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 		}
 		if p.GameMode != player.GameModeCreative {
 			for _, item := range containerItems {
-				stack := player.ItemStack{
-					ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations,
-				}
+				stack := item.Stack()
 				if dropped := s.newDroppedItemForPlayer(p, stack, center, item.Slot+1); dropped != nil {
 					handler.BroadcastSpawnMobInDimension(dropped, s.sessions, p.Dimension)
 				}
@@ -2205,7 +2203,8 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			if p.GameMode != player.GameModeCreative || action.Count <= 0 {
 				return
 			}
-			given := player.ItemStack{ItemID: action.Item.ItemID, Count: action.Count, Damage: action.Item.Damage}
+			given := action.Item
+			given.Count = action.Count
 			if !canPlaceBedrockFurnaceSlot(action.Destination, given) || !set(action.Destination, given) {
 				return
 			}
@@ -2236,12 +2235,13 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				return
 			}
 			destination, ok := get(action.Destination)
-			if !ok || (!destination.IsEmpty() && (destination.ItemID != source.ItemID || destination.Damage != source.Damage)) {
+			if !ok || (!destination.IsEmpty() && !destination.SameItem(source)) {
 				return
 			}
 			newDestination := destination
 			if newDestination.IsEmpty() {
-				newDestination = player.ItemStack{ItemID: source.ItemID, Damage: source.Damage}
+				newDestination = source
+				newDestination.Count = 0
 			}
 			newDestination.Count += action.Count
 			limit := player.MaxStackSize(newDestination.ItemID)
@@ -2255,7 +2255,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			if action.Source == 0 {
 				for range crafts {
 					current := inventory[0]
-					if current.ItemID != source.ItemID || current.Damage != source.Damage || current.Count*crafts != action.Count {
+					if !current.SameItem(source) || current.Count*crafts != action.Count {
 						return
 					}
 					consumeBedrockPersonalCrafting(&inventory)
@@ -2263,7 +2263,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			} else if action.Source == intent.InventoryCraftingTableOutput {
 				for range crafts {
 					current := handler.FindBedrockCraftingTableResult(craftingGrid)
-					if current.ItemID != source.ItemID || current.Damage != source.Damage || current.Count*crafts != action.Count {
+					if !current.SameItem(source) || current.Count*crafts != action.Count {
 						return
 					}
 					consumeBedrockCraftingTable(&craftingGrid)
@@ -2271,7 +2271,7 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 				craftingResult = handler.FindBedrockCraftingTableResult(craftingGrid)
 			} else if workstationOutput {
 				result, ok := handler.TakeWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
-				if !ok || result.ItemID != source.ItemID || result.Count != action.Count || result.Damage != source.Damage {
+				if !ok || !result.SameItem(source) || result.Count != action.Count {
 					return
 				}
 			} else if !set(action.Source, source) {
@@ -2294,13 +2294,15 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 			if action.Count <= 0 || action.Count > source.Count {
 				return
 			}
-			drops = append(drops, player.ItemStack{ItemID: source.ItemID, Count: action.Count, Damage: source.Damage})
+			drop := source
+			drop.Count = action.Count
+			drops = append(drops, drop)
 			if workstationOutput {
 				if action.Count != source.Count {
 					return
 				}
 				result, ok := handler.TakeWorkstationResult(p.OpenContainerKind, containerSlots, p.WorkstationSelection)
-				if !ok || result.ItemID != source.ItemID || result.Count != action.Count || result.Damage != source.Damage {
+				if !ok || !result.SameItem(source) || result.Count != action.Count {
 					return
 				}
 				continue
@@ -3220,10 +3222,7 @@ func (s *Server) newDroppedItemInWorld(dimensionWorld *coreworld.World, stack pl
 	id := s.game.NextEntityID()
 	dropped := corentity.New(id, newRandomUUID(), corentity.TypeItem,
 		position.X, position.Y+0.25, position.Z)
-	dropped.ItemID = stack.ItemID
-	dropped.ItemCount = stack.Count
-	dropped.ItemDamage = stack.Damage
-	dropped.ItemPotDecorations = stack.PotDecorations
+	dropped.SetDroppedItem(stack)
 	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
 	dropped.VX = math.Cos(angle) * 0.1
 	dropped.VY = 0.2
@@ -3295,9 +3294,7 @@ func (s *Server) tryPickupDroppedItem(e *corentity.Entity, dimension int32) bool
 		if dx*dx+dy*dy+dz*dz > 2.25 {
 			continue
 		}
-		stack := player.ItemStack{
-			ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage, PotDecorations: e.ItemPotDecorations,
-		}
+		stack := e.DroppedItem()
 		if !p.GiveItem(stack) {
 			continue
 		}

@@ -29,6 +29,9 @@ func TestPlayerDataStoreRoundTrip(t *testing.T) {
 	source.Inventory[player.HotbarStart+4] = player.ItemStack{ItemID: "minecraft:diamond_pickaxe", Count: 1, Damage: 57}
 	source.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:shield", Count: 1, Damage: 4}
 	source.EnderChestInventory[7] = player.ItemStack{ItemID: "minecraft:nether_star", Count: 2}
+	if err := source.Inventory[24].SetComponent("custom_name", map[string]any{"text": "Building wood", "italic": false}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Saving twice exercises replacement of an existing file, which is
 	// especially important on Windows where the server commonly runs.

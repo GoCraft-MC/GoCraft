@@ -48,7 +48,9 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: item, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations})
+				cooking := held
+				cooking.Count = 1
+				items = append(items, coreworld.ContainerItemFromStack(slot, cooking))
 				s.bedrockWorld().SetContainerItems(x, y, z, name, items)
 				s.consumeBedrockHeldItem(p, 1)
 				return true
@@ -347,17 +349,18 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		items := s.bedrockWorld().ContainerItems(x, y, z)
 		var stored player.ItemStack
 		if len(items) > 0 {
-			stored = player.ItemStack{ItemID: items[0].ItemID, Count: items[0].Count, Damage: items[0].Damage, Enchantments: items[0].Enchantments}
+			stored = items[0].Stack()
 		}
-		if !stored.IsEmpty() && (stored.ItemID != held.ItemID || stored.Damage != held.Damage || stored.Count >= player.MaxStackSize(stored.ItemID)) {
+		if !stored.IsEmpty() && (!stored.SameItem(held) || stored.Count >= player.MaxStackSize(stored.ItemID)) {
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations}
+			stored = held
+			stored.Count = 1
 		} else {
 			stored.Count++
 		}
-		s.bedrockWorld().SetContainerItems(x, y, z, name, []coreworld.ContainerItem{{Slot: 0, ItemID: stored.ItemID, Count: stored.Count, Damage: stored.Damage, Enchantments: stored.Enchantments}})
+		s.bedrockWorld().SetContainerItems(x, y, z, name, []coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, stored)})
 		s.consumeBedrockHeldItem(p, 1)
 		return true
 	}

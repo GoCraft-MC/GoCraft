@@ -97,7 +97,7 @@ func (s *Server) openBedrockGenericContainer(p *player.Player, pos spatial.Block
 		if item.Slot < 0 || item.Slot >= len(p.ContainerSlots) || item.ItemID == "" || item.Count <= 0 {
 			continue
 		}
-		p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+		p.ContainerSlots[item.Slot] = item.Stack()
 	}
 }
 
@@ -119,7 +119,7 @@ func (s *Server) persistBedrockGenericContainer(p *player.Player) {
 		if stack.IsEmpty() {
 			continue
 		}
-		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+		items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 	}
 	pos := p.OpenContainerPos
 	s.worldForPlayer(p).SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), p.OpenContainerKind, items)

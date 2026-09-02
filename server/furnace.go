@@ -62,7 +62,7 @@ func loadFurnaceSlots(w *coreworld.World, pos spatial.BlockPos) []player.ItemSta
 	slots := make([]player.ItemStack, furnaceSlotCount)
 	for _, item := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 		if item.Slot >= 0 && item.Slot < furnaceSlotCount && item.ItemID != "" && item.Count > 0 {
-			slots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+			slots[item.Slot] = item.Stack()
 		}
 	}
 	return slots
@@ -73,7 +73,7 @@ func persistFurnaceSlots(w *coreworld.World, pos spatial.BlockPos, blockID strin
 	for slot := 0; slot < furnaceSlotCount && slot < len(slots); slot++ {
 		stack := slots[slot]
 		if !stack.IsEmpty() {
-			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+			items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 		}
 	}
 	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), blockID, items)
