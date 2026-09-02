@@ -186,6 +186,11 @@ func containerItemsTag(items []coreworld.ContainerItem) Tag {
 		if item.ItemID == "minecraft:decorated_pot" {
 			components["minecraft:pot_decorations"] = potDecorationsTag(item.PotDecorations)
 		}
+		if item.Components != "" {
+			components["minecraft:custom_data"] = Tag{typ: tagCompound, compound: map[string]Tag{
+				"GoCraftComponents": {typ: tagString, strV: item.Components},
+			}}
+		}
 		if len(components) != 0 {
 			compound["components"] = Tag{typ: tagCompound, compound: components}
 		}

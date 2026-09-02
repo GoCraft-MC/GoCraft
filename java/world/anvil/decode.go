@@ -145,15 +145,19 @@ func decodeContainerItems(list Tag) []coreworld.ContainerItem {
 		if slot < 0 || itemID == "" || count <= 0 {
 			continue
 		}
-		damage, enchantments := 0, ""
+		damage, enchantments, itemComponents := 0, "", ""
 		var potDecorations [4]string
 		if components := entry.compound["components"]; components.typ == tagCompound {
 			damage = numericTagValue(components.compound["minecraft:damage"])
 			enchantments = decodeItemEnchantments(components.compound["minecraft:enchantments"])
 			potDecorations = decodePotDecorations(components.compound["minecraft:pot_decorations"])
+			if customData := components.compound["minecraft:custom_data"]; customData.typ == tagCompound {
+				itemComponents = customData.compound["GoCraftComponents"].Str()
+			}
 		}
 		items = append(items, coreworld.ContainerItem{
-			Slot: slot, ItemID: itemID, Count: count, Damage: damage, Enchantments: enchantments, PotDecorations: potDecorations,
+			Slot: slot, ItemID: itemID, Count: count, Damage: damage, Enchantments: enchantments,
+			PotDecorations: potDecorations, Components: itemComponents,
 		})
 	}
 	return items
