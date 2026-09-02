@@ -1372,11 +1372,12 @@ func (s *Server) applyBedrockStartUseItem(i intent.StartUseItemIntent) {
 		}
 		return
 	}
-	if _, _, ok := player.FoodValue(stack.ItemID); !ok || stack.IsEmpty() {
+	_, _, food := player.FoodValue(stack.ItemID)
+	if stack.IsEmpty() || !food && !player.IsConsumable(stack.ItemID) {
 		return
 	}
-	_, food, _, _ := p.HealthSnapshot()
-	if p.GameMode != player.GameModeCreative && food >= 20 && !player.CanAlwaysEat(stack.ItemID) {
+	_, hunger, _, _ := p.HealthSnapshot()
+	if p.GameMode != player.GameModeCreative && food && hunger >= 20 && !player.CanAlwaysEat(stack.ItemID) {
 		return
 	}
 	if p.UsingItemID != stack.ItemID || p.UsingItemSlot != hotbar || p.UsingItemSince.IsZero() {
@@ -1439,14 +1440,14 @@ func (s *Server) finishBedrockFoodUse(p *player.Player) {
 	}
 	slot := player.HotbarStart + p.UsingItemSlot
 	stack := p.Inventory[slot]
-	nutrition, saturation, ok := player.FoodValue(stack.ItemID)
-	if !ok || stack.IsEmpty() || stack.ItemID != p.UsingItemID {
+	nutrition, saturation, food := player.FoodValue(stack.ItemID)
+	if stack.IsEmpty() || stack.ItemID != p.UsingItemID || !food && !player.IsConsumable(stack.ItemID) {
 		s.clearBedrockItemUse(p, false)
 		return
 	}
 	consumedID := stack.ItemID
 	if p.GameMode != player.GameModeCreative {
-		if !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(stack.ItemID)) {
+		if food && !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(stack.ItemID)) {
 			s.clearBedrockItemUse(p, false)
 			return
 		}
