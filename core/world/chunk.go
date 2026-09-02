@@ -1,5 +1,7 @@
 package world
 
+import "GoCraft/core/player"
+
 const (
 	// SectionSize is the number of blocks along each axis of a chunk section.
 	SectionSize = 16
@@ -56,6 +58,33 @@ type ContainerItem struct {
 	Damage         int
 	Enchantments   string
 	PotDecorations [4]string
+	HasFireworks   bool
+	Fireworks      player.FireworkData
+	// Components is canonical JSON for additional item data that must survive
+	// containers and world persistence without making inventory values non-comparable.
+	Components string
+}
+
+// ContainerItemFromStack copies a complete canonical stack into a block
+// container slot. Keeping this conversion in core prevents adapters from
+// silently dropping newly added components.
+func ContainerItemFromStack(slot int, stack player.ItemStack) ContainerItem {
+	return ContainerItem{
+		Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage,
+		Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations,
+		HasFireworks: stack.HasFireworks, Fireworks: stack.Fireworks,
+		Components: stack.Components,
+	}
+}
+
+// Stack returns the complete canonical item stored in a container entry.
+func (i ContainerItem) Stack() player.ItemStack {
+	return player.ItemStack{
+		ItemID: i.ItemID, Count: i.Count, Damage: i.Damage,
+		Enchantments: i.Enchantments, PotDecorations: i.PotDecorations,
+		HasFireworks: i.HasFireworks, Fireworks: i.Fireworks,
+		Components: i.Components,
+	}
 }
 
 // HighestBlockY returns the highest non-air block in the local x/z column.

@@ -264,7 +264,11 @@ type Entity struct {
 	ItemID             string
 	ItemCount          int
 	ItemDamage         int
+	ItemEnchantments   string
 	ItemPotDecorations [4]string
+	ItemHasFireworks   bool
+	ItemFireworks      player.FireworkData
+	ItemComponents     string
 	// ExperienceAmount is the number of points carried by an experience orb.
 	// ExperienceKillerUUID records the player whose damage caused a living
 	// entity's death so the simulation can apply player-kill XP rewards.
@@ -321,6 +325,33 @@ type Entity struct {
 	// DeathTicks keeps a dead living entity present long enough for the
 	// vanilla 20-tick death animation before it is removed from clients.
 	DeathTicks int
+}
+
+// SetDroppedItem copies a complete stack into this entity's dropped-item
+// state. Callers should use this instead of assigning individual fields.
+func (e *Entity) SetDroppedItem(stack player.ItemStack) {
+	if e == nil {
+		return
+	}
+	e.ItemID, e.ItemCount, e.ItemDamage = stack.ItemID, stack.Count, stack.Damage
+	e.ItemEnchantments = stack.Enchantments
+	e.ItemPotDecorations = stack.PotDecorations
+	e.ItemHasFireworks, e.ItemFireworks = stack.HasFireworks, stack.Fireworks
+	e.ItemComponents = stack.Components
+}
+
+// DroppedItem reconstructs the complete canonical stack carried by an item
+// entity.
+func (e *Entity) DroppedItem() player.ItemStack {
+	if e == nil {
+		return player.ItemStack{}
+	}
+	return player.ItemStack{
+		ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage,
+		Enchantments: e.ItemEnchantments, PotDecorations: e.ItemPotDecorations,
+		HasFireworks: e.ItemHasFireworks, Fireworks: e.ItemFireworks,
+		Components: e.ItemComponents,
+	}
 }
 
 // CanTradeAsVillager reports whether a villager is old enough and has a
