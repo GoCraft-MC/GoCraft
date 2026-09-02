@@ -62,3 +62,19 @@ func TestJavaStewLeavesBowl(t *testing.T) {
 		t.Fatalf("stew remainder = %+v, want bowl", stack)
 	}
 }
+
+func TestJavaGoldenAppleStoresAuthoritativeEffects(t *testing.T) {
+	p := player.New([16]byte{75}, "golden-eater", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.HeldSlot = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:golden_apple", Count: 1}
+	started := time.Now().Add(-player.FoodUseDuration("minecraft:golden_apple"))
+	if !startJavaFoodUse(p, player.HotbarStart, started) || !TickJavaFoodUse(p, nil, nil, time.Now()) {
+		t.Fatal("golden apple use did not complete")
+	}
+	regeneration, regenOK := p.StatusEffect("regeneration")
+	absorption, absorptionOK := p.StatusEffect("absorption")
+	if !regenOK || !absorptionOK || regeneration.Amplifier != 1 || absorption.Duration != 2400 || p.AbsorptionSnapshot() != 4 {
+		t.Fatalf("stored effects = regeneration %#v absorption %#v hearts %.1f", regeneration, absorption, p.AbsorptionSnapshot())
+	}
+}
