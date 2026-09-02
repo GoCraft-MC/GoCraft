@@ -723,7 +723,11 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 	// What this player may type. Sent once, because AvailableCommands replaces
 	// the client's whole list and there is no way for it to ask again — a later
 	// change reaches them through RefreshCommands.
-	l.SendCommands(playerUUID)
+	//
+	// Sent to this connection rather than looked up by uuid: addSession below
+	// is what publishes the roster, so a lookup here finds nothing and the
+	// player joins with no commands at all.
+	l.sendCommandsTo(bedrockSess.conn, playerUUID)
 
 	// ── Step 5: play loop ─────────────────────────────────────────────────────
 	l.addSession(bedrockSess)

@@ -4,7 +4,10 @@ import (
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
+	"GoCraft/core/game"
+	"GoCraft/core/player"
 	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
@@ -155,5 +158,77 @@ func TestAvailableCommandsBoundsTheFanOut(t *testing.T) {
 	pk := availableCommands(root)
 	if got := len(pk.Commands[0].Overloads); got > maximumOverloads {
 		t.Fatalf("/summon rendered %d overloads", got)
+	}
+}
+
+// recordingWriter stands in for a client connection, so what a send actually
+// puts on the wire can be asserted without one.
+type recordingWriter struct{ sent []packet.Packet }
+
+func (w *recordingWriter) WritePacket(pk packet.Packet) error {
+	w.sent = append(w.sent, pk)
+	return nil
+}
+
+func listenerWithTree(t *testing.T, uuid [16]byte) (*Listener, *player.Player) {
+	t.Helper()
+	g := game.New()
+	p := player.New(uuid, "joiner", player.ClientEditionBedrock)
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	l := &Listener{game: g}
+	l.SetCommandTree(func(*player.Player) command.Root { return shopTree() })
+	return l, p
+}
+
+// A joining player is sent their commands before addSession publishes the
+// roster, so a send that resolves the session by uuid finds nothing and the
+// player spends the session with an empty command list. The login path takes
+// the connection it already holds; this is what says so.
+func TestCommandsReachAPlayerNotYetInTheRoster(t *testing.T) {
+	l, p := listenerWithTree(t, [16]byte{7})
+	if l.sessionForPlayer(p.UUID) != nil {
+		t.Fatal("the roster is not supposed to hold this player yet")
+	}
+
+	conn := &recordingWriter{}
+	l.sendCommandsTo(conn, p.UUID)
+
+	if len(conn.sent) != 1 {
+		t.Fatalf("wrote %d packets, want 1", len(conn.sent))
+	}
+	if _, ok := conn.sent[0].(*packet.AvailableCommands); !ok {
+		t.Fatalf("wrote %T, want *packet.AvailableCommands", conn.sent[0])
+	}
+}
+
+// Nothing installed means nothing advertised: a server that never calls
+// SetCommandTree behaves as it did before this edition rendered commands.
+func TestNoCommandsSentWithoutATree(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{8}, "joiner", player.ClientEditionBedrock)
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+
+	conn := &recordingWriter{}
+	(&Listener{game: g}).sendCommandsTo(conn, p.UUID)
+
+	if len(conn.sent) != 0 {
+		t.Fatalf("wrote %d packets with no tree installed, want 0", len(conn.sent))
+	}
+}
+
+// The tree is rendered per player, so a uuid the game no longer knows has
+// nobody to render for.
+func TestNoCommandsSentForAPlayerWhoLeft(t *testing.T) {
+	l, _ := listenerWithTree(t, [16]byte{9})
+
+	conn := &recordingWriter{}
+	l.sendCommandsTo(conn, [16]byte{200})
+
+	if len(conn.sent) != 0 {
+		t.Fatalf("wrote %d packets for an absent player, want 0", len(conn.sent))
 	}
 }

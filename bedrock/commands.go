@@ -216,20 +216,41 @@ func (l *Listener) SetCommandTree(tree func(*player.Player) command.Root) {
 	l.commandMu.Unlock()
 }
 
-// SendCommands tells one player what they may run.
+// packetWriter is the one thing sending a command list needs from a
+// connection. Narrow because it is also what lets a test watch what was sent
+// without standing up a client.
+type packetWriter interface {
+	WritePacket(pk packet.Packet) error
+}
+
+// SendCommands tells one connected player what they may run.
+//
+// For a player already in the roster. The login path does not use it: at the
+// point it has a list to send, the session it belongs to is not in the roster
+// yet, so this would find nothing and send nothing. It sends to its own
+// connection through sendCommandsTo instead.
+func (l *Listener) SendCommands(playerUUID [16]byte) {
+	session := l.sessionForPlayer(playerUUID)
+	if session == nil {
+		return
+	}
+	l.sendCommandsTo(session.conn, playerUUID)
+}
+
+// sendCommandsTo writes one player's list to a connection given to it.
+//
+// Taking the connection rather than looking it up is the point: a caller that
+// already holds the session cannot be made wrong by when the roster is
+// published.
 //
 // A no-op when no tree is installed or the player has nothing they may use:
 // AvailableCommands replaces the client's whole list rather than adding to it,
 // so an empty packet would take away what an earlier one gave.
-func (l *Listener) SendCommands(playerUUID [16]byte) {
+func (l *Listener) sendCommandsTo(conn packetWriter, playerUUID [16]byte) {
 	l.commandMu.RLock()
 	tree := l.commandTree
 	l.commandMu.RUnlock()
 	if tree == nil {
-		return
-	}
-	session := l.sessionForPlayer(playerUUID)
-	if session == nil {
 		return
 	}
 	target := l.game.GetPlayer(playerUUID)
@@ -237,7 +258,7 @@ func (l *Listener) SendCommands(playerUUID [16]byte) {
 		return
 	}
 	if pk := availableCommands(tree(target)); pk != nil {
-		_ = session.conn.WritePacket(pk)
+		_ = conn.WritePacket(pk)
 	}
 }
 
