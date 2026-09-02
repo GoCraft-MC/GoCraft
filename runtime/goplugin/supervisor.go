@@ -50,5 +50,5 @@ func (r *Runtime) spawn(executable string) link.Spawn {
 
 func runtimeLabel(pluginID string) string {
 	hash := sha256.Sum256([]byte(pluginID))
-	return fmt.Sprintf("go-%x", hash[:4])
+	return fmt.Sprintf("go-%x", hash[:8])
 }
