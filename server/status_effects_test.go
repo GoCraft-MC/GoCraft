@@ -5,6 +5,7 @@ import (
 
 	"GoCraft/core/game"
 	"GoCraft/core/player"
+	bedrockpacket "github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 func TestPlayerStatusEffectsTickInServer(t *testing.T) {
@@ -29,5 +30,20 @@ func TestPlayerStatusEffectsTickInServer(t *testing.T) {
 	effects := p.StatusEffectsSnapshot()
 	if len(effects) != 1 || effects[0].ID != "minecraft:poison" || effects[0].Duration != 24 {
 		t.Fatalf("remaining effects = %+v", effects)
+	}
+}
+
+func TestBedrockEffectTypeCoverage(t *testing.T) {
+	tests := map[string]int32{
+		"minecraft:speed":           bedrockpacket.EffectSpeed,
+		"minecraft:mining_fatigue":  bedrockpacket.EffectMiningFatigue,
+		"minecraft:water_breathing": bedrockpacket.EffectWaterBreathing,
+		"minecraft:slow_falling":    bedrockpacket.EffectSlowFalling,
+		"minecraft:luck":            0,
+	}
+	for id, want := range tests {
+		if got := bedrockEffectType(id); got != want {
+			t.Errorf("bedrockEffectType(%q) = %d, want %d", id, got, want)
+		}
 	}
 }
