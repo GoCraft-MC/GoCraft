@@ -73,6 +73,11 @@ type ItemStack struct {
 	// effective vanilla default for a rocket is flight duration one.
 	HasFireworks bool         `json:",omitempty"`
 	Fireworks    FireworkData `json:",omitempty"`
+	// Components stores additional edition-independent data components as a
+	// canonical JSON object. A string keeps ItemStack comparable for the fixed
+	// inventory snapshots used by both protocol adapters. Components with
+	// dedicated hot-path fields above remain there until their codecs migrate.
+	Components string `json:",omitempty"`
 }
 
 // IsEmpty reports whether the slot contains no item.
@@ -103,7 +108,8 @@ func (s ItemStack) NormalizedPotDecorations() [4]string {
 func (s ItemStack) SameItem(other ItemStack) bool {
 	return s.ItemID == other.ItemID && s.Damage == other.Damage && s.Enchantments == other.Enchantments &&
 		s.NormalizedPotDecorations() == other.NormalizedPotDecorations() &&
-		s.EffectiveFireworks() == other.EffectiveFireworks()
+		s.EffectiveFireworks() == other.EffectiveFireworks() &&
+		s.NormalizedComponents() == other.NormalizedComponents()
 }
 
 // EffectiveFireworks returns a validated component. Vanilla rockets without
