@@ -96,3 +96,22 @@ func TestJavaHoneyBottleCuresPoison(t *testing.T) {
 		t.Fatalf("honey remainder = %+v", stack)
 	}
 }
+
+func TestJavaMilkBucketClearsEffects(t *testing.T) {
+	p := player.New([16]byte{77}, "milk-drinker", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.HeldSlot = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:milk_bucket", Count: 1}
+	p.AddStatusEffect(player.StatusEffect{ID: "poison", Duration: 100})
+	p.AddStatusEffect(player.StatusEffect{ID: "speed", Duration: 100})
+	started := time.Now().Add(-player.FoodUseDuration("minecraft:milk_bucket"))
+	if !startJavaFoodUse(p, player.HotbarStart, started) || !TickJavaFoodUse(p, nil, nil, time.Now()) {
+		t.Fatal("milk bucket use did not complete")
+	}
+	if effects := p.StatusEffectsSnapshot(); len(effects) != 0 {
+		t.Fatalf("effects remain after milk: %+v", effects)
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:bucket" || stack.Count != 1 {
+		t.Fatalf("milk remainder = %+v", stack)
+	}
+}

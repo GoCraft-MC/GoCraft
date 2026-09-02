@@ -259,11 +259,12 @@ func startJavaFoodUse(p *player.Player, inventorySlot int, now time.Time) bool {
 	if stack.IsEmpty() {
 		return false
 	}
-	if _, _, ok := player.FoodValue(stack.ItemID); !ok {
+	_, _, food := player.FoodValue(stack.ItemID)
+	if !food && !player.IsConsumable(stack.ItemID) {
 		return false
 	}
-	_, food, _, _ := p.HealthSnapshot()
-	if p.GameMode != player.GameModeCreative && food >= 20 && !player.CanAlwaysEat(stack.ItemID) {
+	_, hunger, _, _ := p.HealthSnapshot()
+	if p.GameMode != player.GameModeCreative && food && hunger >= 20 && !player.CanAlwaysEat(stack.ItemID) {
 		return false
 	}
 	p.UsingItemID = stack.ItemID
@@ -278,7 +279,7 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 	if p == nil || p.UsingItemID == "" || p.UsingItemSince.IsZero() {
 		return false
 	}
-	if _, _, ok := player.FoodValue(p.UsingItemID); !ok {
+	if !player.IsConsumable(p.UsingItemID) {
 		return false
 	}
 	if p.UsingItemSlot < 0 || p.UsingItemSlot >= 9 || p.HeldSlot != p.UsingItemSlot {
@@ -295,10 +296,10 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 		return false
 	}
 
-	nutrition, saturation, _ := player.FoodValue(stack.ItemID)
+	nutrition, saturation, food := player.FoodValue(stack.ItemID)
 	consumedID := stack.ItemID
 	if p.GameMode != player.GameModeCreative {
-		if !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(consumedID)) {
+		if food && !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(consumedID)) {
 			clearJavaFoodUse(p)
 			return false
 		}
