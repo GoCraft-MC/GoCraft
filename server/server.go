@@ -627,6 +627,7 @@ func New(cfg *config.Config) (*Server, error) {
 	cmds.SetMessenger(s.sendPlayerMessage)
 	cmds.SetLinkMessenger(s.sendPlayerLink)
 	cmds.SetAbilitySync(s.syncPlayerAbilities)
+	cmds.SetStatusEffectSync(s.syncPlayerStatusEffect)
 	// Registered here rather than beside the registry, because a runtime that
 	// can come back from a crash needs to tell the server it did — and only the
 	// server knows who is online to replay it to.

@@ -111,6 +111,25 @@ func (s *Server) syncPlayerAbilities(target *player.Player) {
 	}
 }
 
+// syncPlayerStatusEffect publishes command-applied effects through both
+// protocol adapters while canonical state remains on the shared player.
+func (s *Server) syncPlayerStatusEffect(target *player.Player, effect player.StatusEffect) {
+	if target == nil {
+		return
+	}
+	if s.sessions != nil {
+		for _, viewer := range s.sessions.SnapshotAll() {
+			handler.SendMobEffect(viewer.Conn, target, effect.ID, effect.Amplifier, effect.Duration)
+		}
+	}
+	if target.Edition == player.ClientEditionBedrock && s.bedrockListener != nil {
+		effectType := bedrockEffectType(effect.ID)
+		if effectType != 0 {
+			s.bedrockListener.SendPlayerMobEffect(target, effectType, effect.Amplifier, effect.Duration)
+		}
+	}
+}
+
 func (s *Server) broadcastMessage(message string) {
 	handler.BroadcastSystemMessage(s.sessions, message)
 }
