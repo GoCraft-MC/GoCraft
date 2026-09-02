@@ -42,19 +42,25 @@ func NewRegistry() *Registry {
 // new version for clients already connected. Replacing drops the previous
 // executors first, so a command that went away takes its handler with it.
 func (r *Registry) Replace(source Source, root command.Root, handlers map[command.ExecID]Handler) error {
+	if err := command.Validate(&root); err != nil {
+		return err
+	}
 	key, err := sourceKey(source)
 	if err != nil {
 		return err
 	}
-	r.mu.Lock()
-	if previous, exists := r.entries[key]; exists {
-		for _, executor := range previous.executors {
-			delete(r.handlers, executor)
+	executors := command.Executors(root)
+	for _, executor := range executors {
+		if handlers[executor] == nil {
+			return fmt.Errorf("command source %s: executor %d has no handler", key, executor)
 		}
-		delete(r.entries, key)
 	}
-	r.mu.Unlock()
-	return r.Register(source, root, handlers)
+	if len(executors) != len(handlers) {
+		return fmt.Errorf("command source %s: handler count does not match the tree", key)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.registerLocked(key, source, root, handlers, true)
 }
 
 func (r *Registry) Register(source Source, root command.Root, handlers map[command.ExecID]Handler) error {
@@ -76,16 +82,29 @@ func (r *Registry) Register(source Source, root command.Root, handlers map[comma
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.entries[key]; exists {
+	return r.registerLocked(key, source, root, handlers, false)
+}
+
+func (r *Registry) registerLocked(key string, source Source, root command.Root, handlers map[command.ExecID]Handler, replace bool) error {
+	if _, exists := r.entries[key]; exists && !replace {
 		return fmt.Errorf("command source %s is already registered", key)
 	}
-	for _, existing := range r.entries {
+	for existingKey, existing := range r.entries {
+		if replace && existingKey == key {
+			continue
+		}
 		if source.Kind != SourceCore && existing.source.Kind != SourceCore {
 			continue
 		}
 		if conflict := rootConflict(root.Children, existing.root.Children); conflict != "" {
 			return fmt.Errorf("command /%s conflicts with a core command", conflict)
 		}
+	}
+	if previous, exists := r.entries[key]; exists {
+		for _, executor := range previous.executors {
+			delete(r.handlers, executor)
+		}
+		delete(r.entries, key)
 	}
 	root, remapped := remapRoot(root, func() command.ExecID {
 		r.nextExec++
