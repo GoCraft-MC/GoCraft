@@ -14,6 +14,10 @@ examples/go-plugin/go-plugin
 # committed here once. Anchored: cmd/protoc-gen-gocraft is the source.
 /protoc-gen-gocraft
 
+# Same trap in the miniserv module: `go build ./...` there drops a 13 MB
+# binary named after the directory, right next to its source.
+/miniserv/miniserv
+
 # Plugin bundles (.gcpkg files) dropped in by the admin.
 # The README is tracked, so use the wildcard pattern instead of plugins/ to
 # allow the negation rule below to work.
