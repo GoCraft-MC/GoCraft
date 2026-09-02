@@ -376,12 +376,18 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	var potDecorations [4]string
 	var fireworks player.FireworkData
 	hasFireworks := false
+	components := ""
 	for i := int32(0); i < added; i++ {
 		componentType, err := protocol.ReadVarInt(r)
 		if err != nil {
 			return player.ItemStack{}, err
 		}
 		switch componentType {
+		case 0: // custom_data: preserve GoCraft's canonical extension object
+			components, err = readGoCraftComponents(r)
+			if err != nil {
+				return player.ItemStack{}, fmt.Errorf("reading custom item data: %w", err)
+			}
 		case 2: // max_damage
 			if _, err := protocol.ReadVarInt(r); err != nil {
 				return player.ItemStack{}, err
@@ -495,10 +501,16 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	if damage < 0 {
 		damage = 0
 	}
-	return player.ItemStack{
+	stack := player.ItemStack{
 		ItemID: name, Count: int(count), Damage: int(damage), Enchantments: enchantments, PotDecorations: potDecorations,
 		HasFireworks: hasFireworks, Fireworks: fireworks,
-	}, nil
+	}
+	if components != "" {
+		if err := stack.SetComponents(components); err != nil {
+			return player.ItemStack{}, fmt.Errorf("invalid canonical item components: %w", err)
+		}
+	}
+	return stack, nil
 }
 
 func readJavaFireworkExplosion(r *bytes.Reader) (player.FireworkExplosion, error) {
@@ -632,11 +644,24 @@ func readNBTLength(r *bytes.Reader) (int, error) {
 }
 
 func skipNBTString(r *bytes.Reader) error {
+	_, err := readNBTStringValue(r)
+	return err
+}
+
+func readNBTStringValue(r *bytes.Reader) (string, error) {
 	var raw [2]byte
 	if _, err := io.ReadFull(r, raw[:]); err != nil {
-		return err
+		return "", err
 	}
-	return skipReaderBytes(r, int(binary.BigEndian.Uint16(raw[:])))
+	length := int(binary.BigEndian.Uint16(raw[:]))
+	if length > r.Len() {
+		return "", io.ErrUnexpectedEOF
+	}
+	value := make([]byte, length)
+	if _, err := io.ReadFull(r, value); err != nil {
+		return "", err
+	}
+	return string(value), nil
 }
 
 func skipReaderBytes(r *bytes.Reader, n int) error {
@@ -671,7 +696,7 @@ func clickPlayerInventorySlot(p *player.Player, slot int, button byte) {
 			return
 		case target.IsEmpty():
 			*target, p.CarriedItem = p.CarriedItem, player.ItemStack{}
-		case target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage:
+		case target.SameItem(p.CarriedItem):
 			limit := player.MaxStackSize(target.ItemID)
 			add := minInt(limit-target.Count, p.CarriedItem.Count)
 			if add > 0 {
@@ -708,7 +733,7 @@ func clickPlayerInventorySlot(p *player.Player, slot int, button byte) {
 		normalizeStack(&p.CarriedItem)
 		return
 	}
-	if target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage &&
+	if target.SameItem(p.CarriedItem) &&
 		target.Count < player.MaxStackSize(target.ItemID) {
 		target.Count++
 		p.CarriedItem.Count--
@@ -792,7 +817,7 @@ func handleQuickCraft(p *player.Player, slot int, button byte, targetFor func(in
 		remainingSlots := len(p.QuickCraftSlots)
 		for _, selected := range p.QuickCraftSlots {
 			target := targetFor(selected)
-			if target == nil || (!target.IsEmpty() && (target.ItemID != p.CarriedItem.ItemID || target.Damage != p.CarriedItem.Damage)) {
+			if target == nil || (!target.IsEmpty() && !target.SameItem(p.CarriedItem)) {
 				remainingSlots--
 				continue
 			}
@@ -837,7 +862,7 @@ func updatePersonalCraftingResult(p *player.Player) {
 
 func takePersonalCraftingResult(p *player.Player) {
 	result := p.Inventory[0]
-	if result.IsEmpty() || (!p.CarriedItem.IsEmpty() && p.CarriedItem.ItemID != result.ItemID) {
+	if result.IsEmpty() || (!p.CarriedItem.IsEmpty() && !p.CarriedItem.SameItem(result)) {
 		return
 	}
 	if p.CarriedItem.Count+result.Count > player.MaxStackSize(result.ItemID) {
@@ -960,7 +985,7 @@ func takeCraftingResult(p *player.Player) {
 	if p.CraftingResult.IsEmpty() {
 		return
 	}
-	if !p.CarriedItem.IsEmpty() && p.CarriedItem.ItemID != p.CraftingResult.ItemID {
+	if !p.CarriedItem.IsEmpty() && !p.CarriedItem.SameItem(p.CraftingResult) {
 		return
 	}
 	if p.CarriedItem.Count+p.CraftingResult.Count > 64 {
