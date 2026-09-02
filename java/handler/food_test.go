@@ -78,3 +78,21 @@ func TestJavaGoldenAppleStoresAuthoritativeEffects(t *testing.T) {
 		t.Fatalf("stored effects = regeneration %#v absorption %#v hearts %.1f", regeneration, absorption, p.AbsorptionSnapshot())
 	}
 }
+
+func TestJavaHoneyBottleCuresPoison(t *testing.T) {
+	p := player.New([16]byte{76}, "honey-drinker", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.HeldSlot = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honey_bottle", Count: 1}
+	p.AddStatusEffect(player.StatusEffect{ID: "poison", Duration: 100})
+	started := time.Now().Add(-player.FoodUseDuration("minecraft:honey_bottle"))
+	if !startJavaFoodUse(p, player.HotbarStart, started) || !TickJavaFoodUse(p, nil, nil, time.Now()) {
+		t.Fatal("honey bottle use did not complete")
+	}
+	if _, poisoned := p.StatusEffect("poison"); poisoned {
+		t.Fatal("poison remained after drinking honey")
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:glass_bottle" || stack.Count != 1 {
+		t.Fatalf("honey remainder = %+v", stack)
+	}
+}

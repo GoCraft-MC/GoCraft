@@ -324,6 +324,9 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 	BroadcastSoundAt(mgr, "minecraft:entity.player.burp", soundCategoryPlayers,
 		p.Position.X, p.Position.Y+1.5, p.Position.Z, 0.5, 1)
 	applyFoodEffect(conn, p, consumedID)
+	for _, removed := range p.ApplyConsumableCleansing(consumedID) {
+		RemoveMobEffect(conn, p, removed.ID)
+	}
 	return true
 }
 
