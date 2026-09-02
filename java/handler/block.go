@@ -180,6 +180,8 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		breakLinkedDoorHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		unlinkChestPartner(int(bx), int(by), int(bz), broken, w, mgr)
 		breakUnsupportedBlocksAboveWithDrops(int(bx), int(by), int(bz), w, mgr, nextEntityID, p.Dimension)
+		// Client which sent this event produce sounds on its own
+		// Maybe we should broadcast some sounds only to other players?
 		broadcastSoundAt(mgr, blockBreakSound(broken.ResourceLocation()), soundCategoryBlocks,
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 		w.EmitVibration(int(bx), int(by), int(bz))
@@ -632,6 +634,7 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		return nil
 	}
 	if !bypassActivation && toggleDoor(int(bx), int(by), int(bz), targetBlock, w, mgr) {
+		// Client which sent this event plays sound twice.
 		sound := "minecraft:block.wooden_door.open"
 		if targetBlock.Properties["open"] == "true" {
 			sound = "minecraft:block.wooden_door.close"
@@ -882,6 +885,8 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		}
 		block.Properties = redstoneWireConnections(px, py, pz, w)
 	}
+	broadcastSoundAt(mgr, blockBreakSound(block.ResourceLocation()), soundCategoryBlocks,
+		float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 	slog.Info("block place", "player", p.Username,
 		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
 	switch {
