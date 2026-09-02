@@ -88,6 +88,8 @@ type Player struct {
 	Food                 int32
 	Saturation           float32
 	Exhaustion           float32
+	Absorption           float32
+	StatusEffects        []StatusEffect
 	ExperienceLevel      int32
 	ExperienceTotal      int32
 	ExperienceProgress   float32
