@@ -10,9 +10,9 @@ plugins/*
 !plugins/README.md
 
 # Worlds and state written by a running server
-world/
-world_nether/
-world_end/
+/world/
+/world_nether/
+/world_end/
 logs/latest.log
 logs/*.log.gz
 ops.json

@@ -614,7 +614,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 	}
 	for _, key := range initialKeys {
 		c := w.Chunk(key[0], key[1])
-		if err := sender.SendChunk(conn, c); err != nil {
+		if err := sender.SendChunkFromWorld(conn, w, c); err != nil {
 			return fmt.Errorf("play loop: initial chunk (%d,%d): %w", key[0], key[1], err)
 		}
 		sentChunks[key] = struct{}{}
@@ -1081,7 +1081,7 @@ func sendChunkKeys(
 		return fmt.Errorf(`starting chunk batch: %w`, err)
 	}
 	for _, key := range keys {
-		if err := sender.SendChunk(conn, w.Chunk(key[0], key[1])); err != nil {
+		if err := sender.SendChunkFromWorld(conn, w, w.Chunk(key[0], key[1])); err != nil {
 			return fmt.Errorf(`chunk (%d,%d): %w`, key[0], key[1], err)
 		}
 		sent[key] = struct{}{}
@@ -1120,7 +1120,7 @@ func updateChunkView(
 		}
 		for _, key := range newKeys {
 			c := w.Chunk(key[0], key[1])
-			if err := sender.SendChunk(conn, c); err != nil {
+			if err := sender.SendChunkFromWorld(conn, w, c); err != nil {
 				return fmt.Errorf("chunk (%d,%d): %w", key[0], key[1], err)
 			}
 			sent[key] = struct{}{}

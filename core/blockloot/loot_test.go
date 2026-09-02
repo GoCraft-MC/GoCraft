@@ -171,6 +171,19 @@ func TestBlockExperienceRequiresToolAndRejectsSilkTouch(t *testing.T) {
 	}
 }
 
+func TestRawMetalOresDoNotDropVanillaExperience(t *testing.T) {
+	for _, name := range []string{"iron_ore", "deepslate_iron_ore", "copper_ore", "deepslate_copper_ore"} {
+		ctx := Context{
+			Block:  block(name),
+			Tool:   player.ItemStack{ItemID: "minecraft:iron_pickaxe", Count: 1},
+			Random: rand.New(rand.NewSource(1)),
+		}
+		if got := Experience(ctx); got != 0 {
+			t.Errorf("%s XP = %d, want vanilla value 0", name, got)
+		}
+	}
+}
+
 func TestDoublePlantChecksOtherHalf(t *testing.T) {
 	lower := block("large_fern", map[string]string{"half": "lower"})
 	got := Drops(Context{
