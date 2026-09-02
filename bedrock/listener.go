@@ -124,6 +124,7 @@ type bedrockSession struct {
 	lastExperienceLevel int32
 	lastExperience      float32
 	experienceSent      bool
+	lastStatusEffects   []player.StatusEffect
 	wasDead             bool
 	inventorySent       bool
 	lastInventory       [player.InventorySize]player.ItemStack

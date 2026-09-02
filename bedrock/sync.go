@@ -116,6 +116,7 @@ func (l *Listener) Sync(tick uint64) {
 		l.syncLocalHealth(viewer, tick)
 		l.syncLocalHunger(viewer, tick)
 		l.syncLocalExperience(viewer, tick)
+		l.syncLocalStatusEffects(viewer, tick)
 		l.syncLocalPlayerState(viewer)
 		l.syncLocalInventory(viewer)
 	}
