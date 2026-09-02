@@ -44,6 +44,7 @@ import (
 	coreexperience "GoCraft/core/experience"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
+	"GoCraft/core/itemregistry"
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
@@ -2527,16 +2528,19 @@ func canPlaceCanonicalInventorySlot(slot int, stack player.ItemStack) bool {
 	if stack.IsEmpty() || slot < 5 || slot > 8 {
 		return true
 	}
-	name := strings.TrimPrefix(stack.ItemID, "minecraft:")
-	switch slot {
-	case 5:
-		return strings.HasSuffix(name, "_helmet") || name == "turtle_helmet" || name == "carved_pumpkin" || strings.HasSuffix(name, "_head") || strings.HasSuffix(name, "_skull")
-	case 6:
-		return strings.HasSuffix(name, "_chestplate") || name == "elytra"
-	case 7:
-		return strings.HasSuffix(name, "_leggings")
-	case 8:
-		return strings.HasSuffix(name, "_boots")
+	definition, ok := itemregistry.Lookup(stack.ItemID)
+	if !ok || definition.Equipment == nil {
+		return false
+	}
+	switch definition.Equipment.Slot {
+	case "head":
+		return slot == 5
+	case "chest":
+		return slot == 6
+	case "legs":
+		return slot == 7
+	case "feet":
+		return slot == 8
 	default:
 		return false
 	}

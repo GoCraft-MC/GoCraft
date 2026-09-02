@@ -1,5 +1,7 @@
 package entity
 
+import "GoCraft/core/itemregistry"
+
 // Pumpkin/vanilla animal timing constants, expressed in 20 TPS game ticks.
 const (
 	BabyGrowUpTicks       int32 = 24_000
@@ -167,33 +169,8 @@ func BreedingChildType(a, b EntityType) EntityType {
 	return a
 }
 
-func isOneOf(item string, values ...string) bool {
-	for _, value := range values {
-		if item == value {
-			return true
-		}
-	}
-	return false
-}
-
-func isSeed(item string) bool {
-	return isOneOf(item, "minecraft:wheat_seeds", "minecraft:melon_seeds", "minecraft:pumpkin_seeds",
-		"minecraft:beetroot_seeds", "minecraft:torchflower_seeds", "minecraft:pitcher_pod")
-}
-
-func isWolfMeat(item string) bool {
-	return isOneOf(item, "minecraft:beef", "minecraft:cooked_beef", "minecraft:chicken", "minecraft:cooked_chicken",
-		"minecraft:porkchop", "minecraft:cooked_porkchop", "minecraft:mutton", "minecraft:cooked_mutton",
-		"minecraft:rabbit", "minecraft:cooked_rabbit", "minecraft:rotten_flesh")
-}
-
-func isFlower(item string) bool {
-	return isOneOf(item, "minecraft:dandelion", "minecraft:poppy", "minecraft:blue_orchid", "minecraft:allium",
-		"minecraft:azure_bluet", "minecraft:red_tulip", "minecraft:orange_tulip", "minecraft:white_tulip",
-		"minecraft:pink_tulip", "minecraft:oxeye_daisy", "minecraft:cornflower", "minecraft:lily_of_the_valley",
-		"minecraft:wither_rose", "minecraft:sunflower", "minecraft:lilac", "minecraft:rose_bush",
-		"minecraft:peony", "minecraft:torchflower", "minecraft:flowering_azalea", "minecraft:azalea",
-		"minecraft:open_eyeblossom", "minecraft:closed_eyeblossom")
+func animalFood(item, animal string) bool {
+	return itemregistry.HasTag(item, "minecraft:"+animal+"_food")
 }
 
 // FoodEffect is the shared feeding, breeding and taming item table. The tamed
@@ -203,31 +180,36 @@ func FoodEffect(t EntityType, item string, tamed bool) AnimalFoodEffect {
 		return AnimalFoodEffect{Accepted: ok, Breeding: ok, Heal: heal}
 	}
 	switch t {
-	case TypeCow, TypeMooshroom, TypeSheep, TypeGoat:
-		return breed(item == "minecraft:wheat", 0)
+	case TypeCow, TypeMooshroom:
+		return breed(animalFood(item, "cow"), 0)
+	case TypeSheep:
+		return breed(animalFood(item, "sheep"), 0)
+	case TypeGoat:
+		return breed(animalFood(item, "goat"), 0)
 	case TypeChicken:
-		return breed(isSeed(item), 0)
+		return breed(animalFood(item, "chicken"), 0)
 	case TypePig:
-		return breed(isOneOf(item, "minecraft:carrot", "minecraft:potato", "minecraft:beetroot"), 0)
+		return breed(animalFood(item, "pig"), 0)
 	case TypeRabbit:
-		return breed(isOneOf(item, "minecraft:carrot", "minecraft:golden_carrot", "minecraft:dandelion"), 0)
+		return breed(animalFood(item, "rabbit"), 0)
 	case TypeCat:
-		ok := isOneOf(item, "minecraft:cod", "minecraft:salmon")
+		ok := animalFood(item, "cat")
 		return AnimalFoodEffect{Accepted: ok, Breeding: tamed && ok, Taming: !tamed && ok, Heal: 2}
 	case TypeOcelot:
-		ok := isOneOf(item, "minecraft:cod", "minecraft:salmon")
+		ok := animalFood(item, "ocelot")
 		return AnimalFoodEffect{Accepted: ok, Taming: ok}
 	case TypeWolf:
 		if !tamed {
 			return AnimalFoodEffect{Accepted: item == "minecraft:bone", Taming: item == "minecraft:bone"}
 		}
-		ok := isWolfMeat(item)
+		ok := animalFood(item, "wolf")
 		return AnimalFoodEffect{Accepted: ok, Breeding: ok, Heal: 4}
 	case TypeParrot:
-		if item == "minecraft:cookie" {
+		if itemregistry.HasTag(item, "minecraft:parrot_poisonous_food") {
 			return AnimalFoodEffect{Accepted: true, Poisons: true}
 		}
-		return AnimalFoodEffect{Accepted: isSeed(item), Taming: !tamed && isSeed(item)}
+		ok := animalFood(item, "parrot")
+		return AnimalFoodEffect{Accepted: ok, Taming: !tamed && ok}
 	case TypeHorse, TypeDonkey, TypeMule, TypeSkeletonHorse, TypeZombieHorse:
 		switch item {
 		case "minecraft:sugar":
@@ -251,27 +233,27 @@ func FoodEffect(t EntityType, item string, tamed bool) AnimalFoodEffect {
 			return AnimalFoodEffect{Accepted: true, Breeding: tamed && t == TypeLlama, Heal: 10, GrowthTicks: 1_800, TemperIncrease: 6}
 		}
 	case TypeCamel:
-		return breed(item == "minecraft:cactus", 2)
+		return breed(animalFood(item, "camel"), 2)
 	case TypeTurtle:
-		return breed(item == "minecraft:seagrass", 0)
+		return breed(animalFood(item, "turtle"), 0)
 	case TypeFox:
-		return breed(isOneOf(item, "minecraft:sweet_berries", "minecraft:glow_berries"), 0)
+		return breed(animalFood(item, "fox"), 0)
 	case TypePanda:
-		return breed(item == "minecraft:bamboo", 0)
+		return breed(animalFood(item, "panda"), 0)
 	case TypeBee:
-		return breed(isFlower(item), 0)
+		return breed(animalFood(item, "bee"), 0)
 	case TypeHoglin:
-		return breed(item == "minecraft:crimson_fungus", 0)
+		return breed(animalFood(item, "hoglin"), 0)
 	case TypeStrider:
-		return breed(item == "minecraft:warped_fungus", 0)
+		return breed(animalFood(item, "strider"), 0)
 	case TypeArmadillo:
-		return breed(item == "minecraft:spider_eye", 0)
+		return breed(animalFood(item, "armadillo"), 0)
 	case TypeSniffer:
-		return breed(item == "minecraft:torchflower_seeds", 0)
+		return breed(animalFood(item, "sniffer"), 0)
 	case TypeFrog:
-		return breed(item == "minecraft:slime_ball", 0)
+		return breed(animalFood(item, "frog"), 0)
 	case TypeAxolotl:
-		return breed(item == "minecraft:tropical_fish_bucket", 0)
+		return breed(animalFood(item, "axolotl"), 0)
 	}
 	return AnimalFoodEffect{}
 }

@@ -1,8 +1,7 @@
 package handler
 
 import (
-	"strings"
-
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -257,11 +256,11 @@ func canPlaceWorkstationSlot(kind string, index int, stack player.ItemStack) boo
 	case "minecraft:enchanting_table":
 		return (index == 1 && stack.ItemID == "minecraft:lapis_lazuli") || index == 0
 	case "minecraft:loom":
-		return (index == 0 && strings.HasSuffix(stack.ItemID, "_banner")) ||
-			(index == 1 && isDye(stack.ItemID)) || (index == 2 && strings.HasSuffix(stack.ItemID, "_banner_pattern"))
+		return (index == 0 && itemregistry.HasTag(stack.ItemID, "minecraft:banners")) ||
+			(index == 1 && itemregistry.HasTag(stack.ItemID, "gocraft:dyes")) ||
+			(index == 2 && itemregistry.HasTag(stack.ItemID, "gocraft:banner_patterns"))
 	case "minecraft:smithing_table":
-		return (index == 0 && strings.HasSuffix(stack.ItemID, "_smithing_template")) ||
-			(index == 1 && player.MaxDurability(stack.ItemID) > 0) || index == 2
+		return smithingAccepts(index, stack.ItemID)
 	case "minecraft:stonecutter":
 		return index == 0
 	case "minecraft:cartography_table":
@@ -450,7 +449,7 @@ func anvilOperation(slots []player.ItemStack) workstationOperation {
 			consume: []int{1, 1},
 		}
 	}
-	if anvilRepairMaterial(left.ItemID) != right.ItemID {
+	if !itemregistry.RepairsWith(left.ItemID, right.ItemID) {
 		return workstationOperation{}
 	}
 	result := left
@@ -460,32 +459,6 @@ func anvilOperation(slots []player.ItemStack) workstationOperation {
 		result.Damage = 0
 	}
 	return workstationOperation{result: result, consume: []int{1, 1}}
-}
-
-func anvilRepairMaterial(itemID string) string {
-	switch {
-	case strings.HasPrefix(itemID, "minecraft:wooden_"):
-		return "minecraft:oak_planks"
-	case strings.HasPrefix(itemID, "minecraft:stone_"):
-		return "minecraft:cobblestone"
-	case strings.HasPrefix(itemID, "minecraft:iron_"), itemID == "minecraft:chainmail_helmet",
-		itemID == "minecraft:chainmail_chestplate", itemID == "minecraft:chainmail_leggings", itemID == "minecraft:chainmail_boots":
-		return "minecraft:iron_ingot"
-	case strings.HasPrefix(itemID, "minecraft:golden_"):
-		return "minecraft:gold_ingot"
-	case strings.HasPrefix(itemID, "minecraft:diamond_"):
-		return "minecraft:diamond"
-	case strings.HasPrefix(itemID, "minecraft:netherite_"):
-		return "minecraft:netherite_ingot"
-	case strings.HasPrefix(itemID, "minecraft:leather_"):
-		return "minecraft:leather"
-	case itemID == "minecraft:turtle_helmet":
-		return "minecraft:turtle_scute"
-	case itemID == "minecraft:elytra":
-		return "minecraft:phantom_membrane"
-	default:
-		return ""
-	}
 }
 
 func grindstoneOperation(slots []player.ItemStack) workstationOperation {
@@ -519,24 +492,19 @@ func repairedStack(first, second player.ItemStack, bonusPercent int) player.Item
 }
 
 func smithingOperation(slots []player.ItemStack) workstationOperation {
-	if slots[0].ItemID != "minecraft:netherite_upgrade_smithing_template" ||
-		slots[2].ItemID != "minecraft:netherite_ingot" || !strings.HasPrefix(slots[1].ItemID, "minecraft:diamond_") {
+	resultID, ok := smithingTransform(slots[0].ItemID, slots[1].ItemID, slots[2].ItemID)
+	if !ok {
 		return workstationOperation{}
 	}
-	suffix := strings.TrimPrefix(slots[1].ItemID, "minecraft:diamond_")
-	switch suffix {
-	case "helmet", "chestplate", "leggings", "boots", "sword", "pickaxe", "axe", "shovel", "hoe":
-		result := slots[1]
-		result.ItemID = "minecraft:netherite_" + suffix
-		result.Count = 1
-		return workstationOperation{result: result, consume: []int{1, 1, 1}}
-	default:
-		return workstationOperation{}
-	}
+	result := slots[1]
+	result.ItemID = resultID
+	result.Count = 1
+	return workstationOperation{result: result, consume: []int{1, 1, 1}}
 }
 
 func loomOperation(slots []player.ItemStack) workstationOperation {
-	if !strings.HasSuffix(slots[0].ItemID, "_banner") || !isDye(slots[1].ItemID) {
+	if !itemregistry.HasTag(slots[0].ItemID, "minecraft:banners") ||
+		!itemregistry.HasTag(slots[1].ItemID, "gocraft:dyes") {
 		return workstationOperation{}
 	}
 	result := slots[0]
@@ -546,20 +514,6 @@ func loomOperation(slots []player.ItemStack) workstationOperation {
 		consume[2] = 1
 	}
 	return workstationOperation{result: result, consume: consume}
-}
-
-func isDye(itemID string) bool {
-	if !strings.HasSuffix(itemID, "_dye") {
-		return false
-	}
-	colour := strings.TrimSuffix(strings.TrimPrefix(itemID, "minecraft:"), "_dye")
-	switch colour {
-	case "white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray",
-		"light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black":
-		return true
-	default:
-		return false
-	}
 }
 
 func stonecutterOperation(slots []player.ItemStack, selection int) workstationOperation {
