@@ -126,9 +126,15 @@ func tryConsumeTotem(target *session.Session) bool {
 	}
 
 	// Apply effects: Absorption II (100t), Regeneration II (900t), Fire Resistance I (800t).
-	sendMobEffect(target.Conn, p.EntityID, "minecraft:absorption", 1, 100)
-	sendMobEffect(target.Conn, p.EntityID, "minecraft:regeneration", 1, 900)
-	sendMobEffect(target.Conn, p.EntityID, "minecraft:fire_resistance", 0, 800)
+	effects := []player.StatusEffect{
+		{ID: "minecraft:absorption", Amplifier: 1, Duration: 100, ShowParticles: true, ShowIcon: true},
+		{ID: "minecraft:regeneration", Amplifier: 1, Duration: 900, ShowParticles: true, ShowIcon: true},
+		{ID: "minecraft:fire_resistance", Duration: 800, ShowParticles: true, ShowIcon: true},
+	}
+	for _, effect := range effects {
+		stored, _ := p.AddStatusEffect(effect)
+		sendMobEffect(target.Conn, p.EntityID, stored.ID, stored.Amplifier, stored.Duration)
+	}
 	return true
 }
 

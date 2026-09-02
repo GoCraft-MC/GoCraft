@@ -152,3 +152,26 @@ func TestMagicDamageBypassesArmor(t *testing.T) {
 		}
 	}
 }
+
+func TestTotemStoresSurvivalEffects(t *testing.T) {
+	p := player.New([16]byte{}, "survivor", player.ClientEditionJava)
+	p.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:totem_of_undying", Count: 1}
+	p.Health = 0
+	p.Dead = true
+	if !tryConsumeTotem(&session.Session{Player: p}) {
+		t.Fatal("totem was not consumed")
+	}
+	health, _, _, dead := p.HealthSnapshot()
+	if health != 1 || dead {
+		t.Fatalf("restored state = health %v dead %v", health, dead)
+	}
+	if !p.Inventory[player.OffhandSlot].IsEmpty() {
+		t.Fatal("totem remains in offhand")
+	}
+	if effects := p.StatusEffectsSnapshot(); len(effects) != 3 {
+		t.Fatalf("stored effects = %+v", effects)
+	}
+	if absorption := p.AbsorptionSnapshot(); absorption != 8 {
+		t.Fatalf("absorption = %v, want 8", absorption)
+	}
+}
