@@ -347,6 +347,16 @@ func SendMobEffect(conn *network.ClientConn, p *player.Player, name string, ampl
 	_ = conn.WritePacket(pkt)
 }
 
+// SyncPlayerStatusEffects restores canonical effects after login or respawn.
+func SyncPlayerStatusEffects(conn *network.ClientConn, p *player.Player) {
+	if conn == nil || p == nil {
+		return
+	}
+	for _, effect := range p.StatusEffectsSnapshot() {
+		SendMobEffect(conn, p, effect.ID, effect.Amplifier, effect.Duration)
+	}
+}
+
 // RemoveMobEffect removes one expired canonical effect from a Java client.
 func RemoveMobEffect(conn *network.ClientConn, p *player.Player, name string) {
 	if conn == nil || p == nil {

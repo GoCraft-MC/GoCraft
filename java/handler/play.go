@@ -613,6 +613,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		},
 	}
 	mgr.Add(sess)
+	SyncPlayerStatusEffects(conn, p)
 	defer mgr.Remove(p.UUID)
 	defer onPlayerLeave(mgr, sess)
 	// Entities generated before this player joined are included in the full
@@ -720,6 +721,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			return fmt.Errorf("respawn packet: %w", err)
 		}
 		_ = sendUpdateHealth(conn, p)
+		SyncPlayerStatusEffects(conn, p)
 		_ = sendPlayerAbilities(conn, p)
 		_ = sendCombatAttributes(conn, p)
 		_ = sendArmorAttributes(conn, p)
