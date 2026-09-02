@@ -2411,62 +2411,7 @@ func (s *Server) applyBedrockFoodEffect(p *player.Player, itemID string) {
 }
 
 func bedrockEffectType(id string) int32 {
-	switch id {
-	case "minecraft:speed":
-		return bedrockpacket.EffectSpeed
-	case "minecraft:slowness":
-		return bedrockpacket.EffectSlowness
-	case "minecraft:haste":
-		return bedrockpacket.EffectHaste
-	case "minecraft:mining_fatigue":
-		return bedrockpacket.EffectMiningFatigue
-	case "minecraft:strength":
-		return bedrockpacket.EffectStrength
-	case "minecraft:instant_health":
-		return bedrockpacket.EffectInstantHealth
-	case "minecraft:instant_damage":
-		return bedrockpacket.EffectInstantDamage
-	case "minecraft:jump_boost":
-		return bedrockpacket.EffectJumpBoost
-	case "minecraft:hunger":
-		return bedrockpacket.EffectHunger
-	case "minecraft:poison":
-		return bedrockpacket.EffectPoison
-	case "minecraft:nausea":
-		return bedrockpacket.EffectNausea
-	case "minecraft:regeneration":
-		return bedrockpacket.EffectRegeneration
-	case "minecraft:absorption":
-		return bedrockpacket.EffectAbsorption
-	case "minecraft:resistance":
-		return bedrockpacket.EffectResistance
-	case "minecraft:fire_resistance":
-		return bedrockpacket.EffectFireResistance
-	case "minecraft:water_breathing":
-		return bedrockpacket.EffectWaterBreathing
-	case "minecraft:invisibility":
-		return bedrockpacket.EffectInvisibility
-	case "minecraft:blindness":
-		return bedrockpacket.EffectBlindness
-	case "minecraft:night_vision":
-		return bedrockpacket.EffectNightVision
-	case "minecraft:weakness":
-		return bedrockpacket.EffectWeakness
-	case "minecraft:wither":
-		return bedrockpacket.EffectWither
-	case "minecraft:health_boost":
-		return bedrockpacket.EffectHealthBoost
-	case "minecraft:saturation":
-		return bedrockpacket.EffectSaturation
-	case "minecraft:levitation":
-		return bedrockpacket.EffectLevitation
-	case "minecraft:conduit_power":
-		return bedrockpacket.EffectConduitPower
-	case "minecraft:slow_falling":
-		return bedrockpacket.EffectSlowFalling
-	default:
-		return 0
-	}
+	return bedrock.EffectType(id)
 }
 
 func (s *Server) tickPufferfishContact(entities []*corentity.Entity) {
