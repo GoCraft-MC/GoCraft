@@ -588,6 +588,22 @@ func TestBedrockPumpkinShearsAndComposterLifecycle(t *testing.T) {
 	})
 }
 
+func TestBedrockHarvestsFullBeehive(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("beehive", map[string]string{"honey_level": "5", "facing": "east"}))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:glass_bottle", Count: 1}
+	if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}}, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("glass bottle did not harvest the beehive")
+	}
+	hive := s.world.GetBlock(1, 64, 0)
+	if hive.Properties["honey_level"] != "0" || hive.Properties["facing"] != "east" {
+		t.Fatalf("harvested hive = %+v", hive)
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:honey_bottle" || stack.Count != 1 {
+		t.Fatalf("harvest result = %+v", stack)
+	}
+}
+
 func TestBedrockBucketFillsAndEmptiesCauldron(t *testing.T) {
 	s, p := newBedrockActionTestServer(t)
 	s.world.SetBlock(1, 64, 0, bedrockBlock("cauldron", nil))

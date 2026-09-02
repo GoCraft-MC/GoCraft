@@ -138,22 +138,16 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 		s.damageBedrockHeldItem(p, 1)
 		return true
 	}
-	if (name == "minecraft:beehive" || name == "minecraft:bee_nest") && target.Properties["honey_level"] == "5" {
+	if replacement, output, harvested := coreworld.HarvestBeehive(target, item); harvested {
+		s.setBedrockActionBlock(x, y, z, replacement)
 		switch item {
 		case "minecraft:shears":
-			replacement := bedrockCopyBlock(target)
-			replacement.Properties["honey_level"] = "0"
-			s.setBedrockActionBlock(x, y, z, replacement)
-			s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:honeycomb", Count: 3})
+			s.giveBedrockActionItem(p, output)
 			s.damageBedrockHeldItem(p, 1)
-			return true
 		case "minecraft:glass_bottle":
-			replacement := bedrockCopyBlock(target)
-			replacement.Properties["honey_level"] = "0"
-			s.setBedrockActionBlock(x, y, z, replacement)
-			s.replaceBedrockHeldItem(p, "minecraft:honey_bottle")
-			return true
+			s.replaceBedrockHeldItem(p, output.ItemID)
 		}
+		return true
 	}
 
 	if name == "minecraft:cake" && bedrockIsCandleItem(item) {
