@@ -1665,6 +1665,7 @@ func (l *Listener) canonicalInventoryActions(
 					Damage:       int(ki.meta),
 					HasFireworks: ki.hasFireworks,
 					Fireworks:    ki.fireworks,
+					Components:   ki.components,
 				},
 			})
 			creativeSelected = true

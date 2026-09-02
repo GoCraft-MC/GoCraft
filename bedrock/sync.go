@@ -732,9 +732,7 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 	}
 
 	if entity.Type == corentity.TypeItem {
-		item := l.itemInstance(player.ItemStack{
-			ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage, PotDecorations: entity.ItemPotDecorations,
-		}, 1)
+		item := l.itemInstance(entity.DroppedItem(), 1)
 		if item.Stack.NetworkID == 0 {
 			return nil
 		}
@@ -1979,6 +1977,9 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 		for key, value := range bedrockFireworkNBT(stack.EffectiveFireworks()) {
 			nbtData[key] = value
 		}
+	}
+	if stack.Components != "" {
+		nbtData[goCraftComponentsNBTKey] = stack.NormalizedComponents()
 	}
 	if len(nbtData) == 0 {
 		nbtData = nil

@@ -23,6 +23,7 @@ type creativeKnownItem struct {
 	meta         int16
 	hasFireworks bool
 	fireworks    player.FireworkData
+	components   string
 }
 
 type creativeBedrockIdentity struct {
@@ -190,6 +191,12 @@ func (l *Listener) initCreativeContent() {
 		known := creativeKnownItem{name: canonicalName, meta: canonicalMeta}
 		if canonicalName == "minecraft:firework_rocket" {
 			known.fireworks, known.hasFireworks = bedrockFireworkDataFromNBT(stack.NBTData)
+		}
+		if encoded, ok := stack.NBTData[goCraftComponentsNBTKey].(string); ok {
+			probe := player.ItemStack{}
+			if probe.SetComponents(encoded) == nil {
+				known.components = probe.Components
+			}
 		}
 		l.creativeNames[creativeNetworkID] = known
 	}
