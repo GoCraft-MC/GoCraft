@@ -130,3 +130,25 @@ func TestLegacyArmorReduction(t *testing.T) {
 		t.Fatalf("legacy full diamond damage = %v, want 2", got)
 	}
 }
+
+func TestMagicDamageBypassesArmor(t *testing.T) {
+	p := player.New([16]byte{}, "tank", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[5] = player.ItemStack{ItemID: "minecraft:diamond_helmet", Count: 1}
+	p.Inventory[6] = player.ItemStack{ItemID: "minecraft:diamond_chestplate", Count: 1}
+	p.Inventory[7] = player.ItemStack{ItemID: "minecraft:diamond_leggings", Count: 1}
+	p.Inventory[8] = player.ItemStack{ItemID: "minecraft:diamond_boots", Count: 1}
+	target := &session.Session{Player: p}
+	if !DamagePlayerMagic(target, 4, "withered away", nil) {
+		t.Fatal("magic damage was rejected")
+	}
+	health, _, _, _ := p.HealthSnapshot()
+	if health != 16 {
+		t.Fatalf("health = %v, want 16", health)
+	}
+	for slot := 5; slot <= 8; slot++ {
+		if p.Inventory[slot].Damage != 0 {
+			t.Fatalf("armour slot %d was damaged", slot)
+		}
+	}
+}

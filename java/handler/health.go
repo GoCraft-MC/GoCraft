@@ -212,10 +212,15 @@ func damagePlayerFromPos(target *session.Session, rawDamage float32, cause strin
 		}
 	}
 
-	return damagePlayer(target, rawDamage, cause, mgr, false, bypassInvulnerability)
+	return damagePlayer(target, rawDamage, cause, mgr, false, bypassInvulnerability, false)
 }
 
-func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr *session.Manager, legacyArmor, bypassInvulnerability bool) bool {
+// DamagePlayerMagic applies effect damage without armour reduction or wear.
+func DamagePlayerMagic(target *session.Session, rawDamage float32, cause string, mgr *session.Manager) bool {
+	return damagePlayer(target, rawDamage, cause, mgr, false, false, true)
+}
+
+func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr *session.Manager, legacyArmor, bypassInvulnerability, bypassArmor bool) bool {
 	if target == nil || target.Player == nil || rawDamage <= 0 {
 		return false
 	}
@@ -235,7 +240,7 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 	}
 
 	damage := rawDamage
-	if !bypassInvulnerability {
+	if !bypassInvulnerability && !bypassArmor {
 		damage = reducedDamage(p, rawDamage, legacyArmor)
 	}
 	if damage <= 0 {
@@ -243,7 +248,7 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 	}
 	_, died := p.ApplyDamage(damage, cause)
 
-	if !bypassInvulnerability {
+	if !bypassInvulnerability && !bypassArmor {
 		armourWear := int(math.Floor(float64(rawDamage) / 4))
 		if armourWear < 1 {
 			armourWear = 1
@@ -299,7 +304,7 @@ func KillPlayer(target *session.Session, cause string, mgr *session.Manager) boo
 	if maxHealth <= 0 {
 		maxHealth = 20
 	}
-	return damagePlayer(target, maxHealth+1, cause, mgr, false, true)
+	return damagePlayer(target, maxHealth+1, cause, mgr, false, true, true)
 }
 
 // SendLegacyKnockback applies the configured 1.7-style impulse, reduced by
