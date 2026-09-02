@@ -1704,6 +1704,25 @@ func (l *Listener) SendPlayerMobEffect(p *player.Player, effectType, amplifier, 
 	})
 }
 
+// RemovePlayerMobEffect removes one expired canonical effect from a Bedrock client.
+func (l *Listener) RemovePlayerMobEffect(p *player.Player, effectType int32) {
+	if l == nil || p == nil || effectType == 0 {
+		return
+	}
+	l.sessionsMu.RLock()
+	session := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if session == nil {
+		return
+	}
+	_ = session.conn.WritePacket(&packet.MobEffect{
+		EntityRuntimeID: bedrockSelfRuntimeID,
+		Operation:       packet.MobEffectRemove,
+		EffectType:      effectType,
+		Tick:            uint64(time.Now().UnixMilli() / 50),
+	})
+}
+
 func (l *Listener) changeDimension(p *player.Player, dimension int32, position spatial.Vec3, respawn bool) {
 	if p == nil {
 		return

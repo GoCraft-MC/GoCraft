@@ -29,6 +29,7 @@
     "minecraft:player_info_update": 64,
     "minecraft:player_position": 66,
     "minecraft:remove_entities": 71,
+    "minecraft:remove_mob_effect": 72,
     "minecraft:respawn": 76,
     "minecraft:player_info_remove": 63,
     "minecraft:rotate_head": 77,

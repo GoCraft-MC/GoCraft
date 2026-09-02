@@ -347,6 +347,21 @@ func SendMobEffect(conn *network.ClientConn, p *player.Player, name string, ampl
 	_ = conn.WritePacket(pkt)
 }
 
+// RemoveMobEffect removes one expired canonical effect from a Java client.
+func RemoveMobEffect(conn *network.ClientConn, p *player.Player, name string) {
+	if conn == nil || p == nil {
+		return
+	}
+	effectID := javaworld.MobEffectID(name)
+	if effectID < 0 {
+		return
+	}
+	_ = conn.WritePacket(protocol.NewBuilder(packetIDRemoveMobEffect).
+		VarInt(p.EntityID).
+		VarInt(effectID).
+		Build())
+}
+
 func applyFoodEffect(conn *network.ClientConn, p *player.Player, itemID string) {
 	if p == nil {
 		return
