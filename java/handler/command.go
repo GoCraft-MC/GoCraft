@@ -83,7 +83,8 @@ type CommandContext struct {
 	// SyncAbilities republishes the issuing player's local state — game mode,
 	// flight, speeds — after a command changed it. Both adapters send their own
 	// packets for this; neither is reachable from here.
-	SyncAbilities func(*player.Player)
+	SyncAbilities    func(*player.Player)
+	SyncStatusEffect func(*player.Player, player.StatusEffect)
 
 	DisconnectPlayer func(*player.Player, string) error
 }
@@ -132,6 +133,7 @@ type Dispatcher struct {
 	messenger            func(*player.Player, string) error
 	linkMessenger        func(*player.Player, string, string) error
 	syncAbilities        func(*player.Player)
+	syncStatusEffect     func(*player.Player, player.StatusEffect)
 	chatFormatter        ChatFormatter
 	bedrockChatFormatter ChatFormatter
 	groupPrefix          func(username string) string
@@ -348,6 +350,13 @@ func (d *Dispatcher) SetAbilitySync(sync func(*player.Player)) {
 	d.mu.Unlock()
 }
 
+// SetStatusEffectSync installs the cross-edition effect packet bridge.
+func (d *Dispatcher) SetStatusEffectSync(sync func(*player.Player, player.StatusEffect)) {
+	d.mu.Lock()
+	d.syncStatusEffect = sync
+	d.mu.Unlock()
+}
+
 // SetMaxPlayers publishes the configured player capacity to commands.
 func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 	d.mu.Lock()
@@ -390,6 +399,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	messenger := d.messenger
 	linkMessenger := d.linkMessenger
 	syncAbilities := d.syncAbilities
+	syncStatusEffect := d.syncStatusEffect
 	d.mu.RUnlock()
 	ctx.NextEntityID = allocateEntityID
 	ctx.FindPlayer = findPlayer
@@ -398,7 +408,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	ctx.DisconnectPlayer = disconnectPlayer
 	ctx.MaxPlayers = maxPlayers
 	ctx.AvailableCommands = d.VisibleCommands(ctx.Player)
-	fillFeedback(&ctx, messenger, linkMessenger, syncAbilities)
+	fillFeedback(&ctx, messenger, linkMessenger, syncAbilities, syncStatusEffect)
 
 	if !ok {
 		// Plugins are asked only once no built-in answers to the name. That
