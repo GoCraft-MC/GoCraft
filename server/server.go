@@ -1463,6 +1463,11 @@ func (s *Server) finishBedrockFoodUse(p *player.Player) {
 		}
 	}
 	s.applyBedrockFoodEffect(p, consumedID)
+	for _, removed := range p.ApplyConsumableCleansing(consumedID) {
+		if s.bedrockListener != nil {
+			s.bedrockListener.RemovePlayerMobEffect(p, bedrockEffectType(removed.ID))
+		}
+	}
 	s.clearBedrockItemUse(p, true)
 }
 

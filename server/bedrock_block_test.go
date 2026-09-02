@@ -348,6 +348,7 @@ func TestBedrockFoodCompletesOnServerTickAndReturnsContainer(t *testing.T) {
 	p.Food = 10
 	p.Saturation = 0
 	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honey_bottle", Count: 1}
+	p.AddStatusEffect(player.StatusEffect{ID: "poison", Duration: 100})
 	if err := g.AddPlayer(p); err != nil {
 		t.Fatal(err)
 	}
@@ -362,6 +363,9 @@ func TestBedrockFoodCompletesOnServerTickAndReturnsContainer(t *testing.T) {
 	}
 	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:glass_bottle" || got.Count != 1 {
 		t.Fatalf("consumed honey bottle remainder = %+v, want one glass bottle", got)
+	}
+	if _, poisoned := p.StatusEffect("poison"); poisoned {
+		t.Fatal("poison remained after drinking honey")
 	}
 	if p.UsingItemID != "" || p.UsingItemSlot != -1 || !p.UsingItemSince.IsZero() {
 		t.Fatalf("completed food retained active state: %q/%d/%v", p.UsingItemID, p.UsingItemSlot, p.UsingItemSince)
