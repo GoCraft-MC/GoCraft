@@ -1442,12 +1442,12 @@ func (s *Server) finishBedrockFoodUse(p *player.Player) {
 		s.clearBedrockItemUse(p, false)
 		return
 	}
+	consumedID := stack.ItemID
 	if p.GameMode != player.GameModeCreative {
 		if !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(stack.ItemID)) {
 			s.clearBedrockItemUse(p, false)
 			return
 		}
-		consumedID := stack.ItemID
 		p.Inventory[slot].Count--
 		if p.Inventory[slot].Count <= 0 {
 			p.Inventory[slot] = player.ItemStack{}
@@ -1460,6 +1460,7 @@ func (s *Server) finishBedrockFoodUse(p *player.Player) {
 			}
 		}
 	}
+	s.applyBedrockFoodEffect(p, consumedID)
 	s.clearBedrockItemUse(p, true)
 }
 
@@ -2395,40 +2396,36 @@ func canPlaceBedrockFurnaceSlot(slot int16, stack player.ItemStack) bool {
 }
 
 func (s *Server) applyBedrockFoodEffect(p *player.Player, itemID string) {
-	if s.bedrockListener == nil || p == nil {
+	if p == nil {
 		return
 	}
 	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff
-	send := func(effectType, amplifier, duration int32) {
-		s.bedrockListener.SendPlayerMobEffect(p, effectType, amplifier, duration)
+	for _, effect := range player.FoodStatusEffects(itemID, roll%100) {
+		stored, changed := p.AddStatusEffect(effect)
+		if effectType := bedrockEffectType(stored.ID); changed && effectType != 0 && s.bedrockListener != nil {
+			s.bedrockListener.SendPlayerMobEffect(p, effectType, stored.Amplifier, stored.Duration)
+		}
 	}
-	switch itemID {
-	case "minecraft:rotten_flesh":
-		if roll%100 < 80 {
-			send(bedrockpacket.EffectHunger, 0, 600)
-		}
-	case "minecraft:chicken":
-		if roll%100 < 30 {
-			send(bedrockpacket.EffectHunger, 0, 600)
-		}
-	case "minecraft:spider_eye":
-		send(bedrockpacket.EffectPoison, 0, 100)
-	case "minecraft:poisonous_potato":
-		if roll%100 < 60 {
-			send(bedrockpacket.EffectPoison, 3, 100)
-		}
-	case "minecraft:pufferfish":
-		send(bedrockpacket.EffectPoison, 3, 1200)
-		send(bedrockpacket.EffectHunger, 2, 300)
-		send(bedrockpacket.EffectNausea, 1, 300)
-	case "minecraft:golden_apple":
-		send(bedrockpacket.EffectRegeneration, 1, 100)
-		send(bedrockpacket.EffectAbsorption, 0, 2400)
-	case "minecraft:enchanted_golden_apple":
-		send(bedrockpacket.EffectRegeneration, 4, 600)
-		send(bedrockpacket.EffectAbsorption, 3, 2400)
-		send(bedrockpacket.EffectResistance, 0, 6000)
-		send(bedrockpacket.EffectFireResistance, 0, 6000)
+}
+
+func bedrockEffectType(id string) int32 {
+	switch id {
+	case "minecraft:hunger":
+		return bedrockpacket.EffectHunger
+	case "minecraft:poison":
+		return bedrockpacket.EffectPoison
+	case "minecraft:nausea":
+		return bedrockpacket.EffectNausea
+	case "minecraft:regeneration":
+		return bedrockpacket.EffectRegeneration
+	case "minecraft:absorption":
+		return bedrockpacket.EffectAbsorption
+	case "minecraft:resistance":
+		return bedrockpacket.EffectResistance
+	case "minecraft:fire_resistance":
+		return bedrockpacket.EffectFireResistance
+	default:
+		return 0
 	}
 }
 

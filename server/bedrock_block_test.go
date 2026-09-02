@@ -390,3 +390,22 @@ func TestBedrockCreativeFoodAnimatesWithoutConsumingStack(t *testing.T) {
 		t.Fatalf("creative eating animation did not complete: %q", p.UsingItemID)
 	}
 }
+
+func TestBedrockTimedFoodStoresAuthoritativeEffects(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{45}, "bedrock-golden-eater", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:golden_apple", Count: 1}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g}
+	s.applyBedrockStartUseItem(intent.StartUseItemIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
+	p.UsingItemSince = time.Now().Add(-2 * time.Second)
+	s.tickBedrockItemUse()
+	regeneration, regenOK := p.StatusEffect("regeneration")
+	absorption, absorptionOK := p.StatusEffect("absorption")
+	if !regenOK || !absorptionOK || regeneration.Amplifier != 1 || absorption.Duration != 2400 || p.AbsorptionSnapshot() != 4 {
+		t.Fatalf("stored effects = regeneration %#v absorption %#v hearts %.1f", regeneration, absorption, p.AbsorptionSnapshot())
+	}
+}
