@@ -124,7 +124,7 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if item == "minecraft:honeycomb" {
-		if waxed, ok := bedrockWaxCopper(target); ok {
+		if waxed, ok := coreworld.WaxCopper(target); ok {
 			s.setBedrockActionBlock(x, y, z, waxed)
 			s.consumeBedrockHeldItem(p, 1)
 			return true
@@ -1197,15 +1197,6 @@ func bedrockAxeTransformation(block coreworld.Block) (coreworld.Block, bool) {
 		return replacement, true
 	}
 	return coreworld.Block{}, false
-}
-
-func bedrockWaxCopper(block coreworld.Block) (coreworld.Block, bool) {
-	if block.Namespace != "minecraft" || strings.HasPrefix(block.Name, "waxed_") || !strings.Contains(block.Name, "copper") {
-		return coreworld.Block{}, false
-	}
-	replacement := bedrockCopyBlock(block)
-	replacement.Name = "waxed_" + replacement.Name
-	return replacement, true
 }
 
 func bedrockIsHoe(item string) bool {
