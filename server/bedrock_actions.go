@@ -132,9 +132,8 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if item == "minecraft:shears" && name == "minecraft:pumpkin" {
-		s.setBedrockActionBlock(x, y, z, bedrockBlock("carved_pumpkin", map[string]string{
-			"facing": bedrockOppositeFacing(bedrockPlayerFacing(p.Rotation.Yaw)),
-		}))
+		carved, _ := coreworld.CarvePumpkin(target, bedrockOppositeFacing(bedrockPlayerFacing(p.Rotation.Yaw)))
+		s.setBedrockActionBlock(x, y, z, carved)
 		s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:pumpkin_seeds", Count: 4})
 		s.damageBedrockHeldItem(p, 1)
 		return true
