@@ -267,7 +267,11 @@ func dropJavaHeldItem(p *player.Player, w *coreworld.World, mgr *session.Manager
 	normalizeStack(&p.Inventory[slot])
 	clearJavaFoodUse(p)
 	spawnBlockDrop(w, nextEntityID, p.Position, dropped, 0, mgr, p.Dimension)
-	_ = SyncPlayerInventory(conn, p)
+	if conn != nil {
+		_ = SyncPlayerInventory(conn, p)
+	} else {
+		p.ContainerStateID++
+	}
 }
 
 func swapJavaOffhand(p *player.Player, conn *network.ClientConn) {
@@ -277,7 +281,11 @@ func swapJavaOffhand(p *player.Player, conn *network.ClientConn) {
 	held := player.HotbarStart + p.HeldSlot
 	p.Inventory[held], p.Inventory[player.OffhandSlot] = p.Inventory[player.OffhandSlot], p.Inventory[held]
 	clearJavaFoodUse(p)
-	_ = SyncPlayerInventory(conn, p)
+	if conn != nil {
+		_ = SyncPlayerInventory(conn, p)
+	} else {
+		p.ContainerStateID++
+	}
 }
 
 func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spatial.Vec3, stack player.ItemStack, ordinal int, mgr *session.Manager, dimension int32) {

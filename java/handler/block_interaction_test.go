@@ -302,6 +302,53 @@ func javaWorldHasDroppedItem(w *coreworld.World, itemID string, count int) bool 
 	return false
 }
 
+func TestJavaPlayerDropActionsPreserveStacks(t *testing.T) {
+	p := player.New([16]byte{}, "dropper", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:diamond", Count: 3, Components: `{"custom_name":"Gem"}`}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	nextID := int32(0)
+	for _, status := range []int32{actionStatusDropItem, actionStatusDropStack} {
+		pkt := protocol.NewBuilder(packetIDPlayerAction).
+			VarInt(status).Long(packBlockPos(0, 64, 0)).Byte(1).VarInt(status).Build()
+		if err := handlePlayerActionWithContext(pkt, p, w, session.NewManager(), nil, func() int32 {
+			nextID++
+			return nextID
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stack := p.Inventory[player.HotbarStart]; !stack.IsEmpty() {
+		t.Fatalf("held stack remains: %+v", stack)
+	}
+	counts := map[int]bool{}
+	for _, entity := range w.Entities.Snapshot() {
+		stack := entity.DroppedItem()
+		if stack.ItemID == "minecraft:diamond" && stack.Components == `{"custom_name":"Gem"}` {
+			counts[stack.Count] = true
+		}
+	}
+	if !counts[1] || !counts[2] {
+		t.Fatalf("dropped stack counts = %+v", counts)
+	}
+}
+
+func TestJavaPlayerActionSwapsOffhand(t *testing.T) {
+	p := player.New([16]byte{}, "swapper", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:torch", Count: 4}
+	p.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:shield", Count: 1}
+	pkt := protocol.NewBuilder(packetIDPlayerAction).
+		VarInt(actionStatusSwapOffhand).Long(packBlockPos(0, 64, 0)).Byte(1).VarInt(1).Build()
+	if err := handlePlayerAction(pkt, p, nil, session.NewManager()); err != nil {
+		t.Fatal(err)
+	}
+	if p.Inventory[player.HotbarStart].ItemID != "minecraft:shield" || p.Inventory[player.OffhandSlot].ItemID != "minecraft:torch" {
+		t.Fatalf("swapped inventory = main %+v offhand %+v", p.Inventory[player.HotbarStart], p.Inventory[player.OffhandSlot])
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
