@@ -35,6 +35,8 @@ type persistedPlayerData struct {
 	Food          int32                                  `json:"food"`
 	Saturation    float32                                `json:"saturation"`
 	Exhaustion    float32                                `json:"exhaustion"`
+	Absorption    float32                                `json:"absorption,omitempty"`
+	StatusEffects []player.StatusEffect                  `json:"status_effects,omitempty"`
 	Experience    int32                                  `json:"experience"`
 	Tags          []string                               `json:"tags,omitempty"`
 	Inventory     [player.InventorySize]player.ItemStack `json:"inventory"`
@@ -71,6 +73,7 @@ func snapshotPlayerData(p *player.Player) persistedPlayerData {
 		Version: playerDataVersion, Username: p.Username,
 		Position: p.Position, Rotation: p.Rotation, GameMode: p.GameMode,
 		Health: health, Dead: dead, Food: food, Saturation: saturation, Exhaustion: exhaustion, Experience: experience, Tags: p.Tags(),
+		Absorption: p.AbsorptionSnapshot(), StatusEffects: p.StatusEffectsSnapshot(),
 		Inventory: p.Inventory, EnderChest: p.EnderChestInventory, HeldSlot: p.HeldSlot,
 		SpawnPoint: p.SpawnPoint, HasSpawnPoint: p.HasSpawnPoint,
 		Dimension: p.Dimension,
@@ -186,6 +189,14 @@ func applyPersistedPlayerData(p *player.Player, data persistedPlayerData) error 
 	p.Food = min(max(data.Food, 0), 20)
 	p.Saturation = min(max(data.Saturation, 0), 20)
 	p.Exhaustion = min(max(data.Exhaustion, 0), 4)
+	p.StatusEffects = nil
+	p.Absorption = 0
+	for _, effect := range data.StatusEffects {
+		if _, ok := p.AddStatusEffect(effect); !ok {
+			return fmt.Errorf("invalid saved status effect %+v", effect)
+		}
+	}
+	p.Absorption = min(max(data.Absorption, 0), p.Absorption)
 	p.SetTotalExperience(data.Experience)
 	for _, tag := range data.Tags {
 		if strings.TrimSpace(tag) == "" || len(tag) > 1024 {

@@ -65,6 +65,15 @@ func (p *Player) StatusEffectsSnapshot() []StatusEffect {
 	return append([]StatusEffect(nil), p.StatusEffects...)
 }
 
+func (p *Player) AbsorptionSnapshot() float32 {
+	if p == nil {
+		return 0
+	}
+	p.healthMu.Lock()
+	defer p.healthMu.Unlock()
+	return p.Absorption
+}
+
 func (p *Player) StatusEffect(id string) (StatusEffect, bool) {
 	if p == nil {
 		return StatusEffect{}, false

@@ -29,6 +29,8 @@ func TestPlayerDataStoreRoundTrip(t *testing.T) {
 	source.Inventory[player.HotbarStart+4] = player.ItemStack{ItemID: "minecraft:diamond_pickaxe", Count: 1, Damage: 57}
 	source.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:shield", Count: 1, Damage: 4}
 	source.EnderChestInventory[7] = player.ItemStack{ItemID: "minecraft:nether_star", Count: 2}
+	source.AddStatusEffect(player.StatusEffect{ID: "minecraft:absorption", Amplifier: 1, Duration: 1200, ShowParticles: true, ShowIcon: true})
+	source.Absorption = 5
 	if err := source.Inventory[24].SetComponent("custom_name", map[string]any{"text": "Building wood", "italic": false}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +65,9 @@ func TestPlayerDataStoreRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(restored.EnderChestInventory, source.EnderChestInventory) {
 		t.Fatalf("ender chest mismatch: got %#v, want %#v", restored.EnderChestInventory, source.EnderChestInventory)
+	}
+	if !reflect.DeepEqual(restored.StatusEffectsSnapshot(), source.StatusEffectsSnapshot()) || restored.AbsorptionSnapshot() != 5 {
+		t.Fatalf("status state mismatch: effects=%#v absorption=%v", restored.StatusEffectsSnapshot(), restored.AbsorptionSnapshot())
 	}
 	if restored.HeldSlot != source.HeldSlot || restored.GameMode != source.GameMode {
 		t.Fatalf("player settings mismatch: slot/mode %d/%d, want %d/%d", restored.HeldSlot, restored.GameMode, source.HeldSlot, source.GameMode)
