@@ -349,6 +349,28 @@ func TestJavaPlayerActionSwapsOffhand(t *testing.T) {
 	}
 }
 
+func TestJavaHoneycombWaxesCopper(t *testing.T) {
+	p := player.New([16]byte{}, "waxer", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honeycomb", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(4, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "exposed_cut_copper", Properties: map[string]string{"axis": "x"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(4, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(2).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	block := w.GetBlock(4, 64, 0)
+	if block.ResourceLocation() != "minecraft:waxed_exposed_cut_copper" || block.Properties["axis"] != "x" {
+		t.Fatalf("waxed block = %+v", block)
+	}
+	if count := p.Inventory[player.HotbarStart].Count; count != 1 {
+		t.Fatalf("honeycomb count = %d, want 1", count)
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
