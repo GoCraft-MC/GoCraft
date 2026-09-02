@@ -5,9 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
-func TestLoadDirectoryPreparesPluginData(t *testing.T) {
+// The three calls below are the sequence the server performs at boot, spelled
+// out rather than hidden behind a helper: a wrapper that only the tests used
+// was a second load path free to drift from the one that ships.
+func TestScanPreflightLoadPreparesPluginData(t *testing.T) {
 	directory := t.TempDir()
 	writeBundle(t, directory, "protect.gcpkg", `
 id = "dev.example.protect"
@@ -25,8 +30,15 @@ runtime = "recording"
 	if err := registry.RegisterRuntime(&recordingRuntime{order: &order, loaded: &loaded}); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.LoadDirectory(context.Background(), directory); err != nil {
-		t.Fatal(err)
+	bundles, err := ScanBundles(directory)
+	if err != nil {
+		t.Fatalf("ScanBundles(%q): %v", directory, err)
+	}
+	if err := registry.Preflight(context.Background(), bundles); err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+	if err := registry.LoadAll(context.Background(), bundles); err != nil {
+		t.Fatalf("LoadAll: %v", err)
 	}
 	wantDirectory := filepath.Join(directory, "dev.example.protect")
 	if len(loaded) != 1 {
@@ -50,11 +62,11 @@ version = "1.0.0"
 api = 1
 runtime = "recording"
 `, map[string]string{"config/config.yml": "from bundle\n"})
-	bundle, err := OpenBundle(filepath.Join(directory, "settings.gcpkg"))
+	opened, err := gcpkg.Open(filepath.Join(directory, "settings.gcpkg"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := prepareBundleData(bundle)
+	prepared, err := prepareBundleData(Bundle{Bundle: opened})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +74,7 @@ runtime = "recording"
 	if err := os.WriteFile(configPath, []byte("server owner\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareBundleData(bundle); err != nil {
+	if _, err := prepareBundleData(Bundle{Bundle: opened}); err != nil {
 		t.Fatal(err)
 	}
 	assertFileContents(t, configPath, "server owner\n")

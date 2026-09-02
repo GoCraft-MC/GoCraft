@@ -55,6 +55,7 @@ Connect a Java 1.21.4 client to `localhost:25565`.
 | [Custom Items](docs/custom-items.md) | Cross-edition custom item system — define once, works on Java and Bedrock |
 | [Permissions](docs/permissions.md) | Group-based permission system and the GoPerm browser editor |
 | [Commands](docs/commands.md) | All built-in commands with permission nodes |
+| [Native Go Plugins](docs/go-plugins.md) | Lifecycle, events, commands, packaging, and example plugin |
 | [Bedrock & Cross-play](docs/bedrock.md) | Bedrock setup, shared features, and pack support |
 | [Architecture](docs/architecture.md) | Core design, adapter pattern, project structure |
 | [Command Parity](docs/command-parity.md) | Gaps relative to vanilla Paper/Spigot |
@@ -68,6 +69,7 @@ Connect a Java 1.21.4 client to `localhost:25565`.
 - **Permission editor** — browser-based group editor via bytebin relay, no inbound port needed
 - **MiniMessage** — full gradient, hex color, and glyph support in chat, prefixes, and item names
 - **Resource packs** — push `.mcpack`, `.zip`, and `.mcaddon` files to Bedrock clients; serve Java packs automatically
+- **Native Go plugins** — isolated processes with owned events, commands, scheduling, and configuration
 - **Persistent world** — Anvil region files, autosaves, atomic writes, memory-mode option
 - **Data-driven** — block states, item IDs, entity types, biomes, and packet IDs loaded from versioned JSON at startup; no hardcoded maps
 
@@ -82,7 +84,7 @@ Connect a Java 1.21.4 client to `localhost:25565`.
 | 11–13 — Entity system, commands, data-driven registries | Complete |
 | 14 — Bedrock adapter | Beta |
 | Custom items (Java + Bedrock) | In progress |
-| 15 — Go plugin API | Future |
+| 15 — Go plugin API | Experimental |
 
 Full milestone details are in [`logs/`](logs/).
 

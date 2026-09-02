@@ -4,6 +4,7 @@ import (
 	"math"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/navigation"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
@@ -191,20 +192,22 @@ func (s *Server) closestVisiblePlayer(e *corentity.Entity, maximumDistance float
 }
 
 func isTemptItem(entityType corentity.EntityType, item string) bool {
+	animal := ""
 	switch entityType {
-	case corentity.TypeCow, corentity.TypeMooshroom, corentity.TypeSheep, corentity.TypeGoat:
-		return item == "minecraft:wheat"
+	case corentity.TypeCow, corentity.TypeMooshroom:
+		animal = "cow"
+	case corentity.TypeSheep:
+		animal = "sheep"
+	case corentity.TypeGoat:
+		animal = "goat"
 	case corentity.TypePig:
-		return item == "minecraft:carrot" || item == "minecraft:potato" || item == "minecraft:beetroot"
+		animal = "pig"
 	case corentity.TypeChicken:
-		switch item {
-		case "minecraft:wheat_seeds", "minecraft:melon_seeds", "minecraft:pumpkin_seeds", "minecraft:beetroot_seeds", "minecraft:torchflower_seeds":
-			return true
-		}
+		animal = "chicken"
 	case corentity.TypeRabbit:
-		return item == "minecraft:carrot" || item == "minecraft:golden_carrot" || item == "minecraft:dandelion"
+		animal = "rabbit"
 	}
-	return false
+	return animal != "" && itemregistry.HasTag(item, "minecraft:"+animal+"_food")
 }
 
 func (s *Server) tickHostileIdleGoals(e *corentity.Entity, ai *mobAI) {

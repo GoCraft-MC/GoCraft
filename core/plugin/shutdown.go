@@ -23,6 +23,28 @@ func (r *Registry) startRuntimes(ctx context.Context, bundles []Bundle) error {
 	return nil
 }
 
+// readyRuntimes ends the load phase for every runtime that has one.
+//
+// It runs once, after the last plugin is up, rather than once per plugin: a
+// runtime told it is ready while the host is still loading would let its
+// plugins act on a world the rest of them have not seen yet.
+func (r *Registry) readyRuntimes(ctx context.Context, bundles []Bundle) error {
+	required, err := r.neededRuntimes(bundles)
+	if err != nil {
+		return err
+	}
+	for _, item := range required {
+		ready, ok := item.runtime.(ReadyRuntime)
+		if !ok {
+			continue
+		}
+		if err := ready.Ready(ctx); err != nil {
+			return fmt.Errorf("ready runtime %s: %w", item.name, err)
+		}
+	}
+	return nil
+}
+
 // Stop unloads plugins and runtimes in reverse load order.
 func (r *Registry) Stop(ctx context.Context) error {
 	r.mu.Lock()

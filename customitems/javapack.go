@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"GoCraft/core/itemregistry"
 )
 
 // BuildJavaPack generates a Java Edition resource pack ZIP in memory.
@@ -118,18 +120,15 @@ func writeZipEntry(zw *zip.Writer, name string, data []byte) error {
 // lowercase material name. Swords and tools use "item/handheld" so the item
 // is held correctly; everything else uses "item/generated" (flat sprite).
 func javaVanillaParent(mat string) string {
-	switch mat {
-	case "wooden_sword", "stone_sword", "iron_sword", "golden_sword",
-		"diamond_sword", "netherite_sword",
-		"wooden_pickaxe", "stone_pickaxe", "iron_pickaxe", "golden_pickaxe",
-		"diamond_pickaxe", "netherite_pickaxe",
-		"wooden_axe", "stone_axe", "iron_axe", "golden_axe",
-		"diamond_axe", "netherite_axe",
-		"wooden_shovel", "stone_shovel", "iron_shovel", "golden_shovel",
-		"diamond_shovel", "netherite_shovel",
-		"wooden_hoe", "stone_hoe", "iron_hoe", "golden_hoe",
-		"diamond_hoe", "netherite_hoe":
-		return "item/handheld"
+	definition, ok := itemregistry.Lookup("minecraft:" + mat)
+	if !ok || definition.Tool == nil {
+		return "item/generated"
 	}
-	return "item/generated"
+	switch definition.Tool.Category {
+	case itemregistry.ToolSword, itemregistry.ToolPickaxe, itemregistry.ToolAxe,
+		itemregistry.ToolShovel, itemregistry.ToolHoe:
+		return "item/handheld"
+	default:
+		return "item/generated"
+	}
 }

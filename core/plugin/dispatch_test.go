@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 func TestEmitCancellableUsesPriorityOrder(t *testing.T) {
@@ -15,12 +17,12 @@ func TestEmitCancellableUsesPriorityOrder(t *testing.T) {
 	var calls []string
 	for _, tc := range []struct {
 		id       string
-		priority Priority
+		priority gcpkg.Priority
 		cancel   bool
-	}{{"last", PriorityLow, false}, {"first", PriorityHigh, false}, {"stop", PriorityNormal, true}} {
+	}{{"last", gcpkg.PriorityLow, false}, {"first", gcpkg.PriorityHigh, false}, {"stop", gcpkg.PriorityNormal, true}} {
 		tc := tc
 		instance := &fakeInstance{
-			manifest: Manifest{ID: tc.id, Subscriptions: []Subscription{{Event: "block.break", Priority: tc.priority}}},
+			manifest: gcpkg.Manifest{ID: tc.id, Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: tc.priority}}},
 			dispatch: func(context.Context, *abi.Event) (abi.Verdict, error) {
 				calls = append(calls, tc.id)
 				return abi.Verdict{Cancelled: tc.cancel}, nil
@@ -47,7 +49,7 @@ func TestEmitCancellableAppliesFailurePolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bus := NewBus(context.Background(), time.Second)
 			instance := &fakeInstance{
-				manifest: Manifest{ID: "broken", Subscriptions: []Subscription{{Event: "block.break"}}},
+				manifest: gcpkg.Manifest{ID: "broken", Subscriptions: []gcpkg.Subscription{{Event: "block.break"}}},
 				dispatch: func(context.Context, *abi.Event) (abi.Verdict, error) {
 					return abi.Verdict{}, errors.New("runtime stopped")
 				},
@@ -66,14 +68,14 @@ func TestEventDeadlineStopsRemainingSubscribers(t *testing.T) {
 	bus := NewBus(context.Background(), 5*time.Millisecond)
 	lateCalled := false
 	slow := &fakeInstance{
-		manifest: Manifest{ID: "slow", Subscriptions: []Subscription{{Event: "block.break", Priority: PriorityHigh}}},
+		manifest: gcpkg.Manifest{ID: "slow", Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: gcpkg.PriorityHigh}}},
 		dispatch: func(ctx context.Context, _ *abi.Event) (abi.Verdict, error) {
 			<-ctx.Done()
 			return abi.Verdict{}, ctx.Err()
 		},
 	}
 	late := &fakeInstance{
-		manifest: Manifest{ID: "late", Subscriptions: []Subscription{{Event: "block.break", Priority: PriorityLow}}},
+		manifest: gcpkg.Manifest{ID: "late", Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: gcpkg.PriorityLow}}},
 		dispatch: func(context.Context, *abi.Event) (abi.Verdict, error) {
 			lateCalled = true
 			return abi.Verdict{}, nil
@@ -104,7 +106,7 @@ func TestEventVerdictQueuesBatchedEffects(t *testing.T) {
 	queue := NewMutationQueue()
 	bus := newBus(context.Background(), time.Second, queue)
 	instance := &fakeInstance{
-		manifest: Manifest{ID: "protect", Subscriptions: []Subscription{{Event: "block.break"}}},
+		manifest: gcpkg.Manifest{ID: "protect", Subscriptions: []gcpkg.Subscription{{Event: "block.break"}}},
 		dispatch: func(context.Context, *abi.Event) (abi.Verdict, error) {
 			return abi.Verdict{
 				Cancelled: true,

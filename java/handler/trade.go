@@ -361,19 +361,11 @@ func tradesForProfession(profession corentity.VillagerProfession, levels ...int3
 }
 
 func playerAttackCooldown(p *player.Player) time.Duration {
-	switch p.HeldItem().ItemID {
-	case "minecraft:wooden_axe", "minecraft:stone_axe":
-		return 1250 * time.Millisecond
-	case "minecraft:iron_axe":
-		return 1100 * time.Millisecond
-	case "minecraft:diamond_axe", "minecraft:netherite_axe", "minecraft:golden_axe":
-		return time.Second
-	case "minecraft:wooden_sword", "minecraft:stone_sword", "minecraft:iron_sword",
-		"minecraft:diamond_sword", "minecraft:netherite_sword", "minecraft:golden_sword":
-		return 625 * time.Millisecond
-	default:
-		return 250 * time.Millisecond
+	_, speed, ok := player.AttackAttributes(p.HeldItem().ItemID)
+	if !ok || speed <= 0 {
+		speed = 4
 	}
+	return time.Duration(float64(time.Second) / float64(speed))
 }
 func playerAttackDamage(p *player.Player) float32 {
 	if p.AttackCooldown {

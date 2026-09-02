@@ -9,7 +9,7 @@ import (
 
 // varintCase is a single round-trip test case.
 type varintCase struct {
-	value    int32
+	value     int32
 	wantBytes []byte // expected encoded representation
 }
 
@@ -20,7 +20,7 @@ var varintCases = []varintCase{
 	{128, []byte{0x80, 0x01}},
 	{255, []byte{0xFF, 0x01}},
 	{2147483647, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0x07}},  // max int32
-	{-1, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0x0F}},           // two's complement
+	{-1, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0x0F}},          // two's complement
 	{-2147483648, []byte{0x80, 0x80, 0x80, 0x80, 0x08}}, // min int32
 }
 
@@ -113,7 +113,7 @@ func TestVarIntSize(t *testing.T) {
 // --- VarLong tests ---
 
 type varlongCase struct {
-	value    int64
+	value     int64
 	wantBytes []byte
 }
 

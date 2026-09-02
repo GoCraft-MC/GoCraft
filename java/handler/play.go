@@ -171,7 +171,7 @@ func HandlePlay(conn *network.ClientConn, p *player.Player, w *coreworld.World, 
 		return fmt.Errorf("play: recipes: %w", err)
 	}
 	// Send command graph for tab completion.
-	if err := conn.WritePacket(buildCommandsPacket(func(name string) bool { return cmds.CanUse(p, name) })); err != nil {
+	if err := conn.WritePacket(buildCommandsPacket(cmds.CommandTree(p))); err != nil {
 		return fmt.Errorf("play: %w", err)
 	}
 	// Send the current time so the client shows the correct sky/lighting immediately.
@@ -315,6 +315,27 @@ func sendPlayerAbilities(conn *network.ClientConn, p *player.Player) error {
 		return nil
 	}
 	return conn.WritePacket(buildPlayerAbilities(p))
+}
+
+// SyncPlayerState republishes a Java player's game mode and the flight, speed
+// and instant-build flags that depend on it.
+//
+// It is the Java half of the ability-sync bridge a command context carries, and
+// the mirror of what the Bedrock adapter sends in one go: game mode first,
+// because the abilities that follow are read against it.
+//
+// Game Event reason 3 is change_game_mode, with the mode as a float32.
+func SyncPlayerState(conn *network.ClientConn, p *player.Player) error {
+	if conn == nil || p == nil {
+		return nil
+	}
+	if err := sendGameEvent(conn, 3, float32(p.GameMode)); err != nil {
+		return fmt.Errorf("sending game mode: %w", err)
+	}
+	if err := sendPlayerAbilities(conn, p); err != nil {
+		return fmt.Errorf("sending abilities: %w", err)
+	}
+	return nil
 }
 
 func buildPlayerAbilities(p *player.Player) *protocol.Packet {

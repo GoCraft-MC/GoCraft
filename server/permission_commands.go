@@ -15,9 +15,10 @@ func (s *Server) registerPermissionCommands() {
 		if err != nil {
 			return err
 		}
-		if len(ctx.Args) == 1 && strings.EqualFold(ctx.Args[0], "peditor") && ctx.Reply == nil {
+		if len(ctx.Args) == 1 && strings.EqualFold(ctx.Args[0], "peditor") && ctx.ReplyLink != nil {
 			link := strings.TrimPrefix(message, "Open the permission editor: ")
-			return handler.SendLinkMessage(ctx.Conn, message, link)
+			text := strings.TrimSpace(strings.TrimSuffix(message, link))
+			return ctx.ReplyLink(text, link)
 		}
 		return commandReply(ctx, message)
 	})

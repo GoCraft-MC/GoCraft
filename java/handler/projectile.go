@@ -6,6 +6,7 @@ import (
 	"time"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -272,8 +273,7 @@ func consumeArrow(p *player.Player) bool {
 		return true
 	}
 	for index := range p.Inventory {
-		if p.Inventory[index].ItemID != "minecraft:arrow" &&
-			p.Inventory[index].ItemID != "minecraft:spectral_arrow" {
+		if !itemregistry.HasTag(p.Inventory[index].ItemID, "minecraft:arrows") {
 			continue
 		}
 		p.Inventory[index].Count--

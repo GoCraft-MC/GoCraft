@@ -5,10 +5,22 @@ import (
 	"fmt"
 	"sync"
 
-	abi "GoCraft/abi/v1"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 )
 
 var ErrMutationQueueClosed = errors.New("plugin mutation queue is closed")
+
+// ErrMutationQueueFull means the tick has stopped draining, or a plugin is
+// producing faster than a tick can apply.
+var ErrMutationQueueFull = errors.New("plugin mutation queue is full")
+
+// maximumQueuedCalls bounds what a plugin can leave waiting.
+//
+// A queue only the tick drains is a queue nothing drains if the tick stops, and
+// an unbounded one turns that into the server running out of memory instead of
+// reporting a problem. Twenty tick's worth of a busy plugin is generous; past
+// it the call is refused and counted rather than kept.
+const maximumQueuedCalls = 8192
 
 // MutationQueue buffers plugin host calls until the simulation tick drains it.
 type MutationQueue struct {
@@ -31,6 +43,9 @@ func (q *MutationQueue) Enqueue(call abi.HostCall) error {
 	defer q.mu.Unlock()
 	if q.closed {
 		return ErrMutationQueueClosed
+	}
+	if len(q.calls) >= maximumQueuedCalls {
+		return ErrMutationQueueFull
 	}
 	q.calls = append(q.calls, call)
 	return nil

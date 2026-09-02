@@ -5,18 +5,19 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 type cancellingPlugin struct{}
 
-func (cancellingPlugin) Manifest() coreplugin.Manifest {
-	return coreplugin.Manifest{ID: "protect", Subscriptions: []coreplugin.Subscription{{Event: coreplugin.EventBlockBreak}}}
+func (cancellingPlugin) Manifest() gcpkg.Manifest {
+	return gcpkg.Manifest{ID: "protect", Subscriptions: []gcpkg.Subscription{{Event: coreplugin.EventBlockBreak}}}
 }
 func (cancellingPlugin) Dispatch(context.Context, *abi.Event) (abi.Verdict, error) {
 	return abi.Verdict{Cancelled: true}, nil

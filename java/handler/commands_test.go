@@ -134,7 +134,7 @@ func TestEverySummonCompletionBuildsAJavaSpawnPacket(t *testing.T) {
 }
 
 func TestCommandsPacketTabCompletesLocateSummonAndVersion(t *testing.T) {
-	nodes, root, err := parseCommandTestGraph(buildCommandsPacket().Data)
+	nodes, root, err := parseCommandTestGraph(buildCommandsPacket(serverCommandTree(t)).Data)
 	if err != nil {
 		t.Fatalf("parse Commands packet: %v", err)
 	}
@@ -379,7 +379,7 @@ func skipCommandTestParser(reader *bytes.Reader) error {
 		}
 	case 5: // brigadier:string
 		_, err = protocol.ReadVarInt(reader)
-	case 7, 14: // minecraft:game_profile, minecraft:item_stack
+	case 7, 8, 12, 14: // game_profile, block_pos, block_state, item_stack
 		// These parsers have no extra command-node properties.
 	default:
 		return fmt.Errorf("unsupported parser ID %d", parserID)
@@ -413,7 +413,7 @@ func TestHealAndEffectCommandsAreRegisteredAndCompletable(t *testing.T) {
 			t.Errorf(`command %q was not registered`, name)
 		}
 	}
-	nodes, root, err := parseCommandTestGraph(buildCommandsPacket().Data)
+	nodes, root, err := parseCommandTestGraph(buildCommandsPacket(serverCommandTree(t)).Data)
 	if err != nil {
 		t.Fatalf(`parse Commands packet: %v`, err)
 	}

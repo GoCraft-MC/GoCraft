@@ -1,0 +1,55 @@
+# Event generation, for every runtime at once.
+#
+# The wire types are generated in gocraft-abi, beside the schema they come from.
+# This runs only over events.proto, and only messages carrying a gc.event option
+# produce anything: what it emits is not transport but the typed surface each
+# runtime hands to a plugin author.
+#
+#   schema=$(go list -m -f '{{.Dir}}' github.com/GoCraft-MC/gocraft-abi)
+#   buf generate "$schema" --template buf.gen.events.yaml \
+#       --path "$schema/abi/v1/events.proto"
+#
+# The schema comes from the module, not from a checkout: whatever version go.mod
+# pins is the version the runtimes are generated from, so regenerating cannot
+# quietly pick up a schema nobody depends on yet.
+#
+# Both languages come out of one command on purpose. Generating them separately
+# would let someone regenerate Go, forget Java, and ship a host that writes a
+# field the plugins read at another index — the drift §01 exists to prevent, and
+# the kind that surfaces as a handler quietly reading the wrong value rather
+# than as a build failure.
+#
+# `go run` rather than an installed binary: the generator is built from the
+# working tree, so a change to it and the code it emits land in one commit.
+#
+# It lives here rather than with the schema because it knows each host's package
+# layout — vocabulary.go maps ABI types to core/player, core/spatial and
+# core/world. In gocraft-abi it would make the contract depend on the internals
+# of one of its consumers.
+version: v2
+
+plugins:
+  # The host: type constants and typed emitters, replacing what used to be
+  # written by hand in core/plugin/native_events.go.
+  - local: ["go", "run", "./cmd/protoc-gen-gocraft"]
+    out: .
+    opt: lang=go
+
+  # The plugin side of the Go runtime: what a compiled Go plugin receives.
+  # Separate from the host target above because they are two different views of
+  # the same event — one emits it, the other reads it — and the SDK used to be
+  # a transcription of the first, which is how it drifted.
+  #
+  # It is a sibling checkout because the SDK is its own module; §16 splits it
+  # out so a plugin does not depend on the server.
+  - local: ["go", "run", "./cmd/protoc-gen-gocraft"]
+    out: ../gocraft-api-go
+    opt: lang=gosdk
+
+  # The Java plugin API, in the sibling gocraft-jvm checkout. It lands in
+  # gocraft-api-jvm rather than the runtime: an event class is what a plugin
+  # subscribes to, and the artefact the runtime ships does not go on a plugin's
+  # classpath.
+  - local: ["go", "run", "./cmd/protoc-gen-gocraft"]
+    out: ../gocraft-jvm/gocraft-api-jvm/src/main/generated
+    opt: lang=java

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 // LoadAll starts required runtimes and loads validated bundles deterministically.
@@ -16,7 +18,7 @@ func (r *Registry) LoadAll(ctx context.Context, bundles []Bundle) error {
 	})
 	seen := make(map[string]struct{}, len(ordered))
 	for _, bundle := range ordered {
-		if err := validateManifest(bundle.Manifest); err != nil {
+		if err := gcpkg.ValidateManifest(bundle.Manifest); err != nil {
 			return err
 		}
 		if _, duplicate := seen[bundle.Manifest.ID]; duplicate {
@@ -73,6 +75,9 @@ func (r *Registry) LoadAll(ctx context.Context, bundles []Bundle) error {
 		r.instances[actual.ID] = instance
 		r.loadOrder = append(r.loadOrder, instance)
 		r.mu.Unlock()
+	}
+	if err := r.readyRuntimes(ctx, ordered); err != nil {
+		return rollback(err, nil)
 	}
 	return nil
 }

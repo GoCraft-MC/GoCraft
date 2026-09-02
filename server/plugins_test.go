@@ -67,3 +67,41 @@ func TestUnloadPluginsToleratesAServerWithoutARegistry(t *testing.T) {
 	s := &Server{}
 	s.unloadPlugins()
 }
+
+func TestRegisterPluginRuntimesMakesTheJVMAvailable(t *testing.T) {
+	// A method on the server rather than a free function: a runtime that can
+	// come back from a crash has to tell the server it did, and only the server
+	// knows who is online to replay the joins to.
+	s := pluginServer(filepath.Join(t.TempDir(), "plugins"), true)
+	s.cfg.Plugins.Runtimes = config.RuntimesConfig{
+		JVM: config.JVMRuntimeConfig{PreferSystem: true},
+	}
+	if err := s.registerPluginRuntimes(s.cfg); err != nil {
+		t.Fatalf("registerPluginRuntimes() = %v", err)
+	}
+	runtime, ok := s.pluginRegistry.Runtime("jvm")
+	if !ok {
+		t.Fatal("registerPluginRuntimes() left the jvm runtime unavailable")
+	}
+	if runtime.Name() != "jvm" {
+		t.Fatalf("runtime name = %q, want the name a manifest writes", runtime.Name())
+	}
+}
+
+// The §17 promise, as a test rather than an intention: a server with no Java
+// plugin never looks for java, never provisions, and prints no warning. The
+// runtime is registered on every boot, so this is what stops that costing
+// anything — and it is why the JDK search lives in Provision rather than in
+// construction.
+func TestABootWithNoPluginsNeverLooksForJava(t *testing.T) {
+	t.Setenv("JAVA_HOME", filepath.Join(t.TempDir(), "there-is-no-jdk-here"))
+	t.Setenv("PATH", "")
+
+	s := pluginServer(filepath.Join(t.TempDir(), "plugins"), true)
+	if err := s.registerPluginRuntimes(s.cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.loadPlugins(context.Background()); err != nil {
+		t.Fatalf("loadPlugins() = %v, want a clean boot with no plugin installed", err)
+	}
+}

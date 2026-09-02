@@ -13,19 +13,26 @@ import (
 	"strings"
 	"sync"
 
+	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
-	"GoCraft/java/network"
 	"GoCraft/java/session"
 )
 
 // CommandContext carries every resource a command handler might need.
-// The Conn field is the issuing player's connection; use it for per-player
-// feedback.  Manager gives access to all online sessions for commands that
-// affect other players (e.g. /kick, /tp <player>).
+//
+// It holds no connection, deliberately. A Bedrock player has no
+// *network.ClientConn, so a handler that reached for one answered nobody on
+// that edition — silently, because every Java send helper treats a nil
+// connection as a no-op. Feedback and client resynchronisation therefore travel
+// through the callbacks below, which Dispatch fills from bridges the server
+// installs once and which know both editions.
+//
+// Manager is the exception that proves it: it holds Java network sessions only,
+// so anything that merely needs canonical player state must use FindPlayer and
+// ListPlayers instead.
 type CommandContext struct {
 	Player  *player.Player
-	Conn    *network.ClientConn
 	Args    []string // tokens after the command name, split on whitespace
 	World   *coreworld.World
 	Manager *session.Manager
@@ -61,10 +68,23 @@ type CommandContext struct {
 	MaxPlayers        int
 	AvailableCommands []string
 
-	// Reply sends command feedback to the issuing edition. SyncAbilities asks
-	// that edition adapter to publish changed flight/permission state.
-	Reply            func(text string) error
-	SyncAbilities    func(*player.Player)
+	// Reply sends command feedback to the issuing player, whichever edition
+	// they are on. ReplyTo does the same for anyone else online, which is what
+	// commands acting on a target need — /heal notifies the healed player, and
+	// that player may well be on the other edition.
+	Reply   func(text string) error
+	ReplyTo func(target *player.Player, text string) error
+
+	// ReplyLink sends a clickable link where the edition supports one and
+	// degrades to text where it does not, rather than leaving Bedrock players
+	// with nothing at all.
+	ReplyLink func(text, link string) error
+
+	// SyncAbilities republishes the issuing player's local state — game mode,
+	// flight, speeds — after a command changed it. Both adapters send their own
+	// packets for this; neither is reachable from here.
+	SyncAbilities func(*player.Player)
+
 	DisconnectPlayer func(*player.Player, string) error
 }
 
@@ -82,6 +102,15 @@ type registeredCommand struct {
 
 type PermissionChecker func(player *player.Player, node string, defaultAllowed bool) bool
 
+// PluginCommands runs one line against the commands plugins registered.
+//
+// It reports whether the line named one at all, which is what lets the two
+// command systems live side by side while §18's extraction is unfinished: a
+// line this returns false for was never a plugin's, and the dispatcher answers
+// for it as it always did. A returned error is a sentence for whoever typed the
+// line, not a server fault.
+type PluginCommands func(sender *player.Player, line string) (handled bool, err error)
+
 // ChatFormatter formats a single chat line.  prefix is the player's
 // highest-weight group prefix (may be ""), username is the speaker, message is
 // the raw chat text.
@@ -90,18 +119,23 @@ type ChatFormatter func(prefix, username, message string) string
 // Dispatcher maps command names (lower-case) to their implementations.
 // All methods are safe for concurrent use.
 type Dispatcher struct {
-	mu               sync.RWMutex
-	cmds             map[string]registeredCommand
-	nextEntityID     func() int32
-	findPlayer       func(string) *player.Player
-	listPlayers      func() []*player.Player
-	teleportPlayer   func(*player.Player, float64, float64, float64) error
-	disconnectPlayer func(*player.Player, string) error
-	permission       PermissionChecker
+	mu                   sync.RWMutex
+	cmds                 map[string]registeredCommand
+	nextEntityID         func() int32
+	findPlayer           func(string) *player.Player
+	listPlayers          func() []*player.Player
+	teleportPlayer       func(*player.Player, float64, float64, float64) error
+	disconnectPlayer     func(*player.Player, string) error
+	permission           PermissionChecker
+	registry             *dispatch.Registry
+	pluginCommands       PluginCommands
+	messenger            func(*player.Player, string) error
+	linkMessenger        func(*player.Player, string, string) error
+	syncAbilities        func(*player.Player)
 	chatFormatter        ChatFormatter
 	bedrockChatFormatter ChatFormatter
 	groupPrefix          func(username string) string
-	maxPlayers       int
+	maxPlayers           int
 }
 
 // NewDispatcher returns an empty, ready-to-use Dispatcher.
@@ -116,6 +150,7 @@ func (d *Dispatcher) Register(name string, fn CommandFunc) {
 	name = strings.ToLower(name)
 	d.cmds[name] = registeredCommand{fn: fn, permission: commandPermissionNode(name), defaultAllow: true}
 	d.mu.Unlock()
+	d.publishTree()
 }
 
 // RegisterOperator adds a command that may only be used by server operators.
@@ -124,6 +159,7 @@ func (d *Dispatcher) RegisterOperator(name string, fn CommandFunc) {
 	name = strings.ToLower(name)
 	d.cmds[name] = registeredCommand{fn: fn, operatorOnly: true, permission: commandPermissionNode(name)}
 	d.mu.Unlock()
+	d.publishTree()
 }
 
 // RequireOperator upgrades already-registered commands to operator-only.
@@ -131,23 +167,41 @@ func (d *Dispatcher) RequireOperator(names ...string) {
 	d.mu.Lock()
 	for _, name := range names {
 		key := strings.ToLower(name)
-		command, ok := d.cmds[key]
+		registered, ok := d.cmds[key]
 		if ok {
-			command.operatorOnly = true
-			command.defaultAllow = false
-			d.cmds[key] = command
+			registered.operatorOnly = true
+			registered.defaultAllow = false
+			d.cmds[key] = registered
 		}
 	}
 	d.mu.Unlock()
+	d.publishTree()
 }
 
+// builtinPermissionPrefix namespaces every built-in's permission node, and is
+// what lets a node be read back as the command it guards.
+const builtinPermissionPrefix = "gocraft.command."
+
 func commandPermissionNode(name string) string {
-	return "gocraft.command." + strings.ToLower(strings.TrimSpace(name))
+	return builtinPermissionPrefix + strings.ToLower(strings.TrimSpace(name))
 }
 
 func (d *Dispatcher) SetPermissionChecker(check PermissionChecker) {
 	d.mu.Lock()
 	d.permission = check
+	d.mu.Unlock()
+}
+
+// SetPluginCommands installs the bridge to the plugin command registry.
+//
+// One hook rather than a merged table: the two registries validate, namespace
+// and check permissions differently, and copying plugin commands in here would
+// be a second place they are written down. Built-in names are refused to
+// plugins at registration, so there is no precedence to invent — a line is one
+// or the other, never both.
+func (d *Dispatcher) SetPluginCommands(run PluginCommands) {
+	d.mu.Lock()
+	d.pluginCommands = run
 	d.mu.Unlock()
 }
 
@@ -266,6 +320,34 @@ func (d *Dispatcher) SetPlayerDisconnector(disconnect func(*player.Player, strin
 	d.mu.Unlock()
 }
 
+// SetMessenger installs the edition-neutral bridge that delivers command
+// feedback to any online player.
+//
+// It is what replaced the connection CommandContext used to carry. Only the
+// server sees both adapters, so only the server can write this — which is also
+// why it is a bridge rather than something java/handler resolves itself.
+func (d *Dispatcher) SetMessenger(send func(*player.Player, string) error) {
+	d.mu.Lock()
+	d.messenger = send
+	d.mu.Unlock()
+}
+
+// SetLinkMessenger installs the bridge for clickable links. A sender with no
+// way to render one is expected to fall back to text rather than send nothing.
+func (d *Dispatcher) SetLinkMessenger(send func(*player.Player, string, string) error) {
+	d.mu.Lock()
+	d.linkMessenger = send
+	d.mu.Unlock()
+}
+
+// SetAbilitySync installs the bridge that republishes a player's game mode,
+// flight and speeds after a command changed them.
+func (d *Dispatcher) SetAbilitySync(sync func(*player.Player)) {
+	d.mu.Lock()
+	d.syncAbilities = sync
+	d.mu.Unlock()
+}
+
 // SetMaxPlayers publishes the configured player capacity to commands.
 func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 	d.mu.Lock()
@@ -277,9 +359,14 @@ func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 // name, fills ctx.Args with the remaining tokens, and calls the registered
 // handler.
 //
-// Unknown commands and handler errors are reported to ctx.Conn as a system
-// message.  Dispatch itself never returns an error to the caller because
+// Unknown commands and handler errors are reported to the issuing player as a
+// system message.  Dispatch itself never returns an error to the caller because
 // command failures are player-facing, not server-fatal.
+//
+// It is also where the context is completed: the caller supplies who is asking
+// and what they asked, and the callbacks that reach either edition are filled
+// in from the bridges installed on the dispatcher. A caller that already set
+// one keeps it, which is what lets a test inject its own without a server.
 func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	input = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(input), "/"))
 	parts := strings.Fields(input)
@@ -299,6 +386,10 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	disconnectPlayer := d.disconnectPlayer
 	maxPlayers := d.maxPlayers
 	checkPermission := d.permission
+	runPluginCommand := d.pluginCommands
+	messenger := d.messenger
+	linkMessenger := d.linkMessenger
+	syncAbilities := d.syncAbilities
 	d.mu.RUnlock()
 	ctx.NextEntityID = allocateEntityID
 	ctx.FindPlayer = findPlayer
@@ -307,13 +398,21 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	ctx.DisconnectPlayer = disconnectPlayer
 	ctx.MaxPlayers = maxPlayers
 	ctx.AvailableCommands = d.VisibleCommands(ctx.Player)
+	fillFeedback(&ctx, messenger, linkMessenger, syncAbilities)
 
 	if !ok {
-		if ctx.Reply != nil {
-			_ = ctx.Reply(fmt.Sprintf(`Unknown command: /%s`, name))
-			return
+		// Plugins are asked only once no built-in answers to the name. That
+		// ordering costs nothing — the two sets cannot overlap — and it keeps
+		// a plugin from being consulted on every /gamemode ever typed.
+		if runPluginCommand != nil {
+			if handled, err := runPluginCommand(ctx.Player, input); handled {
+				if err != nil {
+					_ = sendCommandMessage(ctx, err.Error())
+				}
+				return
+			}
 		}
-		_ = sendSystemMessage(ctx.Conn, fmt.Sprintf("Unknown command: /%s", name))
+		_ = sendCommandMessage(ctx, fmt.Sprintf("Unknown command: /%s", name))
 		return
 	}
 	allowed := !command.operatorOnly && command.defaultAllow || ctx.Player != nil && ctx.Player.Operator
@@ -325,10 +424,6 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 		return
 	}
 	if err := command.fn(ctx); err != nil {
-		if ctx.Reply != nil {
-			_ = ctx.Reply(`Error: ` + err.Error())
-			return
-		}
-		_ = sendSystemMessage(ctx.Conn, "Error: "+err.Error())
+		_ = sendCommandMessage(ctx, "Error: "+err.Error())
 	}
 }
