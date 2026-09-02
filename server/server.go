@@ -960,6 +960,7 @@ func (s *Server) safeTick() {
 	s.tickAuxiliaryDimensionItems()
 	s.tickStationaryLavaDamage()
 	s.tickPlayerBreathing()
+	s.tickPlayerStatusEffects()
 	s.tickPlayerHunger()
 	s.tickIdleTimeout()
 	s.tickWeather()
@@ -2424,6 +2425,8 @@ func bedrockEffectType(id string) int32 {
 		return bedrockpacket.EffectResistance
 	case "minecraft:fire_resistance":
 		return bedrockpacket.EffectFireResistance
+	case "minecraft:wither":
+		return bedrockpacket.EffectWither
 	default:
 		return 0
 	}
