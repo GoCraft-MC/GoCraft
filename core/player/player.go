@@ -253,6 +253,16 @@ func (p *Player) ApplyDamage(amount float32, cause string) (health float32, died
 	if amount <= 0 || p.Dead {
 		return p.Health, false
 	}
+	if isFireDamageCause(cause) && p.hasStatusEffectLocked("minecraft:fire_resistance") {
+		return p.Health, false
+	}
+	amount = p.resistedDamageLocked(amount, cause)
+	absorbed := min(amount, p.Absorption)
+	p.Absorption -= absorbed
+	amount -= absorbed
+	if amount <= 0 {
+		return p.Health, false
+	}
 	p.Health -= amount
 	if p.Health <= 0 {
 		p.Health = 0

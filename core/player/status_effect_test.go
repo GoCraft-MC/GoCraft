@@ -52,3 +52,22 @@ func TestStatusEffectMovementMultiplier(t *testing.T) {
 		t.Fatalf("clear returned %#v, remaining %#v", removed, p.StatusEffectsSnapshot())
 	}
 }
+
+func TestDefensiveStatusEffectsApplyToDamage(t *testing.T) {
+	p := New([16]byte{4}, "defended", ClientEditionJava)
+	p.AddStatusEffect(StatusEffect{ID: "absorption", Duration: 100})
+	health, died := p.ApplyDamage(3, "was hit")
+	if died || health != 20 || p.AbsorptionSnapshot() != 1 {
+		t.Fatalf("absorbed hit = health %.1f absorption %.1f died=%v", health, p.AbsorptionSnapshot(), died)
+	}
+	p.AddStatusEffect(StatusEffect{ID: "resistance", Amplifier: 1, Duration: 100})
+	health, _ = p.ApplyDamage(5, "was hit")
+	if health != 18 || p.AbsorptionSnapshot() != 0 {
+		t.Fatalf("resisted hit = health %.1f absorption %.1f", health, p.AbsorptionSnapshot())
+	}
+	p.AddStatusEffect(StatusEffect{ID: "fire_resistance", Duration: 100})
+	health, died = p.ApplyDamage(20, "tried to swim in lava")
+	if died || health != 18 {
+		t.Fatalf("fire-resistant hit = health %.1f died=%v", health, died)
+	}
+}
