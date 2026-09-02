@@ -674,6 +674,26 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			return nil
 		}
 	}
+	if hand == 0 && held.ItemID == "minecraft:shears" && p.GameMode != player.GameModeSpectator {
+		if carved, ok := coreworld.CarvePumpkin(targetBlock, chestFacingFromYaw(p.Rotation.Yaw)); ok {
+			applyBlockChange(int(bx), int(by), int(bz), carved, w, mgr)
+			seeds := player.ItemStack{ItemID: "minecraft:pumpkin_seeds", Count: 4}
+			if !p.GiveItem(seeds) {
+				spawnBlockDrop(w, nextEntityID, p.Position, seeds, 0, mgr, p.Dimension)
+			}
+			if !damageHeldItem(p, conn, 1) {
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, "minecraft:block.pumpkin.carve", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 
 	// Sneaking with an item bypasses block activation so a block can be placed
 	// against doors, containers, workstations, composters, and other UIs.

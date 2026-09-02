@@ -371,6 +371,36 @@ func TestJavaHoneycombWaxesCopper(t *testing.T) {
 	}
 }
 
+func TestJavaShearsCarvePumpkin(t *testing.T) {
+	p := player.New([16]byte{}, "carver", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Rotation.Yaw = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:shears", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(5, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "pumpkin"})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(5, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(3).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	block := w.GetBlock(5, 64, 0)
+	if block.ResourceLocation() != "minecraft:carved_pumpkin" || block.Properties["facing"] != "north" {
+		t.Fatalf("carved pumpkin = %+v", block)
+	}
+	if p.Inventory[player.HotbarStart].Damage != 1 {
+		t.Fatal("carving did not damage shears")
+	}
+	foundSeeds := false
+	for _, stack := range p.Inventory {
+		foundSeeds = foundSeeds || stack.ItemID == "minecraft:pumpkin_seeds" && stack.Count == 4
+	}
+	if !foundSeeds {
+		t.Fatal("carving did not produce four pumpkin seeds")
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
