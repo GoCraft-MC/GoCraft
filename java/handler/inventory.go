@@ -487,6 +487,9 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		if item.ItemID == "minecraft:firework_rocket" {
 			componentCount++
 		}
+		if item.Components != "" {
+			componentCount++
+		}
 		b.VarInt(int32(item.Count)).
 			VarInt(id).
 			VarInt(componentCount).
@@ -494,6 +497,7 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		encodeSlotEnchantments(b, enchantments)
 		encodeSlotPotDecorations(b, item)
 		encodeSlotFireworks(b, item)
+		encodeSlotExtensionComponents(b, item)
 		return
 	}
 	damage := item.Damage
@@ -551,6 +555,9 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 	if len(enchantments) > 0 {
 		componentCount++
 	}
+	if item.Components != "" {
+		componentCount++
+	}
 	b.VarInt(int32(item.Count)).
 		VarInt(id).
 		VarInt(componentCount).
@@ -558,6 +565,7 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		VarInt(2).VarInt(int32(maxDamage)).
 		VarInt(3).VarInt(int32(damage))
 	encodeSlotEnchantments(b, enchantments)
+	encodeSlotExtensionComponents(b, item)
 	if len(lore) > 0 {
 		b.VarInt(8).VarInt(int32(len(lore)))
 		for _, line := range lore {
@@ -570,6 +578,13 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		// actual damage, armour, and cooldown remain server-authoritative.
 		b.VarInt(13).VarInt(0).Bool(false)
 	}
+}
+
+func encodeSlotExtensionComponents(b *protocol.Builder, item player.ItemStack) {
+	if item.Components == "" {
+		return
+	}
+	b.VarInt(0).Bytes(nbtGoCraftComponents(item.NormalizedComponents()))
 }
 
 func encodeSlotEnchantments(b *protocol.Builder, enchantments []player.EnchantmentLevel) {
