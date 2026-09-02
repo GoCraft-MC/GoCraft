@@ -120,7 +120,7 @@ func openStorageContainer(p *player.Player, conn *network.ClientConn, w *corewor
 				continue
 			}
 			if item.Slot >= 0 && item.Slot < len(p.ContainerSlots) && item.ItemID != "" && item.Count > 0 {
-				p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+				p.ContainerSlots[item.Slot] = item.Stack()
 			}
 		}
 	}
@@ -153,7 +153,7 @@ func RefreshOpenStorageContainer(p *player.Player, conn *network.ClientConn, w *
 		p.ContainerSlots = make([]player.ItemStack, javaStorageContainerSize(kind))
 		for _, item := range w.ContainerItems(int(position.X), int(position.Y), int(position.Z)) {
 			if item.Slot >= 0 && item.Slot < len(p.ContainerSlots) && item.ItemID != "" && item.Count > 0 {
-				p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+				p.ContainerSlots[item.Slot] = item.Stack()
 			}
 		}
 		p.ContainerStateID++
@@ -189,7 +189,7 @@ func LoadChestContainerState(p *player.Player, w *coreworld.World, pos spatial.B
 	// Right half → slots 0-26.
 	for _, item := range w.ContainerItems(int(rightPos.X), int(rightPos.Y), int(rightPos.Z)) {
 		if item.Slot >= 0 && item.Slot < chestSlotCount && item.ItemID != "" && item.Count > 0 {
-			p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+			p.ContainerSlots[item.Slot] = item.Stack()
 		}
 	}
 	// Left half → slots 27-53.
@@ -197,7 +197,7 @@ func LoadChestContainerState(p *player.Player, w *coreworld.World, pos spatial.B
 		for _, item := range w.ContainerItems(int(leftPos.X), int(leftPos.Y), int(leftPos.Z)) {
 			slot := item.Slot + chestSlotCount
 			if item.Slot >= 0 && item.Slot < chestSlotCount && slot < slotCount && item.ItemID != "" && item.Count > 0 {
-				p.ContainerSlots[slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+				p.ContainerSlots[slot] = item.Stack()
 			}
 		}
 	}
@@ -442,7 +442,7 @@ func persistStorageContents(p *player.Player, w *coreworld.World) {
 	items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots)+1)
 	for slot, stack := range p.ContainerSlots {
 		if !stack.IsEmpty() {
-			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage})
+			items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 		}
 	}
 	if p.OpenContainerKind == "minecraft:crafter" && p.CrafterDisabledSlots != 0 {
@@ -598,7 +598,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		for slot := 0; slot < chestSlotCount && slot < len(p.ContainerSlots); slot++ {
 			stack := p.ContainerSlots[slot]
 			if !stack.IsEmpty() {
-				rightItems = append(rightItems, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+				rightItems = append(rightItems, coreworld.ContainerItemFromStack(slot, stack))
 			}
 		}
 		w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), kind, rightItems)
@@ -609,7 +609,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		for slot := chestSlotCount; slot < doubleChestSlotCount && slot < len(p.ContainerSlots); slot++ {
 			stack := p.ContainerSlots[slot]
 			if !stack.IsEmpty() {
-				leftItems = append(leftItems, coreworld.ContainerItem{Slot: slot - chestSlotCount, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+				leftItems = append(leftItems, coreworld.ContainerItemFromStack(slot-chestSlotCount, stack))
 			}
 		}
 		w.SetContainerItems(int(lp.X), int(lp.Y), int(lp.Z), kind, leftItems)
@@ -622,7 +622,7 @@ func persistChestContents(p *player.Player, w *coreworld.World) {
 		if stack.IsEmpty() {
 			continue
 		}
-		items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+		items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 	}
 	w.SetContainerItems(int(pos.X), int(pos.Y), int(pos.Z), kind, items)
 }

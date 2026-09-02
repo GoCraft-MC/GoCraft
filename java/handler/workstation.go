@@ -32,7 +32,7 @@ func openWorkstation(p *player.Player, conn *network.ClientConn, w *coreworld.Wo
 	if kind == "minecraft:brewing_stand" && w != nil {
 		for _, ci := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 			if ci.Slot >= 0 && ci.Slot < len(p.ContainerSlots) {
-				p.ContainerSlots[ci.Slot] = player.ItemStack{ItemID: ci.ItemID, Count: ci.Count, Damage: ci.Damage, Enchantments: ci.Enchantments}
+				p.ContainerSlots[ci.Slot] = ci.Stack()
 			}
 		}
 	}
@@ -149,7 +149,7 @@ func clickWorkstationSlot(p *player.Player, containerSlot int, button byte) {
 			p.CarriedItem, *target = *target, player.ItemStack{}
 		case target.IsEmpty() && canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem):
 			*target, p.CarriedItem = p.CarriedItem, player.ItemStack{}
-		case target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage &&
+		case target.SameItem(p.CarriedItem) &&
 			canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem) && target.Count < player.MaxStackSize(target.ItemID):
 			add := minInt(player.MaxStackSize(target.ItemID)-target.Count, p.CarriedItem.Count)
 			target.Count += add
@@ -165,14 +165,16 @@ func clickWorkstationSlot(p *player.Player, containerSlot int, button byte) {
 			return
 		}
 		take := (target.Count + 1) / 2
-		p.CarriedItem = player.ItemStack{ItemID: target.ItemID, Count: take, Damage: target.Damage}
+		p.CarriedItem = *target
+		p.CarriedItem.Count = take
 		target.Count -= take
 		normalizeStack(target)
 	} else if target.IsEmpty() && canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem) {
-		*target = player.ItemStack{ItemID: p.CarriedItem.ItemID, Count: 1, Damage: p.CarriedItem.Damage}
+		*target = p.CarriedItem
+		target.Count = 1
 		p.CarriedItem.Count--
 		normalizeStack(&p.CarriedItem)
-	} else if target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage &&
+	} else if target.SameItem(p.CarriedItem) &&
 		canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem) && target.Count < player.MaxStackSize(target.ItemID) {
 		target.Count++
 		p.CarriedItem.Count--
@@ -217,7 +219,8 @@ func shiftWorkstationSlot(p *player.Player, containerSlot int) {
 			continue
 		}
 		add := minInt(player.MaxStackSize(remaining.ItemID), remaining.Count)
-		slots[index] = player.ItemStack{ItemID: remaining.ItemID, Count: add, Damage: remaining.Damage}
+		slots[index] = remaining
+		slots[index].Count = add
 		remaining.Count -= add
 	}
 	if remaining.Count == 0 {
@@ -305,7 +308,7 @@ func closeWorkstation(p *player.Player, w *coreworld.World) {
 		items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots))
 		for slot, stack := range p.ContainerSlots {
 			if !stack.IsEmpty() {
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+				items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 			}
 		}
 		w.SetContainerItems(int(p.OpenContainerPos.X), int(p.OpenContainerPos.Y), int(p.OpenContainerPos.Z), p.OpenContainerKind, items)

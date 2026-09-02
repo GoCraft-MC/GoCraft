@@ -195,8 +195,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 			if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) {
 				for _, item := range containerItems {
 					if item.ItemID != "" && item.Count > 0 {
-						spawnBlockDrop(w, nextEntityID, dropPosition,
-							player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}, ordinal, mgr, p.Dimension)
+						spawnBlockDrop(w, nextEntityID, dropPosition, item.Stack(), ordinal, mgr, p.Dimension)
 						ordinal++
 					}
 				}
@@ -252,8 +251,7 @@ func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spat
 	entityUUID[6] = (entityUUID[6] & 0x0f) | 0x40
 	entityUUID[8] = (entityUUID[8] & 0x3f) | 0x80
 	dropped := corentity.New(id, entityUUID, corentity.TypeItem, position.X, position.Y+0.25, position.Z)
-	dropped.ItemID, dropped.ItemCount, dropped.ItemDamage = stack.ItemID, stack.Count, stack.Damage
-	dropped.ItemPotDecorations = stack.PotDecorations
+	dropped.SetDroppedItem(stack)
 	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
 	dropped.VX, dropped.VY, dropped.VZ = math.Cos(angle)*0.1, 0.2, math.Sin(angle)*0.1
 	w.Entities.Add(dropped)
@@ -1240,7 +1238,9 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations})
+				cooking := held
+				cooking.Count = 1
+				items = append(items, coreworld.ContainerItemFromStack(slot, cooking))
 				w.SetContainerItems(x, y, z, target.ResourceLocation(), items)
 				if p.GameMode != player.GameModeCreative {
 					inventorySlot := player.HotbarStart + p.HeldSlot
@@ -1297,17 +1297,18 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		items := w.ContainerItems(x, y, z)
 		var stored player.ItemStack
 		if len(items) > 0 {
-			stored = player.ItemStack{ItemID: items[0].ItemID, Count: items[0].Count, Damage: items[0].Damage, Enchantments: items[0].Enchantments}
+			stored = items[0].Stack()
 		}
-		if !stored.IsEmpty() && (stored.ItemID != held.ItemID || stored.Damage != held.Damage || stored.Count >= player.MaxStackSize(stored.ItemID)) {
+		if !stored.IsEmpty() && (!stored.SameItem(held) || stored.Count >= player.MaxStackSize(stored.ItemID)) {
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations}
+			stored = held
+			stored.Count = 1
 		} else {
 			stored.Count++
 		}
-		w.SetContainerItems(x, y, z, target.ResourceLocation(), []coreworld.ContainerItem{{Slot: 0, ItemID: stored.ItemID, Count: stored.Count, Damage: stored.Damage, Enchantments: stored.Enchantments}})
+		w.SetContainerItems(x, y, z, target.ResourceLocation(), []coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, stored)})
 		if p.GameMode != player.GameModeCreative {
 			slot := player.HotbarStart + p.HeldSlot
 			p.Inventory[slot].Count--
