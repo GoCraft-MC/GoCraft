@@ -72,6 +72,9 @@ const (
 	actionStatusStartDigging  = 0 // block targeted — instant break in creative
 	actionStatusCancelDigging = 1 // player looked away / right-clicked before break
 	actionStatusFinishDigging = 2 // break animation completed (survival)
+	actionStatusDropStack     = 3
+	actionStatusDropItem      = 4
+	actionStatusSwapOffhand   = 6
 )
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -126,6 +129,16 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 	}
 	if status == 5 { // RELEASE_USE_ITEM
 		releaseRangedItem(p, w, mgr, conn, nextEntityID)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	if status == actionStatusDropStack || status == actionStatusDropItem {
+		dropJavaHeldItem(p, w, mgr, conn, nextEntityID, status == actionStatusDropStack)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	if status == actionStatusSwapOffhand {
+		swapJavaOffhand(p, conn)
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		return nil
 	}
@@ -235,6 +248,36 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 	// Always acknowledge so the client does not roll back its optimistic update.
 	sendAcknowledgeBlockChange(mgr, p, seq)
 	return nil
+}
+
+func dropJavaHeldItem(p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, entireStack bool) {
+	if p == nil || w == nil || p.Dead || p.GameMode == player.GameModeSpectator || p.HeldSlot < 0 || p.HeldSlot >= 9 {
+		return
+	}
+	slot := player.HotbarStart + p.HeldSlot
+	stack := p.Inventory[slot]
+	if stack.IsEmpty() {
+		return
+	}
+	dropped := stack
+	if !entireStack {
+		dropped.Count = 1
+	}
+	p.Inventory[slot].Count -= dropped.Count
+	normalizeStack(&p.Inventory[slot])
+	clearJavaFoodUse(p)
+	spawnBlockDrop(w, nextEntityID, p.Position, dropped, 0, mgr, p.Dimension)
+	_ = SyncPlayerInventory(conn, p)
+}
+
+func swapJavaOffhand(p *player.Player, conn *network.ClientConn) {
+	if p == nil || p.Dead || p.GameMode == player.GameModeSpectator || p.HeldSlot < 0 || p.HeldSlot >= 9 {
+		return
+	}
+	held := player.HotbarStart + p.HeldSlot
+	p.Inventory[held], p.Inventory[player.OffhandSlot] = p.Inventory[player.OffhandSlot], p.Inventory[held]
+	clearJavaFoodUse(p)
+	_ = SyncPlayerInventory(conn, p)
 }
 
 func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spatial.Vec3, stack player.ItemStack, ordinal int, mgr *session.Manager, dimension int32) {
