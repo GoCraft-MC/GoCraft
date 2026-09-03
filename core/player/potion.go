@@ -89,6 +89,23 @@ func basePotionOutcome(name string) PotionOutcome {
 		return effect("slow_falling", 0, 1800)
 	case "strong_slowness":
 		return effect("slowness", 3, 400)
+	case "decay":
+		return effect("wither", 0, 800)
+	case "luck":
+		return effect("luck", 0, 6000)
+	case "wind_charged", "weaving", "oozing", "infested":
+		return effect(name, 0, 3600)
+	case "turtle_master", "long_turtle_master", "strong_turtle_master":
+		duration, resistance, slowness := int32(400), int32(2), int32(3)
+		if name == "long_turtle_master" {
+			duration = 800
+		} else if name == "strong_turtle_master" {
+			resistance, slowness = 3, 5
+		}
+		return PotionOutcome{Effects: []StatusEffect{
+			{ID: "minecraft:resistance", Amplifier: resistance, Duration: duration, ShowParticles: true, ShowIcon: true},
+			{ID: "minecraft:slowness", Amplifier: slowness, Duration: duration, ShowParticles: true, ShowIcon: true},
+		}}
 	default:
 		return PotionOutcome{}
 	}

@@ -76,3 +76,24 @@ func TestPotionNameReadsCanonicalContents(t *testing.T) {
 		t.Fatal("non-potion stack reported a potion name")
 	}
 }
+
+func TestPotionOutcomeForTurtleMasterAndTrialEffects(t *testing.T) {
+	for _, name := range []string{"wind_charged", "weaving", "oozing", "infested"} {
+		stack := ItemStack{ItemID: "minecraft:potion", Count: 1}
+		if err := stack.SetComponent("potion_contents", map[string]string{"potion": "minecraft:" + name}); err != nil {
+			t.Fatal(err)
+		}
+		outcome, _ := PotionOutcomeFor(stack)
+		if len(outcome.Effects) != 1 || outcome.Effects[0].ID != "minecraft:"+name || outcome.Effects[0].Duration != 3600 {
+			t.Fatalf("%s outcome = %+v", name, outcome)
+		}
+	}
+	stack := ItemStack{ItemID: "minecraft:potion", Count: 1}
+	if err := stack.SetComponent("potion_contents", map[string]string{"potion": "minecraft:strong_turtle_master"}); err != nil {
+		t.Fatal(err)
+	}
+	outcome, _ := PotionOutcomeFor(stack)
+	if len(outcome.Effects) != 2 || outcome.Effects[0].Amplifier != 3 || outcome.Effects[1].Amplifier != 5 {
+		t.Fatalf("strong turtle master outcome = %+v", outcome)
+	}
+}
