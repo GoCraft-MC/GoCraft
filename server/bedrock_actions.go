@@ -71,29 +71,15 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if bedrockIsHoe(item) {
-		var replacement coreworld.Block
-		changed := false
-		switch name {
-		case "minecraft:grass_block", "minecraft:dirt", "minecraft:dirt_path":
-			if i.Face != 0 && s.bedrockWorld().GetBlock(x, y+1, z).IsAir() {
-				replacement = bedrockBlock("farmland", map[string]string{"moisture": "0"})
-				changed = true
+		canMakeFarmland := i.Face != 0 && s.bedrockWorld().GetBlock(x, y+1, z).IsAir()
+		if replacement, drop, ok := coreworld.UseHoe(target, canMakeFarmland); ok {
+			s.setBedrockActionBlock(x, y, z, replacement)
+			if p.GameMode != player.GameModeCreative && !drop.IsEmpty() {
+				s.giveBedrockActionItem(p, drop)
 			}
-		case "minecraft:coarse_dirt", "minecraft:rooted_dirt":
-			// Pumpkin matches vanilla here: coarse/rooted dirt first become dirt,
-			// and rooted dirt may also be worked from its bottom face.
-			replacement = bedrockBlock("dirt", nil)
-			changed = true
+			s.damageBedrockHeldItem(p, 1)
+			return true
 		}
-		if !changed {
-			return false
-		}
-		s.setBedrockActionBlock(x, y, z, replacement)
-		if name == "minecraft:rooted_dirt" && p.GameMode != player.GameModeCreative {
-			s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:hanging_roots", Count: 1})
-		}
-		s.damageBedrockHeldItem(p, 1)
-		return true
 	}
 
 	if bedrockIsAxe(item) {
