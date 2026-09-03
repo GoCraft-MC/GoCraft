@@ -81,8 +81,11 @@ func basePotionOutcome(name string) PotionOutcome {
 }
 
 func potionEffectID(name string) string {
-	if name == "swiftness" {
+	switch name {
+	case "swiftness":
 		return "speed"
+	case "leaping":
+		return "jump_boost"
 	}
 	return name
 }
