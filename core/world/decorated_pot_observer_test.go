@@ -32,3 +32,17 @@ func TestSetBlockEntityNotifiesObserverWithOwnedData(t *testing.T) {
 		t.Fatalf("observer data aliases caller: %v", observed.Data)
 	}
 }
+
+func TestBlockObserverReceivesPreviousState(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	stone := Block{Namespace: "minecraft", Name: "stone"}
+	torch := Block{Namespace: "minecraft", Name: "torch"}
+	w.SetBlock(1, 64, 1, stone)
+	var observed BlockChange
+	w.SetBlockObserver(func(change BlockChange) { observed = change })
+	w.SetBlock(1, 64, 1, torch)
+	if !observed.Previous.Equal(stone) || !observed.Block.Equal(torch) {
+		t.Fatalf("observer states = previous %s current %s", observed.Previous.ResourceLocation(), observed.Block.ResourceLocation())
+	}
+}

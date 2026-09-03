@@ -25,6 +25,18 @@ func TestLoadServerIconUsesEmbeddedDefault(t *testing.T) {
 	}
 }
 
+func TestLoadServerIconFallsBackWhenConfiguredFileIsMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing-server-icon.png")
+	dataURI, err := LoadServerIcon(path)
+	if err != nil {
+		t.Fatalf("LoadServerIcon: %v", err)
+	}
+	icon := decodeStatusIcon(t, dataURI)
+	if icon.Bounds().Dx() != 64 || icon.Bounds().Dy() != 64 {
+		t.Fatalf("icon dimensions = %v, want 64x64", icon.Bounds())
+	}
+}
+
 func TestLoadServerIconResizesConfiguredPNG(t *testing.T) {
 	source := image.NewNRGBA(image.Rect(0, 0, 96, 48))
 	for y := range 48 {

@@ -44,6 +44,7 @@ import (
 	coreexperience "GoCraft/core/experience"
 	"GoCraft/core/game"
 	"GoCraft/core/intent"
+	"GoCraft/core/itemregistry"
 	corepermission "GoCraft/core/permission"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
@@ -118,6 +119,22 @@ type Server struct {
 	// so they can emit native events without knowing about runtimes.
 	pluginRegistry *coreplugin.Registry
 	plugins        *coreplugin.Bus
+
+	// pluginEffects holds what plugins asked the server to do. Writes never
+	// originate from a plugin: a verdict carries them here and the tick applies
+	// them, which is what keeps a handler on another thread from touching world
+	// state while the simulation is reading it.
+	pluginEffects *coreplugin.MutationQueue
+
+	// commandTreeVersion is the registry version every connected client was
+	// last told about. Compared once per tick, because both editions are told
+	// their command list once and have no way to ask for it again.
+	commandTreeVersion uint64
+
+	// pendingJoins holds players who have joined but cannot yet be written to.
+	// See announceJoinWhenReachable.
+	pendingJoinsMu sync.Mutex
+	pendingJoins   map[[16]byte]int
 
 	// connCount tracks the number of active TCP connections (Java).
 	connCount atomic.Int64
@@ -200,10 +217,12 @@ type bedrockRecentBlockUse struct {
 
 // New creates a Server with the given configuration.
 // It initialises the game core and generates the RSA keypair for online-mode auth.
+// The plugin drop directory is not created here. It was, against a hardcoded
+// "plugins" that ignored plugins.directory: an admin who configured another
+// name got an empty directory they never asked for and a scan somewhere else.
+// loadPlugins creates the configured one through ScanBundles, and only when the
+// subsystem is enabled.
 func New(cfg *config.Config) (*Server, error) {
-	if err := coreplugin.EnsureDirectory(coreplugin.DefaultDirectory); err != nil {
-		return nil, err
-	}
 	handler.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
@@ -365,7 +384,10 @@ func New(cfg *config.Config) (*Server, error) {
 
 	bus := intent.NewBus(64, 512)
 	eventBudget := time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond
-	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, nil, nil)
+	// The queue is built here rather than left to the registry, because the
+	// tick has to drain it and only something holding it can.
+	pluginEffects := coreplugin.NewMutationQueue()
+	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, pluginEffects, nil)
 	plugins := pluginRegistry.Bus()
 	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
 		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
@@ -407,6 +429,7 @@ func New(cfg *config.Config) (*Server, error) {
 		customItems:             customItemsMgr,
 		intentBus:               bus,
 		pluginRegistry:          pluginRegistry,
+		pluginEffects:           pluginEffects,
 		plugins:                 plugins,
 		mobAIs:                  make(map[int32]*mobAI),
 		spawnRNG:                rand.New(rand.NewSource(cfg.WorldSeed ^ 0x4d6f624372616674)),
@@ -433,6 +456,11 @@ func New(cfg *config.Config) (*Server, error) {
 			s.spawnState.set(savedSpawn)
 		}
 	}
+	// Installed once s exists, and before any listener opens: the registry is
+	// empty until plugins load, so an early line simply finds nothing there.
+	cmds.SetPluginCommands(s.runPluginCommand)
+	cmds.SetCommandRegistry(pluginRegistry.Commands())
+
 	s.registerSpawnCommands()
 	s.registerLifecycleCommands()
 	s.registerWorldSettingsCommands()
@@ -447,7 +475,7 @@ func New(cfg *config.Config) (*Server, error) {
 		if ctx.Reply != nil {
 			return ctx.Reply(report)
 		}
-		return handler.SendSystemMessage(ctx.Conn, report)
+		return commandReply(ctx, report)
 	})
 	cmds.Register("tps", func(ctx handler.CommandContext) error {
 		tps, avgMs := timings.TPS()
@@ -462,7 +490,7 @@ func New(cfg *config.Config) (*Server, error) {
 		if ctx.Reply != nil {
 			return ctx.Reply(message)
 		}
-		return handler.SendSystemMessage(ctx.Conn, message)
+		return commandReply(ctx, message)
 	})
 	cmds.Register("mspt", func(ctx handler.CommandContext) error {
 		return commandReply(ctx, timings.MSPT())
@@ -470,7 +498,7 @@ func New(cfg *config.Config) (*Server, error) {
 	cmds.Register("time", func(ctx handler.CommandContext) error {
 		if len(ctx.Args) == 0 {
 			tod := s.worldAge % 24000
-			return handler.SendSystemMessage(ctx.Conn,
+			return commandReply(ctx,
 				fmt.Sprintf("Time of day: %d (world age: %d)", tod, s.worldAge))
 		}
 		switch strings.ToLower(ctx.Args[0]) {
@@ -508,7 +536,7 @@ func New(cfg *config.Config) (*Server, error) {
 			return fmt.Errorf("usage: /time <day|night|set <0-23999>>")
 		}
 		handler.DispatchWorldTime(s.worldAge, s.worldAge%24000, s.sessions)
-		return handler.SendSystemMessage(ctx.Conn,
+		return commandReply(ctx,
 			fmt.Sprintf("Time set to %d", s.worldAge%24000))
 	})
 	cmds.RequireOperator(`timings`, `tps`, `mspt`, `time`)
@@ -536,6 +564,10 @@ func New(cfg *config.Config) (*Server, error) {
 			configuredGameMode(cfg.DefaultGameMode),
 			difficultyID(cfg.Difficulty),
 		)
+		// The same tree the Java adapter renders. Installed here rather than
+		// passed to the constructor because a listener without it behaves
+		// exactly as this edition did before: it advertises nothing.
+		s.bedrockListener.SetCommandTree(s.cmds.CommandTree)
 		// Load manually-configured Bedrock packs from server.yml.
 		if cfg.ResourcePack.Bedrock.Enabled && len(cfg.ResourcePack.Bedrock.Paths) > 0 {
 			if packs, err := loadBedrockPacks(cfg.ResourcePack.Bedrock.Paths); err != nil {
@@ -562,9 +594,6 @@ func New(cfg *config.Config) (*Server, error) {
 		s.sessions.SetExternalKnockbackHandler(func(p *player.Player, sourceX, sourceZ, horizontal, vertical float64) {
 			s.sendLegacyPlayerKnockback(&session.Session{Player: p}, sourceX, sourceZ, horizontal, vertical)
 		})
-		worldInstance.SetBlockObserver(s.bedrockListener.BroadcastBlockChange)
-		netherWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(1))
-		endWorld.SetBlockObserver(s.bedrockListener.DimensionBlockObserver(2))
 	}
 	for dimension, dimensionWorld := range map[int32]*coreworld.World{
 		dimensionOverworld: worldInstance,
@@ -572,6 +601,17 @@ func New(cfg *config.Config) (*Server, error) {
 		dimensionEnd:       endWorld,
 	} {
 		dimension := dimension
+		dimensionWorld := dimensionWorld
+		var bedrockObserver func(coreworld.BlockChange)
+		if s.bedrockListener != nil {
+			bedrockObserver = s.bedrockListener.DimensionBlockObserver(dimension)
+		}
+		dimensionWorld.SetBlockObserver(func(change coreworld.BlockChange) {
+			if bedrockObserver != nil {
+				bedrockObserver(change)
+			}
+			handler.BroadcastBlockLightUpdatesInDimension(dimensionWorld, change, s.sessions, dimension)
+		})
 		dimensionWorld.SetBlockEntityObserver(func(entity coreworld.BlockEntity) {
 			handler.BroadcastBlockEntityDataInDimension(entity, s.sessions, dimension)
 			if s.bedrockListener != nil {
@@ -581,6 +621,19 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	cmds.SetPlayerTeleporter(s.teleportPlayer)
 	cmds.SetPlayerDisconnector(s.disconnectPlayer)
+	// The command context used to carry a *network.ClientConn, which a Bedrock
+	// player does not have, so roughly twenty commands ran and told that player
+	// nothing. These three bridges are what replaced it: only the server sees
+	// both adapters, so only the server can write them.
+	cmds.SetMessenger(s.sendPlayerMessage)
+	cmds.SetLinkMessenger(s.sendPlayerLink)
+	cmds.SetAbilitySync(s.syncPlayerAbilities)
+	// Registered here rather than beside the registry, because a runtime that
+	// can come back from a crash needs to tell the server it did — and only the
+	// server knows who is online to replay it to.
+	if err := s.registerPluginRuntimes(cfg); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -988,6 +1041,9 @@ func (s *Server) tickPlayerHunger() {
 // tickIntents drains the intent bus and applies each intent to world/player state.
 // This is the sole point of mutating player state from adapter goroutines.
 func (s *Server) tickIntents() {
+	s.announceReachableJoins()
+	s.applyPluginEffects()
+	s.resendChangedCommands()
 	dr := s.intentBus.Drain()
 
 	for _, l := range dr.Lifecycle {
@@ -1147,6 +1203,7 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	}
 
 	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
+	s.announceJoinWhenReachable(p)
 	slog.Info("player joined via intent",
 		"name", p.Username, "uuid", p.UUID,
 		"edition", i.Edition, "trusted", i.TrustedIdentity,
@@ -1611,12 +1668,14 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 			World:   s.worldForPlayer(p),
 			Manager: s.sessions,
 		}
+		// Reply and SyncAbilities are not set here. Dispatch fills them from
+		// the bridges, which route by edition, so this path and the Java one in
+		// chat.go now answer through the same code — the two used to diverge,
+		// which is how commands ended up working on one edition only.
+		//
+		// Teleport and dimension change stay: they move this player through
+		// this adapter, which is not something a shared bridge can do.
 		if s.bedrockListener != nil && p.Edition == player.ClientEditionBedrock {
-			ctx.Reply = func(message string) error {
-				s.bedrockListener.SendMessage(p.UUID, message)
-				return nil
-			}
-			ctx.SyncAbilities = s.bedrockListener.RefreshPlayerAbilities
 			ctx.TeleportTo = func(x, y, z float64) error {
 				p.Position = spatial.Vec3{X: x, Y: y, Z: z}
 				p.FallDistance = 0
@@ -1685,7 +1744,7 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 			return
 		}
 		held := p.HeldItem()
-		if s.plugins != nil && !s.plugins.EmitBlockBreak(p, i.Position, block, held) {
+		if s.plugins != nil && !s.plugins.EmitBlockBreak(p, i.Position, block, held.ItemID) {
 			if s.bedrockListener != nil {
 				s.bedrockListener.DimensionBlockObserver(p.Dimension)(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block})
 			}
@@ -2478,16 +2537,19 @@ func canPlaceCanonicalInventorySlot(slot int, stack player.ItemStack) bool {
 	if stack.IsEmpty() || slot < 5 || slot > 8 {
 		return true
 	}
-	name := strings.TrimPrefix(stack.ItemID, "minecraft:")
-	switch slot {
-	case 5:
-		return strings.HasSuffix(name, "_helmet") || name == "turtle_helmet" || name == "carved_pumpkin" || strings.HasSuffix(name, "_head") || strings.HasSuffix(name, "_skull")
-	case 6:
-		return strings.HasSuffix(name, "_chestplate") || name == "elytra"
-	case 7:
-		return strings.HasSuffix(name, "_leggings")
-	case 8:
-		return strings.HasSuffix(name, "_boots")
+	definition, ok := itemregistry.Lookup(stack.ItemID)
+	if !ok || definition.Equipment == nil {
+		return false
+	}
+	switch definition.Equipment.Slot {
+	case "head":
+		return slot == 5
+	case "chest":
+		return slot == 6
+	case "legs":
+		return slot == 7
+	case "feet":
+		return slot == 8
 	default:
 		return false
 	}
@@ -4894,6 +4956,7 @@ func (s *Server) registerPlayer(result *handler.LoginResult, remoteAddress strin
 		// Duplicate UUID — extremely rare; log and continue with assigned ID.
 		slog.Warn("duplicate player UUID", "name", p.Username, "uuid", p.UUID, "err", err)
 	}
+	s.announceJoinWhenReachable(p)
 
 	// Update the status-ping online count.
 	handler.OnlineCount.Store(int32(s.game.OnlineCount()))

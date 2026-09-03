@@ -6,7 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	abi "GoCraft/abi/v1"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 type fakeRuntime struct {
@@ -51,8 +53,8 @@ func TestPreflightProvisionsOnlyRequiredRuntime(t *testing.T) {
 		}
 	}
 	bundles := []Bundle{
-		{Manifest: Manifest{ID: "one", Runtime: "needed"}},
-		{Manifest: Manifest{ID: "two", Runtime: "needed"}},
+		{Bundle: gcpkg.Bundle{Manifest: gcpkg.Manifest{ID: "one", Runtime: "needed"}}},
+		{Bundle: gcpkg.Bundle{Manifest: gcpkg.Manifest{ID: "two", Runtime: "needed"}}},
 	}
 	if err := registry.Preflight(context.Background(), bundles); err != nil {
 		t.Fatal(err)
@@ -64,7 +66,7 @@ func TestPreflightProvisionsOnlyRequiredRuntime(t *testing.T) {
 
 func TestPreflightReportsMissingRuntime(t *testing.T) {
 	registry := NewRegistry(context.Background(), 0, nil, nil)
-	err := registry.Preflight(context.Background(), []Bundle{{Manifest: Manifest{ID: "shop", Runtime: "missing"}}})
+	err := registry.Preflight(context.Background(), []Bundle{{Bundle: gcpkg.Bundle{Manifest: gcpkg.Manifest{ID: "shop", Runtime: "missing"}}}})
 	if err == nil || !strings.Contains(err.Error(), "not available in this build") {
 		t.Fatalf("Preflight() error = %v", err)
 	}

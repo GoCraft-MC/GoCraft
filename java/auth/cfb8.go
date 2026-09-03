@@ -12,11 +12,12 @@ import (
 // Minecraft uses CFB with 8-bit segment size (CFB8), so we implement it here.
 //
 // CFB8 algorithm for each byte i:
-//   keystream = AES_Encrypt(shiftRegister)
-//   if encrypting: ciphertext[i] = plaintext[i] ^ keystream[0]
-//                  shiftRegister = (shiftRegister << 8) | ciphertext[i]
-//   if decrypting: plaintext[i]  = ciphertext[i] ^ keystream[0]
-//                  shiftRegister = (shiftRegister << 8) | ciphertext[i]
+//
+//	keystream = AES_Encrypt(shiftRegister)
+//	if encrypting: ciphertext[i] = plaintext[i] ^ keystream[0]
+//	               shiftRegister = (shiftRegister << 8) | ciphertext[i]
+//	if decrypting: plaintext[i]  = ciphertext[i] ^ keystream[0]
+//	               shiftRegister = (shiftRegister << 8) | ciphertext[i]
 //
 // In both modes the shift register is updated with the ciphertext byte.
 type cfb8Stream struct {

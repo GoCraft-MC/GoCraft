@@ -2,6 +2,21 @@
 gocraft-linux-amd64
 gocraft-windows-amd64.exe
 *.exe
+examples/go-plugin/bin/
+# What `-gocraft-dump-commands` writes; the bundle build reads it and the
+# packer skips it.
+examples/go-plugin/.gocraft/
+# `go build` with no -o names the binary after the directory.
+examples/go-plugin/go-plugin
+
+# The event generator, built at the root. *.exe covered the Windows build and
+# nothing covered the one without an extension, which is how an 11 MB ELF got
+# committed here once. Anchored: cmd/protoc-gen-gocraft is the source.
+/protoc-gen-gocraft
+
+# Same trap in the miniserv module: `go build ./...` there drops a 13 MB
+# binary named after the directory, right next to its source.
+/miniserv/miniserv
 
 # Plugin bundles (.gcpkg files) dropped in by the admin.
 # The README is tracked, so use the wildcard pattern instead of plugins/ to
@@ -10,9 +25,9 @@ plugins/*
 !plugins/README.md
 
 # Worlds and state written by a running server
-world/
-world_nether/
-world_end/
+/world/
+/world_nether/
+/world_end/
 logs/latest.log
 logs/*.log.gz
 ops.json

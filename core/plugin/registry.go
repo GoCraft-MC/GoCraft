@@ -8,13 +8,15 @@ import (
 	"time"
 
 	"GoCraft/core/player"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 const defaultEventBudget = 2 * time.Millisecond
 
 type subscriber struct {
 	id          string
-	priority    Priority
+	priority    gcpkg.Priority
 	instance    Instance
 	health      *healthTracker
 	permissions []string
@@ -134,9 +136,9 @@ func (b *Bus) Health(pluginID string) (HealthSnapshot, bool) {
 	return tracker.snapshot(time.Now()), true
 }
 
-func priorityRank(priority Priority) int {
-	if priority == PriorityMonitor {
+func priorityRank(priority gcpkg.Priority) int {
+	if priority == gcpkg.PriorityMonitor {
 		return 5
 	}
-	return int(PriorityHighest - priority)
+	return int(gcpkg.PriorityHighest - priority)
 }

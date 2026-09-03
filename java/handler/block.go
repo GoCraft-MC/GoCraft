@@ -22,6 +22,7 @@ import (
 	corentity "GoCraft/core/entity"
 	coreexperience "GoCraft/core/experience"
 	coreintent "GoCraft/core/intent"
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
@@ -141,7 +142,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		heldSlot := player.HotbarStart + p.HeldSlot
 		held := p.Inventory[heldSlot]
 		position := spatial.BlockPos{X: bx, Y: by, Z: bz}
-		if plugins != nil && !plugins.EmitBlockBreak(p, position, broken, held) {
+		if plugins != nil && !plugins.EmitBlockBreak(p, position, broken, held.ItemID) {
 			BroadcastBlockChange(coreworld.BlockChange{X: int(bx), Y: int(by), Z: int(bz), Block: broken}, mgr)
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
@@ -180,6 +181,8 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		breakLinkedDoorHalf(int(bx), int(by), int(bz), broken, w, mgr)
 		unlinkChestPartner(int(bx), int(by), int(bz), broken, w, mgr)
 		breakUnsupportedBlocksAboveWithDrops(int(bx), int(by), int(bz), w, mgr, nextEntityID, p.Dimension)
+		// Client which sent this event produce sounds on its own
+		// Maybe we should broadcast some sounds only to other players?
 		broadcastSoundAt(mgr, blockBreakSound(broken.ResourceLocation()), soundCategoryBlocks,
 			float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 		w.EmitVibration(int(bx), int(by), int(bz))
@@ -632,6 +635,7 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		return nil
 	}
 	if !bypassActivation && toggleDoor(int(bx), int(by), int(bz), targetBlock, w, mgr) {
+		// Client which sent this event plays sound twice.
 		sound := "minecraft:block.wooden_door.open"
 		if targetBlock.Properties["open"] == "true" {
 			sound = "minecraft:block.wooden_door.close"
@@ -882,6 +886,8 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		}
 		block.Properties = redstoneWireConnections(px, py, pz, w)
 	}
+	broadcastSoundAt(mgr, blockBreakSound(block.ResourceLocation()), soundCategoryBlocks,
+		float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
 	slog.Info("block place", "player", p.Username,
 		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
 	switch {
@@ -2088,25 +2094,30 @@ func buildPackedSpawnPosition(packed int64) *protocol.Packet {
 }
 
 func isHoe(item string) bool {
-	switch item {
-	case "minecraft:wooden_hoe", "minecraft:stone_hoe", "minecraft:iron_hoe",
-		"minecraft:golden_hoe", "minecraft:diamond_hoe", "minecraft:netherite_hoe":
-		return true
-	default:
-		return false
-	}
+	return toolCategory(item) == itemregistry.ToolHoe
 }
 
 func isAxe(item string) bool {
-	return strings.HasSuffix(item, "_axe") && !strings.HasSuffix(item, "pickaxe")
+	return toolCategory(item) == itemregistry.ToolAxe
 }
 
 func isShovel(item string) bool {
-	return strings.HasSuffix(item, "_shovel")
+	return toolCategory(item) == itemregistry.ToolShovel
 }
 
 func isBlockUseTool(item string) bool {
-	return isHoe(item) || isAxe(item) || isShovel(item) || item == "minecraft:flint_and_steel"
+	category := toolCategory(item)
+	return category == itemregistry.ToolHoe || category == itemregistry.ToolAxe ||
+		category == itemregistry.ToolShovel || category == itemregistry.ToolFlintAndSteel
+
+}
+
+func toolCategory(item string) itemregistry.ToolCategory {
+	definition, ok := itemregistry.Lookup(item)
+	if !ok || definition.Tool == nil {
+		return ""
+	}
+	return definition.Tool.Category
 }
 
 func axeTransformation(block coreworld.Block) (coreworld.Block, string, bool) {

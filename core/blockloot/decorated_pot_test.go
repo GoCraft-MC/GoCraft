@@ -10,7 +10,7 @@ import (
 func TestDecoratedPotIntactDropPreservesDecorations(t *testing.T) {
 	decorations := [4]string{"minecraft:angler_pottery_sherd", "minecraft:brick", "minecraft:skull_pottery_sherd", "minecraft:heart_pottery_sherd"}
 	drops := Drops(Context{
-		Block: coreworld.Block{Namespace: "minecraft", Name: "decorated_pot", Properties: map[string]string{"cracked": "false"}},
+		Block:          coreworld.Block{Namespace: "minecraft", Name: "decorated_pot", Properties: map[string]string{"cracked": "false"}},
 		PotDecorations: decorations,
 	})
 	if len(drops) != 1 || drops[0].ItemID != "minecraft:decorated_pot" || drops[0].Count != 1 {
@@ -24,8 +24,8 @@ func TestDecoratedPotIntactDropPreservesDecorations(t *testing.T) {
 func TestDecoratedPotShatterReturnsOriginalSherds(t *testing.T) {
 	decorations := [4]string{"minecraft:angler_pottery_sherd", "minecraft:brick", "minecraft:skull_pottery_sherd", "minecraft:angler_pottery_sherd"}
 	drops := Drops(Context{
-		Block: coreworld.Block{Namespace: "minecraft", Name: "decorated_pot", Properties: map[string]string{"cracked": "true"}},
-		Tool: player.ItemStack{ItemID: "minecraft:iron_pickaxe", Count: 1},
+		Block:          coreworld.Block{Namespace: "minecraft", Name: "decorated_pot", Properties: map[string]string{"cracked": "true"}},
+		Tool:           player.ItemStack{ItemID: "minecraft:iron_pickaxe", Count: 1},
 		PotDecorations: decorations,
 	})
 	counts := map[string]int{}

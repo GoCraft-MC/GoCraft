@@ -26,3 +26,17 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      # miniserv is a module of its own, so the steps above never reach it:
+      # `./...` stops at a module boundary. That is how a stale go.sum
+      # survived a fork bump and an emptied one survived a push, both under
+      # a green tick. Two checks, because they fail differently: the lockfile
+      # can be wrong while the source compiles, and the source can break on a
+      # dependency the lockfile records perfectly well.
+      - name: Miniserv lockfile
+        working-directory: miniserv
+        run: go mod tidy -diff
+
+      - name: Miniserv build
+        working-directory: miniserv
+        run: go build ./...

@@ -202,6 +202,18 @@ func (l *Listener) syncLocalPlayerState(viewer *bedrockSession) {
 	l.sendLocalPlayerState(viewer, p)
 }
 
+// HasSession reports whether this player can be written to.
+//
+// The server asks before announcing a join to plugins: a greeting sent while
+// the client is still logging in has nowhere to go, and the plugin would look
+// like it did nothing.
+func (l *Listener) HasSession(uuid [16]byte) bool {
+	l.sessionsMu.RLock()
+	_, ok := l.sessions[uuid]
+	l.sessionsMu.RUnlock()
+	return ok
+}
+
 // RefreshPlayerAbilities immediately publishes flight, operator, god-mode,
 // and movement settings after a command changes canonical player state.
 func (l *Listener) RefreshPlayerAbilities(p *player.Player) {
@@ -314,16 +326,26 @@ func (l *Listener) syncPlayers(viewer *bedrockSession, players []*player.Player,
 			_ = viewer.conn.WritePacket(&packet.ActorEvent{EntityRuntimeID: bedrockRemoteRuntimeID(p.EntityID), EventType: packet.ActorEventDeath})
 		}
 		if p.UUID != viewer.uuid && (previous.position != p.Position || previous.rotation != p.Rotation) {
-			_ = viewer.conn.WritePacket(&packet.MovePlayer{
-				EntityRuntimeID: bedrockRemoteRuntimeID(p.EntityID),
-				Position:        playerNetworkPosition(p.Position),
-				Pitch:           p.Rotation.Pitch,
-				Yaw:             p.Rotation.Yaw,
-				HeadYaw:         p.Rotation.Yaw,
-				Mode:            bedrockRemotePlayerMoveMode(previous.position, p.Position),
-				OnGround:        p.OnGround,
-				Tick:            tick,
-			})
+			if bedrockRemotePlayerNeedsRespawn(previous.position, p.Position) {
+				_ = viewer.conn.WritePacket(&packet.RemoveActor{EntityUniqueID: int64(bedrockRemoteRuntimeID(p.EntityID))})
+				platform := viewer.buildPlatform
+				if targetSession := bedrockByUUID[p.UUID]; targetSession != nil {
+					platform = targetSession.buildPlatform
+				}
+				_ = viewer.conn.WritePacket(buildAddBedrockPlayer(p, platform))
+				l.sendPlayerEquipment(viewer, p)
+			} else {
+				_ = viewer.conn.WritePacket(&packet.MovePlayer{
+					EntityRuntimeID: bedrockRemoteRuntimeID(p.EntityID),
+					Position:        playerNetworkPosition(p.Position),
+					Pitch:           p.Rotation.Pitch,
+					Yaw:             p.Rotation.Yaw,
+					HeadYaw:         p.Rotation.Yaw,
+					Mode:            packet.MoveModeNormal,
+					OnGround:        p.OnGround,
+					Tick:            tick,
+				})
+			}
 		}
 		if p.UUID != viewer.uuid && (previous.inventory != p.Inventory || previous.heldSlot != p.HeldSlot) {
 			l.sendPlayerEquipment(viewer, p)
@@ -409,18 +431,14 @@ func bedrockPlayerInView(viewer, target *player.Player) bool {
 		dz >= -bedrockChunkRadius && dz <= bedrockChunkRadius
 }
 
-// bedrockRemotePlayerMoveMode keeps ordinary walking/sprinting smooth, but
-// marks teleport-sized canonical jumps explicitly. Bedrock clients may discard
-// a huge MoveModeNormal delta for a remote actor, leaving a Java player stale or
-// invisible after /tp until that actor is respawned.
-func bedrockRemotePlayerMoveMode(previous, current spatial.Vec3) byte {
+// bedrockRemotePlayerNeedsRespawn separates smooth movement from an
+// authoritative teleport. Re-spawning a remote actor avoids routing command
+// teleports through the local-player correction path used by MoveModeTeleport.
+func bedrockRemotePlayerNeedsRespawn(previous, current spatial.Vec3) bool {
 	const maxNormalDelta = 8.0
-	if math.Abs(current.X-previous.X) > maxNormalDelta ||
+	return math.Abs(current.X-previous.X) > maxNormalDelta ||
 		math.Abs(current.Y-previous.Y) > maxNormalDelta ||
-		math.Abs(current.Z-previous.Z) > maxNormalDelta {
-		return byte(packet.MoveModeTeleport)
-	}
-	return byte(packet.MoveModeNormal)
+		math.Abs(current.Z-previous.Z) > maxNormalDelta
 }
 
 func entityInView(viewer *player.Player, entity *corentity.Entity) bool {

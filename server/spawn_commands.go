@@ -100,9 +100,12 @@ func (s *Server) registerSpawnCommands() {
 	})
 }
 
+// commandReply answers the issuing player. The dispatcher fills Reply from an
+// edition-neutral bridge before any handler runs, so a nil one means the
+// command was invoked outside Dispatch and there is nobody to answer.
 func commandReply(ctx handler.CommandContext, message string) error {
-	if ctx.Reply != nil {
-		return ctx.Reply(message)
+	if ctx.Reply == nil {
+		return nil
 	}
-	return handler.SendSystemMessage(ctx.Conn, message)
+	return ctx.Reply(message)
 }

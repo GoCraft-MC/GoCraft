@@ -5,19 +5,21 @@ import (
 	"testing"
 	"time"
 
-	abi "GoCraft/abi/v1"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
+
+	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
 )
 
 func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {
 	bus := NewBus(context.Background(), time.Second)
 	var received *abi.Event
 	instance := &fakeInstance{
-		manifest: Manifest{
+		manifest: gcpkg.Manifest{
 			ID: "protect", Permissions: []string{"zone.trusted", "zone.build"},
-			Subscriptions: []Subscription{{Event: EventBlockBreak}},
+			Subscriptions: []gcpkg.Subscription{{Event: EventBlockBreak}},
 		},
 		dispatch: func(_ context.Context, event *abi.Event) (abi.Verdict, error) {
 			received = event
@@ -33,8 +35,11 @@ func TestBlockBreakPayloadIsEditionNeutral(t *testing.T) {
 	block := coreworld.Block{Namespace: "minecraft", Name: "oak_log", Properties: map[string]string{
 		"waterlogged": "false", "axis": "y",
 	}}
+	// The tool is the item id, not an ItemStack: the schema declares a string,
+	// because nothing downstream reads a count or durability off it and a
+	// vocabulary type nobody uses is one more thing every runtime must model.
 	allowed := bus.EmitBlockBreak(p, spatial.BlockPos{X: 4, Y: 64, Z: -2}, block,
-		player.ItemStack{ItemID: "minecraft:iron_axe"})
+		"minecraft:iron_axe")
 	if allowed || received == nil {
 		t.Fatalf("allowed = %v, event = %v", allowed, received)
 	}

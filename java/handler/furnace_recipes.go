@@ -1,13 +1,11 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
-	"GoCraft/internal/gamedata"
 )
 
 // CookingRecipeDescription is the protocol-neutral form of one fixed Java
@@ -25,30 +23,7 @@ type CookingRecipeDescription struct {
 var (
 	cookingRecipesOnce sync.Once
 	cookingRecipes     map[string]map[string]CookingRecipeDescription
-	furnaceFuelTicks   map[string]int
-	furnaceFuelErr     error
 )
-
-func init() {
-	var catalogue struct {
-		Version string         `json:"_gocraft_version"`
-		Fuels   map[string]int `json:"fuels"`
-	}
-	data, err := gamedata.FS.ReadFile("java/1.21.4/fuels.json")
-	if err != nil {
-		furnaceFuelErr = fmt.Errorf("reading embedded fuels: %w", err)
-		return
-	}
-	if err := json.Unmarshal(data, &catalogue); err != nil {
-		furnaceFuelErr = fmt.Errorf("decoding embedded fuels: %w", err)
-		return
-	}
-	if catalogue.Version != RecipeCatalogVersion {
-		furnaceFuelErr = fmt.Errorf("fuel catalogue version %q, want %s", catalogue.Version, RecipeCatalogVersion)
-		return
-	}
-	furnaceFuelTicks = catalogue.Fuels
-}
 
 func buildCookingRecipeIndex() {
 	cookingRecipes = make(map[string]map[string]CookingRecipeDescription)
@@ -105,10 +80,10 @@ func CookingRecipeCatalog(station string) []CookingRecipeDescription {
 
 // FurnaceFuelDuration reports the vanilla Java 1.21.4 burn duration in ticks.
 func FurnaceFuelDuration(itemID string) int {
-	if furnaceFuelErr != nil {
-		return 0
+	if definition, ok := itemregistry.Lookup(itemID); ok {
+		return definition.FuelTicks
 	}
-	return furnaceFuelTicks[itemID]
+	return 0
 }
 
 // CanPlaceFurnaceFuelSlot reports whether an item is accepted by the fuel

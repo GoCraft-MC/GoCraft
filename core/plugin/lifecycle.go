@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"GoCraft/core/command"
+	"GoCraft/core/dispatch"
 )
 
 // Registry owns runtimes and loaded plugin instances for one server.
 type Registry struct {
 	mu          sync.RWMutex
 	bus         *Bus
-	commands    *command.Registry
+	commands    *dispatch.Registry
 	host        Host
 	provisioner Provisioner
 	runtimes    map[string]Runtime
@@ -28,14 +28,14 @@ func NewRegistry(ctx context.Context, budget time.Duration, host Host, provision
 		host = NewMutationQueue()
 	}
 	return &Registry{
-		bus: newBus(ctx, budget, host), commands: command.NewRegistry(), host: host, provisioner: provisioner,
+		bus: newBus(ctx, budget, host), commands: dispatch.NewRegistry(), host: host, provisioner: provisioner,
 		runtimes: make(map[string]Runtime), instances: make(map[string]Instance),
 	}
 }
 
 func (r *Registry) Bus() *Bus { return r.bus }
 
-func (r *Registry) Commands() *command.Registry { return r.commands }
+func (r *Registry) Commands() *dispatch.Registry { return r.commands }
 
 func (r *Registry) RegisterRuntime(runtime Runtime) error {
 	if runtime == nil {

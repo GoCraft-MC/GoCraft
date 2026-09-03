@@ -3,14 +3,14 @@
 //
 // # Planned implementation references
 //
-// - Nukkit  — Java Bedrock server (architectural reference)
-//             https://github.com/CloudburstMC/Nukkit
+//   - Nukkit  — Java Bedrock server (architectural reference)
+//     https://github.com/CloudburstMC/Nukkit
 //
-// - Dragonfly — Go Bedrock server (Go architecture reference)
-//               https://github.com/df-mc/dragonfly
+//   - Dragonfly — Go Bedrock server (Go architecture reference)
+//     https://github.com/df-mc/dragonfly
 //
-// - gophertunnel — Go Bedrock protocol library (networking/packets)
-//                  https://github.com/Sandertv/gophertunnel
+//   - gophertunnel — Go Bedrock protocol library (networking/packets)
+//     https://github.com/Sandertv/gophertunnel
 //
 // # Architecture (to be implemented in Milestone 14)
 //

@@ -95,6 +95,19 @@ type World struct {
 	spawnedVillageGuards map[[2]int]struct{}
 }
 
+// ChunkIfLoaded returns a cached chunk without loading or generating terrain.
+// Network-side derived data such as light updates use this to avoid expanding
+// the world merely because a mutation occurred near a chunk border.
+func (w *World) ChunkIfLoaded(cx, cz int32) (*Chunk, bool) {
+	if w == nil {
+		return nil, false
+	}
+	w.mu.RLock()
+	chunk, ok := w.chunks[[2]int32{cx, cz}]
+	w.mu.RUnlock()
+	return chunk, ok
+}
+
 // SetBlockObserver installs an adapter-neutral notification invoked after each
 // canonical block mutation. It lets secondary protocol adapters mirror Java,
 // physics, redstone, and command changes without importing networking into core.
@@ -104,12 +117,12 @@ func (w *World) SetBlockObserver(observer func(BlockChange)) {
 	w.blockObserverMu.Unlock()
 }
 
-func (w *World) notifyBlockObserver(x, y, z int, block Block) {
+func (w *World) notifyBlockObserver(x, y, z int, previous, block Block) {
 	w.blockObserverMu.RLock()
 	observer := w.blockObserver
 	w.blockObserverMu.RUnlock()
 	if observer != nil {
-		observer(BlockChange{X: x, Y: y, Z: z, Block: block})
+		observer(BlockChange{X: x, Y: y, Z: z, Previous: previous, Block: block})
 	}
 }
 
@@ -730,8 +743,9 @@ func IsEntitySupportBlock(name string) bool {
 
 // BlockChange describes a canonical world mutation that adapters can broadcast.
 type BlockChange struct {
-	X, Y, Z int
-	Block   Block
+	X, Y, Z  int
+	Previous Block
+	Block    Block
 }
 
 // TickFarmland applies vanilla hydration: water within four horizontal blocks
@@ -1071,7 +1085,7 @@ func (w *World) SetBlock(x, y, z int, block Block) {
 	// Schedule physics updates for affected neighbours.
 	// worldAge 0 = "fire next tick" (drainDue uses <= comparison).
 	w.scheduleBlockNeighborUpdates(x, y, z, oldBlock, block)
-	w.notifyBlockObserver(x, y, z, block)
+	w.notifyBlockObserver(x, y, z, oldBlock, block)
 	if !oldBlock.Equal(block) {
 		w.triggerObservers(x, y, z)
 	}
@@ -1122,7 +1136,7 @@ func (w *World) setBlockNoPhysics(x, y, z int, block Block) {
 	w.dirty[key] = struct{}{}
 	w.trimChunksLocked()
 	w.mu.Unlock()
-	w.notifyBlockObserver(x, y, z, block)
+	w.notifyBlockObserver(x, y, z, oldBlock, block)
 	if !oldBlock.Equal(block) {
 		w.triggerObservers(x, y, z)
 	}

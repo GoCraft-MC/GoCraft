@@ -38,3 +38,28 @@ func TestGoCraftPermissionEditorCommandRequiresPermission(t *testing.T) {
 		t.Fatalf("non-operator editor reply = %q", reply)
 	}
 }
+
+func TestGoCraftPermissionEditorUsesLinkReply(t *testing.T) {
+	bytebin := newMockBytebin(t)
+	dispatcher := handler.NewDispatcher()
+	server := &Server{
+		cmds: dispatcher,
+		permissionEditor: newPermissionEditor(
+			corepermission.NewMemory(), "https://permissions.example", bytebin.URL),
+	}
+	server.registerPermissionCommands()
+
+	operator := player.New([16]byte{3}, "admin", player.ClientEditionJava)
+	operator.Operator = true
+	var text, link string
+	dispatcher.Dispatch("/gocraft peditor", handler.CommandContext{
+		Player: operator,
+		ReplyLink: func(message, target string) error {
+			text, link = message, target
+			return nil
+		},
+	})
+	if text != "Open the permission editor:" || !strings.Contains(link, "?key=") {
+		t.Fatalf("link reply = (%q, %q)", text, link)
+	}
+}

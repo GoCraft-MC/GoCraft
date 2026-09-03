@@ -6,6 +6,7 @@ import (
 
 	"GoCraft/core/blockloot"
 	"GoCraft/core/intent"
+	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -1205,15 +1206,23 @@ func bedrockWaxCopper(block coreworld.Block) (coreworld.Block, bool) {
 }
 
 func bedrockIsHoe(item string) bool {
-	return strings.HasSuffix(item, "_hoe")
+	return bedrockToolCategory(item) == itemregistry.ToolHoe
 }
 
 func bedrockIsAxe(item string) bool {
-	return strings.HasSuffix(item, "_axe") && !strings.HasSuffix(item, "pickaxe")
+	return bedrockToolCategory(item) == itemregistry.ToolAxe
 }
 
 func bedrockIsShovel(item string) bool {
-	return strings.HasSuffix(item, "_shovel")
+	return bedrockToolCategory(item) == itemregistry.ToolShovel
+}
+
+func bedrockToolCategory(item string) itemregistry.ToolCategory {
+	definition, ok := itemregistry.Lookup(item)
+	if !ok || definition.Tool == nil {
+		return ""
+	}
+	return definition.Tool.Category
 }
 
 func bedrockBlock(name string, properties map[string]string) coreworld.Block {

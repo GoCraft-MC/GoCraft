@@ -53,6 +53,7 @@ import (
 	coreworld "GoCraft/core/world"
 	"GoCraft/internal/debuglog"
 	"GoCraft/java/handler"
+	"github.com/GoCraft-MC/gocraft-abi/command"
 )
 
 const bedrockChunkRadius int32 = 4
@@ -60,23 +61,29 @@ const bedrockChunkRadius int32 = 4
 // Listener wraps a gophertunnel minecraft.Listener and manages Bedrock client
 // connections.
 type Listener struct {
-	cfg        config.BedrockConfig
-	bus        *intent.Bus
-	world      *coreworld.World
-	worlds     map[int32]*coreworld.World
-	game       *game.Game
-	encoder    *bedrockworld.Encoder
-	worldSeed  int64
-	spawnX     int
-	spawnY     int
-	spawnZ     int
-	spawnMu    sync.RWMutex
-	gameMode   atomic.Uint32
-	difficulty int32
-	weather    atomic.Uint32
-	sessionsMu sync.RWMutex
-	sessions   map[[16]byte]*bedrockSession
-	screenID   atomic.Uint32
+	cfg       config.BedrockConfig
+	bus       *intent.Bus
+	world     *coreworld.World
+	worlds    map[int32]*coreworld.World
+	game      *game.Game
+	encoder   *bedrockworld.Encoder
+	worldSeed int64
+	spawnX    int
+	spawnY    int
+	spawnZ    int
+	spawnMu   sync.RWMutex
+
+	// commandTree reports what one player may use, built-ins and plugins in one
+	// tree. Nil until the server installs it, which is what keeps a listener
+	// built in a test from needing a command registry.
+	commandMu   sync.RWMutex
+	commandTree func(*player.Player) command.Root
+	gameMode    atomic.Uint32
+	difficulty  int32
+	weather     atomic.Uint32
+	sessionsMu  sync.RWMutex
+	sessions    map[[16]byte]*bedrockSession
+	screenID    atomic.Uint32
 
 	// spawnNotify maps a client remote address to a channel that is closed/sent
 	// when gophertunnel sends PlayStatus(PlayerSpawn) for that connection.
@@ -712,6 +719,15 @@ func (l *Listener) handleConn(ctx context.Context, gt *minecraft.Listener, conn 
 	if p := l.game.GetPlayer(playerUUID); p != nil {
 		l.sendLocalPlayerState(bedrockSess, p)
 	}
+
+	// What this player may type. Sent once, because AvailableCommands replaces
+	// the client's whole list and there is no way for it to ask again — a later
+	// change reaches them through RefreshCommands.
+	//
+	// Sent to this connection rather than looked up by uuid: addSession below
+	// is what publishes the roster, so a lookup here finds nothing and the
+	// player joins with no commands at all.
+	l.sendCommandsTo(bedrockSess.conn, playerUUID)
 
 	// ── Step 5: play loop ─────────────────────────────────────────────────────
 	l.addSession(bedrockSess)

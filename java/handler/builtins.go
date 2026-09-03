@@ -193,7 +193,7 @@ func cmdSeed(ctx CommandContext) error {
 		return fmt.Errorf("world state is unavailable")
 	}
 	seed := ctx.World.Seed()
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf("World seed: %d", seed))
+	_ = sendCommandMessage(ctx, fmt.Sprintf("World seed: %d", seed))
 	return nil
 }
 
@@ -232,7 +232,7 @@ func cmdSpawnBoat(ctx CommandContext) error {
 	)
 	ctx.World.Entities.Add(boat)
 	BroadcastSpawnMob(boat, ctx.Manager)
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf("Spawned %s at your position. Right-click to board, sneak to dismount.", entityTypeName))
+	_ = sendCommandMessage(ctx, fmt.Sprintf("Spawned %s at your position. Right-click to board, sneak to dismount.", entityTypeName))
 	return nil
 }
 
@@ -290,7 +290,7 @@ func cmdXYZ(ctx CommandContext) error {
 	block := position.ToBlock()
 	chunkX := int32(math.Floor(position.X / float64(coreworld.SectionSize)))
 	chunkZ := int32(math.Floor(position.Z / float64(coreworld.SectionSize)))
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf(
+	_ = sendCommandMessage(ctx, fmt.Sprintf(
 		"Position: X=%.2f Y=%.2f Z=%.2f | Block: %d %d %d | Chunk: %d %d",
 		position.X, position.Y, position.Z, block.X, block.Y, block.Z, chunkX, chunkZ,
 	))
@@ -369,7 +369,7 @@ func cmdLocate(ctx CommandContext) error {
 			float64(center.WorldZ-originZ),
 		)))
 		biome := strings.TrimPrefix(center.Biome, "minecraft:")
-		_ = sendSystemMessage(ctx.Conn, fmt.Sprintf(
+		_ = sendCommandMessage(ctx, fmt.Sprintf(
 			"Nearest village: %d %d %d (%d blocks, %s). Teleport: /tp %d %d %d",
 			center.WorldX, y, center.WorldZ, distance, biome,
 			center.WorldX, y, center.WorldZ,
@@ -388,7 +388,7 @@ func cmdLocate(ctx CommandContext) error {
 	}
 	y := ctx.World.SurfaceY(x, z) + 1
 	distance := int(math.Round(math.Hypot(float64(x-originX), float64(z-originZ))))
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf(
+	_ = sendCommandMessage(ctx, fmt.Sprintf(
 		"Nearest %s: %d %d %d (%d blocks). Teleport: /tp %d %d %d",
 		target, x, y, z, distance, x, y, z,
 	))
@@ -480,12 +480,12 @@ func cmdSummon(ctx CommandContext) error {
 		}
 	}
 	if mobName == "villager" {
-		_ = sendSystemMessage(ctx.Conn, fmt.Sprintf(
+		_ = sendCommandMessage(ctx, fmt.Sprintf(
 			"Summoned villager (%s) with entity ID %d",
 			professionName, entity.EntityID,
 		))
 	} else {
-		_ = sendSystemMessage(ctx.Conn, fmt.Sprintf(
+		_ = sendCommandMessage(ctx, fmt.Sprintf(
 			"Summoned %s with entity ID %d", mobName, entity.EntityID,
 		))
 	}
@@ -520,19 +520,10 @@ func cmdGameMode(ctx CommandContext) error {
 	}
 	ctx.Player.GameMode = mode
 
-	// Notify the client of its new game mode via a Game Event.
-	// Reason 3 = change_game_mode; value = mode as float32.
-	if err := sendGameEvent(ctx.Conn, 3, float32(mode)); err != nil {
-		return fmt.Errorf("sending game event: %w", err)
-	}
-
-	// Resync flight / speed / instant-break flags for the new mode.
-	if err := sendPlayerAbilities(ctx.Conn, ctx.Player); err != nil {
-		return fmt.Errorf("sending abilities: %w", err)
-	}
-	if ctx.SyncAbilities != nil {
-		ctx.SyncAbilities(ctx.Player)
-	}
+	// Republish the new mode and the flight / speed / instant-break flags that
+	// come with it. Both editions have their own packets for this and neither
+	// is reachable from here, which is the whole reason it is a bridge.
+	syncPlayerState(ctx)
 
 	// Update the tab-list game mode for all connected players.
 	if ctx.Manager != nil {
@@ -580,7 +571,7 @@ func cmdTp(ctx CommandContext) error {
 			if err := ctx.TeleportTo(x, y, z); err != nil {
 				return fmt.Errorf("teleporting: %w", err)
 			}
-			_ = sendSystemMessage(ctx.Conn,
+			_ = sendCommandMessage(ctx,
 				fmt.Sprintf("Teleported to %.2f %.2f %.2f", x, y, z))
 			return nil
 		}
@@ -714,10 +705,10 @@ func cmdGive(ctx CommandContext) error {
 	if err := sendSetContainerContent(targetConn, target, 1); err != nil {
 		return fmt.Errorf("syncing %s's inventory: %w", target.Username, err)
 	}
-	_ = sendSystemMessage(ctx.Conn,
+	_ = sendCommandMessage(ctx,
 		fmt.Sprintf("Given %dx %s to %s", count, itemName, target.Username))
 	if target != ctx.Player {
-		_ = sendSystemMessage(targetConn,
+		_ = sendCommandMessageTo(ctx, target,
 			fmt.Sprintf("You received %dx %s", count, itemName))
 	}
 	return nil
@@ -753,31 +744,47 @@ func normalizeResourceLocation(name string) string {
 	return name
 }
 
+// findOnlinePlayer resolves a name to a player and, when that player is on
+// Java, to their connection.
+//
+// The connection is for the few callers that send a Java protocol packet no
+// bridge covers yet — an inventory resync, for instance. Everything that merely
+// talks to the player must use ctx.ReplyTo instead, which reaches both
+// editions. A Bedrock player resolves with a nil connection, which is the
+// honest answer rather than an error: they exist, they simply have no Java
+// session.
+//
+// Self is resolved through Manager like anybody else. Reading it from the
+// context instead would mean carrying a connection there for this one case,
+// which is the thing this change exists to remove.
 func findOnlinePlayer(ctx CommandContext, name string) (*player.Player, *network.ClientConn, error) {
-	if name == "@s" || strings.EqualFold(name, ctx.Player.Username) {
-		return ctx.Player, ctx.Conn, nil
+	if name == "@s" {
+		name = ctx.Player.Username
 	}
-	for _, candidate := range ctx.Manager.SnapshotAll() {
-		if strings.EqualFold(candidate.Player.Username, name) {
-			return candidate.Player, candidate.Conn, nil
+	if ctx.Manager != nil {
+		for _, candidate := range ctx.Manager.SnapshotAll() {
+			if strings.EqualFold(candidate.Player.Username, name) {
+				return candidate.Player, candidate.Conn, nil
+			}
+		}
+	}
+	if strings.EqualFold(name, ctx.Player.Username) {
+		return ctx.Player, nil, nil
+	}
+	if ctx.FindPlayer != nil {
+		if found := ctx.FindPlayer(name); found != nil {
+			return found, nil, nil
 		}
 	}
 	return nil, nil, fmt.Errorf("player not found: %s", name)
 }
 
+// The sync and the reply used to be deferred here as well as sent inline, one
+// pair for each edition, and only avoided firing twice because whichever the
+// player was not on left its callback nil. Both are always filled now, so the
+// deferred copies are gone — they would have answered twice, and they fired on
+// the usage error too, reporting a flight state nothing had changed.
 func cmdFly(ctx CommandContext) error {
-	if ctx.SyncAbilities != nil {
-		defer ctx.SyncAbilities(ctx.Player)
-	}
-	if ctx.Reply != nil {
-		defer func() {
-			state := `disabled`
-			if ctx.Player != nil && ctx.Player.Flying {
-				state = `enabled`
-			}
-			_ = ctx.Reply(`Flight ` + state)
-		}()
-	}
 	if len(ctx.Args) != 0 {
 		return fmt.Errorf("usage: /fly")
 	}
@@ -788,14 +795,12 @@ func cmdFly(ctx CommandContext) error {
 		ctx.Player.AllowFlying = !ctx.Player.AllowFlying
 		ctx.Player.Flying = ctx.Player.AllowFlying
 	}
-	if err := sendPlayerAbilities(ctx.Conn, ctx.Player); err != nil {
-		return fmt.Errorf("sending flight abilities: %w", err)
-	}
+	syncPlayerState(ctx)
 	state := "disabled"
 	if ctx.Player.Flying {
 		state = "enabled"
 	}
-	_ = sendSystemMessage(ctx.Conn, "Flight "+state)
+	_ = sendCommandMessage(ctx, "Flight "+state)
 	return nil
 }
 
@@ -805,10 +810,8 @@ func cmdWalkSpeed(ctx CommandContext) error {
 		return err
 	}
 	ctx.Player.WalkSpeed = speed
-	if err := sendPlayerAbilities(ctx.Conn, ctx.Player); err != nil {
-		return fmt.Errorf("sending walking speed: %w", err)
-	}
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf("Walking speed set to %.3g", speed))
+	syncPlayerState(ctx)
+	_ = sendCommandMessage(ctx, fmt.Sprintf("Walking speed set to %.3g", speed))
 	return nil
 }
 
@@ -818,10 +821,8 @@ func cmdFlySpeed(ctx CommandContext) error {
 		return err
 	}
 	ctx.Player.FlySpeed = speed
-	if err := sendPlayerAbilities(ctx.Conn, ctx.Player); err != nil {
-		return fmt.Errorf("sending flying speed: %w", err)
-	}
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf("Flying speed set to %.3g", speed))
+	syncPlayerState(ctx)
+	_ = sendCommandMessage(ctx, fmt.Sprintf("Flying speed set to %.3g", speed))
 	return nil
 }
 
@@ -866,7 +867,7 @@ func cmdPotionEffect(ctx CommandContext) error {
 	for _, viewer := range ctx.Manager.SnapshotAll() {
 		_ = viewer.Conn.WritePacket(pkt)
 	}
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf(
+	_ = sendCommandMessage(ctx, fmt.Sprintf(
 		"Applied %s to %s for %d seconds", effectName, target.Username, seconds))
 	return nil
 }
@@ -896,9 +897,9 @@ func cmdHeal(ctx CommandContext) error {
 	if err := sendUpdateHealth(targetConn, target); err != nil {
 		return fmt.Errorf(`syncing %s health: %w`, target.Username, err)
 	}
-	_ = sendSystemMessage(ctx.Conn, fmt.Sprintf(`Healed %s to full health`, target.Username))
+	_ = sendCommandMessage(ctx, fmt.Sprintf(`Healed %s to full health`, target.Username))
 	if target != ctx.Player {
-		_ = sendSystemMessage(targetConn, `You were healed to full health`)
+		_ = sendCommandMessageTo(ctx, target, `You were healed to full health`)
 	}
 	return nil
 }
@@ -921,7 +922,7 @@ func cmdKick(ctx CommandContext) error {
 			// via the deferred onPlayerLeave / mgr.Remove calls.
 			_ = s.Conn.WritePacket(buildDisconnectPlay(reason))
 			_ = s.Conn.Close()
-			_ = sendSystemMessage(ctx.Conn,
+			_ = sendCommandMessage(ctx,
 				fmt.Sprintf("Kicked %s: %s", s.Player.Username, reason))
 			return nil
 		}

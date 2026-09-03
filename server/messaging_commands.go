@@ -55,7 +55,16 @@ func (s *Server) findOnlinePlayer(name string) *player.Player {
 	return found
 }
 
+// sendPlayerMessage delivers text to one online player on either edition. It
+// is installed on the dispatcher as the command-feedback bridge, so it is also
+// how every built-in command answers.
+//
+// A nil target is the console, which has no session to write to and is not an
+// error: the caller has already logged whatever it was going to say.
 func (s *Server) sendPlayerMessage(target *player.Player, message string) error {
+	if target == nil {
+		return nil
+	}
 	if target.Edition == player.ClientEditionJava {
 		if current, ok := s.sessions.Get(target.UUID); ok {
 			return handler.SendSystemMessage(current.Conn, message)
@@ -65,6 +74,41 @@ func (s *Server) sendPlayerMessage(target *player.Player, message string) error 
 		return nil
 	}
 	return fmt.Errorf("player session is unavailable")
+}
+
+// sendPlayerLink sends a clickable component to a Java player and the plain URL
+// to a Bedrock one.
+//
+// Degrading rather than dropping it is the point: the Bedrock client cannot
+// render the component, and sending nothing is how the permission editor link
+// became invisible to half the operators on the server.
+func (s *Server) sendPlayerLink(target *player.Player, message, link string) error {
+	if target == nil {
+		return nil
+	}
+	if target.Edition == player.ClientEditionJava {
+		if current, ok := s.sessions.Get(target.UUID); ok {
+			return handler.SendLinkMessage(current.Conn, message, link)
+		}
+	}
+	return s.sendPlayerMessage(target, message+" "+link)
+}
+
+// syncPlayerAbilities republishes a player's game mode, flight and speeds after
+// a command changed them, through whichever adapter owns that player.
+func (s *Server) syncPlayerAbilities(target *player.Player) {
+	if target == nil {
+		return
+	}
+	if target.Edition == player.ClientEditionJava {
+		if current, ok := s.sessions.Get(target.UUID); ok {
+			_ = handler.SyncPlayerState(current.Conn, target)
+		}
+		return
+	}
+	if s.bedrockListener != nil {
+		s.bedrockListener.RefreshPlayerAbilities(target)
+	}
 }
 
 func (s *Server) broadcastMessage(message string) {

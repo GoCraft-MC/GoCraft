@@ -57,8 +57,8 @@ func TestTeleportSelfToPlayerSameDimensionSkipsWorldChange(t *testing.T) {
 
 	worldChanged := false
 	ctx := CommandContext{
-		Player: issuer,
-		Args:   []string{"Target"},
+		Player:     issuer,
+		Args:       []string{"Target"},
 		FindPlayer: func(string) *player.Player { return target },
 		ChangeWorld: func(int32) error {
 			worldChanged = true

@@ -151,6 +151,38 @@ type PluginsConfig struct {
 	// EventBudgetMillis bounds how long one cancellable event may spend across
 	// all of its subscribers before the host stops waiting for verdicts.
 	EventBudgetMillis int `yaml:"event_budget_ms"`
+
+	// Runtimes configures the language backends. Nothing here is consulted
+	// unless an installed plugin declares that runtime: a server with no Java
+	// plugin never looks for java and never provisions anything.
+	Runtimes RuntimesConfig `yaml:"runtimes"`
+}
+
+// RuntimesConfig holds one section per language backend, keyed by the name a
+// plugin manifest writes in its runtime field.
+type RuntimesConfig struct {
+	JVM JVMRuntimeConfig `yaml:"jvm"`
+}
+
+// JVMRuntimeConfig configures the Java backend.
+//
+// The host parses this, never the JVM: a runtime that read its own YAML would
+// leave the host unable to report a bad value with a file and a line, and would
+// not help Lua or Go plugins at all.
+type JVMRuntimeConfig struct {
+	// PreferSystem keeps an installed JDK that meets the baseline instead of
+	// downloading a second copy. Turning it off is an admin asking for the
+	// pinned build specifically, so detection is then skipped rather than used
+	// as a fallback.
+	PreferSystem bool `yaml:"prefer_system"`
+
+	// JavaPath forces one java binary and outranks JAVA_HOME and PATH.
+	JavaPath string `yaml:"java_path"`
+
+	// JarPath runs a runtime jar from disk instead of the embedded one. It is
+	// how a developer works against a local gocraft-java checkout, and the only
+	// way to run Java plugins in a build that carries no embedded jar.
+	JarPath string `yaml:"jar_path"`
 }
 
 // DebugConfig controls verbose diagnostic log categories. All switches default
@@ -302,6 +334,9 @@ func defaults() *Config {
 			Enabled:           true,
 			Directory:         "plugins",
 			EventBudgetMillis: 2,
+			Runtimes: RuntimesConfig{
+				JVM: JVMRuntimeConfig{PreferSystem: true},
+			},
 		},
 		Combat: CombatConfig{
 			AttackCooldown:      false,
