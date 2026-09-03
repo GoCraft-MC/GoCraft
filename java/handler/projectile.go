@@ -35,6 +35,8 @@ func UseThrowable(p *player.Player, w *coreworld.World, mgr *session.Manager, co
 		projectileType, sound = corentity.TypeEnderPearl, "minecraft:entity.ender_pearl.throw"
 	case "minecraft:experience_bottle":
 		projectileType, speed, sound = corentity.TypeExperienceBottle, 0.7, "minecraft:entity.experience_bottle.throw"
+	case "minecraft:splash_potion", "minecraft:lingering_potion":
+		projectileType, speed, sound = corentity.TypePotion, 0.5, "minecraft:entity.splash_potion.throw"
 	default:
 		return false
 	}
@@ -45,13 +47,17 @@ func UseThrowable(p *player.Player, w *coreworld.World, mgr *session.Manager, co
 	copy(uuid[4:], p.UUID[:12])
 	yaw := float64(p.Rotation.Yaw) * math.Pi / 180
 	pitchDegrees := float64(p.Rotation.Pitch)
-	if projectileType == corentity.TypeExperienceBottle {
+	if projectileType == corentity.TypeExperienceBottle || projectileType == corentity.TypePotion {
 		pitchDegrees += 20
 	}
 	pitch := pitchDegrees * math.Pi / 180
 	cosPitch := math.Cos(pitch)
 	projectile := corentity.New(id, uuid, projectileType, p.Position.X, p.Position.Y+1.52, p.Position.Z)
 	projectile.OwnerEntityID = p.EntityID
+	if projectileType == corentity.TypePotion {
+		projectile.ProjectileItem = stack
+		projectile.ProjectileItem.Count = 1
+	}
 	projectile.VX = -math.Sin(yaw) * cosPitch * speed
 	projectile.VY = -math.Sin(pitch) * speed
 	projectile.VZ = math.Cos(yaw) * cosPitch * speed
