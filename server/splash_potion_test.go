@@ -7,6 +7,7 @@ import (
 	"GoCraft/core/game"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
 )
 
@@ -72,5 +73,24 @@ func TestLingeringSplashUsesQuarterDuration(t *testing.T) {
 	s.applySplashPotionScaled(stack, spatial.Vec3{Y: 64.9}, 0.25)
 	if effect, ok := p.StatusEffect("poison"); !ok || effect.Duration != 225 {
 		t.Fatalf("lingering splash poison = %+v, ok=%v", effect, ok)
+	}
+}
+
+func TestLingeringPotionImpactSpawnsCloud(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	t.Cleanup(func() { _ = w.Close() })
+	stack := player.ItemStack{ItemID: "minecraft:lingering_potion", Count: 1}
+	if err := stack.SetComponent("potion_contents", map[string]string{"potion": "minecraft:poison"}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: game.New(), world: w, sessions: session.NewManager(), simulationDimension: dimensionOverworld}
+	s.resolveProjectileImpact(&corentity.Entity{Type: corentity.TypePotion, ProjectileItem: stack}, spatial.Vec3{X: 2, Y: 65, Z: 3})
+	entities := w.Entities.Snapshot()
+	if len(entities) != 1 || entities[0].Type != corentity.TypeAreaEffectCloud {
+		t.Fatalf("spawned entities = %+v", entities)
+	}
+	cloud := entities[0]
+	if cloud.Position != (spatial.Vec3{X: 2, Y: 65, Z: 3}) || cloud.ProjectileItem.Components == "" {
+		t.Fatalf("cloud payload = %+v", cloud)
 	}
 }

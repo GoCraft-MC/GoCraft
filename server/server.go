@@ -4768,7 +4768,17 @@ func (s *Server) resolveProjectileImpact(projectile *corentity.Entity, position 
 	case corentity.TypeFireball:
 		s.explodeAt(position.X, position.Y, position.Z, 1, "was fireballed")
 	case corentity.TypePotion:
-		s.applySplashPotion(projectile.ProjectileItem, position)
+		if projectile.ProjectileItem.ItemID == "minecraft:lingering_potion" {
+			s.applySplashPotionScaled(projectile.ProjectileItem, position, 0.25)
+			if s.game != nil && s.world != nil {
+				cloud := corentity.NewAreaEffectCloud(s.game.NextEntityID(), newRandomUUID(),
+					position.X, position.Y, position.Z, projectile.ProjectileItem)
+				s.world.Entities.Add(cloud)
+				handler.BroadcastSpawnMobInDimension(cloud, s.sessions, s.simulationDimension)
+			}
+		} else {
+			s.applySplashPotion(projectile.ProjectileItem, position)
+		}
 		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.splash_potion.break", handler.SoundCategoryHostile,
 			position.X, position.Y, position.Z, 1, 1)
 	case corentity.TypeExperienceBottle:
