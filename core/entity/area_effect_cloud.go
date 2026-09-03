@@ -12,6 +12,9 @@ func NewAreaEffectCloud(id int32, uuid [16]byte, x, y, z float64, potion player.
 	cloud.CloudRadiusOnUse = -0.5
 	cloud.CloudDurationTicks = 600
 	cloud.CloudReapplicationDelay = 40
+	if outcome, ok := player.PotionOutcomeFor(potion); ok && (outcome.Heal > 0 || outcome.Damage > 0) {
+		cloud.CloudReapplicationDelay = 0
+	}
 	cloud.CloudTargets = make(map[int32]int64)
 	return cloud
 }
