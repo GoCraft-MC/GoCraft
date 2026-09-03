@@ -1092,6 +1092,9 @@ func (w *World) SetBlock(x, y, z int, block Block) {
 	if IsRailBlock(oldBlock.ResourceLocation()) || IsRailBlock(block.ResourceLocation()) {
 		w.UpdateRailShapesAround(x, y, z)
 	}
+	if block.ResourceLocation() == "minecraft:sponge" && oldBlock.ResourceLocation() != "minecraft:sponge" {
+		w.absorbWaterAround(x, y, z)
+	}
 }
 
 func (w *World) triggerObservers(x, y, z int) {
