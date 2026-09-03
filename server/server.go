@@ -2817,6 +2817,8 @@ func (s *Server) tickEntities() {
 			if s.tickAreaEffectCloud(e) {
 				s.world.Entities.Remove(e.EntityID)
 				deadIDs = append(deadIDs, e.EntityID)
+			} else if e.AgeTicks >= areaEffectCloudWarmup && e.AgeTicks%10 == 0 {
+				handler.BroadcastMobMetadataInDimension(e, s.sessions, dimensionOverworld)
 			}
 			continue
 		}
@@ -3411,6 +3413,8 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				if simulation.tickAreaEffectCloud(entity) {
 					dimensionWorld.Entities.Remove(entity.EntityID)
 					deadIDs = append(deadIDs, entity.EntityID)
+				} else if entity.AgeTicks >= areaEffectCloudWarmup && entity.AgeTicks%10 == 0 {
+					handler.BroadcastMobMetadataInDimension(entity, s.sessions, dimension)
 				}
 			case entity.Type == corentity.TypeItem:
 				if simulation.tryPickupDroppedItem(entity, dimension) || entity.AgeTicks >= 6000 || entity.Position.Y < coreworld.WorldMinY-16 {

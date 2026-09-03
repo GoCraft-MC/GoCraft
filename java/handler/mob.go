@@ -263,6 +263,25 @@ func BroadcastMobMetadata(e *corentity.Entity, mgr *session.Manager) {
 	}()
 }
 
+// BroadcastMobMetadataInDimension publishes metadata only to viewers of the
+// dimension containing the entity.
+func BroadcastMobMetadataInDimension(e *corentity.Entity, mgr *session.Manager, dimension int32) {
+	if e == nil || mgr == nil {
+		return
+	}
+	pkt := buildMobMetadata(e)
+	if pkt == nil {
+		return
+	}
+	go func() {
+		for _, current := range mgr.SnapshotAll() {
+			if current.Player != nil && current.Player.Dimension == dimension {
+				_ = current.Conn.WritePacket(pkt)
+			}
+		}
+	}()
+}
+
 // BroadcastMobFireState updates the shared entity flags even when fire was
 // extinguished. buildMobMetadata intentionally omits default metadata for most
 // hostiles, so the explicit zero flag is required to clear the flame renderer.
