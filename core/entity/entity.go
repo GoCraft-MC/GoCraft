@@ -94,6 +94,7 @@ const (
 	TypeEnderPearl       EntityType = "minecraft:ender_pearl"
 	TypeExperienceBottle EntityType = "minecraft:experience_bottle"
 	TypePotion           EntityType = "minecraft:potion"
+	TypeAreaEffectCloud  EntityType = "minecraft:area_effect_cloud"
 	TypeSmallFireball    EntityType = "minecraft:small_fireball"
 	TypeFireball         EntityType = "minecraft:fireball"
 	TypeEyeOfEnder       EntityType = "minecraft:eye_of_ender"
@@ -259,6 +260,13 @@ type Entity struct {
 	FireworkData      player.FireworkData
 	FireworkLifeTicks int32
 	FireworkLifetime  int32
+	// Area-effect cloud fields hold lingering-potion lifecycle state.
+	CloudRadius             float64
+	CloudRadiusGrowth       float64
+	CloudRadiusOnUse        float64
+	CloudDurationTicks      int64
+	CloudReapplicationDelay int64
+	CloudTargets            map[int32]int64
 
 	// Dropped-item fields. These are used only when Type == TypeItem and are
 	// encoded as the ItemEntity's tracked ItemStack at metadata index 8.
