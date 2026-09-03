@@ -5614,10 +5614,8 @@ func (s *Server) activateTNT(x, y, z int, changes *[]coreworld.BlockChange) {
 
 	id := s.game.NextEntityID()
 	uuid := newRandomUUID()
-	tnt := corentity.New(id, uuid, corentity.TypePrimedTNT,
+	tnt := corentity.NewPrimedTNT(id, uuid,
 		float64(x)+0.5, float64(y), float64(z)+0.5)
-	tnt.FuseTicks = 80
-	tnt.VY = 0.2 // small upward pop like vanilla
 	s.world.Entities.Add(tnt)
 	handler.BroadcastSpawnMob(tnt, s.sessions)
 }
