@@ -4768,6 +4768,7 @@ func (s *Server) resolveProjectileImpact(projectile *corentity.Entity, position 
 	case corentity.TypeFireball:
 		s.explodeAt(position.X, position.Y, position.Z, 1, "was fireballed")
 	case corentity.TypePotion:
+		s.applySplashPotion(projectile.ProjectileItem, position)
 		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.splash_potion.break", handler.SoundCategoryHostile,
 			position.X, position.Y, position.Z, 1, 1)
 	case corentity.TypeExperienceBottle:
