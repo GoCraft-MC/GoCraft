@@ -1986,6 +1986,9 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 			metadata = uint32(uint16(meta))
 		}
 	}
+	if potionID, ok := bedrockPotionID(stack); ok {
+		metadata = uint32(uint16(potionID))
+	}
 	nbtData := map[string]any{}
 	if stack.Damage > 0 && lightLevel < 0 {
 		nbtData["Damage"] = int32(stack.Damage)

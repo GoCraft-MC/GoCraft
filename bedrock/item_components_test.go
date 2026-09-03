@@ -13,6 +13,9 @@ func TestBedrockExtensionComponentsArePreservedInNBT(t *testing.T) {
 		t.Fatal(err)
 	}
 	instance := (&Listener{encoder: bedrockworld.NewEncoder()}).itemInstance(stack, 7)
+	if instance.Stack.MetadataValue != 21 {
+		t.Fatalf("Bedrock healing potion metadata = %d", instance.Stack.MetadataValue)
+	}
 	if got := instance.Stack.NBTData[goCraftComponentsNBTKey]; got != stack.Components {
 		t.Fatalf("Bedrock component NBT = %#v, want %q", got, stack.Components)
 	}
