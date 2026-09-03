@@ -1,7 +1,7 @@
 # Dragonfly gameplay and interaction parity audit
 
 Audit date: 2026-09-02. GoCraft baseline: `missing-items` at `00685b7`.
-Progress update: 2026-09-03 at `1afb02e`.
+Progress update: 2026-09-03 (batch 2, random-tick block growth).
 Reference implementation: Dragonfly v0.11.0 from the resolved Go module source.
 Protocol targets: Java Edition 1.21.4 and Bedrock Edition 1.26.45.
 
@@ -30,9 +30,49 @@ cross-edition test. Completed so far:
   roots — all now routed through shared canonical operations.
 - **Java drop & offhand player actions** (Player Action statuses 3/4 drop, 6 swap).
 
-Still open: the remaining `Partial`/`Missing` rows below that are **not** marked
-"(new)", and findings 3–5 (unified use dispatch, richer hand/use state, and
-mining-time validation) are only partially addressed.
+Batch 2 (random-tick block growth, `core/world`, all deterministically tested):
+
+- **Sugar cane & cactus growth** to a three-block height via the age counter;
+  cactus refuses to grow beside a solid block.
+- **Kelp** column growth up through source water, leaving kelp_plant bodies.
+- **Twisting & weeping vine** growth into air (upward / downward).
+- **Dry-sponge water absorption** on placement (BFS, distance 6, ≤64 blocks,
+  waterlogged draining, wet-sponge conversion).
+- **Coral death** — live coral dies to its dead variant 60 ticks after losing
+  water contact, scheduled through the block-physics engine.
+
+## Still left to do (as of batch 2)
+
+Nothing below is claimed complete. Ordered roughly by the original
+implementation order; the largest remaining structural gaps first.
+
+1. **Charged/stateful use items (finding 4).** Canonical two-hand use state,
+   charged-crossbow stack, gliding flag + glide physics. Then Bedrock
+   bow/crossbow/trident/shield use paths (all currently Java-only or missing) and
+   Elytra rocket boost.
+2. **Stateful block entities (order 5).** Jukebox, lectern, chiseled bookshelf,
+   sign text editing, banner patterns, item/glow item frames, and keeping shulker
+   contents inside the dropped item.
+3. **Entity interactions (order 6).** Name tags, sheep shearing/dyeing,
+   cow/mooshroom milking, fish/axolotl/tadpole bucket capture, leads & leash
+   knots, horse/llama equipment UI, chest boats & storage minecarts, armour
+   stands.
+4. **Remaining random-tick / neighbour behaviour (order 7).** Bamboo growth,
+   cocoa jungle-log survival + bone meal, ordinary/cave vine spread and berries,
+   full fluid flow vectors / finite levels, and fire flammability nuances.
+5. **Workstation operations.** Beacon effects, enchanting offers, brewing timer &
+   transformations, anvil rename/enchant-merge/XP, grindstone disenchant, smithing
+   trims, loom patterns, cartography scaling — screens open but the defining
+   operation is absent.
+6. **Combat & survival depth (order 8).** Critical/sweep attacks, weapon &
+   armour enchantment families, tipped/spectral arrows, and the remaining
+   exhaustion/hazard sources.
+7. **Ranged/utility items still missing outright.** Goat horn, spyglass, fishing
+   rod, brush, carrot/warped-fungus on a stick, writable/written books, music
+   discs, dyes on entities/signs, bundles, and maps.
+
+Findings 3–5 (unified use dispatch, richer hand/use state, mining-time
+validation) remain only partially addressed.
 
 This is a static code audit of behaviour, not a registry-presence check. An item
 is not considered implemented merely because it appears in the Java data pack,
@@ -194,13 +234,13 @@ operations before adding Java calls — was followed for all nine.
 | Campfire | Partial | Placement, lighting/extinguishing, four stored cooking slots, cooking completion, and damage are present. Item rendering, per-slot progress persistence, smoke height, hay signal, bee pacification, projectile lighting, soul variants, and complete drop/waterlogging rules remain. |
 | Candles / candle cakes / cake | Partial | Core stacking, eating, lighting, and extinguishing exist, but Java candle-cake creation, projectile lighting, cake collision details, particles, sounds, and complete waterlogging/support behaviour remain. |
 | Cauldrons | Partial | Full bucket transfers work. Bottles, incremental water/powder levels, dyed leather washing/dyeing, banner cleaning, shulker dyeing, precipitation, dripstone filling, entity extinguishing, and comparator details are absent. |
-| Sponge | Partial | Wet-sponge smelting and bucket remainder exist. Dry-sponge water absorption, 65-block search, wet conversion, neighbour reaction, Nether drying, and particles are absent. |
-| Coral and coral blocks | Partial | Generation/placement exists. Loss-of-water scheduled death and dead variants are absent. |
-| Cactus | Partial | Contact damage and support removal are present. Random growth, height limit, side-neighbour survival, item destruction, and entity collision details are absent. |
-| Sugar cane | Partial | Placement/support removal exists. Random growth, height limit, water-adjacency validation, and complete survival rules are absent. |
+| Sponge | Implemented (new) | Dry-sponge breadth-first water absorption (taxicab distance 6, up to 64 blocks), waterlogged draining, and wet-sponge conversion now run on placement through any adapter. Nether instant-drying and absorption particles remain. |
+| Coral and coral blocks | Implemented (new) | Live coral now schedules a death check 60 ticks after losing water contact and converts to its dead variant; waterlogged or water-adjacent coral survives. Bone-meal coral-block spreading remains. |
+| Cactus | Implemented (new) | Random growth to a three-block height with the age counter, refusing to grow beside a solid block. Contact damage and support removal were already present. Item destruction and entity collision detail remain. |
+| Sugar cane | Implemented (new) | Random growth to a three-block height through the age counter. Placement/support removal was already present. Water-adjacency survival is still enforced only by block physics. |
 | Bamboo / bamboo sapling | Partial | Generation, placement, support, and bamboo block axis exist. Sapling conversion, random growth, leaves/stage/age transitions, height selection, and bone-meal growth are absent. |
-| Kelp | Partial | Placement/data exists. Random growth, age, water-column conversion, top/body state, and support updates are absent. |
-| Vines / cave vines / twisting and weeping vines | Partial | Some placement/generation exists. Climbing state, random spread/growth, berry harvest, bone meal, support updates, and shears rules are incomplete or absent. |
+| Kelp | Implemented (new) | Random column growth through water: the age-0..25 tip advances into source water above, leaving kelp_plant bodies behind. Bone-meal growth and break-from-below rules remain. |
+| Vines / cave vines / twisting and weeping vines | Partial | Twisting (upward) and weeping (downward) vines now grow randomly into air via the age-0..25 tip mechanic, leaving _plant bodies (new). Ordinary/cave vine spread, berry harvest, climbing state, bone meal, and shears rules are still absent. |
 | Cocoa | Partial | A bounded legacy growth tick exists. Correct jungle-log attachment/facing survival, placement interaction, and bone meal are absent. |
 | Fire | Partial | Placement, scheduled spread/burnout, and contact damage exist. Fire immunity/effects, rain extinguishing, portal interaction details, gamerules, block-specific flammability, and complete soul-fire rules remain. |
 | Fluids and waterlogging | Partial | Source placement, simple spread, collision checks, and lava/water hardening exist. Flow vectors, finite levels/source formation, waterlogged fluid ticking, ultrawarm evaporation, entity pushing, dripstone, and many replaceability rules are incomplete. |
