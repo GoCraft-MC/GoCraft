@@ -778,10 +778,46 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			return nil
 		}
 	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if composted, consumed, schedule := coreworld.AddToComposter(targetBlock, held.ItemID, int(bx), int(by), int(bz), w.PhysicsTime()); consumed {
+			applyBlockChange(int(bx), int(by), int(bz), composted, w, mgr)
+			if schedule {
+				w.BlockPhysics.ScheduleComposter(int(bx), int(by), int(bz), w.PhysicsTime(), 20)
+			}
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 
 	// Sneaking with an item bypasses block activation so a block can be placed
 	// against doors, containers, workstations, composters, and other UIs.
 	bypassActivation := p.Sneaking && !held.IsEmpty()
+	if !bypassActivation && p.GameMode != player.GameModeSpectator {
+		if emptied, ready := coreworld.EmptyComposter(targetBlock); ready {
+			applyBlockChange(int(bx), int(by), int(bz), emptied, w, mgr)
+			boneMeal := player.ItemStack{ItemID: "minecraft:bone_meal", Count: 1}
+			if !p.GiveItem(boneMeal) {
+				spawnBlockDrop(w, nextEntityID, p.Position, boneMeal, 0, mgr, p.Dimension)
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 	if !bypassActivation && p.GameMode != player.GameModeSpectator && targetBlock.ResourceLocation() == "minecraft:bell" {
 		if _, valid := coreworld.BellRingDirection(targetBlock, face, cursorY); valid {
 			if intents != nil {

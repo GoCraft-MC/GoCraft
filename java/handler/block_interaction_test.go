@@ -472,6 +472,35 @@ func TestJavaFlowerPotInsertAndRemove(t *testing.T) {
 	}
 }
 
+func TestJavaComposterLifecycle(t *testing.T) {
+	p := player.New([16]byte{}, "composter", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:cake", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(9, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "composter", Properties: map[string]string{"level": "6"}})
+	use := func(sequence int32) {
+		pkt := protocol.NewBuilder(packetIDUseItemOn).
+			VarInt(0).Long(packBlockPos(9, 64, 0)).VarInt(1).
+			Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(sequence).Build()
+		if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	use(8)
+	if got := w.GetBlock(9, 64, 0).Properties["level"]; got != "7" {
+		t.Fatalf("filled composter level = %q", got)
+	}
+	w.SetBlock(9, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "composter", Properties: map[string]string{"level": "8"}})
+	use(9)
+	if got := w.GetBlock(9, 64, 0).Properties["level"]; got != "0" {
+		t.Fatalf("emptied composter level = %q", got)
+	}
+	if p.HeldItem().ItemID != "minecraft:bone_meal" {
+		t.Fatalf("collected item = %+v", p.HeldItem())
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
