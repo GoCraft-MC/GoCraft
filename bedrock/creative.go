@@ -195,6 +195,11 @@ func (l *Listener) initCreativeContent() {
 			if setBedrockPotionContents(&potionStack, entry.meta) {
 				known.components = potionStack.Components
 			}
+		case "minecraft:suspicious_stew":
+			stewStack := player.ItemStack{ItemID: canonicalName, Count: 1}
+			if setBedrockStewContents(&stewStack, entry.meta) {
+				known.components = stewStack.Components
+			}
 		}
 		if canonicalName == "minecraft:firework_rocket" {
 			known.fireworks, known.hasFireworks = bedrockFireworkDataFromNBT(stack.NBTData)
