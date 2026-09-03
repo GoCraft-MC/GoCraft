@@ -843,6 +843,14 @@ func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corenti
 	if entity.Type == corentity.TypeFireworkRocket {
 		metadata[protocol.EntityDataKeyDisplayFirework] = bedrockFireworkNBT(entity.FireworkData)
 	}
+	if entity.Type == corentity.TypePotion {
+		if potionID, ok := bedrockPotionID(entity.ProjectileItem); ok {
+			metadata[protocol.EntityDataKeyAuxValueData] = potionID
+			if potionID > 4 {
+				metadata[protocol.EntityDataKeyCustomDisplay] = byte(potionID + 1)
+			}
+		}
+	}
 	if entity.Type == corentity.TypeAreaEffectCloud {
 		metadata[protocol.EntityDataKeyDataRadius] = float32(entity.CloudRadius)
 		metadata[protocol.EntityDataKeyDataDuration] = int32(math.MaxInt32)
