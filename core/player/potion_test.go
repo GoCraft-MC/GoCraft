@@ -63,3 +63,16 @@ func TestPotionOutcomeIncludesCustomEffects(t *testing.T) {
 		t.Fatal("non-potion stack produced a potion outcome")
 	}
 }
+
+func TestPotionNameReadsCanonicalContents(t *testing.T) {
+	stack := ItemStack{ItemID: "minecraft:lingering_potion", Count: 1}
+	if err := stack.SetComponent("potion_contents", map[string]string{"potion": "minecraft:long_poison"}); err != nil {
+		t.Fatal(err)
+	}
+	if name, ok := PotionName(stack); !ok || name != "long_poison" {
+		t.Fatalf("potion name = %q, ok=%v", name, ok)
+	}
+	if _, ok := PotionName(ItemStack{ItemID: "minecraft:apple", Count: 1}); ok {
+		t.Fatal("non-potion stack reported a potion name")
+	}
+}

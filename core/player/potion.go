@@ -12,6 +12,20 @@ type potionContents struct {
 	CustomEffects []StatusEffect `json:"custom_effects"`
 }
 
+// PotionName returns the base potion stored in a potion item's contents.
+func PotionName(stack ItemStack) (string, bool) {
+	switch stack.ItemID {
+	case "minecraft:potion", "minecraft:splash_potion", "minecraft:lingering_potion":
+	default:
+		return "", false
+	}
+	var contents potionContents
+	if !stack.Component("potion_contents", &contents) {
+		return "", true
+	}
+	return strings.TrimPrefix(contents.Potion, "minecraft:"), true
+}
+
 func PotionOutcomeFor(stack ItemStack) (PotionOutcome, bool) {
 	switch stack.ItemID {
 	case "minecraft:potion", "minecraft:splash_potion", "minecraft:lingering_potion":
