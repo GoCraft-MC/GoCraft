@@ -377,6 +377,7 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	var fireworks player.FireworkData
 	hasFireworks := false
 	components := ""
+	potionName := ""
 	for i := int32(0); i < added; i++ {
 		componentType, err := protocol.ReadVarInt(r)
 		if err != nil {
@@ -466,6 +467,31 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 			if _, readErr = protocol.ReadBool(r); readErr != nil {
 				return player.ItemStack{}, readErr
 			}
+		case 41: // potion_contents: optional potion, colour, custom effects
+			hasPotion, readErr := protocol.ReadBool(r)
+			if readErr != nil {
+				return player.ItemStack{}, readErr
+			}
+			if hasPotion {
+				potionRegistryID, idErr := protocol.ReadVarInt(r)
+				if idErr != nil || javaworld.PotionName(potionRegistryID) == "" {
+					return player.ItemStack{}, fmt.Errorf("invalid potion registry ID %d", potionRegistryID)
+				}
+				potionName = javaworld.PotionName(potionRegistryID)
+			}
+			hasColour, colourErr := protocol.ReadBool(r)
+			if colourErr != nil {
+				return player.ItemStack{}, colourErr
+			}
+			if hasColour {
+				if _, colourErr = protocol.ReadInt(r); colourErr != nil {
+					return player.ItemStack{}, colourErr
+				}
+			}
+			customEffects, effectErr := protocol.ReadVarInt(r)
+			if effectErr != nil || customEffects != 0 {
+				return player.ItemStack{}, fmt.Errorf("unsupported custom potion effect count %d", customEffects)
+			}
 		case 56: // fireworks: flight duration and bounded explosion list
 			flight, readErr := protocol.ReadVarInt(r)
 			if readErr != nil || flight < 0 || flight > 255 {
@@ -508,6 +534,13 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	if components != "" {
 		if err := stack.SetComponents(components); err != nil {
 			return player.ItemStack{}, fmt.Errorf("invalid canonical item components: %w", err)
+		}
+	}
+	if potionName != "" {
+		if existing, _ := player.PotionName(stack); existing == "" {
+			if err := stack.SetComponent("potion_contents", map[string]string{"potion": potionName}); err != nil {
+				return player.ItemStack{}, err
+			}
 		}
 	}
 	return stack, nil

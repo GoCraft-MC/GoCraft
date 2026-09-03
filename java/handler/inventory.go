@@ -481,6 +481,9 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 	enchantments := item.EnchantmentLevels()
 	if maxDamage <= 0 {
 		componentCount := int32(0)
+		if potionID(item) >= 0 {
+			componentCount++
+		}
 		if len(enchantments) > 0 {
 			componentCount++
 		}
@@ -497,6 +500,7 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 			VarInt(id).
 			VarInt(componentCount).
 			VarInt(0) // components_to_remove
+		encodeSlotPotionContents(b, item)
 		encodeSlotEnchantments(b, enchantments)
 		encodeSlotPotDecorations(b, item)
 		encodeSlotFireworks(b, item)
@@ -581,6 +585,23 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		// actual damage, armour, and cooldown remain server-authoritative.
 		b.VarInt(13).VarInt(0).Bool(false)
 	}
+}
+
+func potionID(item player.ItemStack) int32 {
+	name, ok := player.PotionName(item)
+	if !ok || name == "" {
+		return -1
+	}
+	return javaworld.PotionID("minecraft:" + name)
+}
+
+func encodeSlotPotionContents(b *protocol.Builder, item player.ItemStack) {
+	id := potionID(item)
+	if id < 0 {
+		return
+	}
+	// Component 41: optional base potion, optional colour, custom effects.
+	b.VarInt(41).Bool(true).VarInt(id).Bool(false).VarInt(0)
 }
 
 func encodeSlotExtensionComponents(b *protocol.Builder, item player.ItemStack) {
