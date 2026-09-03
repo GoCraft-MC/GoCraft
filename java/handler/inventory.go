@@ -297,7 +297,8 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 	}
 
 	nutrition, saturation, food := player.FoodValue(stack.ItemID)
-	consumedID := stack.ItemID
+	consumed := stack
+	consumedID := consumed.ItemID
 	if p.GameMode != player.GameModeCreative {
 		if food && !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(consumedID)) {
 			clearJavaFoodUse(p)
@@ -319,20 +320,19 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 		}
 	}
 	clearJavaFoodUse(p)
+	applyConsumableEffects(conn, p, consumed, mgr)
 	_ = sendUpdateHealth(conn, p)
 	BroadcastSoundAt(mgr, "minecraft:entity.generic.eat", soundCategoryPlayers,
 		p.Position.X, p.Position.Y+1.5, p.Position.Z, 1, 1)
 	BroadcastSoundAt(mgr, "minecraft:entity.player.burp", soundCategoryPlayers,
 		p.Position.X, p.Position.Y+1.5, p.Position.Z, 0.5, 1)
-	applyFoodEffect(conn, p, consumedID)
 	for _, removed := range p.ApplyConsumableCleansing(consumedID) {
 		RemoveMobEffect(conn, p, removed.ID)
 	}
 	return true
 }
 
-// applyFoodEffect sends any status-effect side effects for eating a food item.
-// Vanilla data source: Pumpkin-master living.rs and vanilla food component data.
+// SendMobEffect adds or refreshes a status effect on a Java client.
 func SendMobEffect(conn *network.ClientConn, p *player.Player, name string, amplifier, durationTicks int32) {
 	if conn == nil || p == nil {
 		return
@@ -376,12 +376,22 @@ func RemoveMobEffect(conn *network.ClientConn, p *player.Player, name string) {
 		Build())
 }
 
-func applyFoodEffect(conn *network.ClientConn, p *player.Player, itemID string) {
+func applyConsumableEffects(conn *network.ClientConn, p *player.Player, stack player.ItemStack, mgr *session.Manager) {
 	if p == nil {
 		return
 	}
 	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff
-	for _, effect := range player.FoodStatusEffects(itemID, roll%100) {
+	effects := player.FoodStatusEffects(stack.ItemID, roll%100)
+	if potion, ok := player.PotionOutcomeFor(stack); ok {
+		if potion.Heal > 0 {
+			p.Heal(potion.Heal)
+		}
+		if potion.Damage > 0 {
+			DamagePlayerMagic(&session.Session{Player: p, Conn: conn}, potion.Damage, "was killed by magic", mgr)
+		}
+		effects = append(effects, potion.Effects...)
+	}
+	for _, effect := range effects {
 		if stored, changed := p.AddStatusEffect(effect); changed {
 			SendMobEffect(conn, p, stored.ID, stored.Amplifier, stored.Duration)
 		}
