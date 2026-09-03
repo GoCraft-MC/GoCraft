@@ -501,6 +501,27 @@ func TestJavaComposterLifecycle(t *testing.T) {
 	}
 }
 
+func TestJavaChargesRespawnAnchor(t *testing.T) {
+	p := player.New([16]byte{}, "charger", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:glowstone", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(10, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "respawn_anchor", Properties: map[string]string{"charges": "2"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(10, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(10).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(10, 64, 0).Properties["charges"]; got != "3" {
+		t.Fatalf("anchor charges = %q", got)
+	}
+	if count := p.HeldItem().Count; count != 1 {
+		t.Fatalf("glowstone count = %d", count)
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
