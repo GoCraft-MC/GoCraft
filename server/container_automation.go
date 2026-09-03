@@ -578,6 +578,10 @@ func (s *Server) dispenseSpecialItem(world *coreworld.World, dimension int32, ta
 	entity := corentity.New(s.game.NextEntityID(), newRandomUUID(), projectileType,
 		float64(target[0])+0.5, float64(target[1])+0.5, float64(target[2])+0.5)
 	entity.ProjectileDamage = damage
+	if projectileType == corentity.TypePotion {
+		entity.ProjectileItem = item
+		entity.ProjectileItem.Count = 1
+	}
 	entity.VX, entity.VY, entity.VZ = float64(dx)*1.1, float64(dy)*1.1, float64(dz)*1.1
 	if projectileType == corentity.TypeWindCharge {
 		entity.VX, entity.VY, entity.VZ = float64(dx)*1.5, float64(dy)*1.5, float64(dz)*1.5
