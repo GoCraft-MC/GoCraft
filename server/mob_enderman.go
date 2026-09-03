@@ -3,7 +3,6 @@ package server
 import (
 	"math"
 	"math/rand"
-	"strings"
 
 	corentity "GoCraft/core/entity"
 	coreworld "GoCraft/core/world"
@@ -105,8 +104,9 @@ func (s *Server) tryEndermanPickupBlock(e *corentity.Entity) {
 	if !EndermanPickupBlocks[name] {
 		return
 	}
-	s.setEndermanBlock(x, y, z, coreworld.Block{Namespace: "minecraft", Name: "air"})
+	s.setEndermanBlock(x, y, z, coreworld.Air)
 	e.EndermanCarriedBlock = name
+	s.broadcastEndermanCarryState(e)
 }
 
 // tryEndermanPlaceBlock puts the carried block back into the world. The target
@@ -119,24 +119,25 @@ func (s *Server) tryEndermanPlaceBlock(e *corentity.Entity) {
 	if !s.endermanBlockReachable(x, y, z) || !s.endermanBlockReachable(x, y-1, z) {
 		return
 	}
-	if s.world.GetBlock(x, y, z).ResourceLocation() != "minecraft:air" {
+	if !s.world.GetBlock(x, y, z).IsAir() {
 		return
 	}
 	if !coreworld.IsEntitySupportBlock(s.world.GetBlock(x, y-1, z).ResourceLocation()) {
 		return
 	}
-	s.setEndermanBlock(x, y, z, endermanBlockFor(e.EndermanCarriedBlock))
+	s.setEndermanBlock(x, y, z, coreworld.BlockFromResourceLocation(e.EndermanCarriedBlock))
 	e.EndermanCarriedBlock = ""
+	s.broadcastEndermanCarryState(e)
 }
 
-// endermanBlockFor rebuilds a canonical block from a stored resource location.
-// Block properties are not carried, so a lifted block is placed in its default
-// state; vanilla preserves the full block state.
-func endermanBlockFor(resourceLocation string) coreworld.Block {
-	if namespace, path, found := strings.Cut(resourceLocation, ":"); found {
-		return coreworld.Block{Namespace: namespace, Name: path}
-	}
-	return coreworld.Block{Namespace: "minecraft", Name: resourceLocation}
+// broadcastEndermanCarryState republishes entity metadata after the carried
+// block changes. It is deliberately not called every tick: only the two carry
+// transitions alter what the client renders.
+//
+// Block properties are not stored, so coreworld.BlockFromResourceLocation
+// resolves a carried block to its default state; vanilla keeps the full state.
+func (s *Server) broadcastEndermanCarryState(e *corentity.Entity) {
+	handler.BroadcastMobMetadata(e, s.javaSessionsForDimension(s.simulationDimension))
 }
 
 // endermanBlockRoll reuses the deterministic roll from tickEndermanWater.

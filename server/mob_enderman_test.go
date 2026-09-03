@@ -1,9 +1,11 @@
 package server
 
 import (
+	"math/rand"
 	"testing"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/game"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
 )
@@ -118,5 +120,35 @@ func TestEndermanIgnoresBlocksOutsideHoldableSet(t *testing.T) {
 	tickEndermanUntil(s, enderman, func() bool { return false }, 20000)
 	if enderman.EndermanCarriedBlock != "" {
 		t.Fatalf("enderman picked up %q, want nothing", enderman.EndermanCarriedBlock)
+	}
+}
+
+func TestKilledEndermanDropsCarriedBlock(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	s := &Server{
+		world:               w,
+		game:                game.New(),
+		sessions:            session.NewManager(),
+		simulationDimension: dimensionOverworld,
+		spawnRNG:            rand.New(rand.NewSource(1)),
+	}
+	enderman := corentity.New(1, [16]byte{}, corentity.TypeEnderman, 0.5, 64, 0.5)
+	enderman.EndermanCarriedBlock = "minecraft:grass_block"
+
+	var carried *corentity.Entity
+	for _, dropped := range s.spawnMobDrops(enderman) {
+		if dropped.ItemID == "minecraft:grass_block" {
+			carried = dropped
+		}
+	}
+	if carried == nil {
+		t.Fatal("killed enderman did not drop its carried block")
+	}
+	if carried.ItemCount != 1 {
+		t.Fatalf("dropped stack count = %d, want 1", carried.ItemCount)
+	}
+	if enderman.EndermanCarriedBlock != "" {
+		t.Fatalf("carried block still %q after death", enderman.EndermanCarriedBlock)
 	}
 }
