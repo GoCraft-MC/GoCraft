@@ -741,6 +741,43 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			return nil
 		}
 	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator && targetBlock.ResourceLocation() == "minecraft:flower_pot" {
+		if potted, ok := coreworld.PottedBlock(held.ItemID); ok {
+			applyBlockChange(int(bx), int(by), int(bz), potted, w, mgr)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if pottedItem, ok := coreworld.PottedItem(targetBlock); ok {
+			if _, canPot := coreworld.PottedBlock(held.ItemID); canPot {
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+			applyBlockChange(int(bx), int(by), int(bz), coreworld.Block{Namespace: "minecraft", Name: "flower_pot"}, w, mgr)
+			returned := player.ItemStack{ItemID: pottedItem, Count: 1}
+			if !p.GiveItem(returned) {
+				spawnBlockDrop(w, nextEntityID, p.Position, returned, 0, mgr, p.Dimension)
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 
 	// Sneaking with an item bypasses block activation so a block can be placed
 	// against doors, containers, workstations, composters, and other UIs.

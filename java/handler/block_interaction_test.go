@@ -444,6 +444,34 @@ func TestJavaAddsCandleToCake(t *testing.T) {
 	}
 }
 
+func TestJavaFlowerPotInsertAndRemove(t *testing.T) {
+	p := player.New([16]byte{}, "gardener", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:poppy", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(8, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "flower_pot"})
+	use := func(sequence int32) {
+		pkt := protocol.NewBuilder(packetIDUseItemOn).
+			VarInt(0).Long(packBlockPos(8, 64, 0)).VarInt(1).
+			Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(sequence).Build()
+		if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	use(6)
+	if got := w.GetBlock(8, 64, 0).ResourceLocation(); got != "minecraft:potted_poppy" {
+		t.Fatalf("potted block = %q", got)
+	}
+	use(7)
+	if got := w.GetBlock(8, 64, 0).ResourceLocation(); got != "minecraft:flower_pot" {
+		t.Fatalf("emptied pot = %q", got)
+	}
+	if p.HeldItem().ItemID != "minecraft:poppy" {
+		t.Fatalf("returned plant = %+v", p.HeldItem())
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
