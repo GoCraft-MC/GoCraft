@@ -2717,6 +2717,7 @@ func (s *Server) tickEntities() {
 		e.AgeTicks++
 		if !e.Dead {
 			s.tickMobSunlight(e, &hurtEntities)
+			s.tickEndermanBlockCarry(e)
 		}
 		// ── Dead entity cleanup ───────────────────────────────────────────────
 		if e.Dead {
