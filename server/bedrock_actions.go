@@ -424,11 +424,10 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		return true
 	}
 	if name == "minecraft:note_block" {
-		replacement := bedrockCopyBlock(block)
-		note, _ := strconv.Atoi(block.Properties["note"])
-		replacement.Properties["note"] = strconv.Itoa((note + 1) % 25)
-		s.setBedrockActionBlock(x, y, z, replacement)
-		return true
+		if replacement, ok := coreworld.TuneNoteBlock(block); ok {
+			s.setBedrockActionBlock(x, y, z, replacement)
+			return true
+		}
 	}
 	if name == "minecraft:cake" && p.ConsumeFood(2, 0.1) {
 		bites, _ := strconv.Atoi(block.Properties["bites"])
