@@ -1667,23 +1667,15 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		return true
 	}
 	if isHoe(held.ItemID) {
-		if face == 0 {
-			return false
-		}
-		above := w.GetBlock(x, y+1, z)
-		if !above.IsAir() {
-			return false
-		}
-		var replacement coreworld.Block
-		switch target.ResourceLocation() {
-		case "minecraft:grass_block", "minecraft:dirt", "minecraft:dirt_path":
-			replacement = coreworld.Block{Namespace: "minecraft", Name: "farmland", Properties: map[string]string{"moisture": "0"}}
-		case "minecraft:coarse_dirt", "minecraft:rooted_dirt":
-			replacement = coreworld.Block{Namespace: "minecraft", Name: "dirt"}
-		default:
+		canMakeFarmland := face != 0 && w.GetBlock(x, y+1, z).IsAir()
+		replacement, drop, ok := coreworld.UseHoe(target, canMakeFarmland)
+		if !ok {
 			return false
 		}
 		applyBlockChange(x, y, z, replacement, w, mgr)
+		if p.GameMode != player.GameModeCreative && !drop.IsEmpty() && !p.GiveItem(drop) {
+			spawnBlockDrop(w, nextEntityID, p.Position, drop, 0, mgr, p.Dimension)
+		}
 		broadcastSoundAt(mgr, "minecraft:item.hoe.till", soundCategoryBlocks, float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
 		return true
 	}
