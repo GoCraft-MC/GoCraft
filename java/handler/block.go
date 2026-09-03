@@ -722,6 +722,25 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			return nil
 		}
 	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if candleCake, ok := coreworld.AddCandleToCake(targetBlock, held.ItemID); ok {
+			applyBlockChange(int(bx), int(by), int(bz), candleCake, w, mgr)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, "minecraft:block.cake.add_candle", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 
 	// Sneaking with an item bypasses block activation so a block can be placed
 	// against doors, containers, workstations, composters, and other UIs.

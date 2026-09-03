@@ -423,6 +423,27 @@ func TestJavaBottleHarvestsFullBeehive(t *testing.T) {
 	}
 }
 
+func TestJavaAddsCandleToCake(t *testing.T) {
+	p := player.New([16]byte{}, "baker", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:blue_candle", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(7, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "cake", Properties: map[string]string{"bites": "0"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(7, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(5).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(7, 64, 0); got.ResourceLocation() != "minecraft:blue_candle_cake" || got.Properties["lit"] != "false" {
+		t.Fatalf("candle cake = %+v", got)
+	}
+	if !p.Inventory[player.HotbarStart].IsEmpty() {
+		t.Fatal("candle was not consumed")
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
