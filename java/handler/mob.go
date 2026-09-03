@@ -105,6 +105,14 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		})
 		return b.Byte(0xff).Build()
 	}
+	if e.Type == corentity.TypePotion && !e.ProjectileItem.IsEmpty() {
+		b := protocol.NewBuilder(packetIDSetEntityData).
+			VarInt(e.EntityID).
+			Byte(8).
+			VarInt(7)
+		encodeSlot(b, e.ProjectileItem)
+		return b.Byte(0xff).Build()
+	}
 	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)
 	hasMetadata := false
 	if e.FireTicks > 0 {
