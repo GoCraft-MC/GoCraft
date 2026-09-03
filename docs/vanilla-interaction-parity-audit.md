@@ -1,8 +1,38 @@
 # Dragonfly gameplay and interaction parity audit
 
 Audit date: 2026-09-02. GoCraft baseline: `missing-items` at `00685b7`.
+Progress update: 2026-09-03 at `1afb02e`.
 Reference implementation: Dragonfly v0.11.0 from the resolved Go module source.
 Protocol targets: Java Edition 1.21.4 and Bedrock Edition 1.26.45.
+
+## Progress since the audit (2026-09-03)
+
+The structural groundwork and the first tranche of `Missing` items are done.
+Rows updated below are marked **Implemented (new)**; each is backed by a
+cross-edition test. Completed so far:
+
+- **Canonical item components.** `player.ItemStack` now carries an extensible
+  component codec preserved through Java codecs, Bedrock NBT, anvil/inventory
+  paths, dropped items, and world objects (resolves finding 1).
+- **Canonical status-effect engine.** Effects are tracked, ticked, expire, apply
+  periodic damage/heal, modify defensive damage, persist, and sync to both
+  clients; foods, potions, totems, milk/honey cures, and a command bridge all
+  route through it (resolves finding 2).
+- **Potions.** Drinkable, splash, and lingering potions work on both editions:
+  outcomes, bottle remainders, thrown payloads, distance-scaled effects,
+  lingering area-effect clouds with radius decay and reapplication, plus Bedrock
+  variant round-tripping and the native Java `potion_contents` component.
+- **Milk & honey.** Milk drinking clears effects; honey cures poison.
+- **Suspicious stew.** Flower-selected effect stored and applied on both editions.
+- **Nine Bedrock-only interactions ported to Java** (TNT ignition, note-block
+  tuning, respawn-anchor charging, composter lifecycle, flower-pot in/out, candle
+  cake, beehive harvest, pumpkin carving, honeycomb waxing) plus hoe hanging
+  roots — all now routed through shared canonical operations.
+- **Java drop & offhand player actions** (Player Action statuses 3/4 drop, 6 swap).
+
+Still open: the remaining `Partial`/`Missing` rows below that are **not** marked
+"(new)", and findings 3–5 (unified use dispatch, richer hand/use state, and
+mining-time validation) are only partially addressed.
 
 This is a static code audit of behaviour, not a registry-presence check. An item
 is not considered implemented merely because it appears in the Java data pack,
@@ -28,16 +58,17 @@ where GoCraft's declared Java target still requires it.
 
 ## Highest-impact findings
 
-1. `player.ItemStack` cannot represent most stateful vanilla components. It
-   currently preserves item ID, count, damage, enchantments, pot decorations,
-   and fireworks. Potion contents, stew effects, book pages, map data, lodestone
+1. **Resolved (2026-09-03).** `player.ItemStack` now has an extensible component
+   codec. Potion contents and stew effects have canonical storage and round-trip
+   through Java codecs, Bedrock NBT, anvil/inventory paths, dropped items, and
+   world objects. Remaining component types (book pages, map data, lodestone
    targets, banner patterns, dyed colour, armour trims, goat-horn instrument,
-   crossbow charge, bundle contents, shulker contents, custom names, and lore
-   have no canonical storage.
-2. GoCraft has no canonical timed status-effect system for players. Several
-   foods and the totem send effect packets, but poison, regeneration,
-   absorption, resistance, fire resistance, and similar effects do not alter
-   authoritative health, damage, movement, or expiry state.
+   crossbow charge, bundle/shulker contents, custom names, lore) still need their
+   own encoders but now have a codec to hang on.
+2. **Resolved (2026-09-03).** GoCraft has a canonical timed status-effect engine.
+   Effects are tracked, ticked, and expired; they apply periodic damage/heal,
+   modify defensive damage, persist, and sync to both clients. Foods, potions,
+   totems, milk/honey cures, and a command bridge route through it.
 3. Java and Bedrock still dispatch many interactions through separate hardcoded
    switches. This has already produced two large adapter-only sets: several
    block/item actions exist only on Bedrock, while ranged weapons and shields
@@ -61,14 +92,14 @@ inventory move, save, cross-edition sync, or restart.
 | Item or family | Java | Bedrock | Missing or incomplete behaviour |
 | --- | --- | --- | --- |
 | Ordinary registry-backed foods | Implemented | Implemented | Hunger, saturation, use duration, full-hunger checks, stack consumption, and bowl/bottle remainders are shared. |
-| Rotten flesh, raw chicken, spider eye, poisonous potato, pufferfish | Partial | Partial | Java sends client effect packets only. Bedrock's normal timed-use completion does not call the special-effect path; its legacy inventory-consume path does. Neither path stores or ticks player effects authoritatively. |
-| Golden apple and enchanted golden apple | Partial | Partial | Food is consumed, but regeneration, absorption, resistance, and fire resistance are client-visible packets rather than canonical effects. Bedrock's normal timed-use path omits them. |
-| Honey bottle | Partial | Partial | Nutrition and bottle remainder work. Dragonfly removes poison; GoCraft has no player poison state to remove. |
-| Suspicious stew | Partial | Partial | Nutrition and bowl remainder work, but the flower-selected effect is not stored or applied. Every stew stack collapses to the same canonical item. |
-| Drinkable potions | Missing | Missing | They are not accepted by the food-use dispatcher, potion type is not stored, the bottle remainder is not produced, and effects are not applied. |
-| Splash potions | Missing | Missing | Dispensers and witches may create a generic potion projectile, but players cannot throw one and impacts only play a sound. Potion payload, distance-scaled effects, colour, and instant effects are absent. |
-| Lingering potions | Missing | Missing | No player throw path, potion payload, area-effect cloud entity, radius decay, reapplication delay, or tipped-arrow interaction. |
-| Milk bucket | Missing | Missing | No drink use, bucket remainder, or effect clearing. |
+| Rotten flesh, raw chicken, spider eye, poisonous potato, pufferfish | Implemented (new) | Implemented (new) | Food effects are now stored and ticked authoritatively via the canonical status-effect engine on both the timed-use and legacy consume paths. Edge cases (probability rolls, exact durations per item) still deserve conformance tests. |
+| Golden apple and enchanted golden apple | Implemented (new) | Implemented (new) | Regeneration, absorption, resistance, and fire resistance are now canonical effects applied through the engine on both editions. |
+| Honey bottle | Implemented (new) | Implemented (new) | Nutrition, bottle remainder, and canonical poison cure all work. |
+| Suspicious stew | Implemented (new) | Implemented (new) | Flower-selected effect is stored as a canonical component and applied on eat; Bedrock variant metadata round-trips through item packets and the creative catalogue. |
+| Drinkable potions | Implemented (new) | Implemented (new) | Accepted by the consumable dispatcher; potion outcome resolved and applied, bottle remainder produced, instant heal/damage handled. |
+| Splash potions | Implemented (new) | Implemented (new) | Players throw them on both editions; impacts apply distance-scaled effects to nearby players with the preserved payload. Colour particles and thrown metadata are sent. |
+| Lingering potions | Implemented (new) | Implemented (new) | Player throw path, canonical area-effect cloud entity with radius decay, reapplication delay, and quarter-duration effects, ticked in every dimension. Tipped-arrow interaction is still open. |
+| Milk bucket | Implemented (new) | Implemented (new) | Drink use, bucket remainder, and effect clearing all work. |
 
 ### Weapons, use-state, and utility items
 
@@ -82,7 +113,7 @@ inventory move, save, cross-edition sync, or restart.
 | Firework rocket | Partial | Partial | Ground launch, preserved rocket explosion data, ticking, explosion, and damage work on both adapters. Elytra boost and crossbow-fired rockets are missing. |
 | Firework star | Partial | Partial | Some crafting/component decoding exists, but a firework-star component is not preserved as an item stack and all crafting transformations are not round-trippable. |
 | Elytra | Partial | Partial | Equipping is possible. Java accepts the start-fall-flying action only by resetting fall distance; no canonical gliding flag or glide physics exists. Bedrock glide input is not modelled, and rocket boost is missing on both. |
-| Totem of undying | Partial | Partial | Canonical death prevention and consumption run for both editions. Java receives its animation/effect packets; Bedrock receives neither through the totem path. The granted effects are not authoritative on either edition. |
+| Totem of undying | Partial | Partial | Canonical death prevention and consumption run for both editions, and the granted survival effects are now stored authoritatively through the status-effect engine. Bedrock still does not receive the totem animation/effect packets through the totem path. |
 | Goat horn | Missing | Missing | Dragonfly plays the selected instrument with use duration/cooldown. GoCraft stores neither instrument nor cooldown and has no use action. |
 | Spyglass | Missing | Missing | No start/stop use state or remote-player using-item metadata. |
 | Fishing rod | Missing | Missing | No hook entity, cast/reel state, bobber physics, hooked entity/item handling, durability, or fishing loot. |
@@ -107,10 +138,10 @@ inventory move, save, cross-edition sync, or restart.
 | Item or family | Java | Bedrock | Missing or incomplete behaviour |
 | --- | --- | --- | --- |
 | Axes | Partial | Partial | Stripping, scraping oxidation, and removing wax are present. Complete sound/particle feedback and enchantment durability rules remain. |
-| Hoes | Partial | Partial | Tilling works. Bedrock drops hanging roots from rooted dirt; Java does not. Java also applies durability outside the interaction helper while Bedrock applies it inside, leaving duplicate logic to keep aligned. |
+| Hoes | Implemented (new) | Implemented (new) | Tilling and hanging-root drops from rooted dirt now share canonical hoe transformations on both editions. Durability enchantment rules still deserve verification. |
 | Shovels | Partial | Partial | Dirt paths and campfire extinguishing work. Full flattenable set, sound parity, and durability/enchantment rules need verification. |
 | Flint and steel / fire charge | Partial | Partial | Both adapters create fire, light candles/campfires, and ignite portals. Bedrock directly primes TNT; Java has no TNT target branch. Projectile/dispenser and feedback rules remain incomplete. |
-| Honeycomb | Missing | Partial | Bedrock waxes copper. Java has axe unwaxing/scraping but no honeycomb waxing action. |
+| Honeycomb | Implemented (new) | Implemented (new) | Copper waxing now runs through a shared canonical operation on both editions. |
 | Bone meal | Partial | Partial | Supported crops and saplings work. Grass-area features, flowers, moss, azalea, mangrove, underwater plants/coral, fungi/nylium, sea pickles, and particles are incomplete. |
 | Ender eye | Implemented | Implemented | Stronghold launch and portal-frame insertion are present. Structure search and feedback still deserve runtime tests. |
 
@@ -118,24 +149,24 @@ inventory move, save, cross-edition sync, or restart.
 
 ### Bedrock behaviour with no Java equivalent
 
-These are confirmed adapter gaps in the current switches, not speculative
-feature requests.
+**Resolved (2026-09-03).** All nine interactions below were moved into shared
+canonical operations and given a Java path, so both editions now dispatch them
+through the same code. Each is covered by a Java test.
 
 | Interaction | Bedrock | Java |
 | --- | --- | --- |
-| Carve pumpkin with shears and drop seeds | Implemented | Missing |
-| Harvest a full bee nest/hive with shears or bottle | Implemented | Missing |
-| Wax copper with honeycomb | Implemented | Missing |
-| Add a candle to a cake | Implemented | Missing |
-| Put a plant into, or remove it from, a flower pot | Implemented | Missing |
-| Add compostables, mature the composter, collect bone meal | Partial | Missing |
-| Charge a respawn anchor with glowstone | Partial | Missing |
-| Ignite TNT directly with flint and steel/fire charge | Implemented | Missing |
-| Tune a note block | Partial | Missing |
+| Carve pumpkin with shears and drop seeds | Implemented | Implemented (new) |
+| Harvest a full bee nest/hive with shears or bottle | Implemented | Implemented (new) |
+| Wax copper with honeycomb | Implemented | Implemented (new) |
+| Add a candle to a cake | Implemented | Implemented (new) |
+| Put a plant into, or remove it from, a flower pot | Implemented | Implemented (new) |
+| Add compostables, mature the composter, collect bone meal | Implemented (new) | Implemented (new) |
+| Charge a respawn anchor with glowstone | Implemented (new) | Implemented (new) |
+| Ignite TNT directly with flint and steel/fire charge | Implemented | Implemented (new) |
+| Tune a note block | Implemented (new) | Implemented (new) |
 
-The Java dispatcher contains none of the corresponding item/block names except
-for generic placement or support checks. These behaviours should move into
-shared canonical operations before Java calls are added.
+The prior structural recommendation — move these into shared canonical
+operations before adding Java calls — was followed for all nine.
 
 ### Missing or incomplete on both editions
 
@@ -146,7 +177,7 @@ shared canonical operations before Java calls are added.
 | Chiseled bookshelf | Missing | Six-slot inventory, targeted slot selection, book insertion/removal, block state, comparator signal, vibration, and persistence. |
 | Item/glow item frame | Missing | See item table; Dragonfly implements this as a stateful block. |
 | Dragon egg | Partial | Gravity is registered, but activate/punch teleport, particles, and creative exception are absent. |
-| Note block | Partial | Bedrock can increment the note and redstone stores `powered`. Java cannot tune it. Neither adapter calculates instrument from the block below or emits canonical note sound/particle on click or rising edge. |
+| Note block | Implemented (new) | Tuning now runs through a shared canonical operation on both editions. Instrument-from-block-below and canonical note sound/particle on rising edge still need coverage. |
 | Signs and hanging signs | Partial | Placement and empty block entities work. Text editing, front/back text, filtering, wax, dye/glow, click events, and persistence/round-trip of text components are absent. |
 | Banners | Partial | Placement works. Pattern layers, loom output, shields carrying patterns, map markers, block-entity persistence, and wash-off in cauldrons are absent. |
 | Beacon | Partial | Both adapters can open a one-slot screen. Pyramid level, beam obstruction/colour, payment validation, selected effects, periodic area application, and persistence are absent. |
@@ -158,7 +189,7 @@ shared canonical operations before Java calls are added.
 | Loom | Partial | It consumes a banner and dye but returns an unchanged banner because pattern data has no canonical representation. Selection, six-layer limit, and full pattern rules are absent. |
 | Stonecutter | Partial | Recipe selection/output exists. Adapter selection parity and complete feedback/validation require tests. |
 | Cartography table | Partial | It returns a generic filled map for paper, map, or glass pane. Scale, clone count, lock state, map identity, and data preservation are absent. |
-| Respawn anchor | Partial | Bedrock can charge it only. Nether spawn assignment, charge use on respawn, comparator output, explosion outside the Nether, and Java interaction are absent. |
+| Respawn anchor | Partial | Charging now works on both editions through a shared canonical operation (Java added). Nether spawn assignment, charge use on respawn, comparator output, and explosion outside the Nether are still absent. |
 | Bee nest / beehive | Partial | Bedrock can harvest honey. Bees, occupants, entry/exit, honey production, anger, smoke pacification, Silk Touch data, dripping, and Java harvest are absent. |
 | Campfire | Partial | Placement, lighting/extinguishing, four stored cooking slots, cooking completion, and damage are present. Item rendering, per-slot progress persistence, smoke height, hay signal, bee pacification, projectile lighting, soul variants, and complete drop/waterlogging rules remain. |
 | Candles / candle cakes / cake | Partial | Core stacking, eating, lighting, and extinguishing exist, but Java candle-cake creation, projectile lighting, cake collision details, particles, sounds, and complete waterlogging/support behaviour remain. |
@@ -213,13 +244,13 @@ adapters unless noted:
 | Action or system | Java | Bedrock | Gap |
 | --- | --- | --- | --- |
 | Movement, sprint, sneak, flight permission | Implemented | Implemented | Swimming, crawling, gliding, pose transitions, collision validation, and speed-effect integration are incomplete. |
-| Drop one stack / drop one item | Missing | Implemented | Java Player Action statuses 3 and 4 are not handled. Bedrock inventory transactions support drops. |
-| Swap main hand and offhand | Missing | Partial | Java Player Action status 6 is not handled. Bedrock inventory swaps exist, but use actions still assume a hotbar item. |
+| Drop one stack / drop one item | Implemented (new) | Implemented | Java now handles Player Action statuses 3 and 4; Bedrock inventory transactions already supported drops. |
+| Swap main hand and offhand | Implemented (new) | Partial | Java now handles Player Action status 6. Bedrock inventory swaps exist, but use actions still assume a hotbar item. |
 | Offhand use | Missing | Missing | Java acknowledges and ignores non-main-hand `Use Item`; Bedrock use intents carry only a hotbar slot. Shields, food, rockets, and utility items therefore cannot use normal offhand semantics. |
 | Melee attack | Partial | Partial | Basic damage, range, cooldown gate, armour/toughness, knockback, mace fall bonus, and durability exist. Critical hits, sweeping attacks, attack-speed-per-item timing, fire aspect, damage/knockback enchantments, shield disable, statistics, and exhaustion are missing. |
 | Armour and defensive enchantments | Partial | Partial | Base armour/toughness/knockback resistance work. Protection families, Feather Falling, Thorns, Respiration, Aqua Affinity, Soul Speed, Swift Sneak, Frost Walker, and equipment-triggered effects are not applied. |
 | Projectile combat | Partial | Partial | Shared collision/damage exists. Tipped/spectral effects, arrow embedding/pickup, criticals, bow/crossbow/trident enchantments, owner rules, and shield interaction are incomplete. |
-| Status effects | Missing | Missing | Client effect packets exist, but there is no canonical effect collection, tick/expiry engine, attribute modification, periodic damage/heal, immunity, cure, persistence, or cross-edition sync source. |
+| Status effects | Implemented (new) | Implemented (new) | Canonical effect collection with a tick/expiry engine, periodic damage/heal, defensive-damage modification, cure, persistence, and cross-edition sync. Full attribute-modifier breadth and immunity rules still need conformance tests. |
 | Hunger, regeneration, starvation | Partial | Partial | Core hunger/exhaustion and natural regeneration/starvation exist. Activity costs, difficulty rules, status-effect interaction, peaceful behaviour, and all exhaustion sources are incomplete. |
 | Fall, fire, lava, cactus, berry, void, drowning | Partial | Partial | Main damage paths exist. Effect/enchantment mitigation, fire ticks, freezing/powder snow, suffocation, cramming, border damage, lightning, and many block hazards are absent or simplified. |
 | Sleep and respawn | Partial | Partial | Beds set spawn and sleep at night. Occupancy, monsters nearby, dimension explosions, obstruction, sleep percentage/gamerules, anchor respawn, charge use, and exact wake placement remain. |
