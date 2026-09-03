@@ -404,6 +404,15 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	return e
 }
 
+// NewPrimedTNT creates an ignited TNT entity with the vanilla fuse and initial
+// upward motion shared by block, redstone, and dispenser activation paths.
+func NewPrimedTNT(id int32, uuid [16]byte, x, y, z float64) *Entity {
+	tnt := New(id, uuid, TypePrimedTNT, x, y, z)
+	tnt.FuseTicks = 80
+	tnt.VY = 0.2
+	return tnt
+}
+
 // defaultMaxHealth returns the base max health for all entity types.
 // Unknown types default to 20 (10 hearts).
 func defaultMaxHealth(t EntityType) float32 {
