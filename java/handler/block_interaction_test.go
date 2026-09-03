@@ -1068,3 +1068,26 @@ func TestJavaIgnitesTNTWithBothIgniters(t *testing.T) {
 		})
 	}
 }
+
+func TestJavaTunesNoteBlock(t *testing.T) {
+	p := player.New([16]byte{95}, "musician", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(2, 64, 0, coreworld.Block{
+		Namespace: "minecraft",
+		Name:      "note_block",
+		Properties: map[string]string{
+			"instrument": "harp", "note": "24", "powered": "false",
+		},
+	})
+
+	if err := handleUseItemOn(useItemOnPacket(2, 64, 0, 1, 720),
+		p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := w.GetBlock(2, 64, 0)
+	if got.Properties["note"] != "0" || got.Properties["instrument"] != "harp" || got.Properties["powered"] != "false" {
+		t.Fatalf("tuned note block = %s", got.Key())
+	}
+}
