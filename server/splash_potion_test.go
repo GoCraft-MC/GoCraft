@@ -56,3 +56,21 @@ func TestSplashPotionImpactAppliesInstantHealing(t *testing.T) {
 		t.Fatalf("health after splash potion = %.1f, want 14", health)
 	}
 }
+
+func TestLingeringSplashUsesQuarterDuration(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{54}, "lingering", player.ClientEditionJava)
+	p.Position = spatial.Vec3{Y: 64}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	stack := player.ItemStack{ItemID: "minecraft:lingering_potion", Count: 1}
+	if err := stack.SetComponent("potion_contents", map[string]string{"potion": "minecraft:poison"}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g, sessions: session.NewManager(), simulationDimension: dimensionOverworld}
+	s.applySplashPotionScaled(stack, spatial.Vec3{Y: 64.9}, 0.25)
+	if effect, ok := p.StatusEffect("poison"); !ok || effect.Duration != 225 {
+		t.Fatalf("lingering splash poison = %+v, ok=%v", effect, ok)
+	}
+}

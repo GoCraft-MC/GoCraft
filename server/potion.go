@@ -11,6 +11,10 @@ import (
 const splashPotionRadius = 4.0
 
 func (s *Server) applySplashPotion(projectileItem player.ItemStack, position spatial.Vec3) {
+	s.applySplashPotionScaled(projectileItem, position, 1)
+}
+
+func (s *Server) applySplashPotionScaled(projectileItem player.ItemStack, position spatial.Vec3, durationMultiplier float64) {
 	outcome, ok := player.PotionOutcomeFor(projectileItem)
 	if !ok || s.game == nil {
 		return
@@ -33,7 +37,7 @@ func (s *Server) applySplashPotion(projectileItem player.ItemStack, position spa
 			handler.DamagePlayerMagic(target, outcome.Damage*float32(scale), "was killed by magic", s.sessions)
 		}
 		for _, effect := range outcome.Effects {
-			effect.Duration = int32(float64(effect.Duration) * scale)
+			effect.Duration = int32(float64(effect.Duration) * scale * durationMultiplier)
 			if effect.Duration < 20 {
 				continue
 			}
