@@ -309,6 +309,36 @@ func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spat
 	BroadcastSpawnMobInDimension(dropped, mgr, dimension)
 }
 
+func primeJavaTNT(x, y, z int, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32, dimension int32) bool {
+	if nextEntityID == nil || w.GetBlock(x, y, z).ResourceLocation() != "minecraft:tnt" {
+		return false
+	}
+	applyBlockChange(x, y, z, coreworld.Air, w, mgr)
+	id := nextEntityID()
+	var uuid [16]byte
+	if _, err := cryptorand.Read(uuid[:]); err != nil {
+		uuid[0], uuid[1], uuid[2], uuid[3] = byte(id>>24), byte(id>>16), byte(id>>8), byte(id)
+	}
+	uuid[6] = (uuid[6] & 0x0f) | 0x40
+	uuid[8] = (uuid[8] & 0x3f) | 0x80
+	tnt := corentity.NewPrimedTNT(id, uuid, float64(x)+0.5, float64(y), float64(z)+0.5)
+	w.Entities.Add(tnt)
+	BroadcastSpawnMobInDimension(tnt, mgr, dimension)
+	return true
+}
+
+func finishJavaIgniterUse(p *player.Player, itemID string) {
+	if itemID != "minecraft:fire_charge" {
+		return
+	}
+	if p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator {
+		return
+	}
+	slot := player.HotbarStart + p.HeldSlot
+	p.Inventory[slot].Count--
+	normalizeStack(&p.Inventory[slot])
+}
+
 func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.World, mgr *session.Manager) {
 	otherY, wantHalf, ok := coreworld.DoublePlantPartnerY(broken, y)
 	if !ok {
@@ -643,7 +673,7 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 	}
 	heldBefore := held.ItemID
 	usedDamageableTool := isBlockUseTool(heldBefore)
-	if hand == 0 && useToolOrPlant(int(bx), int(by), int(bz), face, targetBlock, p, w, mgr, conn) {
+	if hand == 0 && useToolOrPlant(int(bx), int(by), int(bz), face, targetBlock, p, w, mgr, nextEntityID) {
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		if usedDamageableTool {
 			damageHeldItem(p, conn, 1)
@@ -1450,7 +1480,7 @@ func blockSupportsWaterlogging(blockName string) bool {
 	return false
 }
 
-func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn) bool {
+func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.Player, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32) bool {
 	held := p.HeldItem()
 	if held.IsEmpty() {
 		return false
@@ -1680,6 +1710,13 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 	}
 
 	if held.ItemID == "minecraft:flint_and_steel" || held.ItemID == "minecraft:fire_charge" {
+		if target.ResourceLocation() == "minecraft:tnt" &&
+			primeJavaTNT(x, y, z, w, mgr, nextEntityID, p.Dimension) {
+			broadcastSoundAt(mgr, "minecraft:entity.tnt.primed", soundCategoryBlocks,
+				float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+			finishJavaIgniterUse(p, held.ItemID)
+			return true
+		}
 		if target.ResourceLocation() == "minecraft:obsidian" {
 			if changes, ok := coreworld.NetherPortalInterior(w, x, y, z); ok {
 				for _, change := range changes {
@@ -1687,11 +1724,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				}
 				broadcastSoundAt(mgr, "minecraft:item.flintandsteel.use", soundCategoryBlocks,
 					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
-				if held.ItemID == "minecraft:fire_charge" && p.GameMode != player.GameModeCreative {
-					slot := player.HotbarStart + p.HeldSlot
-					p.Inventory[slot].Count--
-					normalizeStack(&p.Inventory[slot])
-				}
+				finishJavaIgniterUse(p, held.ItemID)
 				return true
 			}
 		}
@@ -1703,7 +1736,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				applyBlockChange(x, y, z, lit, w, mgr)
 				broadcastSoundAt(mgr, "minecraft:item.flintandsteel.use", soundCategoryBlocks,
 					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
-				damageHeldItem(p, conn, 1)
+				finishJavaIgniterUse(p, held.ItemID)
 				return true
 			}
 		}
@@ -1715,7 +1748,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				applyBlockChange(x, y, z, lit, w, mgr)
 				broadcastSoundAt(mgr, "minecraft:block.candle.ignite", soundCategoryBlocks,
 					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
-				damageHeldItem(p, conn, 1)
+				finishJavaIgniterUse(p, held.ItemID)
 				return true
 			}
 		}
@@ -1730,11 +1763,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		applyBlockChange(fx, fy, fz, coreworld.Block{Namespace: "minecraft", Name: "fire"}, w, mgr)
 		broadcastSoundAt(mgr, "minecraft:item.flintandsteel.use", soundCategoryBlocks,
 			float64(fx)+0.5, float64(fy)+0.5, float64(fz)+0.5, 1, 1)
-		if held.ItemID == "minecraft:fire_charge" && p.GameMode != player.GameModeCreative {
-			slot := player.HotbarStart + p.HeldSlot
-			p.Inventory[slot].Count--
-			normalizeStack(&p.Inventory[slot])
-		}
+		finishJavaIgniterUse(p, held.ItemID)
 		return true
 	}
 
