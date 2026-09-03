@@ -113,6 +113,13 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		encodeSlot(b, e.ProjectileItem)
 		return b.Byte(0xff).Build()
 	}
+	if e.Type == corentity.TypeAreaEffectCloud {
+		return protocol.NewBuilder(packetIDSetEntityData).
+			VarInt(e.EntityID).
+			Byte(8).VarInt(3).Float(float32(e.CloudRadius)).
+			Byte(9).VarInt(8).Bool(e.AgeTicks < 10).
+			Byte(0xff).Build()
+	}
 	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)
 	hasMetadata := false
 	if e.FireTicks > 0 {
