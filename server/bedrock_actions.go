@@ -182,14 +182,9 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 		return true
 	}
 
-	if name == "minecraft:respawn_anchor" && item == "minecraft:glowstone" {
-		charges, _ := strconv.Atoi(target.Properties["charges"])
-		if charges < 4 {
-			replacement := bedrockCopyBlock(target)
-			replacement.Properties["charges"] = strconv.Itoa(charges + 1)
-			s.setBedrockActionBlock(x, y, z, replacement)
-			s.consumeBedrockHeldItem(p, 1)
-		}
+	if charged, ok := coreworld.ChargeRespawnAnchor(target, item); ok {
+		s.setBedrockActionBlock(x, y, z, charged)
+		s.consumeBedrockHeldItem(p, 1)
 		return true
 	}
 
