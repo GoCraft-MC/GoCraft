@@ -63,6 +63,7 @@ type bedrockEntityView struct {
 	onFire             bool
 	usingItem          bool
 	pufferState        int32
+	cloudRadius        float64
 }
 
 func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
@@ -78,6 +79,7 @@ func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
 		onFire:      entity.FireTicks > 0,
 		usingItem:   entity.UsingItem,
 		pufferState: entity.PufferState,
+		cloudRadius: entity.CloudRadius,
 	}
 }
 
@@ -672,6 +674,7 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 			previous.onFire != (entity.FireTicks > 0) ||
 			previous.usingItem != entity.UsingItem ||
 			previous.pufferState != entity.PufferState ||
+			previous.cloudRadius != entity.CloudRadius ||
 			entity.Type == corentity.TypeVillager &&
 				(previous.villagerVariant != entity.VillagerVariant || previous.villagerProfession != entity.VillagerProfession ||
 					previous.villagerLevel != entity.VillagerLevel) {
@@ -777,7 +780,7 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 
 func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corentity.Entity) protocol.EntityMetadata {
 	metadata := protocol.NewEntityMetadata()
-	if entity == nil || entity.Type != corentity.TypeFireworkRocket {
+	if entity == nil || entity.Type != corentity.TypeFireworkRocket && entity.Type != corentity.TypeAreaEffectCloud {
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
 	}
@@ -839,6 +842,12 @@ func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corenti
 	}
 	if entity.Type == corentity.TypeFireworkRocket {
 		metadata[protocol.EntityDataKeyDisplayFirework] = bedrockFireworkNBT(entity.FireworkData)
+	}
+	if entity.Type == corentity.TypeAreaEffectCloud {
+		metadata[protocol.EntityDataKeyDataRadius] = float32(entity.CloudRadius)
+		metadata[protocol.EntityDataKeyDataDuration] = int32(math.MaxInt32)
+		metadata[protocol.EntityDataKeyDataChangeOnPickup] = float32(math.SmallestNonzeroFloat32)
+		metadata[protocol.EntityDataKeyDataChangeRate] = float32(math.SmallestNonzeroFloat32)
 	}
 	return metadata
 }
