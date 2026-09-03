@@ -6,6 +6,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	"GoCraft/java/handler"
+	"GoCraft/java/session"
 )
 
 const splashPotionRadius = 4.0
@@ -32,27 +33,32 @@ func (s *Server) applySplashPotionScaled(projectileItem player.ItemStack, positi
 			continue
 		}
 		scale := 1 - distance/splashPotionRadius
-		healthChanged := outcome.Heal > 0 && p.Heal(outcome.Heal*float32(scale))
-		if outcome.Damage > 0 {
-			handler.DamagePlayerMagic(target, outcome.Damage*float32(scale), "was killed by magic", s.sessions)
+		s.applyPotionOutcome(target, outcome, scale, scale*durationMultiplier)
+	}
+}
+
+func (s *Server) applyPotionOutcome(target *session.Session, outcome player.PotionOutcome, potencyScale, durationScale float64) {
+	p := target.Player
+	healthChanged := outcome.Heal > 0 && p.Heal(outcome.Heal*float32(potencyScale))
+	if outcome.Damage > 0 {
+		handler.DamagePlayerMagic(target, outcome.Damage*float32(potencyScale), "was killed by magic", s.sessions)
+	}
+	for _, effect := range outcome.Effects {
+		effect.Duration = int32(float64(effect.Duration) * durationScale)
+		if effect.Duration < 20 {
+			continue
 		}
-		for _, effect := range outcome.Effects {
-			effect.Duration = int32(float64(effect.Duration) * scale * durationMultiplier)
-			if effect.Duration < 20 {
-				continue
-			}
-			stored, changed := p.AddStatusEffect(effect)
-			if !changed {
-				continue
-			}
-			if p.Edition == player.ClientEditionJava {
-				handler.SendMobEffect(target.Conn, p, stored.ID, stored.Amplifier, stored.Duration)
-			} else if effectType := bedrockEffectType(stored.ID); effectType != 0 && s.bedrockListener != nil {
-				s.bedrockListener.SendPlayerMobEffect(p, effectType, stored.Amplifier, stored.Duration)
-			}
+		stored, changed := p.AddStatusEffect(effect)
+		if !changed {
+			continue
 		}
-		if healthChanged && p.Edition == player.ClientEditionJava {
-			_ = handler.SyncPlayerHealth(target.Conn, p)
+		if p.Edition == player.ClientEditionJava {
+			handler.SendMobEffect(target.Conn, p, stored.ID, stored.Amplifier, stored.Duration)
+		} else if effectType := bedrockEffectType(stored.ID); effectType != 0 && s.bedrockListener != nil {
+			s.bedrockListener.SendPlayerMobEffect(p, effectType, stored.Amplifier, stored.Duration)
 		}
+	}
+	if healthChanged && p.Edition == player.ClientEditionJava {
+		_ = handler.SyncPlayerHealth(target.Conn, p)
 	}
 }
