@@ -20,6 +20,7 @@ const (
 	UpdatePressurePlate                        // pressure plate checks entities above it
 	UpdateSculkSensor                          // active sensor advances to cooldown/inactive
 	UpdateObserver                             // observer pulse turns off
+	UpdateCoralDeath                           // live coral cut off from water dies
 )
 
 // PendingBlockUpdate is one scheduled block-tick entry.
@@ -98,6 +99,11 @@ func (bp *BlockPhysics) ScheduleSculkSensor(x, y, z int, worldAge, delayTicks in
 
 func (bp *BlockPhysics) ScheduleObserver(x, y, z int, worldAge, delayTicks int64) {
 	bp.schedule(x, y, z, UpdateObserver, worldAge, delayTicks)
+}
+
+// ScheduleCoralDeath queues a water-contact check for a live coral block.
+func (bp *BlockPhysics) ScheduleCoralDeath(x, y, z int, worldAge, delayTicks int64) {
+	bp.schedule(x, y, z, UpdateCoralDeath, worldAge, delayTicks)
 }
 
 // DrainDue removes and returns all updates whose DueTick <= worldAge.
