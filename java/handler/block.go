@@ -962,6 +962,21 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		return nil
 	}
+	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:note_block" {
+		if tuned, ok := coreworld.TuneNoteBlock(targetBlock); ok {
+			applyBlockChange(int(bx), int(by), int(bz), tuned, w, mgr)
+			instrument := tuned.Properties["instrument"]
+			if instrument == "" {
+				instrument = "harp"
+			}
+			note, _ := strconv.Atoi(tuned.Properties["note"])
+			pitch := float32(math.Pow(2, (float64(note)-12)/12))
+			broadcastSoundAt(mgr, "minecraft:block.note_block."+instrument, soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 3, pitch)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 
 	// Cake right-click: consume a slice (based on PumpkinMC cake.rs).
 	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:cake" {
