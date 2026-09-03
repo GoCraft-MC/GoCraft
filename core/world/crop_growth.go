@@ -80,10 +80,10 @@ func isCanonicalCrop(name string) bool {
 	return name == "minecraft:attached_pumpkin_stem" || name == "minecraft:attached_melon_stem"
 }
 
-// isTickableGrowth reports whether a block participates in the crop scan, either
-// as a canonical crop or as a self-paced tall plant (sugar cane, cactus).
+// isTickableGrowth reports whether a block participates in the crop scan: a
+// canonical crop, a self-paced tall plant (sugar cane, cactus), or a kelp tip.
 func isTickableGrowth(name string) bool {
-	return isCanonicalCrop(name) || isTallPlantGrowth(name)
+	return isCanonicalCrop(name) || isTallPlantGrowth(name) || name == "minecraft:kelp"
 }
 
 func standardMoistureCrop(name string) bool {
@@ -341,6 +341,9 @@ func (w *World) tickCropAt(x, y, z int, crop Block, tick int64, changeBudget int
 		// Sugar cane and cactus manage their own survival through block physics;
 		// the crop survival rule does not apply and would delete them.
 		return w.tickTallPlantAt(x, y, z, crop)
+	}
+	if name == "minecraft:kelp" {
+		return w.tickKelpAt(x, y, z, crop, tick)
 	}
 	if !w.cropCanSurviveAt(x, y, z, crop) {
 		w.SetBlock(x, y, z, Air)
