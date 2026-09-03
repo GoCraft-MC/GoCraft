@@ -57,3 +57,28 @@ func TestBedrockDrinkablePotionStoresTimedEffect(t *testing.T) {
 		t.Fatalf("stored speed effect = %+v, ok=%v", effect, ok)
 	}
 }
+
+func TestBedrockSuspiciousStewAppliesStackEffect(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{49}, "bedrock-stew-user", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:suspicious_stew", Count: 1}
+	if err := p.Inventory[player.HotbarStart].SetComponent("suspicious_stew_effects", []player.StatusEffect{
+		{ID: "minecraft:night_vision", Duration: 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g}
+	s.applyBedrockStartUseItem(intent.StartUseItemIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
+	p.UsingItemSince = time.Now().Add(-player.FoodUseDuration("minecraft:suspicious_stew"))
+	s.tickBedrockItemUse()
+	if effect, ok := p.StatusEffect("night_vision"); !ok || effect.Duration != 100 {
+		t.Fatalf("stew effect = %+v, ok=%v", effect, ok)
+	}
+	if stack := p.HeldItem(); stack.ItemID != "minecraft:bowl" {
+		t.Fatalf("stew remainder = %+v", stack)
+	}
+}

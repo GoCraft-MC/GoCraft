@@ -382,6 +382,7 @@ func applyConsumableEffects(conn *network.ClientConn, p *player.Player, stack pl
 	}
 	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff
 	effects := player.FoodStatusEffects(stack.ItemID, roll%100)
+	effects = append(effects, player.SuspiciousStewEffects(stack)...)
 	if potion, ok := player.PotionOutcomeFor(stack); ok {
 		if potion.Heal > 0 {
 			p.Heal(potion.Heal)
