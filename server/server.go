@@ -2813,6 +2813,13 @@ func (s *Server) tickEntities() {
 			deadIDs = append(deadIDs, e.EntityID)
 			continue
 		}
+		if e.Type == corentity.TypeAreaEffectCloud {
+			if s.tickAreaEffectCloud(e) {
+				s.world.Entities.Remove(e.EntityID)
+				deadIDs = append(deadIDs, e.EntityID)
+			}
+			continue
+		}
 		if e.Type == corentity.TypeFireworkRocket {
 			if s.tickFireworkRocket(e) {
 				s.world.Entities.Remove(e.EntityID)
@@ -3400,6 +3407,11 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				continue
 			}
 			switch {
+			case entity.Type == corentity.TypeAreaEffectCloud:
+				if simulation.tickAreaEffectCloud(entity) {
+					dimensionWorld.Entities.Remove(entity.EntityID)
+					deadIDs = append(deadIDs, entity.EntityID)
+				}
 			case entity.Type == corentity.TypeItem:
 				if simulation.tryPickupDroppedItem(entity, dimension) || entity.AgeTicks >= 6000 || entity.Position.Y < coreworld.WorldMinY-16 {
 					dimensionWorld.Entities.Remove(entity.EntityID)
