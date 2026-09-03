@@ -80,6 +80,12 @@ func isCanonicalCrop(name string) bool {
 	return name == "minecraft:attached_pumpkin_stem" || name == "minecraft:attached_melon_stem"
 }
 
+// isTickableGrowth reports whether a block participates in the crop scan, either
+// as a canonical crop or as a self-paced tall plant (sugar cane, cactus).
+func isTickableGrowth(name string) bool {
+	return isCanonicalCrop(name) || isTallPlantGrowth(name)
+}
+
 func standardMoistureCrop(name string) bool {
 	switch name {
 	case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes",
@@ -331,6 +337,11 @@ func (w *World) tickCropAt(x, y, z int, crop Block, tick int64, changeBudget int
 		return nil
 	}
 	name := crop.ResourceLocation()
+	if isTallPlantGrowth(name) {
+		// Sugar cane and cactus manage their own survival through block physics;
+		// the crop survival rule does not apply and would delete them.
+		return w.tickTallPlantAt(x, y, z, crop)
+	}
 	if !w.cropCanSurviveAt(x, y, z, crop) {
 		w.SetBlock(x, y, z, Air)
 		return []BlockChange{{X: x, Y: y, Z: z, Block: Air}}
@@ -427,7 +438,7 @@ func (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {
 			palette := section.BlockPalette()
 			hasCrop := false
 			for _, block := range palette {
-				if isCanonicalCrop(block.ResourceLocation()) {
+				if isTickableGrowth(block.ResourceLocation()) {
 					hasCrop = true
 					break
 				}
@@ -440,7 +451,7 @@ func (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {
 					continue
 				}
 				block := palette[paletteIndex]
-				if !isCanonicalCrop(block.ResourceLocation()) {
+				if !isTickableGrowth(block.ResourceLocation()) {
 					continue
 				}
 				localX := index % SectionSize
