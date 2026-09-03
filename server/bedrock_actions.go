@@ -173,20 +173,13 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 		return true
 	}
 
-	if name == "minecraft:composter" && bedrockCompostable(item) {
-		level, _ := strconv.Atoi(target.Properties["level"])
-		if level <= 7 {
-			s.consumeBedrockHeldItem(p, 1)
-			if level < 7 && (level == 0 || bedrockComposterRoll(x, y, z, s.worldAge, item)) {
-				replacement := bedrockCopyBlock(target)
-				replacement.Properties["level"] = strconv.Itoa(level + 1)
-				s.setBedrockActionBlock(x, y, z, replacement)
-				if level+1 == 7 {
-					s.bedrockWorld().BlockPhysics.ScheduleComposter(x, y, z, s.worldAge, 20)
-				}
-			}
-			return true
+	if replacement, consumed, schedule := coreworld.AddToComposter(target, item, x, y, z, s.worldAge); consumed {
+		s.consumeBedrockHeldItem(p, 1)
+		s.setBedrockActionBlock(x, y, z, replacement)
+		if schedule {
+			s.bedrockWorld().BlockPhysics.ScheduleComposter(x, y, z, s.worldAge, 20)
 		}
+		return true
 	}
 
 	if name == "minecraft:respawn_anchor" && item == "minecraft:glowstone" {
@@ -461,9 +454,7 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		}
 		return true
 	}
-	if name == "minecraft:composter" && block.Properties["level"] == "8" {
-		replacement := bedrockCopyBlock(block)
-		replacement.Properties["level"] = "0"
+	if replacement, ready := coreworld.EmptyComposter(block); ready {
 		s.setBedrockActionBlock(x, y, z, replacement)
 		s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:bone_meal", Count: 1})
 		return true
@@ -1097,47 +1088,6 @@ func bedrockCropForItem(item, target string) (coreworld.Block, bool) {
 
 func bedrockCropMaxAge(name string) (int, bool) {
 	return coreworld.CropMaxAge(name)
-}
-
-func bedrockCompostable(item string) bool {
-	name := strings.TrimPrefix(item, "minecraft:")
-	if strings.HasSuffix(name, "_leaves") || strings.HasSuffix(name, "_sapling") ||
-		strings.HasSuffix(name, "_seeds") || strings.HasSuffix(name, "_flower") {
-		return true
-	}
-	switch name {
-	case "short_grass", "grass", "fern", "seagrass", "kelp", "dried_kelp", "cactus", "sugar_cane",
-		"vine", "glow_lichen", "lily_pad", "moss_carpet", "moss_block", "hanging_roots", "mangrove_roots",
-		"apple", "melon_slice", "melon", "pumpkin", "carved_pumpkin", "potato", "baked_potato",
-		"poisonous_potato", "carrot", "beetroot", "wheat", "bread", "cookie", "cake", "pumpkin_pie",
-		"sweet_berries", "glow_berries", "brown_mushroom", "red_mushroom", "mushroom_stem",
-		"crimson_fungus", "warped_fungus", "crimson_roots", "warped_roots", "nether_sprouts",
-		"weeping_vines", "twisting_vines", "azalea", "flowering_azalea", "big_dripleaf", "small_dripleaf",
-		"spore_blossom", "sea_pickle", "hay_block", "dried_kelp_block", "shroomlight":
-		return true
-	}
-	return false
-}
-
-func bedrockComposterRoll(x, y, z int, worldAge int64, item string) bool {
-	chance := uint64(650)
-	name := strings.TrimPrefix(item, "minecraft:")
-	if strings.HasSuffix(name, "_leaves") || strings.HasSuffix(name, "_sapling") || strings.HasSuffix(name, "_seeds") ||
-		name == "short_grass" || name == "grass" || name == "fern" {
-		chance = 300
-	}
-	switch name {
-	case "cake", "pumpkin_pie":
-		chance = 1000
-	case "baked_potato", "bread", "cookie", "hay_block", "dried_kelp_block", "shroomlight":
-		chance = 850
-	}
-	hash := uint64(int64(x))*0x9e3779b185ebca87 ^ uint64(int64(y))*0xc2b2ae3d27d4eb4f ^
-		uint64(int64(z))*0x165667b19e3779f9 ^ uint64(worldAge) ^ uint64(len(item))*0x27d4eb2f165667c5
-	hash ^= hash >> 33
-	hash *= 0xff51afd7ed558ccd
-	hash ^= hash >> 33
-	return hash%1000 < chance
 }
 
 func bedrockAxeTransformation(block coreworld.Block) (coreworld.Block, bool) {
