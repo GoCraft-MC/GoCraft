@@ -1069,6 +1069,34 @@ func TestJavaIgnitesTNTWithBothIgniters(t *testing.T) {
 	}
 }
 
+func TestJavaHoeReturnsHangingRoots(t *testing.T) {
+	p := player.New([16]byte{95}, "gardener", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:iron_hoe", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(3, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "rooted_dirt"})
+
+	if err := handleUseItemOn(useItemOnPacket(3, 64, 0, 0, 720), p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(3, 64, 0).ResourceLocation(); got != "minecraft:dirt" {
+		t.Fatalf("worked block = %s", got)
+	}
+	if got := p.HeldItem().Damage; got != 1 {
+		t.Fatalf("hoe damage = %d, want 1", got)
+	}
+	roots := 0
+	for _, stack := range p.Inventory {
+		if stack.ItemID == "minecraft:hanging_roots" {
+			roots += stack.Count
+		}
+	}
+	if roots != 1 {
+		t.Fatalf("hanging roots = %d, want 1", roots)
+	}
+}
+
 func TestJavaTunesNoteBlock(t *testing.T) {
 	p := player.New([16]byte{95}, "musician", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
