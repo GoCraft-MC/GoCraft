@@ -251,6 +251,7 @@ type Entity struct {
 	// Projectile fields.
 	OwnerEntityID    int32
 	ProjectileDamage float32
+	ProjectileItem   player.ItemStack
 	EyeTarget        spatial.Vec3
 	HasEyeTarget     bool
 	EyeSurvives      bool
