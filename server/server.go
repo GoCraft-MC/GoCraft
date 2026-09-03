@@ -1463,7 +1463,7 @@ func (s *Server) finishBedrockFoodUse(p *player.Player) {
 			}
 		}
 	}
-	s.applyBedrockFoodEffect(p, consumedID)
+	s.applyBedrockConsumableEffects(p, stack)
 	for _, removed := range p.ApplyConsumableCleansing(consumedID) {
 		if s.bedrockListener != nil {
 			s.bedrockListener.RemovePlayerMobEffect(p, bedrockEffectType(removed.ID))
@@ -2404,11 +2404,25 @@ func canPlaceBedrockFurnaceSlot(slot int16, stack player.ItemStack) bool {
 }
 
 func (s *Server) applyBedrockFoodEffect(p *player.Player, itemID string) {
+	s.applyBedrockConsumableEffects(p, player.ItemStack{ItemID: itemID})
+}
+
+func (s *Server) applyBedrockConsumableEffects(p *player.Player, stack player.ItemStack) {
 	if p == nil {
 		return
 	}
 	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff
-	for _, effect := range player.FoodStatusEffects(itemID, roll%100) {
+	effects := player.FoodStatusEffects(stack.ItemID, roll%100)
+	if potion, ok := player.PotionOutcomeFor(stack); ok {
+		if potion.Heal > 0 {
+			p.Heal(potion.Heal)
+		}
+		if potion.Damage > 0 {
+			handler.DamagePlayerMagic(&session.Session{Player: p}, potion.Damage, "was killed by magic", s.sessions)
+		}
+		effects = append(effects, potion.Effects...)
+	}
+	for _, effect := range effects {
 		stored, changed := p.AddStatusEffect(effect)
 		if effectType := bedrockEffectType(stored.ID); changed && effectType != 0 && s.bedrockListener != nil {
 			s.bedrockListener.SendPlayerMobEffect(p, effectType, stored.Amplifier, stored.Duration)
