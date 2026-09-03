@@ -46,3 +46,31 @@ func TestUseThrowableSpawnsCanonicalEggAndConsumesOne(t *testing.T) {
 		t.Fatalf("remaining eggs = %d, want 2", got)
 	}
 }
+
+func TestUseThrowablePreservesSplashPotionPayload(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	p := player.New([16]byte{5}, "brewer", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.EntityID = 9
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:splash_potion", Count: 2}
+	if err := p.Inventory[player.HotbarStart].SetComponent("potion_contents", map[string]string{
+		"potion": "minecraft:poison",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !UseThrowable(p, w, session.NewManager(), nil, func() int32 { return 44 }) {
+		t.Fatal("splash potion use was rejected")
+	}
+	projectile, ok := w.Entities.Get(44)
+	if !ok || projectile.Type != corentity.TypePotion || projectile.OwnerEntityID != 9 {
+		t.Fatalf("spawned potion = %+v, exists=%v", projectile, ok)
+	}
+	outcome, ok := player.PotionOutcomeFor(projectile.ProjectileItem)
+	if !ok || len(outcome.Effects) != 1 || outcome.Effects[0].ID != "minecraft:poison" {
+		t.Fatalf("projectile outcome = %+v, ok=%v", outcome, ok)
+	}
+	if got := p.Inventory[player.HotbarStart].Count; got != 1 {
+		t.Fatalf("remaining potions = %d, want 1", got)
+	}
+}
