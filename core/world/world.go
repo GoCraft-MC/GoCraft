@@ -1207,6 +1207,19 @@ func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
 		w.BlockPhysics.ScheduleIce(x, y, z, age, IceMeltDelay)
 	}
 
+	// 6b. Live coral schedules a death check when placed; removing a neighbouring
+	// block (for example draining water) rechecks any adjacent coral.
+	if IsLiveCoral(placedName) {
+		w.BlockPhysics.ScheduleCoralDeath(x, y, z, age, coralDeathDelay)
+	}
+	if placed.IsAir() {
+		for _, pos := range neighbors6(x, y, z) {
+			if IsLiveCoral(w.GetBlock(pos[0], pos[1], pos[2]).ResourceLocation()) {
+				w.BlockPhysics.ScheduleCoralDeath(pos[0], pos[1], pos[2], age, coralDeathDelay)
+			}
+		}
+	}
+
 	// 7. Notify redstone engine of any change near redstone components.
 	if IsRedstoneConductor(placedName) || IsRedstoneSource(placedName) || IsRedstoneLoad(placedName) ||
 		IsRedstoneConductor(oldName) || IsRedstoneSource(oldName) || IsRedstoneLoad(oldName) ||
