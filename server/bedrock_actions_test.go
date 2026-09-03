@@ -616,6 +616,28 @@ func TestBedrockAddsCandleToCake(t *testing.T) {
 	}
 }
 
+func TestBedrockFlowerPotInsertAndRemove(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("flower_pot", nil))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:azalea", Count: 1}
+	interaction := intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}}
+	if !s.applyBedrockItemAction(p, interaction, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("azalea was not inserted into flower pot")
+	}
+	if got := s.world.GetBlock(1, 64, 0).ResourceLocation(); got != "minecraft:potted_azalea_bush" {
+		t.Fatalf("potted block = %q", got)
+	}
+	if !s.applyBedrockItemAction(p, interaction, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("azalea was not removed from flower pot")
+	}
+	if got := s.world.GetBlock(1, 64, 0).ResourceLocation(); got != "minecraft:flower_pot" {
+		t.Fatalf("emptied pot = %q", got)
+	}
+	if p.HeldItem().ItemID != "minecraft:azalea" {
+		t.Fatalf("returned plant = %+v", p.HeldItem())
+	}
+}
+
 func TestBedrockBucketFillsAndEmptiesCauldron(t *testing.T) {
 	s, p := newBedrockActionTestServer(t)
 	s.world.SetBlock(1, 64, 0, bedrockBlock("cauldron", nil))

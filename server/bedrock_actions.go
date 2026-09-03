@@ -22,7 +22,9 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 	held := p.HeldItem()
 	if held.IsEmpty() {
-		return false
+		if _, potted := coreworld.PottedItem(target); !potted {
+			return false
+		}
 	}
 	if held.ItemID == "minecraft:firework_rocket" && p.GameMode != player.GameModeSpectator {
 		return s.applyFireworkUse(intent.FireworkUseIntent{
@@ -157,17 +159,17 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if name == "minecraft:flower_pot" {
-		if potted, ok := bedrockPottedBlock(item); ok {
-			s.setBedrockActionBlock(x, y, z, bedrockBlock(potted, nil))
+		if potted, ok := coreworld.PottedBlock(item); ok {
+			s.setBedrockActionBlock(x, y, z, potted)
 			s.consumeBedrockHeldItem(p, 1)
 			return true
 		}
-	} else if strings.HasPrefix(name, "minecraft:potted_") {
-		if _, canPot := bedrockPottedBlock(item); canPot {
+	} else if pottedItem, ok := coreworld.PottedItem(target); ok {
+		if _, canPot := coreworld.PottedBlock(item); canPot {
 			return true
 		}
 		s.setBedrockActionBlock(x, y, z, bedrockBlock("flower_pot", nil))
-		s.giveBedrockActionItem(p, player.ItemStack{ItemID: bedrockPottedItem(name), Count: 1})
+		s.giveBedrockActionItem(p, player.ItemStack{ItemID: pottedItem, Count: 1})
 		return true
 	}
 
@@ -1095,30 +1097,6 @@ func bedrockCropForItem(item, target string) (coreworld.Block, bool) {
 
 func bedrockCropMaxAge(name string) (int, bool) {
 	return coreworld.CropMaxAge(name)
-}
-
-func bedrockPottedBlock(item string) (string, bool) {
-	name := strings.TrimPrefix(item, "minecraft:")
-	switch name {
-	case "oak_sapling", "spruce_sapling", "birch_sapling", "jungle_sapling", "acacia_sapling",
-		"dark_oak_sapling", "mangrove_propagule", "cherry_sapling", "pale_oak_sapling",
-		"fern", "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet", "red_tulip",
-		"orange_tulip", "white_tulip", "pink_tulip", "oxeye_daisy", "cornflower",
-		"lily_of_the_valley", "wither_rose", "red_mushroom", "brown_mushroom", "dead_bush",
-		"cactus", "bamboo", "crimson_fungus", "warped_fungus", "crimson_roots", "warped_roots",
-		"azalea", "flowering_azalea", "torchflower", "closed_eyeblossom", "open_eyeblossom":
-		if name == "azalea" || name == "flowering_azalea" {
-			name += "_bush"
-		}
-		return "potted_" + name, true
-	}
-	return "", false
-}
-
-func bedrockPottedItem(blockName string) string {
-	name := strings.TrimPrefix(blockName, "minecraft:potted_")
-	name = strings.TrimSuffix(name, "_bush")
-	return "minecraft:" + name
 }
 
 func bedrockCompostable(item string) bool {
