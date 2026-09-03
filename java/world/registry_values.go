@@ -4,6 +4,8 @@ package world
 var (
 	soundEventIDs    map[string]int32
 	mobEffectIDs     map[string]int32
+	potionIDs        map[string]int32
+	potionNames      map[int32]string
 	enchantmentIDs   map[string]int32
 	enchantmentNames map[int32]string
 )
@@ -40,6 +42,18 @@ func MobEffectID(name string) int32 {
 	}
 	return id
 }
+
+// PotionID returns the protocol-769 potion registry ID.
+func PotionID(name string) int32 {
+	id, ok := potionIDs[name]
+	if !ok {
+		return -1
+	}
+	return id
+}
+
+// PotionName returns the resource location for a potion registry ID.
+func PotionName(id int32) string { return potionNames[id] }
 
 // MobEffectNames returns sorted, namespace-free names suitable for command
 // literals and tab completion.
