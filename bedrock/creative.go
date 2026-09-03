@@ -189,6 +189,13 @@ func (l *Listener) initCreativeContent() {
 		})
 		canonicalName, canonicalMeta := canonicalCreativeIdentity(entry.name, entry.meta)
 		known := creativeKnownItem{name: canonicalName, meta: canonicalMeta}
+		switch canonicalName {
+		case "minecraft:potion", "minecraft:splash_potion", "minecraft:lingering_potion":
+			potionStack := player.ItemStack{ItemID: canonicalName, Count: 1}
+			if setBedrockPotionContents(&potionStack, entry.meta) {
+				known.components = potionStack.Components
+			}
+		}
 		if canonicalName == "minecraft:firework_rocket" {
 			known.fireworks, known.hasFireworks = bedrockFireworkDataFromNBT(stack.NBTData)
 		}
