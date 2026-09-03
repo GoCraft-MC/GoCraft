@@ -1032,3 +1032,39 @@ func TestJavaPlacesFoodOnCampfire(t *testing.T) {
 		t.Fatalf("held beef = %d, want 1", got)
 	}
 }
+
+func TestJavaIgnitesTNTWithBothIgniters(t *testing.T) {
+	tests := []struct {
+		item       string
+		wantDamage int
+	}{
+		{item: "minecraft:flint_and_steel", wantDamage: 1},
+		{item: "minecraft:fire_charge"},
+	}
+	for index, test := range tests {
+		t.Run(test.item, func(t *testing.T) {
+			p := player.New([16]byte{byte(index + 1)}, "demolitionist", player.ClientEditionJava)
+			p.GameMode = player.GameModeSurvival
+			p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: test.item, Count: 1}
+			w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer w.Close()
+			w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "tnt"})
+
+			if err := handleUseItemOn(useItemOnPacket(0, 64, 0, 1, int32(710+index)),
+				p, w, session.NewManager(), nil, func() int32 { return 91 }); err != nil {
+				t.Fatal(err)
+			}
+			if !w.GetBlock(0, 64, 0).IsAir() {
+				t.Fatalf("TNT block was not removed")
+			}
+			tnt, ok := w.Entities.Get(91)
+			if !ok || tnt.Type != corentity.TypePrimedTNT || tnt.FuseTicks != 80 {
+				t.Fatalf("primed TNT = %+v, exists=%v", tnt, ok)
+			}
+			if got := p.HeldItem(); got.Damage != test.wantDamage ||
+				(test.item == "minecraft:fire_charge" && !got.IsEmpty()) {
+				t.Fatalf("igniter after use = %+v", got)
+			}
+		})
+	}
+}
