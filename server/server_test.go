@@ -125,6 +125,42 @@ func TestVillagerNeverSleepsOnNonBedPOI(t *testing.T) {
 	}
 }
 
+func TestVillagerBedSearchDoesNotLoadTerrain(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.Chunk(0, 0)
+	s := &Server{world: w}
+	villager := corentity.New(1, [16]byte{}, corentity.TypeVillager, 1.5, 64, 1.5)
+	s.claimVillagerBed(villager)
+	for cx := int32(-1); cx <= 1; cx++ {
+		for cz := int32(-1); cz <= 1; cz++ {
+			if (cx != 0 || cz != 0) && w.IsChunkLoaded(cx, cz) {
+				t.Fatalf("bed search loaded chunk (%d, %d)", cx, cz)
+			}
+		}
+	}
+}
+
+func TestVillagerBedSearchSelectsNearestUnclaimedHead(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	bed := coreworld.Block{Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{"part": "head"}}
+	w.SetBlock(2, 64, 1, bed)
+	w.SetBlock(3, 64, 1, coreworld.Block{Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{"part": "foot"}})
+	w.SetBlock(-2, 64, 1, bed)
+	w.SetBlock(8, 64, 1, bed)
+	owner := corentity.New(1, [16]byte{}, corentity.TypeVillager, 2.5, 64, 1.5)
+	owner.HasVillageHome = true
+	owner.VillageBed = spatial.BlockPos{X: 2, Y: 64, Z: 1}
+	w.Entities.Add(owner)
+	villager := corentity.New(2, [16]byte{}, corentity.TypeVillager, 1.5, 64, 1.5)
+	s := &Server{world: w}
+	s.claimVillagerBed(villager)
+	if want := (spatial.BlockPos{X: -2, Y: 64, Z: 1}); !villager.HasVillageHome || villager.VillageBed != want {
+		t.Fatalf("claimed bed = %+v, has home = %v; want %+v", villager.VillageBed, villager.HasVillageHome, want)
+	}
+}
+
 func TestSleepRequiresAndWakesBothEditions(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer w.Close()

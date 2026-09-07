@@ -946,6 +946,19 @@ func (s *Server) runEntityTick(ctx context.Context) {
 // safeTick isolates tick subsystems so a recurring fault in one cannot starve
 // entity AI, queued damage, or the remaining simulation work.
 func (s *Server) safeTick() {
+	start := time.Now()
+	defer func() {
+		if s.timings == nil {
+			return
+		}
+		elapsed := time.Since(start)
+		s.timings.commit(elapsed)
+		if elapsed > 50*time.Millisecond && debuglog.Enabled(debuglog.EntityTickOverruns) {
+			tps, avgMs := s.timings.TPS()
+			slog.Warn("server tick overrun", "elapsed", elapsed.Round(time.Millisecond),
+				"tps", fmt.Sprintf("%.1f", tps), "avg_ms", fmt.Sprintf("%.2f", avgMs))
+		}
+	}()
 	s.runTickStage("intents", s.tickIntents)
 	s.runTickStage("bedrock item use", s.tickBedrockItemUse)
 	s.runTickStage("java item use", s.tickJavaItemUse)
@@ -2890,7 +2903,6 @@ func (s *Server) syncBedrockPlayersToJava() {
 // Ownership: this method is the sole writer of entity spatial/health fields.
 // See the concurrency comment on core/entity.Entity for the full invariant.
 func (s *Server) tickEntities() {
-	start := time.Now()
 	s.worldAge++
 	// Java movement is handled directly by its play loop rather than posted as
 	// a MoveIntent, so check its portal occupancy from the common server tick.
@@ -3288,22 +3300,6 @@ func (s *Server) tickEntities() {
 			runtime.GC()
 			debug.FreeOSMemory()
 		}()
-	}
-
-	// Record this tick into the rolling timing window.
-	elapsed := time.Since(start)
-	s.timings.commit(elapsed)
-
-	// Warn when the CPU work in a tick exceeds the tick budget.
-	// Network I/O is off-goroutine and does not count toward this budget.
-	if elapsed > 50*time.Millisecond && debuglog.Enabled(debuglog.EntityTickOverruns) {
-		tps, avgMs := s.timings.TPS()
-		slog.Warn("entity tick overrun",
-			"elapsed", elapsed.Round(time.Millisecond),
-			"tps", fmt.Sprintf("%.1f", tps),
-			"avg_ms", fmt.Sprintf("%.2f", avgMs),
-			"entities", len(s.world.Entities.Snapshot()),
-		)
 	}
 }
 
@@ -4210,7 +4206,7 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 func (s *Server) tickVillagerBedClaim(e *corentity.Entity, ai *mobAI) {
 	if ai.bedClaimTick <= 0 {
 		s.claimVillagerBed(e)
-		ai.bedClaimTick = 20
+		ai.bedClaimTick = 20 + int(uint32(e.EntityID)%20)
 		return
 	}
 	ai.bedClaimTick--
@@ -4246,7 +4242,8 @@ func (s *Server) validVillagerBed(e *corentity.Entity) bool {
 // claimVillagerBed scans the ±16 X/Z, ±4 Y block neighbourhood for an
 // unclaimed bed head, mirroring PumpkinMC's brute-force POI scan. When one is
 // found the villager's HasVillageHome / VillageBed are set so it will navigate
-// to the bed at night. The scan is cheap enough to run once per second.
+// to the bed at night. Missing chunks are skipped to keep disk I/O and terrain
+// generation off the entity tick.
 func (s *Server) claimVillagerBed(e *corentity.Entity) {
 	if s == nil || s.world == nil || e == nil || e.Type != corentity.TypeVillager {
 		return
@@ -4274,8 +4271,8 @@ func (s *Server) claimVillagerBed(e *corentity.Entity) {
 	for bx := px - 16; bx <= px+16; bx++ {
 		for by := py - 4; by <= py+4; by++ {
 			for bz := pz - 16; bz <= pz+16; bz++ {
-				blk := s.world.GetBlock(bx, by, bz)
-				if !strings.HasSuffix(blk.ResourceLocation(), "_bed") {
+				blk, loaded := s.world.BlockIfLoaded(bx, by, bz)
+				if !loaded || !strings.HasSuffix(blk.Name, "_bed") {
 					continue
 				}
 				part := blk.Properties["part"]
