@@ -67,3 +67,30 @@ func TestFindPathDoesNotLoadMissingChunks(t *testing.T) {
 		t.Fatal("pathfinder loaded the destination chunk")
 	}
 }
+
+func BenchmarkFindPath(b *testing.B) {
+	for _, unreachable := range []bool{false, true} {
+		name := "reachable"
+		if unreachable {
+			name = "unreachable"
+		}
+		b.Run(name, func(b *testing.B) {
+			world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer world.Close()
+			for cx := int32(-2); cx <= 2; cx++ {
+				for cz := int32(-2); cz <= 2; cz++ {
+					world.Chunk(cx, cz)
+				}
+			}
+			goal := spatial.Vec3{X: 12.5, Y: 64, Z: 12.5}
+			if unreachable {
+				goal.Y = 80
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				FindPath(world, spatial.Vec3{X: 1.5, Y: 64, Z: 1.5}, goal, 4096)
+			}
+		})
+	}
+}
