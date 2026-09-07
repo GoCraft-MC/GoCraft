@@ -1413,12 +1413,30 @@ func (w *World) GetBlock(x, y, z int) Block {
 	cx := int32(math.Floor(float64(x) / SectionSize))
 	cz := int32(math.Floor(float64(z) / SectionSize))
 	c := w.Chunk(cx, cz)
+	return blockInChunk(c, x, y, z)
+}
 
+// BlockIfLoaded reads terrain already in memory, without waiting for chunk
+// generation or loading an evicted chunk. The returned bool distinguishes
+// missing terrain from air so simulation callers can defer their work.
+func (w *World) BlockIfLoaded(x, y, z int) (Block, bool) {
+	if y < WorldMinY || y > WorldMaxY {
+		return Air, true
+	}
+	cx, cz := ChunkCoordsFor(x, z)
+	c, loaded := w.ChunkIfLoaded(cx, cz)
+	if !loaded {
+		return Air, false
+	}
+	return blockInChunk(c, x, y, z), true
+}
+
+func blockInChunk(c *Chunk, x, y, z int) Block {
 	relY := y - WorldMinY
 	sIdx := relY / SectionSize
-	lx := x - int(cx)*SectionSize
+	lx := x & (SectionSize - 1)
 	ly := relY % SectionSize
-	lz := z - int(cz)*SectionSize
+	lz := z & (SectionSize - 1)
 
 	if c.Sections[sIdx] == nil {
 		return Air
