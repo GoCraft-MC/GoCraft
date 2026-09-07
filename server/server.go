@@ -943,37 +943,33 @@ func (s *Server) runEntityTick(ctx context.Context) {
 	}
 }
 
-// safeTick wraps a single game tick in a recover so that a panic in any tick
-// subsystem logs the stack trace and restarts the tick rather than crashing
-// the entire server process.
+// safeTick isolates tick subsystems so a recurring fault in one cannot starve
+// entity AI, queued damage, or the remaining simulation work.
 func (s *Server) safeTick() {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("PANIC in tick goroutine — server recovered",
-				"panic", r,
-				"stack", string(debug.Stack()),
-			)
+	s.runTickStage("intents", s.tickIntents)
+	s.runTickStage("bedrock item use", s.tickBedrockItemUse)
+	s.runTickStage("java item use", s.tickJavaItemUse)
+	s.runTickStage("furnaces", s.tickFurnaces)
+	s.runTickStage("brewing stands", s.tickBrewingStands)
+	s.runTickStage("container automation", s.tickContainerAutomation)
+	s.runTickStage("entities", s.tickEntities)
+	s.runTickStage("auxiliary dimensions", s.tickAuxiliaryDimensionItems)
+	s.runTickStage("stationary lava", s.tickStationaryLavaDamage)
+	s.runTickStage("player breathing", s.tickPlayerBreathing)
+	s.runTickStage("status effects", s.tickPlayerStatusEffects)
+	s.runTickStage("player hunger", s.tickPlayerHunger)
+	s.runTickStage("idle timeout", s.tickIdleTimeout)
+	s.runTickStage("weather", s.tickWeather)
+	s.runTickStage("bedrock sync", func() {
+		if s.bedrockListener != nil {
+			s.bedrockListener.Sync(uint64(s.worldAge))
+			s.syncBedrockPlayersToJava()
 		}
-	}()
-	s.tickIntents()
-	s.tickBedrockItemUse()
-	s.tickJavaItemUse()
-	s.tickFurnaces()
-	s.tickBrewingStands()
-	s.tickContainerAutomation()
-	s.tickEntities()
-	s.tickAuxiliaryDimensionItems()
-	s.tickStationaryLavaDamage()
-	s.tickPlayerBreathing()
-	s.tickPlayerStatusEffects()
-	s.tickPlayerHunger()
-	s.tickIdleTimeout()
-	s.tickWeather()
-	if s.bedrockListener != nil {
-		s.bedrockListener.Sync(uint64(s.worldAge))
-		s.syncBedrockPlayersToJava()
-	}
-	if s.autosaveEnabled.Load() && s.worldAge%600 == 0 {
+	})
+	s.runTickStage("autosave", func() {
+		if !s.autosaveEnabled.Load() || s.worldAge%600 != 0 {
+			return
+		}
 		for dimension, dimensionWorld := range map[string]*coreworld.World{"overworld": s.world, "nether": s.netherWorld, "end": s.endWorld} {
 			if err := dimensionWorld.Flush(); err != nil {
 				slog.Warn("world autosave failed", "dimension", dimension, "err", err)
@@ -981,7 +977,20 @@ func (s *Server) safeTick() {
 		}
 		s.saveWorldAge()
 		s.saveAllPlayerData()
-	}
+	})
+}
+
+func (s *Server) runTickStage(name string, run func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("PANIC in tick subsystem — server recovered",
+				"subsystem", name,
+				"panic", r,
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
+	run()
 }
 
 // tickStationaryLavaDamage keeps fluid collision authoritative even when a

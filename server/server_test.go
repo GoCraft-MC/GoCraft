@@ -13,6 +13,17 @@ import (
 	"GoCraft/java/session"
 )
 
+func TestTickStagePanicDoesNotStarveFollowingStage(t *testing.T) {
+	server := &Server{}
+	server.runTickStage("broken", func() { panic("boom") })
+
+	ran := false
+	server.runTickStage("entities", func() { ran = true })
+	if !ran {
+		t.Fatal("a failed subsystem prevented the following tick stage")
+	}
+}
+
 func TestPassiveMobPanicsAwayFromAttacker(t *testing.T) {
 	server := &Server{mobAIs: make(map[int32]*mobAI)}
 	cow := corentity.New(7, [16]byte{}, corentity.TypeCow, 10, 64, 0)
