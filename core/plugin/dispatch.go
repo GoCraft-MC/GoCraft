@@ -53,7 +53,8 @@ func (b *Bus) EmitCancellable(event *abi.Event) bool {
 		b.reportColdStart(firstOfItsKind, sub, event.Type, took)
 		b.reportLateVerdict(ctx, sub, event.Type, took)
 		b.enqueueEffects(sub, event.Type, verdict.Effects)
-		if verdict.Cancelled {
+		b.applyNativeMutations(sub, event, verdict.Mutations)
+		if verdict.Cancelled && (!IsNativeEvent(event.Type) || nativeCancellable(event.Type)) {
 			return false
 		}
 	}
