@@ -65,6 +65,9 @@ type World struct {
 	// and applies it so health retains a single writer.
 	damageMu      sync.Mutex
 	pendingDamage map[int32]EntityDamage
+	// BeforeEntityDamage is installed before listeners start. It runs before
+	// coalescing hits, outside damageMu; false prevents enqueueing the action.
+	BeforeEntityDamage func(*entity.Entity, float32) (float32, bool)
 
 	// Container block entities share canonical contents across Java sessions.
 	containerMu sync.RWMutex
@@ -482,11 +485,19 @@ func (w *World) QueueEntityDamageFromPlayer(entityID int32, amount float32, sour
 }
 
 func (w *World) queueEntityDamage(entityID int32, amount float32, sourceX, sourceZ float64, hasSource bool, playerUUID [16]byte, hasPlayerSource bool) bool {
-	if amount <= 0 {
+	if amount <= 0 || math.IsNaN(float64(amount)) || math.IsInf(float64(amount), 0) {
 		return false
 	}
-	if _, ok := w.Entities.Get(entityID); !ok {
+	target, ok := w.Entities.Get(entityID)
+	if !ok {
 		return false
+	}
+	if w.BeforeEntityDamage != nil {
+		var allowed bool
+		amount, allowed = w.BeforeEntityDamage(target, amount)
+		if !allowed || amount <= 0 || math.IsNaN(float64(amount)) || math.IsInf(float64(amount), 0) {
+			return false
+		}
 	}
 	w.damageMu.Lock()
 	event := w.pendingDamage[entityID]
@@ -1166,11 +1177,11 @@ func (w *World) SetBlockEntitySign(x, y, z int, data []byte, state SignState) {
 	if !updated {
 		snapshot = BlockEntity{
 			X: x, Y: y, Z: z, Type: "minecraft:sign",
-			Data:             append([]byte(nil), data...),
-			SignFrontLines:   state.FrontLines, SignBackLines: state.BackLines,
+			Data:           append([]byte(nil), data...),
+			SignFrontLines: state.FrontLines, SignBackLines: state.BackLines,
 			SignFrontGlowing: state.FrontGlowing, SignBackGlowing: state.BackGlowing,
-			SignFrontColor:   state.FrontColor, SignBackColor: state.BackColor,
-			SignWaxed:        state.Waxed,
+			SignFrontColor: state.FrontColor, SignBackColor: state.BackColor,
+			SignWaxed: state.Waxed,
 		}
 		c.BlockEntities = append(c.BlockEntities, snapshot)
 	}
