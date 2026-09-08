@@ -984,6 +984,10 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 		}
 		clean = append(clean, item)
 	}
+	pageCount := 0
+	if blockEntityType == "minecraft:lectern" {
+		pageCount = LecternPageCount(clean)
+	}
 
 	w.containerMu.Lock()
 	updated := false
@@ -994,6 +998,10 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 		}
 		entity.Type = blockEntityType
 		entity.Items = append([]ContainerItem(nil), clean...)
+		if blockEntityType == "minecraft:lectern" {
+			entity.LecternPage = 0
+			entity.LecternPageCount = pageCount
+		}
 		if len(entity.Data) < 2 {
 			entity.Data = []byte{10, 0}
 		}
@@ -1003,7 +1011,7 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 	if !updated {
 		c.BlockEntities = append(c.BlockEntities, BlockEntity{
 			X: x, Y: y, Z: z, Type: blockEntityType, Data: []byte{10, 0},
-			Items: append([]ContainerItem(nil), clean...),
+			Items: append([]ContainerItem(nil), clean...), LecternPageCount: pageCount,
 		})
 	}
 	w.containerMu.Unlock()
@@ -1041,6 +1049,41 @@ func (w *World) SetBookshelfLastSlot(x, y, z, slot int) {
 	})
 	w.containerMu.Unlock()
 	w.Redstone.NotifyChange(x, y, z)
+}
+
+// SetLecternPage validates and stores a zero-based lectern page. It returns
+// false for an invalid page count or a position without a book-bearing lectern.
+func (w *World) SetLecternPage(x, y, z, page, pageCount int) bool {
+	block := w.GetBlock(x, y, z)
+	if pageCount < 1 || block.ResourceLocation() != "minecraft:lectern" || block.Properties["has_book"] != "true" {
+		return false
+	}
+	page = min(max(page, 0), pageCount-1)
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	updated := false
+	w.containerMu.Lock()
+	for i := range c.BlockEntities {
+		e := &c.BlockEntities[i]
+		if e.X == x && e.Y == y && e.Z == z && LecternBook(*e) != "" {
+			e.LecternPage = page
+			e.LecternPageCount = pageCount
+			updated = true
+			break
+		}
+	}
+	w.containerMu.Unlock()
+	if !updated {
+		return false
+	}
+	w.mu.Lock()
+	key := [2]int32{cx, cz}
+	w.dirty[key] = struct{}{}
+	w.touchChunkLocked(key)
+	w.mu.Unlock()
+	w.Redstone.NotifyChange(x, y, z)
+	return true
 }
 
 // SetBlockEntity stores or replaces the non-container block entity at a world

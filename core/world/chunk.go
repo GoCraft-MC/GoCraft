@@ -62,6 +62,11 @@ type BlockEntity struct {
 	// insert or eject on a chiseled bookshelf. 0 means no interaction yet.
 	// The comparator output equals this value directly (0–6).
 	LastBookshelfSlot int8
+
+	// LecternPage and LecternPageCount track the zero-based page a reader last
+	// navigated to and the total page count of the held book.
+	LecternPage      int
+	LecternPageCount int
 }
 
 // ContainerItem is an edition-independent item stored in a block container.
