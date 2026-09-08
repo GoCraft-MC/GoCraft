@@ -396,3 +396,93 @@ func (b *Bus) EmitPlayerChat(playerRef *player.Player, message *string) bool {
 
 // EmitPlayerCommand publishes player.command to every subscriber, in the same shape whatever
 // edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerCommand(playerRef *player.Player, command *string) bool {
+	if !b.hasSubscribers(EventPlayerCommand) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerCommand,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(*command),
+			b.injectedPermissions(EventPlayerCommand, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*command = event.Fields[1].String
+	return allowed
+}
+
+// EmitPlayerDamage publishes player.damage to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerDamage(playerRef *player.Player, damage *float64, cause string) bool {
+	if !b.hasSubscribers(EventPlayerDamage) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerDamage,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(*damage),
+			abi.String(cause),
+			b.injectedPermissions(EventPlayerDamage, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*damage = event.Fields[1].Double
+	return allowed
+}
+
+// EmitPlayerDeath publishes player.death to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// Observational: the tick does not wait, and nothing a subscriber does can
+// prevent what already happened.
+func (b *Bus) EmitPlayerDeath(playerRef *player.Player, cause string) {
+	if !b.hasSubscribers(EventPlayerDeath) {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerDeath,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(cause),
+		},
+	}
+	b.EmitObservational(event)
+}
+
+// EmitPlayerDeathTo replays player.death to named plugins only.
+//
+// For a runtime that died and was brought back: its plugins missed what
+// happened while they were down, and the ones that stayed up did not.
+func (b *Bus) EmitPlayerDeathTo(plugins []string, playerRef *player.Player, cause string) {
+	if len(plugins) == 0 {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerDeath,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(cause),
+		},
+	}
+	b.EmitObservationalTo(event, plugins)
+}
+
+// EmitPlayerRespawn publishes player.respawn to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// Observational: the tick does not wait, and nothing a subscriber does can
+// prevent what already happened.
+func (b *Bus) EmitPlayerRespawn(playerRef *player.Player, x float64, y float64, z float64, dimension int64) {
