@@ -687,10 +687,9 @@ func (w *World) GroundYAtOrBelow(x, z, maxY int) int {
 		maxY = WorldMaxY
 	}
 	for y := maxY; y >= WorldMinY; y-- {
-		block := w.GetBlock(x, y, z)
-		if entitySupportBlock(block.ResourceLocation()) &&
-			!entitySupportBlock(w.GetBlock(x, y+1, z).ResourceLocation()) &&
-			!entitySupportBlock(w.GetBlock(x, y+2, z).ResourceLocation()) {
+		if IsEntityCollisionBlock(w.GetBlock(x, y, z)) &&
+			!IsEntityCollisionBlock(w.GetBlock(x, y+1, z)) &&
+			!IsEntityCollisionBlock(w.GetBlock(x, y+2, z)) {
 			return y
 		}
 	}
@@ -703,13 +702,23 @@ func (w *World) CanEntityOccupy(x, y, z float64) bool {
 	for _, sampleX := range [...]float64{x - 0.3, x + 0.3} {
 		for _, sampleZ := range [...]float64{z - 0.3, z + 0.3} {
 			for blockY := int(math.Floor(y)); blockY <= int(math.Floor(y))+1; blockY++ {
-				if entitySupportBlock(w.GetBlock(int(math.Floor(sampleX)), blockY, int(math.Floor(sampleZ))).ResourceLocation()) {
+				if IsEntityCollisionBlock(w.GetBlock(int(math.Floor(sampleX)), blockY, int(math.Floor(sampleZ)))) {
 					return false
 				}
 			}
 		}
 	}
 	return true
+}
+
+// IsEntityCollisionBlock reports full-block collision using block state. Open
+// doors have no doorway collision even though their block identifier is solid.
+func IsEntityCollisionBlock(block Block) bool {
+	name := block.ResourceLocation()
+	if strings.HasSuffix(name, "_door") && !strings.HasSuffix(name, "_trapdoor") && block.Properties["open"] == "true" {
+		return false
+	}
+	return entitySupportBlock(name)
 }
 
 func entitySupportBlock(name string) bool {
