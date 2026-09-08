@@ -109,6 +109,32 @@ func TestVillagerSleepsNearBedAndWakesBesideIt(t *testing.T) {
 	}
 }
 
+func TestVillagerRecoversStaleOccupiedBedAfterRestart(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	bed := spatial.BlockPos{X: 0, Y: 64, Z: 0}
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{
+		"part": "head", "facing": "south", "occupied": "true",
+	}})
+	server := &Server{world: w, worldAge: 6000, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(11, [16]byte{}, corentity.TypeVillager, 2.4, 64, 0.5)
+	villager.HasVillageHome = true
+	villager.VillageBed = bed
+	villager.OnGround = true
+	w.Entities.Add(villager)
+	players := []naturalSpawnPlayer{{id: 1, position: villager.Position}}
+
+	server.tickPassiveAIParallel([]*corentity.Entity{villager}, players)
+	if got := w.GetBlock(0, 64, 0).Properties["occupied"]; got != "false" {
+		t.Fatalf("orphaned bed occupancy = %q, want false", got)
+	}
+	server.worldAge = 13000
+	changed := server.tickPassiveAIParallel([]*corentity.Entity{villager}, players)
+	if len(changed) != 1 || !villager.Sleeping {
+		t.Fatal("villager did not sleep after stale occupancy was reconciled")
+	}
+}
+
 func TestVillagerNeverSleepsOnNonBedPOI(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer w.Close()

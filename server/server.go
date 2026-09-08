@@ -4291,6 +4291,10 @@ func (s *Server) claimVillagerBed(e *corentity.Entity) {
 		if !s.validVillagerBed(e) {
 			e.HasVillageHome = false
 			e.VillageBed = spatial.BlockPos{}
+		} else if !e.Sleeping && !s.villagerBedUsedByOther(e) {
+			// Bed state is persisted, but generated villagers are recreated after a
+			// restart. Reconcile an orphaned occupied flag before sleep AI runs.
+			s.setVillagerBedOccupied(e, false)
 		}
 		return
 	}
@@ -4338,6 +4342,16 @@ func (s *Server) claimVillagerBed(e *corentity.Entity) {
 		e.HasVillageHome = true
 		e.VillageCenter = spatial.BlockPos{X: best.X, Y: best.Y, Z: best.Z}
 	}
+}
+
+func (s *Server) villagerBedUsedByOther(owner *corentity.Entity) bool {
+	for _, other := range s.world.Entities.Snapshot() {
+		if other != owner && other.Type == corentity.TypeVillager && !other.Dead &&
+			other.Sleeping && other.VillageBed == owner.VillageBed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {
