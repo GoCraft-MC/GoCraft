@@ -197,6 +197,8 @@ type mobAI struct {
 	lookTick       int
 	lookX, lookZ   float64
 	bedClaimTick   int // ticks until next unclaimed-bed scan (villagers only)
+	openedDoor     spatial.BlockPos
+	doorCloseTick  int
 }
 
 type crossPlayerView struct {
@@ -3754,6 +3756,7 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				previous := entity.Position
 				if isPassiveMob(entity.Type) {
 					if entity.Type == corentity.TypeVillager {
+						simulation.tickVillagerDoor(entity, simulation.mobAIFor(entity))
 						simulation.tickVillagerBedClaim(entity, simulation.mobAIFor(entity))
 					}
 					if simulation.tickPassiveMobAI(entity) && entity.Type == corentity.TypeVillager {
@@ -4235,6 +4238,10 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 				return changed
 			}
 			e.Sleeping = false
+			ai.hasWanderGoal = false
+			if ai.hasPathGoal && ai.pathGoal != e.VillageBed {
+				ai.hasPathGoal = false
+			}
 			if distanceSquared > 4 && !s.navigateMob(e, ai, spatial.Vec3{X: targetX, Y: targetY, Z: targetZ}, pumpkinMovementSpeed(e.Type, 1.0)) {
 				distance := math.Hypot(dx, dz)
 				if distance > 0 {
@@ -4319,6 +4326,10 @@ func (s *Server) claimVillagerBed(e *corentity.Entity) {
 		if !s.validVillagerBed(e) {
 			e.HasVillageHome = false
 			e.VillageBed = spatial.BlockPos{}
+		} else if !e.Sleeping && !s.villagerBedUsedByOther(e) {
+			// Bed state is persisted, but generated villagers are recreated after a
+			// restart. Reconcile an orphaned occupied flag before sleep AI runs.
+			s.setVillagerBedOccupied(e, false)
 		}
 		return
 	}
@@ -4366,6 +4377,16 @@ func (s *Server) claimVillagerBed(e *corentity.Entity) {
 		e.HasVillageHome = true
 		e.VillageCenter = spatial.BlockPos{X: best.X, Y: best.Y, Z: best.Z}
 	}
+}
+
+func (s *Server) villagerBedUsedByOther(owner *corentity.Entity) bool {
+	for _, other := range s.world.Entities.Snapshot() {
+		if other != owner && other.Type == corentity.TypeVillager && !other.Dead &&
+			other.Sleeping && other.VillageBed == owner.VillageBed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {

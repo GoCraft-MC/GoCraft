@@ -4,6 +4,7 @@ package navigation
 import (
 	"container/heap"
 	"math"
+	"strings"
 
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -24,8 +25,9 @@ type standableResult struct {
 // Adjacent A* nodes test the same columns repeatedly. Cache each result only
 // for this search, so the next search observes terrain edits.
 type walkEvaluator struct {
-	world *coreworld.World
-	cache map[nodeKey]standableResult
+	world        *coreworld.World
+	cache        map[nodeKey]standableResult
+	canOpenDoors bool
 }
 
 func (e *walkEvaluator) standableY(x, y, z int) (int, bool) {
@@ -33,7 +35,7 @@ func (e *walkEvaluator) standableY(x, y, z int) (int, bool) {
 	if result, found := e.cache[key]; found {
 		return result.y, result.ok
 	}
-	standY, ok := standableY(e.world, x, y, z)
+	standY, ok := findStandableY(e, x, y, z)
 	e.cache[key] = standableResult{y: standY, ok: ok}
 	return standY, ok
 }
@@ -79,10 +81,20 @@ func (h *openHeap) Pop() any {
 // positions and omit the starting node. reached is false when the best partial
 // path is returned because the exact goal could not be occupied.
 func FindPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) ([]spatial.Vec3, bool) {
+	return findPath(world, start, goal, maxVisited, false)
+}
+
+// FindPathOpeningDoors allows routes through non-iron doors. Callers must open
+// a closed door before moving through its path node.
+func FindPathOpeningDoors(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) ([]spatial.Vec3, bool) {
+	return findPath(world, start, goal, maxVisited, true)
+}
+
+func findPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int, canOpenDoors bool) ([]spatial.Vec3, bool) {
 	if world == nil || maxVisited <= 0 {
 		return nil, false
 	}
-	evaluator := &walkEvaluator{world: world, cache: make(map[nodeKey]standableResult)}
+	evaluator := &walkEvaluator{world: world, cache: make(map[nodeKey]standableResult), canOpenDoors: canOpenDoors}
 	startKey, ok := nearestStandable(evaluator, int(math.Floor(start.X)), int(math.Floor(start.Y)), int(math.Floor(start.Z)))
 	if !ok {
 		return nil, false
@@ -109,7 +121,7 @@ func FindPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) 
 			best = current
 		}
 		if current.key == goalKey && goalStandable {
-			return reconstruct(current), true
+			return reconstruct(current, canOpenDoors), true
 		}
 
 		for _, candidate := range neighbours(evaluator, current.key) {
@@ -135,7 +147,7 @@ func FindPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) 
 	if best == startNode {
 		return nil, false
 	}
-	return reconstruct(best), false
+	return reconstruct(best, canOpenDoors), false
 }
 
 func nearestStandable(evaluator *walkEvaluator, x, y, z int) (nodeKey, bool) {
@@ -178,13 +190,13 @@ func neighbours(evaluator *walkEvaluator, current nodeKey) []nodeKey {
 	return result
 }
 
-func standableY(world *coreworld.World, x, referenceY, z int) (int, bool) {
+func findStandableY(evaluator *walkEvaluator, x, referenceY, z int) (int, bool) {
 	candidates := [maximumStepUp + maximumFall + 1]int{referenceY, referenceY + 1, referenceY - 1, referenceY - 2, referenceY - 3}
 	for _, y := range candidates {
 		if y < coreworld.WorldMinY+1 || y > coreworld.WorldMaxY-1 {
 			continue
 		}
-		support, loaded := world.BlockIfLoaded(x, y-1, z)
+		support, loaded := evaluator.world.BlockIfLoaded(x, y-1, z)
 		if !loaded {
 			return 0, false
 		}
@@ -193,16 +205,25 @@ func standableY(world *coreworld.World, x, referenceY, z int) (int, bool) {
 		}
 		// Walk nodes are block-centred: all four corners of the 0.6-wide
 		// collision box occupy this same column. Read feet and head once.
-		feet, feetLoaded := world.BlockIfLoaded(x, y, z)
-		head, headLoaded := world.BlockIfLoaded(x, y+1, z)
-		if feetLoaded && headLoaded && !coreworld.IsEntitySupportBlock(feet.ResourceLocation()) && !coreworld.IsEntitySupportBlock(head.ResourceLocation()) {
+		feet, feetLoaded := evaluator.world.BlockIfLoaded(x, y, z)
+		head, headLoaded := evaluator.world.BlockIfLoaded(x, y+1, z)
+		if feetLoaded && headLoaded && evaluator.passable(feet) && evaluator.passable(head) {
 			return y, true
 		}
 	}
 	return 0, false
 }
 
-func reconstruct(end *searchNode) []spatial.Vec3 {
+func (evaluator *walkEvaluator) passable(block coreworld.Block) bool {
+	if !coreworld.IsEntityCollisionBlock(block) {
+		return true
+	}
+	name := block.ResourceLocation()
+	return evaluator.canOpenDoors && strings.HasSuffix(name, "_door") &&
+		!strings.HasSuffix(name, "_trapdoor") && name != "minecraft:iron_door"
+}
+
+func reconstruct(end *searchNode, preserveDoorNodes bool) []spatial.Vec3 {
 	reversed := make([]spatial.Vec3, 0, 16)
 	for node := end; node != nil && node.parent != nil; node = node.parent {
 		reversed = append(reversed, spatial.Vec3{X: float64(node.key.x) + 0.5, Y: float64(node.key.y), Z: float64(node.key.z) + 0.5})
@@ -210,6 +231,9 @@ func reconstruct(end *searchNode) []spatial.Vec3 {
 	path := make([]spatial.Vec3, len(reversed))
 	for i := range reversed {
 		path[i] = reversed[len(reversed)-1-i]
+	}
+	if preserveDoorNodes {
+		return path
 	}
 	return simplify(path)
 }

@@ -36,7 +36,12 @@ func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial
 	// every change made all nearby mobs run A* together. Offset refreshes by
 	// entity ID so herds and hostile groups do not create a 15-tick CPU spike.
 	if !ai.hasPathGoal || ai.repathTick <= 0 {
-		path, _ := navigation.FindPath(s.world, e.Position, destination, 4096)
+		var path []spatial.Vec3
+		if e.Type == corentity.TypeVillager {
+			path, _ = navigation.FindPathOpeningDoors(s.world, e.Position, destination, 4096)
+		} else {
+			path, _ = navigation.FindPath(s.world, e.Position, destination, 4096)
+		}
 		ai.path = path
 		ai.pathIndex = 0
 		ai.pathGoal = goal
