@@ -31,7 +31,9 @@ func (s *Server) tickEndermanWater(entity *corentity.Entity, hurtEntities *[]*co
 		return
 	}
 	if s.entityInWater(entity) {
-		entity.Damage(1)
+		if !s.damageEnvironmentalEntity(entity, 1, "water") {
+			return
+		}
 		*hurtEntities = append(*hurtEntities, entity)
 		roll := uint64(entity.EntityID)*0x9e3779b97f4a7c15 ^ uint64(s.worldAge)*0xbf58476d1ce4e5b9
 		if roll%10 != 0 {
@@ -68,8 +70,9 @@ func (s *Server) tickMobSunlight(entity *corentity.Entity, hurtEntities *[]*core
 	} else if entity.FireTicks > 0 {
 		entity.FireTicks--
 		if entity.FireTicks > 0 && entity.FireTicks%20 == 0 {
-			entity.Damage(1)
-			*hurtEntities = append(*hurtEntities, entity)
+			if s.damageEnvironmentalEntity(entity, 1, "fire") {
+				*hurtEntities = append(*hurtEntities, entity)
+			}
 		}
 	}
 	if wasBurning != (entity.FireTicks > 0) {
