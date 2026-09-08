@@ -576,3 +576,81 @@ func (b *Bus) EmitPlayerInteract(playerRef *player.Player, target string, pos sp
 			abi.String(item),
 			abi.Int64(dimension),
 			b.injectedPermissions(EventPlayerInteract, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitInventoryClick publishes inventory.click to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitInventoryClick(playerRef *player.Player, container string, slot int64, button int64, mode int64) bool {
+	if !b.hasSubscribers(EventInventoryClick) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventInventoryClick,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(container),
+			abi.Int64(slot),
+			abi.Int64(button),
+			abi.Int64(mode),
+			b.injectedPermissions(EventInventoryClick, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitItemUse publishes item.use to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitItemUse(playerRef *player.Player, item string, hand int64) bool {
+	if !b.hasSubscribers(EventItemUse) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventItemUse,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(item),
+			abi.Int64(hand),
+			b.injectedPermissions(EventItemUse, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitEntityDamage publishes entity.damage to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitEntityDamage(entityID int64, entityType string, damage *float64, cause string, dimension int64) bool {
+	if !b.hasSubscribers(EventEntityDamage) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventEntityDamage,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			abi.Int64(entityID),
+			abi.String(entityType),
+			abi.Double(*damage),
+			abi.String(cause),
+			abi.Int64(dimension),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*damage = event.Fields[2].Double
+	return allowed
+}
