@@ -619,7 +619,7 @@ func handleUseItemOn(pkt *protocol.Packet, p *player.Player, w *coreworld.World,
 	return handleUseItemOnWithIntents(pkt, p, w, mgr, conn, nextEntityID, nil)
 }
 
-func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, intents *coreintent.Bus) error {
+func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, intents *coreintent.Bus, buses ...*coreplugin.Bus) error {
 	r := pkt.Reader()
 
 	hand, err := protocol.ReadVarInt(r)
