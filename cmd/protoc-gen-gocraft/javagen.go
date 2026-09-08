@@ -66,6 +66,9 @@ type javaAccessor struct {
 	Name      string
 	Reader    string
 	FieldName string
+	Setter    string
+	Writer    string
+	Index     int
 }
 
 type javaEvent struct {
@@ -102,12 +105,18 @@ func javaModel(declared event) (javaEvent, error) {
 		if err != nil {
 			return javaEvent{}, fmt.Errorf("%s.%s: %w", declared.Type, f.Name, err)
 		}
-		model.Accessors = append(model.Accessors, javaAccessor{
+		accessor := javaAccessor{
 			Type:      bound.JavaType,
 			Name:      f.JavaName(),
 			Reader:    fmt.Sprintf(bound.JavaDecode, f.Index),
 			FieldName: f.Name,
-		})
+			Index:     f.Index,
+		}
+		if f.Mutable {
+			accessor.Setter = "set" + exported(f.Name)
+			accessor.Writer = map[string]string{"string": "Text", "bool": "Bool", "int64": "Int", "double": "Decimal"}[f.Kind]
+		}
+		model.Accessors = append(model.Accessors, accessor)
 	}
 	model.Imports = javaImports(model)
 	return model, nil
@@ -163,6 +172,13 @@ public final class {{ .Class }} extends fr.gocraft.api.Event {
     public {{ .Type }} {{ .Name }}() {
         return {{ .Reader }};
     }
+{{- if .Setter }}
+
+    /// Changes this value for subsequent handlers and the original server action.
+    public void {{ .Setter }}({{ .Type }} value) {
+        field({{ .Index }}, new fr.gocraft.api.Value.{{ .Writer }}(value));
+    }
+{{- end }}
 {{ end }}
 {{- if .Permissions }}
     /// Whether the acting player holds a permission.
