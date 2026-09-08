@@ -238,6 +238,8 @@ func BlankEvent(eventType string) []abi.Value {
 			abi.String(""),
 			abi.Double(0),
 			abi.String(""),
+			abi.Int64(0),
+		}
 	}
 	return nil
 }
