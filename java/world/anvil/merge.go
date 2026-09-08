@@ -161,6 +161,10 @@ func blockEntitiesTag(entities []coreworld.BlockEntity) Tag {
 		if entity.Type == "minecraft:decorated_pot" || entity.Type == "DecoratedPot" {
 			compound["sherds"] = potDecorationsTag(entity.PotDecorations)
 		}
+		if entity.Type == "minecraft:lectern" || entity.Type == "lectern" {
+			compound["Page"] = Tag{typ: tagInt, intV: int32(entity.LecternPage)}
+			compound["GoCraftPageCount"] = Tag{typ: tagInt, intV: int32(entity.LecternPageCount)}
+		}
 		entries = append(entries, Tag{typ: tagCompound, compound: compound})
 	}
 	return Tag{typ: tagList, listElem: tagCompound, listV: entries}

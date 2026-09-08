@@ -105,6 +105,14 @@ func decodeBlockEntities(list Tag) []coreworld.BlockEntity {
 		entityType := data["id"].Str()
 		x, y, z := int(data["x"].Int()), int(data["y"].Int()), int(data["z"].Int())
 		items := decodeContainerItems(data["Items"])
+		lecternPage, lecternPageCount := 0, 0
+		if entityType == "minecraft:lectern" || entityType == "lectern" {
+			lecternPage = numericTagValue(data["Page"])
+			lecternPageCount = numericTagValue(data["GoCraftPageCount"])
+			if lecternPageCount < 1 {
+				lecternPageCount = coreworld.LecternPageCount(items)
+			}
+		}
 		potDecorations := decodePotDecorations(data["sherds"])
 		delete(data, "Items")
 		delete(data, "id")
@@ -116,6 +124,7 @@ func decodeBlockEntities(list Tag) []coreworld.BlockEntity {
 		writeCompoundPayload(&payload, data)
 		entities = append(entities, coreworld.BlockEntity{
 			X: x, Y: y, Z: z, Type: entityType, Data: payload.Bytes(), Items: items, PotDecorations: potDecorations,
+			LecternPage: lecternPage, LecternPageCount: lecternPageCount,
 		})
 	}
 	return entities
