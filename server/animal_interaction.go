@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 	"math/rand"
+	"strings"
 
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/intent"
@@ -124,6 +125,150 @@ func (s *Server) interactAnimal(p *player.Player, e *corentity.Entity) bool {
 	}
 	held := p.HeldItem()
 	item := held.ItemID
+
+	// Spawn egg on matching adult mob → spawn baby.
+	if strings.HasSuffix(item, "_spawn_egg") && s.game != nil {
+		eggType := corentity.EntityType("minecraft:" + strings.TrimSuffix(strings.TrimPrefix(item, "minecraft:"), "_spawn_egg"))
+		if eggType == e.Type && !e.IsBaby {
+			if !s.consumeAnimalItem(p, "") {
+				return false
+			}
+			world := s.worldForPlayer(p)
+			baby := corentity.New(s.game.NextEntityID(), newRandomUUID(), eggType,
+				e.Position.X, e.Position.Y, e.Position.Z)
+			baby.IsBaby = true
+			baby.MaxHealth = e.MaxHealth
+			baby.Health = baby.MaxHealth
+			baby.OnGround = e.OnGround
+			world.Entities.Add(baby)
+			handler.BroadcastSpawnMob(baby, s.sessions)
+			return true
+		}
+	}
+
+	// Apply a name tag: sets the entity's custom name and consumes the tag.
+	if item == "minecraft:name_tag" {
+		name := held.DisplayName()
+		if name != "" {
+			if !s.consumeAnimalItem(p, "") {
+				return false
+			}
+			e.DisplayName = name
+			e.CustomNameVisible = true
+			s.broadcastAnimalState(e)
+			return true
+		}
+	}
+
+	// Shear a sheep: drops 1-3 wool and marks the sheep as sheared.
+	if item == "minecraft:shears" && e.Type == corentity.TypeSheep && !e.Sheared && !e.IsBaby {
+		woolColor := e.WoolColor
+		if woolColor == "" {
+			woolColor = "white"
+		}
+		woolItem := "minecraft:" + woolColor + "_wool"
+		woolCount := 1 + s.interactionRNG().Intn(3)
+		drop := player.ItemStack{ItemID: woolItem, Count: woolCount}
+		if !p.GiveItem(drop) {
+			s.newDroppedItemForPlayer(p, drop, e.Position, 0)
+		}
+		e.Sheared = true
+		e.WoolRegrowTicks = 300 // ~15 s at 20 tps; regrow on next grass-eat opportunity
+		s.broadcastAnimalState(e)
+		s.damageBedrockHeldItem(p, 1)
+		return true
+	}
+
+	// Shear a mooshroom: drops 5 mushrooms and converts to a plain cow.
+	if item == "minecraft:shears" && e.Type == corentity.TypeMooshroom && !e.IsBaby {
+		mushroom := "minecraft:red_mushroom"
+		if e.WoolColor == "brown" {
+			mushroom = "minecraft:brown_mushroom"
+		}
+		drop := player.ItemStack{ItemID: mushroom, Count: 5}
+		if !p.GiveItem(drop) {
+			s.newDroppedItemForPlayer(p, drop, e.Position, 0)
+		}
+		// Convert mooshroom to a plain cow.
+		world := s.worldForPlayer(p)
+		world.Entities.Remove(e.EntityID)
+		handler.BroadcastRemoveEntity(e.EntityID, s.sessions)
+		if s.game != nil {
+			cow := corentity.New(s.game.NextEntityID(), newRandomUUID(), corentity.TypeCow,
+				e.Position.X, e.Position.Y, e.Position.Z)
+			cow.Health = e.Health
+			cow.MaxHealth = e.MaxHealth
+			cow.IsBaby = e.IsBaby
+			cow.OnGround = e.OnGround
+			world.Entities.Add(cow)
+			handler.BroadcastSpawnMob(cow, s.sessions)
+		}
+		s.damageBedrockHeldItem(p, 1)
+		return true
+	}
+
+	// Shear a snow golem: remove pumpkin face, drop carved_pumpkin.
+	if item == "minecraft:shears" && e.Type == corentity.TypeSnowGolem && e.HasPumpkin {
+		e.HasPumpkin = false
+		s.broadcastAnimalState(e)
+		drop := player.ItemStack{ItemID: "minecraft:carved_pumpkin", Count: 1}
+		if !p.GiveItem(drop) {
+			s.newDroppedItemForPlayer(p, drop, e.Position, 0)
+		}
+		s.damageBedrockHeldItem(p, 1)
+		return true
+	}
+
+	// Dye a tamed wolf or cat collar.
+	if (e.Type == corentity.TypeWolf || e.Type == corentity.TypeCat) && e.Tamed && animalOwnedBy(e, p) {
+		if color := sheepDyeColor(item); color != "" {
+			if !s.consumeAnimalItem(p, "") {
+				return false
+			}
+			e.CollarColor = color
+			s.broadcastAnimalState(e)
+			return true
+		}
+	}
+
+	// Dye a sheep: applies the dye colour and consumes one dye.
+	if e.Type == corentity.TypeSheep {
+		if color := sheepDyeColor(item); color != "" {
+			if !s.consumeAnimalItem(p, "") {
+				return false
+			}
+			e.WoolColor = color
+			s.broadcastAnimalState(e)
+			return true
+		}
+	}
+
+	// Capture aquatic mobs with a water bucket.
+	if item == "minecraft:water_bucket" && !e.IsBaby {
+		if bucket := fishBucketForType(e.Type); bucket != "" {
+			if !s.consumeAnimalItem(p, bucket) {
+				return false
+			}
+			// Remove the entity from the world.
+			world := s.worldForPlayer(p)
+			world.Entities.Remove(e.EntityID)
+			handler.BroadcastRemoveEntity(e.EntityID, s.sessions)
+			return true
+		}
+	}
+
+	// Milk a cow or mooshroom: replaces one bucket in hand with a milk bucket.
+	if item == "minecraft:bucket" && !e.IsBaby &&
+		(e.Type == corentity.TypeCow || e.Type == corentity.TypeMooshroom) {
+		s.consumeAnimalItem(p, "minecraft:milk_bucket")
+		return true
+	}
+
+	// Bowl on mooshroom → mushroom stew.
+	if item == "minecraft:bowl" && !e.IsBaby && e.Type == corentity.TypeMooshroom {
+		s.consumeAnimalItem(p, "minecraft:mushroom_stew")
+		return true
+	}
 
 	if item == "minecraft:saddle" && saddleApplicable(e.Type) && !e.Saddled && !e.IsBaby {
 		if isHorseFamily(e.Type) && !e.Tamed {
@@ -283,7 +428,7 @@ func (s *Server) dismountPlayer(p *player.Player) bool {
 	}
 	vehicleID := p.VehicleEntityID
 	p.VehicleEntityID = 0
-	if vehicle, ok := s.world.Entities.Get(vehicleID); ok {
+	if vehicle, ok := s.worldForPlayer(p).Entities.Get(vehicleID); ok {
 		vehicle.RemovePassenger(p.EntityID)
 		p.Position.X = vehicle.Position.X + 1.5
 		p.Position.Y = vehicle.Position.Y
@@ -298,6 +443,43 @@ func (s *Server) dismountPlayer(p *player.Player) bool {
 	}
 	handler.BroadcastSetPassengers(vehicleID, nil, s.sessions)
 	return true
+}
+
+// fishBucketForType returns the filled bucket item ID for capturable aquatic mobs, or "".
+func fishBucketForType(t corentity.EntityType) string {
+	switch t {
+	case corentity.TypeCod:
+		return "minecraft:cod_bucket"
+	case corentity.TypeSalmon:
+		return "minecraft:salmon_bucket"
+	case corentity.TypePufferfish:
+		return "minecraft:pufferfish_bucket"
+	case corentity.TypeTropicalFish:
+		return "minecraft:tropical_fish_bucket"
+	case corentity.TypeAxolotl:
+		return "minecraft:axolotl_bucket"
+	case corentity.TypeTadpole:
+		return "minecraft:tadpole_bucket"
+	default:
+		return ""
+	}
+}
+
+// sheepDyeColor returns the canonical colour name if itemID is a dye, else "".
+func sheepDyeColor(itemID string) string {
+	const prefix = "minecraft:"
+	const suffix = "_dye"
+	if len(itemID) <= len(prefix)+len(suffix) {
+		return ""
+	}
+	if itemID[:len(prefix)] != prefix {
+		return ""
+	}
+	tail := itemID[len(prefix):]
+	if len(tail) <= len(suffix) || tail[len(tail)-len(suffix):] != suffix {
+		return ""
+	}
+	return tail[:len(tail)-len(suffix)]
 }
 
 func (s *Server) dismountEntityPassengers(vehicle *corentity.Entity) {

@@ -34,6 +34,12 @@ func TestRegistryBackedConsumptionMetadata(t *testing.T) {
 	if got := FoodUseDuration("minecraft:honey_bottle"); got != 2*time.Second {
 		t.Fatalf("honey use duration = %v, want 2s", got)
 	}
+	if got := FoodUseDuration("minecraft:milk_bucket"); got != 1600*time.Millisecond {
+		t.Fatalf("milk use duration = %v, want 1.6s", got)
+	}
+	if !IsConsumable("minecraft:milk_bucket") || FoodRemainder("minecraft:milk_bucket") != "minecraft:bucket" {
+		t.Fatal("milk bucket consumable metadata is unavailable")
+	}
 	if !CanAlwaysEat("minecraft:honey_bottle") || !CanAlwaysEat("minecraft:suspicious_stew") {
 		t.Fatal("always-edible component was not preserved")
 	}

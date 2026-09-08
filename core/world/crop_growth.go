@@ -80,6 +80,16 @@ func isCanonicalCrop(name string) bool {
 	return name == "minecraft:attached_pumpkin_stem" || name == "minecraft:attached_melon_stem"
 }
 
+// isTickableGrowth reports whether a block participates in the crop scan: a
+// canonical crop, a self-paced tall plant (sugar cane, cactus), a kelp tip,
+// a nether vine head, a bamboo segment/sapling, or a cave vine tip.
+func isTickableGrowth(name string) bool {
+	return isCanonicalCrop(name) || isTallPlantGrowth(name) ||
+		name == "minecraft:kelp" || isNetherVineHead(name) ||
+		isBambooGrowthBlock(name) || isCaveVineTip(name) ||
+		IsVine(name)
+}
+
 func standardMoistureCrop(name string) bool {
 	switch name {
 	case "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes",
@@ -207,8 +217,8 @@ func CanCropSurvive(block, support Block) bool {
 	case "minecraft:sweet_berry_bush", "minecraft:torchflower":
 		return validSweetBerrySupport(support.ResourceLocation())
 	case "minecraft:cocoa":
-		// Cocoa attaches horizontally. GoCraft does not yet retain the attachment
-		// support position here, so leave its legacy survival behaviour unchanged.
+		// Cocoa survival is checked horizontally by cocoaCanSurvive; this
+		// vertical-support path is not used for cocoa.
 		return true
 	default:
 		return true
@@ -231,6 +241,54 @@ func (w *World) BreakUnsupportedCropsAbove(x, y, z int) []BlockChange {
 		}
 		w.SetBlock(x, plantY, z, Air)
 		changes = append(changes, BlockChange{X: x, Y: plantY, Z: z, Block: Air})
+	}
+	return changes
+}
+
+// cocoaSupportOffset returns the (dx, dz) offset from a cocoa block to the
+// jungle log it must be attached to, based on the cocoa's facing property.
+func cocoaSupportOffset(facing string) (int, int) {
+	switch facing {
+	case "north":
+		return 0, -1
+	case "south":
+		return 0, 1
+	case "east":
+		return 1, 0
+	default: // west
+		return -1, 0
+	}
+}
+
+// isJungleLog reports whether name is any jungle-log or jungle-wood variant.
+func isJungleLog(name string) bool {
+	return name == "minecraft:jungle_log" || name == "minecraft:jungle_wood" ||
+		name == "minecraft:stripped_jungle_log" || name == "minecraft:stripped_jungle_wood"
+}
+
+func (w *World) cocoaCanSurvive(x, y, z int, block Block) bool {
+	dx, dz := cocoaSupportOffset(block.Properties["facing"])
+	support, loaded := w.blockIfLoaded(x+dx, y, z+dz)
+	return loaded && isJungleLog(support.ResourceLocation())
+}
+
+// BreakUnsupportedCocoaAdjacentTo checks the four horizontal neighbours of
+// (x,y,z) for cocoa pods whose jungle-log support block was just removed.
+// It breaks any unsupported pod and returns the resulting block changes.
+func (w *World) BreakUnsupportedCocoaAdjacentTo(x, y, z int) []BlockChange {
+	offsets := [4][2]int{{0, -1}, {0, 1}, {1, 0}, {-1, 0}}
+	changes := make([]BlockChange, 0, 4)
+	for _, off := range offsets {
+		cx, cz := x+off[0], z+off[1]
+		cocoa, loaded := w.blockIfLoaded(cx, y, cz)
+		if !loaded || cocoa.ResourceLocation() != "minecraft:cocoa" {
+			continue
+		}
+		if w.cocoaCanSurvive(cx, y, cz, cocoa) {
+			continue
+		}
+		w.SetBlock(cx, y, cz, Air)
+		changes = append(changes, BlockChange{X: cx, Y: y, Z: cz, Block: Air})
 	}
 	return changes
 }
@@ -331,6 +389,26 @@ func (w *World) tickCropAt(x, y, z int, crop Block, tick int64, changeBudget int
 		return nil
 	}
 	name := crop.ResourceLocation()
+	if isTallPlantGrowth(name) {
+		// Sugar cane and cactus manage their own survival through block physics;
+		// the crop survival rule does not apply and would delete them.
+		return w.tickTallPlantAt(x, y, z, crop)
+	}
+	if name == "minecraft:kelp" {
+		return w.tickKelpAt(x, y, z, crop, tick)
+	}
+	if isNetherVineHead(name) {
+		return w.tickNetherVineAt(x, y, z, crop, tick)
+	}
+	if isBambooGrowthBlock(name) {
+		return w.tickBambooAt(x, y, z, crop, tick)
+	}
+	if isCaveVineTip(name) {
+		return w.TickCaveVineAt(x, y, z, crop, tick)
+	}
+	if IsVine(name) {
+		return w.tickVineAt(x, y, z, crop, tick)
+	}
 	if !w.cropCanSurviveAt(x, y, z, crop) {
 		w.SetBlock(x, y, z, Air)
 		return []BlockChange{{X: x, Y: y, Z: z, Block: Air}}
@@ -427,7 +505,7 @@ func (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {
 			palette := section.BlockPalette()
 			hasCrop := false
 			for _, block := range palette {
-				if isCanonicalCrop(block.ResourceLocation()) {
+				if isTickableGrowth(block.ResourceLocation()) {
 					hasCrop = true
 					break
 				}
@@ -440,7 +518,7 @@ func (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {
 					continue
 				}
 				block := palette[paletteIndex]
-				if !isCanonicalCrop(block.ResourceLocation()) {
+				if !isTickableGrowth(block.ResourceLocation()) {
 					continue
 				}
 				localX := index % SectionSize
@@ -472,12 +550,281 @@ func (w *World) TickCrops(tick int64, maxChanges int) []BlockChange {
 	return changes
 }
 
+// grassBoneMealVegetation is the pool of single-block plants placed by bone
+// meal on a grass block (tall_grass/fern excluded — they require 2 air blocks).
+var grassBoneMealVegetation = []string{
+	"minecraft:short_grass", "minecraft:short_grass", "minecraft:short_grass",
+	"minecraft:fern",
+	"minecraft:dandelion", "minecraft:poppy", "minecraft:azure_bluet",
+	"minecraft:blue_orchid", "minecraft:oxeye_daisy", "minecraft:cornflower",
+	"minecraft:lily_of_the_valley",
+}
+
+// grassBoneMeal performs the 128-attempt scatter of vegetation when bone meal
+// is applied to a grass block. Each attempt picks a random offset (±4 x/z)
+// and places a plant above the grass if that column has a grass block below
+// and air above.
+func (w *World) grassBoneMeal(x, y, z int, seed uint64) []BlockChange {
+	changes := make([]BlockChange, 0, 8)
+	rng := seed ^ uint64(x)*cropGateSalt ^ uint64(y)*cropGrowthSalt ^ uint64(z)*cropDirectionSalt
+	for range 128 {
+		rng = rng*6364136223846793005 + 1442695040888963407
+		dx := int(rng>>1%9) - 4
+		rng = rng*6364136223846793005 + 1442695040888963407
+		dz := int(rng>>1%9) - 4
+		tx, tz := x+dx, z+dz
+		below := w.GetBlock(tx, y, tz)
+		if below.ResourceLocation() != "minecraft:grass_block" {
+			continue
+		}
+		above, loaded := w.blockIfLoaded(tx, y+1, tz)
+		if !loaded || !above.IsAir() {
+			continue
+		}
+		rng = rng*6364136223846793005 + 1442695040888963407
+		plant := grassBoneMealVegetation[int(rng>>1%uint64(len(grassBoneMealVegetation)))]
+		block := Block{Namespace: "minecraft", Name: plant[len("minecraft:"):]}
+		w.SetBlock(tx, y+1, tz, block)
+		changes = append(changes, BlockChange{X: tx, Y: y + 1, Z: tz, Block: block})
+	}
+	return changes
+}
+
+// myceliumBoneMeal performs the 128-attempt mushroom scatter when bone meal is
+// applied to a mycelium block. Brown and red mushrooms are placed above any
+// mycelium block with air above it within a ±4 x/z area.
+func (w *World) myceliumBoneMeal(x, y, z int, seed uint64) []BlockChange {
+	mushrooms := [...]string{"minecraft:brown_mushroom", "minecraft:red_mushroom"}
+	changes := make([]BlockChange, 0, 4)
+	rng := seed ^ uint64(x)*cropGateSalt ^ uint64(y)*cropBoneMealSalt ^ uint64(z)*cropDirectionSalt
+	for range 128 {
+		rng = rng*6364136223846793005 + 1442695040888963407
+		dx := int(rng>>1%9) - 4
+		rng = rng*6364136223846793005 + 1442695040888963407
+		dz := int(rng>>1%9) - 4
+		tx, tz := x+dx, z+dz
+		below := w.GetBlock(tx, y, tz)
+		if below.ResourceLocation() != "minecraft:mycelium" {
+			continue
+		}
+		above, loaded := w.blockIfLoaded(tx, y+1, tz)
+		if !loaded || !above.IsAir() {
+			continue
+		}
+		rng = rng*6364136223846793005 + 1442695040888963407
+		mush := mushrooms[rng>>1%2]
+		block := Block{Namespace: "minecraft", Name: mush[len("minecraft:"):]}
+		w.SetBlock(tx, y+1, tz, block)
+		changes = append(changes, BlockChange{X: tx, Y: y + 1, Z: tz, Block: block})
+	}
+	return changes
+}
+
+// mossBoneMealSurface lists blocks that bone meal on moss can convert or place on.
+var mossBoneMealSurface = map[string]bool{
+	"minecraft:moss_block": true, "minecraft:stone": true, "minecraft:cobblestone": true,
+	"minecraft:dirt": true, "minecraft:grass_block": true, "minecraft:gravel": true,
+}
+
+// mossBoneMeal performs the spread when bone meal is applied to a moss block.
+// In a 5×5 area it converts eligible surface blocks to moss and places moss
+// carpet or small plants above them, within the same budget of 128 attempts.
+func (w *World) mossBoneMeal(x, y, z int, seed uint64) []BlockChange {
+	changes := make([]BlockChange, 0, 8)
+	rng := seed ^ uint64(x)*cropGateSalt ^ uint64(y)*cropBoneMealSalt ^ uint64(z)*cropLegacyTickSalt
+	for range 128 {
+		rng = rng*6364136223846793005 + 1442695040888963407
+		dx := int(rng>>1%9) - 4
+		rng = rng*6364136223846793005 + 1442695040888963407
+		dz := int(rng>>1%9) - 4
+		tx, tz := x+dx, z+dz
+		surface := w.GetBlock(tx, y, tz)
+		surfName := surface.ResourceLocation()
+		if !mossBoneMealSurface[surfName] {
+			continue
+		}
+		above, loaded := w.blockIfLoaded(tx, y+1, tz)
+		if !loaded || !above.IsAir() {
+			continue
+		}
+		// Convert the surface to moss if it is not already.
+		if surfName != "minecraft:moss_block" {
+			mossBlock := Block{Namespace: "minecraft", Name: "moss_block"}
+			w.SetBlock(tx, y, tz, mossBlock)
+			changes = append(changes, BlockChange{X: tx, Y: y, Z: tz, Block: mossBlock})
+		}
+		// Place moss carpet or a small plant above.
+		rng = rng*6364136223846793005 + 1442695040888963407
+		var top Block
+		switch rng >> 1 % 3 {
+		case 0:
+			top = Block{Namespace: "minecraft", Name: "moss_carpet"}
+		case 1:
+			top = Block{Namespace: "minecraft", Name: "short_grass"}
+		default:
+			top = Block{Namespace: "minecraft", Name: "azalea"}
+		}
+		w.SetBlock(tx, y+1, tz, top)
+		changes = append(changes, BlockChange{X: tx, Y: y + 1, Z: tz, Block: top})
+	}
+	return changes
+}
+
 // ApplyBoneMeal applies one crop bonemeal interaction. used reports whether
 // the target accepted bonemeal, even when beetroot's integer-divided roll adds
 // zero stages. Nether wart deliberately never accepts bonemeal.
 func (w *World) ApplyBoneMeal(x, y, z int, seed uint64) (changes []BlockChange, used bool) {
 	crop := w.GetBlock(x, y, z)
 	name := crop.ResourceLocation()
+
+	// Grass block: scatter vegetation over a 9×9 area above.
+	if name == "minecraft:grass_block" {
+		changes = w.grassBoneMeal(x, y, z, seed)
+		return changes, true
+	}
+
+	// Mycelium: scatter mushrooms in a ±4 area (same 128-attempt pattern as grass).
+	if name == "minecraft:mycelium" {
+		changes = w.myceliumBoneMeal(x, y, z, seed)
+		return changes, true
+	}
+
+	// Moss block: spread moss carpet and a few plants on top.
+	if name == "minecraft:moss_block" {
+		changes = w.mossBoneMeal(x, y, z, seed)
+		return changes, true
+	}
+
+	// Bamboo sapling: convert to first bamboo segment unconditionally.
+	if name == "minecraft:bamboo_sapling" {
+		below, loaded := w.blockIfLoaded(x, y-1, z)
+		if !loaded || !validBambooSoil(below.ResourceLocation()) {
+			return nil, false
+		}
+		above, aLoaded := w.blockIfLoaded(x, y+1, z)
+		if !aLoaded || !above.IsAir() {
+			return nil, false
+		}
+		segment := makeBambooBlock("small")
+		w.SetBlock(x, y, z, segment)
+		return []BlockChange{{X: x, Y: y, Z: z, Block: segment}}, true
+	}
+
+	// Bamboo tip: grow one block upward if below target height.
+	if name == "minecraft:bamboo" {
+		abv, loaded := w.blockIfLoaded(x, y+1, z)
+		if !loaded || !abv.IsAir() {
+			return nil, false
+		}
+		height := w.bambooColumnHeight(x, y, z)
+		baseY := y - height + 1
+		target := bambooTargetHeight(x, baseY, z)
+		if height >= target {
+			return nil, false
+		}
+		newTip := makeBambooBlock("small")
+		w.SetBlock(x, y+1, z, newTip)
+		cs := []BlockChange{{X: x, Y: y + 1, Z: z, Block: newTip}}
+		// Update current segment leaves.
+		if height >= 1 {
+			updated := makeBambooBlock(bambooLeaves(0, height+1))
+			w.SetBlock(x, y, z, updated)
+			cs = append(cs, BlockChange{X: x, Y: y, Z: z, Block: updated})
+		}
+		if height >= 2 {
+			prev := w.GetBlock(x, y-1, z)
+			if prev.ResourceLocation() == "minecraft:bamboo" {
+				updated := makeBambooBlock(bambooLeaves(1, height+1))
+				w.SetBlock(x, y-1, z, updated)
+				cs = append(cs, BlockChange{X: x, Y: y - 1, Z: z, Block: updated})
+			}
+		}
+		return cs, true
+	}
+
+	// Kelp tip: grow one block upward (no age gate).
+	if name == "minecraft:kelp" {
+		age := kelpAge(crop)
+		if age >= kelpMaxAge {
+			return nil, false
+		}
+		abv, loaded := w.blockIfLoaded(x, y+1, z)
+		if !loaded || abv.ResourceLocation() != "minecraft:water" || FluidLevel(abv) != 0 {
+			return nil, false
+		}
+		newTip := Block{Namespace: "minecraft", Name: "kelp", Properties: map[string]string{"age": strconv.Itoa(age + 1)}}
+		body := Block{Namespace: "minecraft", Name: "kelp_plant"}
+		w.SetBlock(x, y+1, z, newTip)
+		w.SetBlock(x, y, z, body)
+		return []BlockChange{
+			{X: x, Y: y + 1, Z: z, Block: newTip},
+			{X: x, Y: y, Z: z, Block: body},
+		}, true
+	}
+
+	// Cave vine tip: grow one block downward into air (no random gate).
+	if isCaveVineTip(name) {
+		age := kelpAge(crop)
+		if age >= caveVineMaxAge {
+			return nil, false
+		}
+		below, loaded := w.blockIfLoaded(x, y-1, z)
+		if !loaded || !below.IsAir() {
+			return nil, false
+		}
+		plant := Block{Namespace: "minecraft", Name: "cave_vines_plant",
+			Properties: map[string]string{"berries": crop.Properties["berries"]}}
+		w.SetBlock(x, y, z, plant)
+		newTip := Block{Namespace: "minecraft", Name: "cave_vines",
+			Properties: map[string]string{"age": strconv.Itoa(age + 1), "berries": "false"}}
+		w.SetBlock(x, y-1, z, newTip)
+		return []BlockChange{
+			{X: x, Y: y, Z: z, Block: plant},
+			{X: x, Y: y - 1, Z: z, Block: newTip},
+		}, true
+	}
+
+	// Twisting/weeping vine tip: grow one block into air (no age gate).
+	if isNetherVineHead(name) {
+		age := kelpAge(crop)
+		if age >= kelpMaxAge {
+			return nil, false
+		}
+		dy := netherVineDirection(name)
+		target, loaded := w.blockIfLoaded(x, y+dy, z)
+		if !loaded || !target.IsAir() {
+			return nil, false
+		}
+		newTip := Block{Namespace: "minecraft", Name: name[len("minecraft:"):], Properties: map[string]string{"age": strconv.Itoa(age + 1)}}
+		body := Block{Namespace: "minecraft", Name: netherVineBody(name)}
+		w.SetBlock(x, y+dy, z, newTip)
+		w.SetBlock(x, y, z, body)
+		return []BlockChange{
+			{X: x, Y: y + dy, Z: z, Block: newTip},
+			{X: x, Y: y, Z: z, Block: body},
+		}, true
+	}
+
+	// Sea pickles: add one pickle per bone meal use when underwater (max 4).
+	if name == "minecraft:sea_pickle" {
+		pickles, _ := strconv.Atoi(crop.Properties["pickles"])
+		if pickles <= 0 {
+			pickles = 1
+		}
+		if pickles >= 4 {
+			return nil, false
+		}
+		// Sea pickles require a water block at their position or above.
+		here, loaded := w.blockIfLoaded(x, y, z)
+		if !loaded || here.Properties["waterlogged"] != "true" {
+			return nil, false
+		}
+		updated := copyWorldBlock(crop)
+		updated.Properties["pickles"] = strconv.Itoa(pickles + 1)
+		w.SetBlock(x, y, z, updated)
+		return []BlockChange{{X: x, Y: y, Z: z, Block: updated}}, true
+	}
+
 	if (strings.HasSuffix(name, "_sapling") && name != "minecraft:bamboo_sapling") || name == "minecraft:mangrove_propagule" {
 		stage, _ := strconv.Atoi(crop.Properties["stage"])
 		if stage <= 0 {
@@ -491,7 +838,7 @@ func (w *World) ApplyBoneMeal(x, y, z int, seed uint64) (changes []BlockChange, 
 	}
 	age := CropAge(crop)
 	maximum, supported := CropMaxAge(name)
-	if !supported || name == "minecraft:nether_wart" || name == "minecraft:cocoa" || name == "minecraft:pitcher_crop" || age >= maximum {
+	if !supported || name == "minecraft:nether_wart" || age >= maximum {
 		return nil, false
 	}
 

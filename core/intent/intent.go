@@ -132,6 +132,17 @@ type BellRingIntent struct {
 	HitY       float32
 }
 
+// LecternPageIntent carries an absolute Bedrock page update or a Java
+// previous/next-page delta to the simulation thread.
+type LecternPageIntent struct {
+	PlayerUUID [16]byte
+	Dimension  int32
+	Position   spatial.BlockPos
+	Page       int
+	PageCount  int
+	Relative   bool
+}
+
 // FireworkUseIntent asks the simulation to launch the rocket from the
 // action-time hotbar stack at the exact clicked position.
 type FireworkUseIntent struct {
@@ -288,6 +299,7 @@ func (ChatIntent) isGameplay()               {}
 func (TeleportIntent) isGameplay()           {}
 func (BlockInteractIntent) isGameplay()      {}
 func (BellRingIntent) isGameplay()           {}
+func (LecternPageIntent) isGameplay()        {}
 func (FireworkUseIntent) isGameplay()        {}
 func (ConsumeFoodIntent) isGameplay()        {}
 func (StartUseItemIntent) isGameplay()       {}
@@ -385,6 +397,7 @@ func (b *Bus) PostTeleport(i TeleportIntent) bool {
 
 func (b *Bus) PostBlockInteract(i BlockInteractIntent) bool   { return b.tryGameplay(i) }
 func (b *Bus) PostBellRing(i BellRingIntent) bool             { return b.tryGameplay(i) }
+func (b *Bus) PostLecternPage(i LecternPageIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostFireworkUse(i FireworkUseIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostConsumeFood(i ConsumeFoodIntent) bool       { return b.tryGameplay(i) }
 func (b *Bus) PostStartUseItem(i StartUseItemIntent) bool     { return b.tryGameplay(i) }

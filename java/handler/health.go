@@ -126,9 +126,15 @@ func tryConsumeTotem(target *session.Session) bool {
 	}
 
 	// Apply effects: Absorption II (100t), Regeneration II (900t), Fire Resistance I (800t).
-	sendMobEffect(target.Conn, p.EntityID, "minecraft:absorption", 1, 100)
-	sendMobEffect(target.Conn, p.EntityID, "minecraft:regeneration", 1, 900)
-	sendMobEffect(target.Conn, p.EntityID, "minecraft:fire_resistance", 0, 800)
+	effects := []player.StatusEffect{
+		{ID: "minecraft:absorption", Amplifier: 1, Duration: 100, ShowParticles: true, ShowIcon: true},
+		{ID: "minecraft:regeneration", Amplifier: 1, Duration: 900, ShowParticles: true, ShowIcon: true},
+		{ID: "minecraft:fire_resistance", Duration: 800, ShowParticles: true, ShowIcon: true},
+	}
+	for _, effect := range effects {
+		stored, _ := p.AddStatusEffect(effect)
+		sendMobEffect(target.Conn, p.EntityID, stored.ID, stored.Amplifier, stored.Duration)
+	}
 	return true
 }
 
@@ -144,7 +150,19 @@ func reducedDamage(p *player.Player, damage float32, legacyArmor bool) float32 {
 	}
 	toughness := p.ArmorToughness()
 	reduction := float32(math.Min(20, math.Max(float64(armour/5), float64(armour-damage/(2+toughness/4)))))
-	return damage * (1 - reduction/25)
+	damage = damage * (1 - reduction/25)
+	// Protection enchantment: 4 EPF per level, capped at 20 total.
+	epf := 0
+	for i := 5; i <= 8; i++ {
+		epf += p.Inventory[i].EnchantmentLevel("minecraft:protection") * 4
+	}
+	if epf > 20 {
+		epf = 20
+	}
+	if epf > 0 {
+		damage = damage * float32(25-epf) / 25
+	}
+	return damage
 }
 
 // DamagePlayer applies a normal survival hit using modern armour reduction.
@@ -212,10 +230,15 @@ func damagePlayerFromPos(target *session.Session, rawDamage float32, cause strin
 		}
 	}
 
-	return damagePlayer(target, rawDamage, cause, mgr, false, bypassInvulnerability)
+	return damagePlayer(target, rawDamage, cause, mgr, false, bypassInvulnerability, false)
 }
 
-func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr *session.Manager, legacyArmor, bypassInvulnerability bool) bool {
+// DamagePlayerMagic applies effect damage without armour reduction or wear.
+func DamagePlayerMagic(target *session.Session, rawDamage float32, cause string, mgr *session.Manager) bool {
+	return damagePlayer(target, rawDamage, cause, mgr, false, false, true)
+}
+
+func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr *session.Manager, legacyArmor, bypassInvulnerability, bypassArmor bool) bool {
 	if target == nil || target.Player == nil || rawDamage <= 0 {
 		return false
 	}
@@ -235,7 +258,7 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 	}
 
 	damage := rawDamage
-	if !bypassInvulnerability {
+	if !bypassInvulnerability && !bypassArmor {
 		damage = reducedDamage(p, rawDamage, legacyArmor)
 	}
 	if damage <= 0 {
@@ -243,7 +266,7 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 	}
 	_, died := p.ApplyDamage(damage, cause)
 
-	if !bypassInvulnerability {
+	if !bypassInvulnerability && !bypassArmor {
 		armourWear := int(math.Floor(float64(rawDamage) / 4))
 		if armourWear < 1 {
 			armourWear = 1
@@ -299,7 +322,7 @@ func KillPlayer(target *session.Session, cause string, mgr *session.Manager) boo
 	if maxHealth <= 0 {
 		maxHealth = 20
 	}
-	return damagePlayer(target, maxHealth+1, cause, mgr, false, true)
+	return damagePlayer(target, maxHealth+1, cause, mgr, false, true, true)
 }
 
 // SendLegacyKnockback applies the configured 1.7-style impulse, reduced by

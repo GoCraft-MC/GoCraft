@@ -40,7 +40,7 @@ func TestSmithingOutputConsumesOnlyMatchingProfessionSlots(t *testing.T) {
 	if got := slots[3]; got.ItemID != "minecraft:netherite_pickaxe" || got.Count != 1 || got.Damage != 125 {
 		t.Fatalf("smithing preview = %+v", got)
 	}
-	result, ok := TakeWorkstationResult("minecraft:smithing_table", slots, 0)
+	result, _, ok := TakeWorkstationResult("minecraft:smithing_table", slots, 0)
 	if !ok || result.ItemID != "minecraft:netherite_pickaxe" {
 		t.Fatalf("smithing take = %+v, %v", result, ok)
 	}
@@ -87,7 +87,110 @@ func TestStonecutterUsesPublishedVanillaRecipeSelection(t *testing.T) {
 	if slots[1].IsEmpty() || slots[1].ItemID == "minecraft:cobblestone" {
 		t.Fatalf("stonecutter preview = %+v", slots[1])
 	}
-	if _, ok := TakeWorkstationResult("minecraft:stonecutter", slots, 0); !ok || slots[0].Count != 1 {
+	if _, _, ok := TakeWorkstationResult("minecraft:stonecutter", slots, 0); !ok || slots[0].Count != 1 {
 		t.Fatalf("stonecutter did not consume one input: %+v", slots)
+	}
+}
+
+func TestGrindstoneStripsEnchantmentsAndReturnsXP(t *testing.T) {
+	enchanted := player.ItemStack{ItemID: "minecraft:diamond_sword", Count: 1}
+	enchanted.Enchant("minecraft:sharpness", 3)
+	enchanted.Enchant("minecraft:vanishing_curse", 1)
+
+	slots := []player.ItemStack{enchanted, {}, {}}
+	UpdateWorkstationResult("minecraft:grindstone", slots, 0)
+	preview := slots[2]
+	if preview.IsEmpty() || preview.ItemID != "minecraft:diamond_sword" {
+		t.Fatalf("grindstone preview = %+v", preview)
+	}
+	if preview.EnchantmentLevel("minecraft:sharpness") != 0 {
+		t.Fatalf("grindstone preview still has sharpness: %s", preview.Enchantments)
+	}
+	if preview.EnchantmentLevel("minecraft:vanishing_curse") == 0 {
+		t.Fatalf("grindstone preview dropped vanishing_curse: %s", preview.Enchantments)
+	}
+
+	result, xp, ok := TakeWorkstationResult("minecraft:grindstone", slots, 0)
+	if !ok || result.ItemID != "minecraft:diamond_sword" {
+		t.Fatalf("grindstone take = %+v, ok=%v", result, ok)
+	}
+	if xp <= 0 {
+		t.Fatalf("grindstone returned no XP for sharpness 3: xp=%d", xp)
+	}
+	if result.EnchantmentLevel("minecraft:sharpness") != 0 {
+		t.Fatalf("grindstone result still has sharpness: %s", result.Enchantments)
+	}
+	if result.EnchantmentLevel("minecraft:vanishing_curse") == 0 {
+		t.Fatalf("grindstone result dropped vanishing_curse: %s", result.Enchantments)
+	}
+}
+
+func TestAnvilEnchantedBookTransfersToItem(t *testing.T) {
+	book := player.ItemStack{ItemID: "minecraft:enchanted_book", Count: 1}
+	book.Enchant("minecraft:sharpness", 3)
+	sword := player.ItemStack{ItemID: "minecraft:diamond_sword", Count: 1}
+	slots := []player.ItemStack{sword, book, {}}
+	UpdateWorkstationResult("minecraft:anvil", slots, 0)
+	if got := slots[2]; got.IsEmpty() || got.EnchantmentLevel("minecraft:sharpness") != 3 {
+		t.Fatalf("anvil book-transfer output = %+v", got)
+	}
+	result, _, ok := TakeWorkstationResult("minecraft:anvil", slots, 0)
+	if !ok || result.ItemID != "minecraft:diamond_sword" || result.EnchantmentLevel("minecraft:sharpness") != 3 {
+		t.Fatalf("anvil result = %+v, ok=%v", result, ok)
+	}
+}
+
+func TestAnvilMergesSameLevelEnchantmentsToNextLevel(t *testing.T) {
+	left := player.ItemStack{ItemID: "minecraft:diamond_sword", Count: 1}
+	left.Enchant("minecraft:sharpness", 2)
+	right := player.ItemStack{ItemID: "minecraft:diamond_sword", Count: 1}
+	right.Enchant("minecraft:sharpness", 2)
+	slots := []player.ItemStack{left, right, {}}
+	UpdateWorkstationResult("minecraft:anvil", slots, 0)
+	if got := slots[2]; got.IsEmpty() || got.EnchantmentLevel("minecraft:sharpness") != 3 {
+		t.Fatalf("anvil same-level merge output sharpness = %d, want 3; got %+v",
+			got.EnchantmentLevel("minecraft:sharpness"), got)
+	}
+}
+
+func TestAnvilLevelCostDeductedOnOutputTake(t *testing.T) {
+	p := player.New([16]byte{82}, "smith2", player.ClientEditionJava)
+	if err := openWorkstation(p, nil, nil, spatial.BlockPos{X: 0, Y: 64, Z: 0}, "minecraft:anvil"); err != nil {
+		t.Fatal(err)
+	}
+	// Give the player 10 levels of experience.
+	p.SetTotalExperience(player.ExperienceForLevel(10))
+	level0, _, _ := p.ExperienceSnapshot()
+	if level0 != 10 {
+		t.Fatalf("starting level = %d, want 10", level0)
+	}
+
+	// Rename-only anvil operation: costs 1 level.
+	p.ContainerSlots[0] = player.ItemStack{ItemID: "minecraft:diamond_sword", Count: 1}
+	_ = p.ContainerSlots[0].SetComponent("minecraft:custom_name", "Excalibur")
+	UpdateWorkstationResult(p.OpenContainerKind, p.ContainerSlots, p.WorkstationSelection)
+
+	cost := AnvilLevelCost(p.OpenContainerKind, p.ContainerSlots)
+	if cost != 1 {
+		t.Fatalf("rename-only cost = %d, want 1", cost)
+	}
+
+	handleWorkstationClick(p, 2, 0, 0) // click output slot
+	// PendingWorkstationXP should encode the cost as a negative value.
+	if p.PendingWorkstationXP >= 0 {
+		t.Fatalf("PendingWorkstationXP = %d; want negative (level cost)", p.PendingWorkstationXP)
+	}
+	// Simulate the crafting handler applying the cost.
+	if xp := p.PendingWorkstationXP; xp < 0 {
+		p.PendingWorkstationXP = 0
+		lvl, _, _ := p.ExperienceSnapshot()
+		deduct := int32(-xp)
+		if lvl >= deduct {
+			p.SetTotalExperience(player.ExperienceForLevel(lvl - deduct))
+		}
+	}
+	levelAfter, _, _ := p.ExperienceSnapshot()
+	if levelAfter != level0-1 {
+		t.Fatalf("level after rename = %d, want %d", levelAfter, level0-1)
 	}
 }

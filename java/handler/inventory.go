@@ -139,6 +139,36 @@ func handleCreativeModeSetItem(pkt *protocol.Packet, p *player.Player) error {
 // handleUseItem equips armour from the selected hotbar slot when the player
 // right-clicks it. This prevents the client-only predicted equip from being
 // rolled back and keeps the armour attribute authoritative.
+// goatHornSounds maps vanilla instrument index 0..7 to the canonical sound event.
+var goatHornSounds = [8]string{
+	"minecraft:item.goat_horn.sound.0", // ponder
+	"minecraft:item.goat_horn.sound.1", // sing
+	"minecraft:item.goat_horn.sound.2", // seek
+	"minecraft:item.goat_horn.sound.3", // feel
+	"minecraft:item.goat_horn.sound.4", // admire
+	"minecraft:item.goat_horn.sound.5", // call
+	"minecraft:item.goat_horn.sound.6", // yearn
+	"minecraft:item.goat_horn.sound.7", // dream
+}
+
+// GoatHornSound returns the sound event for a goat horn stack. The instrument
+// index is read from the minecraft:instrument component; unknown values fall
+// back to index 0 (ponder).
+func GoatHornSound(stack player.ItemStack) string {
+	var instrument struct {
+		Type string `json:"type"`
+	}
+	if stack.Component("minecraft:instrument", &instrument) {
+		for i, s := range goatHornSounds {
+			suffix := fmt.Sprintf("minecraft:item.goat_horn.sound.%d", i)
+			if instrument.Type == suffix || s == instrument.Type {
+				return s
+			}
+		}
+	}
+	return goatHornSounds[0]
+}
+
 func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32) error {
 	r := pkt.Reader()
 	hand, err := protocol.ReadVarInt(r)
@@ -229,6 +259,36 @@ func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientC
 	case "minecraft:ender_eye":
 		UseEnderEye(p, w, mgr, nextEntityID)
 		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:goat_horn":
+		const goatHornCooldown = 7 * time.Second
+		if !p.LastGoatHornUse.IsZero() && time.Since(p.LastGoatHornUse) < goatHornCooldown {
+			return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+		}
+		p.LastGoatHornUse = time.Now()
+		sound := GoatHornSound(p.Inventory[heldSlot])
+		broadcastSoundAt(mgr, sound, soundCategoryNeutral,
+			p.Position.X, p.Position.Y+1.62, p.Position.Z, 64, 1)
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:spyglass":
+		p.UsingItemID = "minecraft:spyglass"
+		p.UsingItemSince = time.Now()
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:written_book":
+		// Send Open Book packet to trigger the reading UI on the client.
+		// Hand 0 = main hand.
+		_ = conn.WritePacket(protocol.NewBuilder(packetIDOpenBook).VarInt(0).Build())
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+	case "minecraft:carrot_on_a_stick", "minecraft:warped_fungus_on_a_stick":
+		// Steering rod: damage the item 7 durability per use when riding.
+		if p.VehicleEntityID != 0 && p.GameMode != player.GameModeCreative {
+			p.Inventory[heldSlot].ApplyDamage(7)
+			normalizeStack(&p.Inventory[heldSlot])
+			p.ContainerStateID++
+			if err := sendSetContainerContent(conn, p, p.ContainerStateID); err != nil {
+				return err
+			}
+		}
+		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
 	}
 	armorSlot := armorInventorySlot(p.Inventory[heldSlot].ItemID)
 	if armorSlot < 5 {
@@ -259,11 +319,12 @@ func startJavaFoodUse(p *player.Player, inventorySlot int, now time.Time) bool {
 	if stack.IsEmpty() {
 		return false
 	}
-	if _, _, ok := player.FoodValue(stack.ItemID); !ok {
+	_, _, food := player.FoodValue(stack.ItemID)
+	if !food && !player.IsConsumable(stack.ItemID) {
 		return false
 	}
-	_, food, _, _ := p.HealthSnapshot()
-	if p.GameMode != player.GameModeCreative && food >= 20 && !player.CanAlwaysEat(stack.ItemID) {
+	_, hunger, _, _ := p.HealthSnapshot()
+	if p.GameMode != player.GameModeCreative && food && hunger >= 20 && !player.CanAlwaysEat(stack.ItemID) {
 		return false
 	}
 	p.UsingItemID = stack.ItemID
@@ -278,7 +339,7 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 	if p == nil || p.UsingItemID == "" || p.UsingItemSince.IsZero() {
 		return false
 	}
-	if _, _, ok := player.FoodValue(p.UsingItemID); !ok {
+	if !player.IsConsumable(p.UsingItemID) {
 		return false
 	}
 	if p.UsingItemSlot < 0 || p.UsingItemSlot >= 9 || p.HeldSlot != p.UsingItemSlot {
@@ -295,10 +356,11 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 		return false
 	}
 
-	nutrition, saturation, _ := player.FoodValue(stack.ItemID)
-	consumedID := stack.ItemID
+	nutrition, saturation, food := player.FoodValue(stack.ItemID)
+	consumed := stack
+	consumedID := consumed.ItemID
 	if p.GameMode != player.GameModeCreative {
-		if !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(consumedID)) {
+		if food && !p.ConsumeFoodAllowFull(nutrition, saturation, player.CanAlwaysEat(consumedID)) {
 			clearJavaFoodUse(p)
 			return false
 		}
@@ -318,17 +380,19 @@ func TickJavaFoodUse(p *player.Player, conn *network.ClientConn, mgr *session.Ma
 		}
 	}
 	clearJavaFoodUse(p)
+	applyConsumableEffects(conn, p, consumed, mgr)
 	_ = sendUpdateHealth(conn, p)
 	BroadcastSoundAt(mgr, "minecraft:entity.generic.eat", soundCategoryPlayers,
 		p.Position.X, p.Position.Y+1.5, p.Position.Z, 1, 1)
 	BroadcastSoundAt(mgr, "minecraft:entity.player.burp", soundCategoryPlayers,
 		p.Position.X, p.Position.Y+1.5, p.Position.Z, 0.5, 1)
-	applyFoodEffect(conn, p, consumedID)
+	for _, removed := range p.ApplyConsumableCleansing(consumedID) {
+		RemoveMobEffect(conn, p, removed.ID)
+	}
 	return true
 }
 
-// applyFoodEffect sends any status-effect side effects for eating a food item.
-// Vanilla data source: Pumpkin-master living.rs and vanilla food component data.
+// SendMobEffect adds or refreshes a status effect on a Java client.
 func SendMobEffect(conn *network.ClientConn, p *player.Player, name string, amplifier, durationTicks int32) {
 	if conn == nil || p == nil {
 		return
@@ -347,51 +411,51 @@ func SendMobEffect(conn *network.ClientConn, p *player.Player, name string, ampl
 	_ = conn.WritePacket(pkt)
 }
 
-func applyFoodEffect(conn *network.ClientConn, p *player.Player, itemID string) {
-	if conn == nil {
+// SyncPlayerStatusEffects restores canonical effects after login or respawn.
+func SyncPlayerStatusEffects(conn *network.ClientConn, p *player.Player) {
+	if conn == nil || p == nil {
 		return
 	}
-	sendEffect := func(name string, amplifier, durationTicks int32) {
-		SendMobEffect(conn, p, name, amplifier, durationTicks)
+	for _, effect := range p.StatusEffectsSnapshot() {
+		SendMobEffect(conn, p, effect.ID, effect.Amplifier, effect.Duration)
 	}
-	// Probability gate using entity ID as a simple deterministic seed.
+}
+
+// RemoveMobEffect removes one expired canonical effect from a Java client.
+func RemoveMobEffect(conn *network.ClientConn, p *player.Player, name string) {
+	if conn == nil || p == nil {
+		return
+	}
+	effectID := javaworld.MobEffectID(name)
+	if effectID < 0 {
+		return
+	}
+	_ = conn.WritePacket(protocol.NewBuilder(packetIDRemoveMobEffect).
+		VarInt(p.EntityID).
+		VarInt(effectID).
+		Build())
+}
+
+func applyConsumableEffects(conn *network.ClientConn, p *player.Player, stack player.ItemStack, mgr *session.Manager) {
+	if p == nil {
+		return
+	}
 	roll := int(p.EntityID*1103515245+12345) & 0x7fffffff
-	roll100 := roll % 100
-	switch itemID {
-	case "minecraft:rotten_flesh":
-		// 80% chance of Hunger I for 30 s (600 ticks). Vanilla: amplifier 0 = level I.
-		if roll100 < 80 {
-			sendEffect("minecraft:hunger", 0, 600)
+	effects := player.FoodStatusEffects(stack.ItemID, roll%100)
+	effects = append(effects, player.SuspiciousStewEffects(stack)...)
+	if potion, ok := player.PotionOutcomeFor(stack); ok {
+		if potion.Heal > 0 {
+			p.Heal(potion.Heal)
 		}
-	case "minecraft:chicken":
-		// 30% chance of Hunger I for 30 s.
-		if roll100 < 30 {
-			sendEffect("minecraft:hunger", 0, 600)
+		if potion.Damage > 0 {
+			DamagePlayerMagic(&session.Session{Player: p, Conn: conn}, potion.Damage, "was killed by magic", mgr)
 		}
-	case "minecraft:spider_eye":
-		// 100% Poison I for 5 s (100 ticks).
-		sendEffect("minecraft:poison", 0, 100)
-	case "minecraft:poisonous_potato":
-		// 60% chance of Poison IV for 5 s (100 ticks).
-		if roll100 < 60 {
-			sendEffect("minecraft:poison", 3, 100)
+		effects = append(effects, potion.Effects...)
+	}
+	for _, effect := range effects {
+		if stored, changed := p.AddStatusEffect(effect); changed {
+			SendMobEffect(conn, p, stored.ID, stored.Amplifier, stored.Duration)
 		}
-	case "minecraft:pufferfish":
-		// Poison IV 60 s (1200t), Hunger III 15 s (300t), Nausea II 15 s (300t).
-		sendEffect("minecraft:poison", 3, 1200)
-		sendEffect("minecraft:hunger", 2, 300)
-		sendEffect("minecraft:nausea", 1, 300)
-	case "minecraft:golden_apple":
-		// Regeneration II 5 s (100t), Absorption I 2 min (2400t).
-		sendEffect("minecraft:regeneration", 1, 100)
-		sendEffect("minecraft:absorption", 0, 2400)
-	case "minecraft:enchanted_golden_apple":
-		// Regeneration V 30 s (600t), Absorption IV 2 min (2400t),
-		// Resistance I 5 min (6000t), Fire Resistance I 5 min (6000t).
-		sendEffect("minecraft:regeneration", 4, 600)
-		sendEffect("minecraft:absorption", 3, 2400)
-		sendEffect("minecraft:resistance", 0, 6000)
-		sendEffect("minecraft:fire_resistance", 0, 6000)
 	}
 }
 
@@ -478,6 +542,9 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 	enchantments := item.EnchantmentLevels()
 	if maxDamage <= 0 {
 		componentCount := int32(0)
+		if potionID(item) >= 0 {
+			componentCount++
+		}
 		if len(enchantments) > 0 {
 			componentCount++
 		}
@@ -487,13 +554,18 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		if item.ItemID == "minecraft:firework_rocket" {
 			componentCount++
 		}
+		if item.Components != "" {
+			componentCount++
+		}
 		b.VarInt(int32(item.Count)).
 			VarInt(id).
 			VarInt(componentCount).
 			VarInt(0) // components_to_remove
+		encodeSlotPotionContents(b, item)
 		encodeSlotEnchantments(b, enchantments)
 		encodeSlotPotDecorations(b, item)
 		encodeSlotFireworks(b, item)
+		encodeSlotExtensionComponents(b, item)
 		return
 	}
 	damage := item.Damage
@@ -551,6 +623,9 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 	if len(enchantments) > 0 {
 		componentCount++
 	}
+	if item.Components != "" {
+		componentCount++
+	}
 	b.VarInt(int32(item.Count)).
 		VarInt(id).
 		VarInt(componentCount).
@@ -558,6 +633,7 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		VarInt(2).VarInt(int32(maxDamage)).
 		VarInt(3).VarInt(int32(damage))
 	encodeSlotEnchantments(b, enchantments)
+	encodeSlotExtensionComponents(b, item)
 	if len(lore) > 0 {
 		b.VarInt(8).VarInt(int32(len(lore)))
 		for _, line := range lore {
@@ -570,6 +646,30 @@ func encodeSlot(b *protocol.Builder, item player.ItemStack) {
 		// actual damage, armour, and cooldown remain server-authoritative.
 		b.VarInt(13).VarInt(0).Bool(false)
 	}
+}
+
+func potionID(item player.ItemStack) int32 {
+	name, ok := player.PotionName(item)
+	if !ok || name == "" {
+		return -1
+	}
+	return javaworld.PotionID("minecraft:" + name)
+}
+
+func encodeSlotPotionContents(b *protocol.Builder, item player.ItemStack) {
+	id := potionID(item)
+	if id < 0 {
+		return
+	}
+	// Component 41: optional base potion, optional colour, custom effects.
+	b.VarInt(41).Bool(true).VarInt(id).Bool(false).VarInt(0)
+}
+
+func encodeSlotExtensionComponents(b *protocol.Builder, item player.ItemStack) {
+	if item.Components == "" {
+		return
+	}
+	b.VarInt(0).Bytes(nbtGoCraftComponents(item.NormalizedComponents()))
 }
 
 func encodeSlotEnchantments(b *protocol.Builder, enchantments []player.EnchantmentLevel) {

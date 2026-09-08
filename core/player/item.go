@@ -1,6 +1,10 @@
 package player
 
-import "GoCraft/core/itemregistry"
+import (
+	"encoding/json"
+
+	"GoCraft/core/itemregistry"
+)
 
 // InventorySize is the total number of slots in a Java Edition player inventory.
 //
@@ -73,6 +77,11 @@ type ItemStack struct {
 	// effective vanilla default for a rocket is flight duration one.
 	HasFireworks bool         `json:",omitempty"`
 	Fireworks    FireworkData `json:",omitempty"`
+	// Components stores additional edition-independent data components as a
+	// canonical JSON object. A string keeps ItemStack comparable for the fixed
+	// inventory snapshots used by both protocol adapters. Components with
+	// dedicated hot-path fields above remain there until their codecs migrate.
+	Components string `json:",omitempty"`
 }
 
 // IsEmpty reports whether the slot contains no item.
@@ -103,7 +112,8 @@ func (s ItemStack) NormalizedPotDecorations() [4]string {
 func (s ItemStack) SameItem(other ItemStack) bool {
 	return s.ItemID == other.ItemID && s.Damage == other.Damage && s.Enchantments == other.Enchantments &&
 		s.NormalizedPotDecorations() == other.NormalizedPotDecorations() &&
-		s.EffectiveFireworks() == other.EffectiveFireworks()
+		s.EffectiveFireworks() == other.EffectiveFireworks() &&
+		s.NormalizedComponents() == other.NormalizedComponents()
 }
 
 // EffectiveFireworks returns a validated component. Vanilla rockets without
@@ -153,6 +163,29 @@ func MaxStackSize(itemID string) int {
 }
 
 // RemainingDurability returns remaining uses, or zero for non-damageable items.
+// DisplayName returns the plain-text custom name stored in the
+// minecraft:custom_name component, or "" when the stack has no custom name.
+// It handles both raw strings and JSON text-component objects.
+func (s ItemStack) DisplayName() string {
+	var raw json.RawMessage
+	if !s.Component("minecraft:custom_name", &raw) {
+		return ""
+	}
+	// Try plain string first.
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		return str
+	}
+	// Try {"text":"..."} text component.
+	var obj struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.Text
+	}
+	return ""
+}
+
 func (s ItemStack) RemainingDurability() int {
 	max := MaxDurability(s.ItemID)
 	if max == 0 {
@@ -170,6 +203,15 @@ func (s *ItemStack) ApplyDamage(amount int) bool {
 	max := MaxDurability(s.ItemID)
 	if max == 0 || amount <= 0 || s.IsEmpty() {
 		return false
+	}
+	// Unbreaking: each point reduces damage by ~1/(level+1) on average.
+	// We reduce the amount directly for simplicity (no per-hit RNG).
+	if lvl := s.EnchantmentLevel("minecraft:unbreaking"); lvl > 0 {
+		if reduced := amount / (lvl + 1); reduced > 0 {
+			amount = reduced
+		} else {
+			amount = 1
+		}
 	}
 	s.Damage += amount
 	if s.Damage < max {
@@ -240,6 +282,17 @@ func LegacyAttackDamage(itemID string) float32 {
 	default:
 		return 1
 	}
+}
+
+// IsSword reports whether the item is a sword (eligible for sweep attack).
+func IsSword(itemID string) bool {
+	switch itemID {
+	case "minecraft:wooden_sword", "minecraft:golden_sword",
+		"minecraft:stone_sword", "minecraft:iron_sword",
+		"minecraft:diamond_sword", "minecraft:netherite_sword":
+		return true
+	}
+	return false
 }
 
 // AttackAttributes returns the 1.21.4 attack damage and speed shown by vanilla

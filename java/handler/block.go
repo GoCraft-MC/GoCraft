@@ -11,6 +11,7 @@ package handler
 
 import (
 	cryptorand "crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"math"
@@ -72,6 +73,9 @@ const (
 	actionStatusStartDigging  = 0 // block targeted — instant break in creative
 	actionStatusCancelDigging = 1 // player looked away / right-clicked before break
 	actionStatusFinishDigging = 2 // break animation completed (survival)
+	actionStatusDropStack     = 3
+	actionStatusDropItem      = 4
+	actionStatusSwapOffhand   = 6
 )
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -129,6 +133,16 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		return nil
 	}
+	if status == actionStatusDropStack || status == actionStatusDropItem {
+		dropJavaHeldItem(p, w, mgr, conn, nextEntityID, status == actionStatusDropStack)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	if status == actionStatusSwapOffhand {
+		swapJavaOffhand(p, conn)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
 
 	// Reject out-of-bounds Y before touching the world.
 	if int(by) < coreworld.WorldMinY || int(by) > coreworld.WorldMaxY {
@@ -138,6 +152,13 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 	}
 
 	broken := w.GetBlock(int(bx), int(by), int(bz))
+	// Dragon egg teleports on any hit in non-creative.
+	if broken.ResourceLocation() == "minecraft:dragon_egg" && p.GameMode != player.GameModeCreative &&
+		status == actionStatusStartDigging {
+		dragonEggTeleport(int(bx), int(by), int(bz), w, mgr)
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
 	if !broken.IsAir() && digBreaksBlock(status, p.GameMode, broken.ResourceLocation()) {
 		heldSlot := player.HotbarStart + p.HeldSlot
 		held := p.Inventory[heldSlot]
@@ -192,11 +213,17 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 		if p.GameMode != player.GameModeCreative && p.GameMode != player.GameModeSpectator {
 			dropPosition := spatial.Vec3{X: float64(bx) + 0.5, Y: float64(by) + 0.5, Z: float64(bz) + 0.5}
 			ordinal := 0
-			if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) {
+			if coreworld.IsShulkerBox(broken.ResourceLocation()) {
+				// Replace the generic drop with one that carries the contents.
+				for i2, drop := range drops {
+					if drop.ItemID != "" {
+						drops[i2] = coreworld.ShulkerBoxDropItem(drop.ItemID, containerItems)
+					}
+				}
+			} else if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:jukebox" || broken.ResourceLocation() == "minecraft:lectern" || broken.ResourceLocation() == "minecraft:chiseled_bookshelf" {
 				for _, item := range containerItems {
 					if item.ItemID != "" && item.Count > 0 {
-						spawnBlockDrop(w, nextEntityID, dropPosition,
-							player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}, ordinal, mgr, p.Dimension)
+						spawnBlockDrop(w, nextEntityID, dropPosition, item.Stack(), ordinal, mgr, p.Dimension)
 						ordinal++
 					}
 				}
@@ -217,7 +244,7 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 			}
 		}
 		// Clear orphaned container data regardless of game mode.
-		if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) {
+		if isJavaStorageContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:decorated_pot" || IsFurnaceContainer(broken.ResourceLocation()) || broken.ResourceLocation() == "minecraft:jukebox" || broken.ResourceLocation() == "minecraft:lectern" {
 			w.SetContainerItems(int(bx), int(by), int(bz), broken.ResourceLocation(), nil)
 		}
 		// Sync inventory once if the held tool was damaged.
@@ -238,6 +265,44 @@ func handlePlayerActionWithContext(pkt *protocol.Packet, p *player.Player, w *co
 	return nil
 }
 
+func dropJavaHeldItem(p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn, nextEntityID func() int32, entireStack bool) {
+	if p == nil || w == nil || p.Dead || p.GameMode == player.GameModeSpectator || p.HeldSlot < 0 || p.HeldSlot >= 9 {
+		return
+	}
+	slot := player.HotbarStart + p.HeldSlot
+	stack := p.Inventory[slot]
+	if stack.IsEmpty() {
+		return
+	}
+	dropped := stack
+	if !entireStack {
+		dropped.Count = 1
+	}
+	p.Inventory[slot].Count -= dropped.Count
+	normalizeStack(&p.Inventory[slot])
+	clearJavaFoodUse(p)
+	spawnBlockDrop(w, nextEntityID, p.Position, dropped, 0, mgr, p.Dimension)
+	if conn != nil {
+		_ = SyncPlayerInventory(conn, p)
+	} else {
+		p.ContainerStateID++
+	}
+}
+
+func swapJavaOffhand(p *player.Player, conn *network.ClientConn) {
+	if p == nil || p.Dead || p.GameMode == player.GameModeSpectator || p.HeldSlot < 0 || p.HeldSlot >= 9 {
+		return
+	}
+	held := player.HotbarStart + p.HeldSlot
+	p.Inventory[held], p.Inventory[player.OffhandSlot] = p.Inventory[player.OffhandSlot], p.Inventory[held]
+	clearJavaFoodUse(p)
+	if conn != nil {
+		_ = SyncPlayerInventory(conn, p)
+	} else {
+		p.ContainerStateID++
+	}
+}
+
 func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spatial.Vec3, stack player.ItemStack, ordinal int, mgr *session.Manager, dimension int32) {
 	if w == nil || nextEntityID == nil || stack.IsEmpty() {
 		return
@@ -252,12 +317,41 @@ func spawnBlockDrop(w *coreworld.World, nextEntityID func() int32, position spat
 	entityUUID[6] = (entityUUID[6] & 0x0f) | 0x40
 	entityUUID[8] = (entityUUID[8] & 0x3f) | 0x80
 	dropped := corentity.New(id, entityUUID, corentity.TypeItem, position.X, position.Y+0.25, position.Z)
-	dropped.ItemID, dropped.ItemCount, dropped.ItemDamage = stack.ItemID, stack.Count, stack.Damage
-	dropped.ItemPotDecorations = stack.PotDecorations
+	dropped.SetDroppedItem(stack)
 	angle := float64(id+int32(ordinal)*17) * 2.399963229728653
 	dropped.VX, dropped.VY, dropped.VZ = math.Cos(angle)*0.1, 0.2, math.Sin(angle)*0.1
 	w.Entities.Add(dropped)
 	BroadcastSpawnMobInDimension(dropped, mgr, dimension)
+}
+
+func primeJavaTNT(x, y, z int, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32, dimension int32) bool {
+	if nextEntityID == nil || w.GetBlock(x, y, z).ResourceLocation() != "minecraft:tnt" {
+		return false
+	}
+	applyBlockChange(x, y, z, coreworld.Air, w, mgr)
+	id := nextEntityID()
+	var uuid [16]byte
+	if _, err := cryptorand.Read(uuid[:]); err != nil {
+		uuid[0], uuid[1], uuid[2], uuid[3] = byte(id>>24), byte(id>>16), byte(id>>8), byte(id)
+	}
+	uuid[6] = (uuid[6] & 0x0f) | 0x40
+	uuid[8] = (uuid[8] & 0x3f) | 0x80
+	tnt := corentity.NewPrimedTNT(id, uuid, float64(x)+0.5, float64(y), float64(z)+0.5)
+	w.Entities.Add(tnt)
+	BroadcastSpawnMobInDimension(tnt, mgr, dimension)
+	return true
+}
+
+func finishJavaIgniterUse(p *player.Player, itemID string) {
+	if itemID != "minecraft:fire_charge" {
+		return
+	}
+	if p.GameMode == player.GameModeCreative || p.GameMode == player.GameModeSpectator {
+		return
+	}
+	slot := player.HotbarStart + p.HeldSlot
+	p.Inventory[slot].Count--
+	normalizeStack(&p.Inventory[slot])
 }
 
 func breakLinkedPlantHalf(x, y, z int, broken coreworld.Block, w *coreworld.World, mgr *session.Manager) {
@@ -293,6 +387,11 @@ func breakUnsupportedBlocksAboveWithDrops(x, y, z int, w *coreworld.World, mgr *
 		}
 	}
 	for _, change := range w.BreakUnsupportedCropsAbove(x, y, z) {
+		if mgr != nil {
+			BroadcastBlockChange(change, mgr)
+		}
+	}
+	for _, change := range w.BreakUnsupportedCocoaAdjacentTo(x, y, z) {
 		if mgr != nil {
 			BroadcastBlockChange(change, mgr)
 		}
@@ -367,6 +466,8 @@ func containerMenuType(blockName string) int32 {
 		return 2 // minecraft:generic_9x3
 	case "minecraft:hopper":
 		return 16 // minecraft:hopper
+	case "minecraft:lectern":
+		return 17 // minecraft:lectern
 	case "minecraft:dispenser", "minecraft:dropper":
 		return 6 // minecraft:generic_3x3
 	case "minecraft:crafter":
@@ -594,7 +695,7 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 	}
 	heldBefore := held.ItemID
 	usedDamageableTool := isBlockUseTool(heldBefore)
-	if hand == 0 && useToolOrPlant(int(bx), int(by), int(bz), face, targetBlock, p, w, mgr, conn) {
+	if hand == 0 && useToolOrPlant(int(bx), int(by), int(bz), face, targetBlock, p, w, mgr, nextEntityID) {
 		sendAcknowledgeBlockChange(mgr, p, seq)
 		if usedDamageableTool {
 			damageHeldItem(p, conn, 1)
@@ -606,10 +707,399 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		}
 		return nil
 	}
+	if hand == 0 && held.ItemID == "minecraft:honeycomb" && p.GameMode != player.GameModeSpectator {
+		if waxed, ok := coreworld.WaxCopper(targetBlock); ok {
+			applyBlockChange(int(bx), int(by), int(bz), waxed, w, mgr)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, "minecraft:item.honeycomb.wax_on", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		if isSignBlock(targetBlock.ResourceLocation()) {
+			if w.WaxSign(int(bx), int(by), int(bz)) {
+				if p.GameMode != player.GameModeCreative {
+					slot := player.HotbarStart + p.HeldSlot
+					p.Inventory[slot].Count--
+					normalizeStack(&p.Inventory[slot])
+					if conn != nil {
+						_ = SyncPlayerInventory(conn, p)
+					} else {
+						p.ContainerStateID++
+					}
+				}
+				broadcastSoundAt(mgr, "minecraft:item.honeycomb.wax_on", soundCategoryBlocks,
+					float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
+	}
+	if hand == 0 && held.ItemID == "minecraft:shears" && p.GameMode != player.GameModeSpectator {
+		if targetBlock.ResourceLocation() == "minecraft:tripwire" && targetBlock.Properties["disarmed"] != "true" {
+			disarmed := copyBlockProperties(targetBlock)
+			disarmed.Properties["disarmed"] = "true"
+			applyBlockChange(int(bx), int(by), int(bz), disarmed, w, mgr)
+			if targetBlock.Properties["powered"] != "true" {
+				str := player.ItemStack{ItemID: "minecraft:string", Count: 1}
+				if !p.GiveItem(str) {
+					spawnBlockDrop(w, nextEntityID, p.Position, str, 0, mgr, p.Dimension)
+				}
+			}
+			damageHeldItem(p, conn, 1)
+			broadcastSoundAt(mgr, "minecraft:block.tripwire.detach", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		if carved, ok := coreworld.CarvePumpkin(targetBlock, chestFacingFromYaw(p.Rotation.Yaw)); ok {
+			applyBlockChange(int(bx), int(by), int(bz), carved, w, mgr)
+			seeds := player.ItemStack{ItemID: "minecraft:pumpkin_seeds", Count: 4}
+			if !p.GiveItem(seeds) {
+				spawnBlockDrop(w, nextEntityID, p.Position, seeds, 0, mgr, p.Dimension)
+			}
+			if !damageHeldItem(p, conn, 1) {
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, "minecraft:block.pumpkin.carve", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if harvested, output, ok := coreworld.HarvestBeehive(targetBlock, held.ItemID); ok {
+			applyBlockChange(int(bx), int(by), int(bz), harvested, w, mgr)
+			sound := "minecraft:item.bottle.fill"
+			if held.ItemID == "minecraft:shears" {
+				sound = "minecraft:block.beehive.shear"
+				if !p.GiveItem(output) {
+					spawnBlockDrop(w, nextEntityID, p.Position, output, 0, mgr, p.Dimension)
+				}
+				if damageHeldItem(p, conn, 1) {
+					output = player.ItemStack{}
+				}
+			} else {
+				replaceJavaBucket(p, output.ItemID)
+			}
+			if !output.IsEmpty() {
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, sound, soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if candleCake, ok := coreworld.AddCandleToCake(targetBlock, held.ItemID); ok {
+			applyBlockChange(int(bx), int(by), int(bz), candleCake, w, mgr)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, "minecraft:block.cake.add_candle", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator && targetBlock.ResourceLocation() == "minecraft:flower_pot" {
+		if potted, ok := coreworld.PottedBlock(held.ItemID); ok {
+			applyBlockChange(int(bx), int(by), int(bz), potted, w, mgr)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if pottedItem, ok := coreworld.PottedItem(targetBlock); ok {
+			if _, canPot := coreworld.PottedBlock(held.ItemID); canPot {
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+			applyBlockChange(int(bx), int(by), int(bz), coreworld.Block{Namespace: "minecraft", Name: "flower_pot"}, w, mgr)
+			returned := player.ItemStack{ItemID: pottedItem, Count: 1}
+			if !p.GiveItem(returned) {
+				spawnBlockDrop(w, nextEntityID, p.Position, returned, 0, mgr, p.Dimension)
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if composted, consumed, schedule := coreworld.AddToComposter(targetBlock, held.ItemID, int(bx), int(by), int(bz), w.PhysicsTime()); consumed {
+			applyBlockChange(int(bx), int(by), int(bz), composted, w, mgr)
+			if schedule {
+				w.BlockPhysics.ScheduleComposter(int(bx), int(by), int(bz), w.PhysicsTime(), 20)
+			}
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+	if hand == 0 && p.GameMode != player.GameModeSpectator {
+		if charged, ok := coreworld.ChargeRespawnAnchor(targetBlock, held.ItemID); ok {
+			applyBlockChange(int(bx), int(by), int(bz), charged, w, mgr)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+			}
+			broadcastSoundAt(mgr, "minecraft:block.respawn_anchor.charge", soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+		// Right-clicking a charged anchor without glowstone in the Nether sets spawn.
+		if targetBlock.ResourceLocation() == "minecraft:respawn_anchor" && p.Dimension == 1 {
+			charges, _ := strconv.Atoi(targetBlock.Properties["charges"])
+			if charges > 0 {
+				p.SpawnPoint = spatial.BlockPos{X: int32(bx), Y: int32(by), Z: int32(bz)}
+				p.HasSpawnPoint = true
+				p.SpawnIsAnchor = true
+				broadcastSoundAt(mgr, "minecraft:block.respawn_anchor.set_spawn", soundCategoryBlocks,
+					float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
+	}
+
+	// Jukebox: insert a music disc or eject the current one.
+	if hand == 0 && p.GameMode != player.GameModeSpectator &&
+		targetBlock.ResourceLocation() == "minecraft:jukebox" {
+		be := w.GetBlockEntity(int(bx), int(by), int(bz))
+		stored := coreworld.JukeboxRecordItem(be)
+		if stored != "" {
+			// Eject current record.
+			if ejected, cleared, ok := coreworld.EjectJukeboxRecord(targetBlock, stored); ok {
+				applyBlockChange(int(bx), int(by), int(bz), cleared, w, mgr)
+				w.SetContainerItems(int(bx), int(by), int(bz), "minecraft:jukebox", nil)
+				drop := player.ItemStack{ItemID: ejected, Count: 1}
+				if !p.GiveItem(drop) {
+					spawnBlockDrop(w, nextEntityID, p.Position, drop, 0, mgr, p.Dimension)
+				}
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+				broadcastSoundAt(mgr, "minecraft:block.jukebox.stop_record", soundCategoryBlocks,
+					float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 1)
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		} else if coreworld.IsMusicDisc(held.ItemID) {
+			// Insert new record.
+			if updated, ok := coreworld.InsertJukeboxRecord(targetBlock, held.ItemID); ok {
+				applyBlockChange(int(bx), int(by), int(bz), updated, w, mgr)
+				items := []coreworld.ContainerItem{{Slot: 0, ItemID: held.ItemID, Count: 1}}
+				w.SetContainerItems(int(bx), int(by), int(bz), "minecraft:jukebox", items)
+				if p.GameMode != player.GameModeCreative {
+					slot := player.HotbarStart + p.HeldSlot
+					p.Inventory[slot].Count--
+					normalizeStack(&p.Inventory[slot])
+					if conn != nil {
+						_ = SyncPlayerInventory(conn, p)
+					} else {
+						p.ContainerStateID++
+					}
+				}
+				broadcastSoundAt(mgr, coreworld.MusicDiscSound(held.ItemID), soundCategoryRecords,
+					float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 4, 1)
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
+	}
+
+	// Chiseled bookshelf: targeted book insert/remove.
+	if hand == 0 && p.GameMode != player.GameModeSpectator &&
+		targetBlock.ResourceLocation() == "minecraft:chiseled_bookshelf" {
+		facing := targetBlock.Properties["facing"]
+		slot := coreworld.ChiseledBookshelfSlot(facing, float64(cursorX), float64(cursorY), float64(cursorZ))
+		be := w.GetBlockEntity(int(bx), int(by), int(bz))
+		slotProp := fmt.Sprintf("slot_%d_occupied", slot)
+		if targetBlock.Properties[slotProp] == "true" {
+			// Eject book from this slot.
+			storedID := ""
+			for _, ci := range be.Items {
+				if ci.Slot == slot {
+					storedID = ci.ItemID
+					break
+				}
+			}
+			if _, cleared, ok2 := coreworld.EjectBookshelfBook(targetBlock, slot, storedID); ok2 {
+				applyBlockChange(int(bx), int(by), int(bz), cleared, w, mgr)
+				newItems := make([]coreworld.ContainerItem, 0, 6)
+				for _, ci := range be.Items {
+					if ci.Slot != slot {
+						newItems = append(newItems, ci)
+					}
+				}
+				w.SetContainerItems(int(bx), int(by), int(bz), "minecraft:chiseled_bookshelf", newItems)
+				w.SetBookshelfLastSlot(int(bx), int(by), int(bz), slot+1)
+				drop := player.ItemStack{ItemID: storedID, Count: 1}
+				if !p.GiveItem(drop) {
+					spawnBlockDrop(w, nextEntityID, p.Position, drop, 0, mgr, p.Dimension)
+				}
+				if conn != nil {
+					_ = SyncPlayerInventory(conn, p)
+				} else {
+					p.ContainerStateID++
+				}
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		} else if coreworld.IsBookshelfBook(held.ItemID) {
+			// Insert book into empty slot.
+			if updated, ok2 := coreworld.InsertBookshelfBook(targetBlock, slot, held.ItemID); ok2 {
+				applyBlockChange(int(bx), int(by), int(bz), updated, w, mgr)
+				newItems := append(be.Items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1})
+				w.SetContainerItems(int(bx), int(by), int(bz), "minecraft:chiseled_bookshelf", newItems)
+				w.SetBookshelfLastSlot(int(bx), int(by), int(bz), slot+1)
+				if p.GameMode != player.GameModeCreative {
+					heldInvSlot := player.HotbarStart + p.HeldSlot
+					p.Inventory[heldInvSlot].Count--
+					normalizeStack(&p.Inventory[heldInvSlot])
+					if conn != nil {
+						_ = SyncPlayerInventory(conn, p)
+					} else {
+						p.ContainerStateID++
+					}
+				}
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
+	}
+
+	// Lectern: place a book, open reading UI, or eject (sneak).
+	if hand == 0 && p.GameMode != player.GameModeSpectator &&
+		targetBlock.ResourceLocation() == "minecraft:lectern" {
+		be := w.GetBlockEntity(int(bx), int(by), int(bz))
+		stored := coreworld.LecternBook(be)
+		if stored != "" {
+			if p.Sneaking && !coreworld.IsLecternBook(held.ItemID) {
+				// Sneak + right-click: eject book.
+				if _, cleared, ok := coreworld.EjectLecternBook(targetBlock, stored); ok {
+					applyBlockChange(int(bx), int(by), int(bz), cleared, w, mgr)
+					w.SetContainerItems(int(bx), int(by), int(bz), "minecraft:lectern", nil)
+					drop := player.ItemStack{ItemID: stored, Count: 1}
+					if !p.GiveItem(drop) {
+						spawnBlockDrop(w, nextEntityID, p.Position, drop, 0, mgr, p.Dimension)
+					}
+					if conn != nil {
+						_ = SyncPlayerInventory(conn, p)
+					} else {
+						p.ContainerStateID++
+					}
+					sendAcknowledgeBlockChange(mgr, p, seq)
+					return nil
+				}
+			} else {
+				// Right-click without sneaking: open the book reading UI.
+				if err := openLectern(p, conn, spatial.BlockPos{X: bx, Y: by, Z: bz}, be); err != nil {
+					return err
+				}
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		} else if stored == "" && coreworld.IsLecternBook(held.ItemID) {
+			// Place book.
+			if updated, ok := coreworld.InsertLecternBook(targetBlock, held.ItemID); ok {
+				applyBlockChange(int(bx), int(by), int(bz), updated, w, mgr)
+				book := held
+				book.Count = 1
+				items := []coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, book)}
+				w.SetContainerItems(int(bx), int(by), int(bz), "minecraft:lectern", items)
+				if p.GameMode != player.GameModeCreative {
+					slot := player.HotbarStart + p.HeldSlot
+					p.Inventory[slot].Count--
+					normalizeStack(&p.Inventory[slot])
+					if conn != nil {
+						_ = SyncPlayerInventory(conn, p)
+					} else {
+						p.ContainerStateID++
+					}
+				}
+				sendAcknowledgeBlockChange(mgr, p, seq)
+				return nil
+			}
+		}
+	}
 
 	// Sneaking with an item bypasses block activation so a block can be placed
 	// against doors, containers, workstations, composters, and other UIs.
 	bypassActivation := p.Sneaking && !held.IsEmpty()
+	if !bypassActivation && p.GameMode != player.GameModeSpectator {
+		if emptied, ready := coreworld.EmptyComposter(targetBlock); ready {
+			applyBlockChange(int(bx), int(by), int(bz), emptied, w, mgr)
+			boneMeal := player.ItemStack{ItemID: "minecraft:bone_meal", Count: 1}
+			if !p.GiveItem(boneMeal) {
+				spawnBlockDrop(w, nextEntityID, p.Position, boneMeal, 0, mgr, p.Dimension)
+			}
+			if conn != nil {
+				_ = SyncPlayerInventory(conn, p)
+			} else {
+				p.ContainerStateID++
+			}
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
 	if !bypassActivation && p.GameMode != player.GameModeSpectator && targetBlock.ResourceLocation() == "minecraft:bell" {
 		if _, valid := coreworld.BellRingDirection(targetBlock, face, cursorY); valid {
 			if intents != nil {
@@ -703,6 +1193,32 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		}
 		applyBlockChange(int(bx), int(by), int(bz), updated, w, mgr)
 		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:note_block" {
+		blockBelow := w.GetBlock(int(bx), int(by)-1, int(bz))
+		if tuned, ok := coreworld.TuneNoteBlock(targetBlock, blockBelow); ok {
+			applyBlockChange(int(bx), int(by), int(bz), tuned, w, mgr)
+			instrument := tuned.Properties["instrument"]
+			if instrument == "" {
+				instrument = "harp"
+			}
+			note, _ := strconv.Atoi(tuned.Properties["note"])
+			pitch := float32(math.Pow(2, (float64(note)-12)/12))
+			broadcastSoundAt(mgr, "minecraft:block.note_block."+instrument, soundCategoryBlocks,
+				float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 3, pitch)
+			broadcastNoteBlockAction(int(bx), int(by), int(bz), note, tuned, mgr, p.Dimension)
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
+	}
+
+	// Dragon egg right-click: teleport to random position (like PumpkinMC dragon_egg.rs).
+	if !bypassActivation && targetBlock.ResourceLocation() == "minecraft:dragon_egg" && p.GameMode != player.GameModeCreative {
+		if dragonEggTeleport(int(bx), int(by), int(bz), w, mgr) {
+			sendAcknowledgeBlockChange(mgr, p, seq)
+			return nil
+		}
 		return nil
 	}
 
@@ -1127,6 +1643,10 @@ func shulkerBoxFacing(face int32) string {
 	}
 }
 
+// PlacementReplaceable reports whether the named block can be overwritten by a
+// placed block (air, flowers, grass, etc.).
+func PlacementReplaceable(blockName string) bool { return placementReplaceable(blockName) }
+
 func placementReplaceable(blockName string) bool {
 	switch blockName {
 	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
@@ -1223,7 +1743,7 @@ func blockSupportsWaterlogging(blockName string) bool {
 	return false
 }
 
-func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.Player, w *coreworld.World, mgr *session.Manager, conn *network.ClientConn) bool {
+func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.Player, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32) bool {
 	held := p.HeldItem()
 	if held.IsEmpty() {
 		return false
@@ -1240,7 +1760,9 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations})
+				cooking := held
+				cooking.Count = 1
+				items = append(items, coreworld.ContainerItemFromStack(slot, cooking))
 				w.SetContainerItems(x, y, z, target.ResourceLocation(), items)
 				if p.GameMode != player.GameModeCreative {
 					inventorySlot := player.HotbarStart + p.HeldSlot
@@ -1297,17 +1819,18 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		items := w.ContainerItems(x, y, z)
 		var stored player.ItemStack
 		if len(items) > 0 {
-			stored = player.ItemStack{ItemID: items[0].ItemID, Count: items[0].Count, Damage: items[0].Damage, Enchantments: items[0].Enchantments}
+			stored = items[0].Stack()
 		}
-		if !stored.IsEmpty() && (stored.ItemID != held.ItemID || stored.Damage != held.Damage || stored.Count >= player.MaxStackSize(stored.ItemID)) {
+		if !stored.IsEmpty() && (!stored.SameItem(held) || stored.Count >= player.MaxStackSize(stored.ItemID)) {
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations}
+			stored = held
+			stored.Count = 1
 		} else {
 			stored.Count++
 		}
-		w.SetContainerItems(x, y, z, target.ResourceLocation(), []coreworld.ContainerItem{{Slot: 0, ItemID: stored.ItemID, Count: stored.Count, Damage: stored.Damage, Enchantments: stored.Enchantments}})
+		w.SetContainerItems(x, y, z, target.ResourceLocation(), []coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, stored)})
 		if p.GameMode != player.GameModeCreative {
 			slot := player.HotbarStart + p.HeldSlot
 			p.Inventory[slot].Count--
@@ -1346,6 +1869,79 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 			broadcastSoundAt(mgr, sound, soundCategoryPlayers, float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
 			return true
 		}
+	}
+
+	if held.ItemID == "minecraft:glass_bottle" {
+		var waterBottle player.ItemStack
+		if err := waterBottle.SetComponent("potion_contents", map[string]string{"potion": "minecraft:water"}); err == nil {
+			waterBottle.ItemID = "minecraft:potion"
+			waterBottle.Count = 1
+		}
+		switch target.ResourceLocation() {
+		case "minecraft:water":
+			if coreworld.FluidLevel(target) == 0 {
+				replaceJavaBucket(p, "")
+				slot := player.HotbarStart + p.HeldSlot
+				if p.GameMode != player.GameModeCreative {
+					if p.Inventory[slot].Count <= 1 {
+						p.Inventory[slot] = waterBottle
+					} else {
+						p.Inventory[slot].Count--
+						p.GiveItem(waterBottle)
+					}
+				}
+				broadcastSoundAt(mgr, "minecraft:item.bottle.fill", soundCategoryPlayers, float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+				return true
+			}
+		case "minecraft:water_cauldron":
+			level := 0
+			if l := target.Properties["level"]; l != "" {
+				level, _ = strconv.Atoi(l)
+			}
+			if level > 0 {
+				if p.GameMode != player.GameModeCreative {
+					slot := player.HotbarStart + p.HeldSlot
+					if p.Inventory[slot].Count <= 1 {
+						p.Inventory[slot] = waterBottle
+					} else {
+						p.Inventory[slot].Count--
+						p.GiveItem(waterBottle)
+					}
+					newLevel := level - 1
+					if newLevel <= 0 {
+						applyBlockChange(x, y, z, coreworld.Block{Namespace: "minecraft", Name: "cauldron"}, w, mgr)
+					} else {
+						updated := copyBlockProperties(target)
+						updated.Properties["level"] = strconv.Itoa(newLevel)
+						applyBlockChange(x, y, z, updated, w, mgr)
+					}
+				}
+				broadcastSoundAt(mgr, "minecraft:item.bottle.fill", soundCategoryPlayers, float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+				return true
+			}
+		}
+	}
+
+	if entityType := fishBucketEntity(held.ItemID); entityType != "" && nextEntityID != nil {
+		if face < 0 || int(face) >= len(faceOffset) {
+			return false
+		}
+		offset := faceOffset[face]
+		px, py, pz := x+int(offset[0]), y+int(offset[1]), z+int(offset[2])
+		if py >= coreworld.WorldMinY && py <= coreworld.WorldMaxY && placementReplaceable(w.GetBlock(px, py, pz).ResourceLocation()) {
+			applyBlockChange(px, py, pz, coreworld.MakeFluid("minecraft:water", 0), w, mgr)
+			var uuid [16]byte
+			id := nextEntityID()
+			binary.BigEndian.PutUint32(uuid[:4], uint32(id))
+			fish := corentity.New(id, uuid, entityType, float64(px)+0.5, float64(py)+0.5, float64(pz)+0.5)
+			fish.OnGround = true
+			w.Entities.Add(fish)
+			BroadcastSpawnMobInDimension(fish, mgr, p.Dimension)
+			replaceJavaBucket(p, "minecraft:bucket")
+			broadcastSoundAt(mgr, "minecraft:item.bucket.empty_fish", soundCategoryPlayers,
+				float64(px)+0.5, float64(py)+0.5, float64(pz)+0.5, 1, 1)
+		}
+		return true
 	}
 
 	if held.ItemID == "minecraft:water_bucket" || held.ItemID == "minecraft:lava_bucket" || held.ItemID == "minecraft:powder_snow_bucket" {
@@ -1392,23 +1988,15 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		return true
 	}
 	if isHoe(held.ItemID) {
-		if face == 0 {
-			return false
-		}
-		above := w.GetBlock(x, y+1, z)
-		if !above.IsAir() {
-			return false
-		}
-		var replacement coreworld.Block
-		switch target.ResourceLocation() {
-		case "minecraft:grass_block", "minecraft:dirt", "minecraft:dirt_path":
-			replacement = coreworld.Block{Namespace: "minecraft", Name: "farmland", Properties: map[string]string{"moisture": "0"}}
-		case "minecraft:coarse_dirt", "minecraft:rooted_dirt":
-			replacement = coreworld.Block{Namespace: "minecraft", Name: "dirt"}
-		default:
+		canMakeFarmland := face != 0 && w.GetBlock(x, y+1, z).IsAir()
+		replacement, drop, ok := coreworld.UseHoe(target, canMakeFarmland)
+		if !ok {
 			return false
 		}
 		applyBlockChange(x, y, z, replacement, w, mgr)
+		if p.GameMode != player.GameModeCreative && !drop.IsEmpty() && !p.GiveItem(drop) {
+			spawnBlockDrop(w, nextEntityID, p.Position, drop, 0, mgr, p.Dimension)
+		}
 		broadcastSoundAt(mgr, "minecraft:item.hoe.till", soundCategoryBlocks, float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
 		return true
 	}
@@ -1449,7 +2037,68 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		return false
 	}
 
+	if isSignBlock(target.ResourceLocation()) {
+		if held.ItemID == "minecraft:glow_ink_sac" || held.ItemID == "minecraft:ink_sac" {
+			entity := w.GetBlockEntity(x, y, z)
+			glowing := held.ItemID == "minecraft:glow_ink_sac"
+			// Only change if this actually toggles something.
+			if entity.SignFrontGlowing == glowing {
+				return true
+			}
+			state := coreworld.SignState{
+				FrontLines: entity.SignFrontLines, BackLines: entity.SignBackLines,
+				FrontGlowing: glowing, BackGlowing: entity.SignBackGlowing,
+				FrontColor: entity.SignFrontColor, BackColor: entity.SignBackColor,
+				Waxed: entity.SignWaxed,
+			}
+			data := buildSignNBTFromState(state)
+			w.SetBlockEntitySign(x, y, z, data, state)
+			BroadcastBlockEntityDataInDimension(w.GetBlockEntity(x, y, z), mgr, p.Dimension)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			sound := "minecraft:item.glow_ink_sac.use"
+			if !glowing {
+				sound = "minecraft:item.ink_sac.use"
+			}
+			broadcastSoundAt(mgr, sound, soundCategoryPlayers, float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+			return true
+		}
+		if color := signDyeColor(held.ItemID); color != "" {
+			entity := w.GetBlockEntity(x, y, z)
+			if entity.SignFrontColor == color {
+				return true
+			}
+			state := coreworld.SignState{
+				FrontLines: entity.SignFrontLines, BackLines: entity.SignBackLines,
+				FrontGlowing: entity.SignFrontGlowing, BackGlowing: entity.SignBackGlowing,
+				FrontColor: color, BackColor: entity.SignBackColor,
+				Waxed: entity.SignWaxed,
+			}
+			data := buildSignNBTFromState(state)
+			w.SetBlockEntitySign(x, y, z, data, state)
+			BroadcastBlockEntityDataInDimension(w.GetBlockEntity(x, y, z), mgr, p.Dimension)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			broadcastSoundAt(mgr, "minecraft:item.dye.use", soundCategoryPlayers,
+				float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+			return true
+		}
+	}
+
 	if held.ItemID == "minecraft:flint_and_steel" || held.ItemID == "minecraft:fire_charge" {
+		if target.ResourceLocation() == "minecraft:tnt" &&
+			primeJavaTNT(x, y, z, w, mgr, nextEntityID, p.Dimension) {
+			broadcastSoundAt(mgr, "minecraft:entity.tnt.primed", soundCategoryBlocks,
+				float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
+			finishJavaIgniterUse(p, held.ItemID)
+			return true
+		}
 		if target.ResourceLocation() == "minecraft:obsidian" {
 			if changes, ok := coreworld.NetherPortalInterior(w, x, y, z); ok {
 				for _, change := range changes {
@@ -1457,11 +2106,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				}
 				broadcastSoundAt(mgr, "minecraft:item.flintandsteel.use", soundCategoryBlocks,
 					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
-				if held.ItemID == "minecraft:fire_charge" && p.GameMode != player.GameModeCreative {
-					slot := player.HotbarStart + p.HeldSlot
-					p.Inventory[slot].Count--
-					normalizeStack(&p.Inventory[slot])
-				}
+				finishJavaIgniterUse(p, held.ItemID)
 				return true
 			}
 		}
@@ -1473,7 +2118,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				applyBlockChange(x, y, z, lit, w, mgr)
 				broadcastSoundAt(mgr, "minecraft:item.flintandsteel.use", soundCategoryBlocks,
 					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
-				damageHeldItem(p, conn, 1)
+				finishJavaIgniterUse(p, held.ItemID)
 				return true
 			}
 		}
@@ -1485,7 +2130,7 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 				applyBlockChange(x, y, z, lit, w, mgr)
 				broadcastSoundAt(mgr, "minecraft:block.candle.ignite", soundCategoryBlocks,
 					float64(x)+0.5, float64(y)+0.5, float64(z)+0.5, 1, 1)
-				damageHeldItem(p, conn, 1)
+				finishJavaIgniterUse(p, held.ItemID)
 				return true
 			}
 		}
@@ -1500,12 +2145,32 @@ func useToolOrPlant(x, y, z int, face int32, target coreworld.Block, p *player.P
 		applyBlockChange(fx, fy, fz, coreworld.Block{Namespace: "minecraft", Name: "fire"}, w, mgr)
 		broadcastSoundAt(mgr, "minecraft:item.flintandsteel.use", soundCategoryBlocks,
 			float64(fx)+0.5, float64(fy)+0.5, float64(fz)+0.5, 1, 1)
-		if held.ItemID == "minecraft:fire_charge" && p.GameMode != player.GameModeCreative {
-			slot := player.HotbarStart + p.HeldSlot
-			p.Inventory[slot].Count--
-			normalizeStack(&p.Inventory[slot])
-		}
+		finishJavaIgniterUse(p, held.ItemID)
 		return true
+	}
+
+	if strings.HasSuffix(held.ItemID, "_spawn_egg") && nextEntityID != nil {
+		entityType := corentity.EntityType("minecraft:" + strings.TrimSuffix(strings.TrimPrefix(held.ItemID, "minecraft:"), "_spawn_egg"))
+		if corentity.DefaultMaxHealth(entityType) > 0 {
+			if face < 0 || int(face) >= len(faceOffset) {
+				return false
+			}
+			offset := faceOffset[face]
+			sx, sy, sz := x+int(offset[0]), y+int(offset[1]), z+int(offset[2])
+			id := nextEntityID()
+			var uuid [16]byte
+			binary.BigEndian.PutUint32(uuid[:4], uint32(id))
+			e := corentity.New(id, uuid, entityType, float64(sx)+0.5, float64(sy)+0.5, float64(sz)+0.5)
+			e.OnGround = true
+			w.Entities.Add(e)
+			BroadcastSpawnMobInDimension(e, mgr, p.Dimension)
+			if p.GameMode != player.GameModeCreative {
+				slot := player.HotbarStart + p.HeldSlot
+				p.Inventory[slot].Count--
+				normalizeStack(&p.Inventory[slot])
+			}
+			return true
+		}
 	}
 
 	if face != 1 || !w.GetBlock(x, y+1, z).IsAir() {
@@ -1736,6 +2401,26 @@ func replaceJavaBucket(p *player.Player, replacement string) {
 	}
 	p.Inventory[slot].Count--
 	p.GiveItem(player.ItemStack{ItemID: replacement, Count: 1})
+}
+
+// fishBucketEntity returns the entity type for a filled fish/aquatic bucket, or "".
+func fishBucketEntity(itemID string) corentity.EntityType {
+	switch itemID {
+	case "minecraft:cod_bucket":
+		return corentity.TypeCod
+	case "minecraft:salmon_bucket":
+		return corentity.TypeSalmon
+	case "minecraft:pufferfish_bucket":
+		return corentity.TypePufferfish
+	case "minecraft:tropical_fish_bucket":
+		return corentity.TypeTropicalFish
+	case "minecraft:axolotl_bucket":
+		return corentity.TypeAxolotl
+	case "minecraft:tadpole_bucket":
+		return corentity.TypeTadpole
+	default:
+		return ""
+	}
 }
 
 func isChestBlock(blockName string) bool {
@@ -2483,6 +3168,30 @@ func redstoneWireConnections(x, y, z int, w *coreworld.World) map[string]string 
 		}
 	}
 	return props
+}
+
+// dragonEggTeleport moves the dragon egg to a random replaceable position
+// within 15 blocks (x,z ±7, y ±1), removes it from (x,y,z), and places it at
+// the new location. Returns true when a valid destination was found.
+func dragonEggTeleport(x, y, z int, w *coreworld.World, mgr *session.Manager) bool {
+	const tries = 1000
+	for range tries {
+		nx := x + (rand.Intn(15) - 7) //nolint:gosec
+		ny := y + (rand.Intn(3) - 1)  //nolint:gosec
+		nz := z + (rand.Intn(15) - 7) //nolint:gosec
+		if ny < coreworld.WorldMinY || ny > coreworld.WorldMaxY {
+			continue
+		}
+		if !placementReplaceable(w.GetBlock(nx, ny, nz).ResourceLocation()) {
+			continue
+		}
+		if !w.GetBlock(nx, ny-1, nz).IsAir() { // needs solid or replaceable base
+			applyBlockChange(x, y, z, coreworld.Air, w, mgr)
+			applyBlockChange(nx, ny, nz, coreworld.Block{Namespace: "minecraft", Name: "dragon_egg"}, w, mgr)
+			return true
+		}
+	}
+	return false
 }
 
 func javaRedstoneConnectsFrom(direction string, block coreworld.Block) bool {

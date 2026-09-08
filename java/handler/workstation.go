@@ -32,7 +32,7 @@ func openWorkstation(p *player.Player, conn *network.ClientConn, w *coreworld.Wo
 	if kind == "minecraft:brewing_stand" && w != nil {
 		for _, ci := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 			if ci.Slot >= 0 && ci.Slot < len(p.ContainerSlots) {
-				p.ContainerSlots[ci.Slot] = player.ItemStack{ItemID: ci.ItemID, Count: ci.Count, Damage: ci.Damage, Enchantments: ci.Enchantments}
+				p.ContainerSlots[ci.Slot] = ci.Stack()
 			}
 		}
 	}
@@ -105,9 +105,16 @@ func takeWorkstationOutputToCursor(p *player.Player) {
 			p.CarriedItem.Count+preview.Count > player.MaxStackSize(preview.ItemID))) {
 		return
 	}
-	result, ok := TakeWorkstationResult(p.OpenContainerKind, p.ContainerSlots, p.WorkstationSelection)
+	levelCost := AnvilLevelCost(p.OpenContainerKind, p.ContainerSlots)
+	result, xp, ok := TakeWorkstationResult(p.OpenContainerKind, p.ContainerSlots, p.WorkstationSelection)
 	if !ok {
 		return
+	}
+	p.PendingWorkstationXP += xp
+	if levelCost > 0 {
+		// Encode anvil level cost as a negative XP signal so that the
+		// crafting handler can deduct levels on the next container-click flush.
+		p.PendingWorkstationXP -= levelCost
 	}
 	if p.CarriedItem.IsEmpty() {
 		p.CarriedItem = result
@@ -126,9 +133,11 @@ func shiftWorkstationOutput(p *player.Player) {
 		if !addStackToInventory(&inventory, p.ContainerSlots[output]) {
 			return
 		}
-		if _, ok := TakeWorkstationResult(p.OpenContainerKind, p.ContainerSlots, p.WorkstationSelection); !ok {
+		_, xp, ok := TakeWorkstationResult(p.OpenContainerKind, p.ContainerSlots, p.WorkstationSelection)
+		if !ok {
 			return
 		}
+		p.PendingWorkstationXP += xp
 		p.Inventory = inventory
 	}
 }
@@ -149,7 +158,7 @@ func clickWorkstationSlot(p *player.Player, containerSlot int, button byte) {
 			p.CarriedItem, *target = *target, player.ItemStack{}
 		case target.IsEmpty() && canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem):
 			*target, p.CarriedItem = p.CarriedItem, player.ItemStack{}
-		case target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage &&
+		case target.SameItem(p.CarriedItem) &&
 			canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem) && target.Count < player.MaxStackSize(target.ItemID):
 			add := minInt(player.MaxStackSize(target.ItemID)-target.Count, p.CarriedItem.Count)
 			target.Count += add
@@ -165,14 +174,16 @@ func clickWorkstationSlot(p *player.Player, containerSlot int, button byte) {
 			return
 		}
 		take := (target.Count + 1) / 2
-		p.CarriedItem = player.ItemStack{ItemID: target.ItemID, Count: take, Damage: target.Damage}
+		p.CarriedItem = *target
+		p.CarriedItem.Count = take
 		target.Count -= take
 		normalizeStack(target)
 	} else if target.IsEmpty() && canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem) {
-		*target = player.ItemStack{ItemID: p.CarriedItem.ItemID, Count: 1, Damage: p.CarriedItem.Damage}
+		*target = p.CarriedItem
+		target.Count = 1
 		p.CarriedItem.Count--
 		normalizeStack(&p.CarriedItem)
-	} else if target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage &&
+	} else if target.SameItem(p.CarriedItem) &&
 		canPlaceWorkstationSlot(p.OpenContainerKind, workstationIndex, p.CarriedItem) && target.Count < player.MaxStackSize(target.ItemID) {
 		target.Count++
 		p.CarriedItem.Count--
@@ -217,7 +228,8 @@ func shiftWorkstationSlot(p *player.Player, containerSlot int) {
 			continue
 		}
 		add := minInt(player.MaxStackSize(remaining.ItemID), remaining.Count)
-		slots[index] = player.ItemStack{ItemID: remaining.ItemID, Count: add, Damage: remaining.Damage}
+		slots[index] = remaining
+		slots[index].Count = add
 		remaining.Count -= add
 	}
 	if remaining.Count == 0 {
@@ -305,7 +317,7 @@ func closeWorkstation(p *player.Player, w *coreworld.World) {
 		items := make([]coreworld.ContainerItem, 0, len(p.ContainerSlots))
 		for slot, stack := range p.ContainerSlots {
 			if !stack.IsEmpty() {
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+				items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 			}
 		}
 		w.SetContainerItems(int(p.OpenContainerPos.X), int(p.OpenContainerPos.Y), int(p.OpenContainerPos.Z), p.OpenContainerKind, items)
@@ -324,6 +336,43 @@ func closeWorkstation(p *player.Player, w *coreworld.World) {
 	p.ContainerSlots = nil
 	p.WorkstationSelection = 0
 	p.ContainerStateID++
+}
+
+// handleAnvilRename processes the rename_item (C→S) packet sent by the client
+// while typing a name in the anvil UI. It sets or clears the minecraft:custom_name
+// component on slot 0, recomputes the output slot, and syncs the container.
+func handleAnvilRename(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn) error {
+	if p == nil {
+		return nil
+	}
+	if p.OpenContainerKind != "minecraft:anvil" &&
+		p.OpenContainerKind != "minecraft:chipped_anvil" &&
+		p.OpenContainerKind != "minecraft:damaged_anvil" {
+		return nil
+	}
+	r := pkt.Reader()
+	name, err := protocol.ReadString(r)
+	if err != nil {
+		return err
+	}
+	if len(p.ContainerSlots) == 0 || p.ContainerSlots[0].IsEmpty() {
+		return nil
+	}
+	slot0 := p.ContainerSlots[0]
+	if name == "" {
+		// Clear custom name.
+		_ = slot0.SetComponent("minecraft:custom_name", nil)
+	} else {
+		_ = slot0.SetComponent("minecraft:custom_name", name)
+	}
+	p.ContainerSlots[0] = slot0
+	UpdateWorkstationResult(p.OpenContainerKind, p.ContainerSlots, p.WorkstationSelection)
+	p.ContainerStateID++
+	if conn != nil {
+		_ = sendAnvilCost(conn, AnvilLevelCost(p.OpenContainerKind, p.ContainerSlots))
+		return sendChestContainerContent(conn, p)
+	}
+	return nil
 }
 
 // IsWorkstation reports whether kind uses GoCraft's transient workstation
@@ -382,9 +431,38 @@ func WorkstationOutputIndex(kind string) int {
 	}
 }
 
+// SyncWorkstationToConn sends the current workstation slot contents to the
+// player's open container. Used by the brewing stand ticker to push slot
+// updates without reopening the screen.
+func SyncWorkstationToConn(conn *network.ClientConn, p *player.Player) error {
+	if conn == nil || p == nil {
+		return nil
+	}
+	return sendChestContainerContent(conn, p)
+}
+
+// SyncBrewingContainer sends the two brewing stand progress properties to the
+// player who currently has the block open. brewTime counts down 400→0,
+// fuelAmount is the remaining brews from the last blaze powder (0-20).
+func SyncBrewingContainer(conn *network.ClientConn, p *player.Player, brewTime, fuelAmount int) error {
+	if conn == nil || p == nil || p.OpenContainerKind != "minecraft:brewing_stand" {
+		return nil
+	}
+	for prop, value := range [2]int{brewTime, fuelAmount} {
+		pkt := protocol.NewBuilder(packetIDSetContainerData).
+			VarInt(workstationContainerID).Short(int16(prop)).Short(int16(value)).Build()
+		if err := conn.WritePacket(pkt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type workstationOperation struct {
-	result  player.ItemStack
-	consume []int
+	result     player.ItemStack
+	consume    []int
+	xp         int32 // XP to award the player on output take (grindstone disenchant)
+	levelCost  int32 // levels to deduct from the player on output take (anvil)
 }
 
 // UpdateWorkstationResult recomputes the server-authoritative preview. Client
@@ -397,13 +475,38 @@ func UpdateWorkstationResult(kind string, slots []player.ItemStack, selection in
 	slots[output] = workstationOperationFor(kind, slots, selection).result
 }
 
+// AnvilLevelCost returns the level cost shown by the anvil for the current
+// inputs, without consuming anything. Returns 0 for non-anvil kinds or when
+// there is no valid output.
+func AnvilLevelCost(kind string, slots []player.ItemStack) int32 {
+	switch kind {
+	case "minecraft:anvil", "minecraft:chipped_anvil", "minecraft:damaged_anvil":
+	default:
+		return 0
+	}
+	if len(slots) < WorkstationSlotCount(kind) {
+		return 0
+	}
+	return anvilOperation(slots).levelCost
+}
+
+// sendAnvilCost writes a SetContainerData packet with the current anvil level cost.
+func sendAnvilCost(conn *network.ClientConn, levelCost int32) error {
+	if conn == nil {
+		return nil
+	}
+	return conn.WritePacket(protocol.NewBuilder(packetIDSetContainerData).
+		VarInt(workstationContainerID).Short(0).Short(int16(levelCost)).Build())
+}
+
 // TakeWorkstationResult consumes the exact inputs for the current preview and
-// returns one indivisible result stack. It is the only supported way to remove
-// a non-empty workstation output.
-func TakeWorkstationResult(kind string, slots []player.ItemStack, selection int) (player.ItemStack, bool) {
+// returns one indivisible result stack and any XP to award the player (e.g.
+// from grindstone disenchanting). It is the only supported way to remove a
+// non-empty workstation output.
+func TakeWorkstationResult(kind string, slots []player.ItemStack, selection int) (player.ItemStack, int32, bool) {
 	operation := workstationOperationFor(kind, slots, selection)
 	if operation.result.IsEmpty() {
-		return player.ItemStack{}, false
+		return player.ItemStack{}, 0, false
 	}
 	for index, count := range operation.consume {
 		if count <= 0 || index < 0 || index >= len(slots) || slots[index].Count < count {
@@ -413,7 +516,7 @@ func TakeWorkstationResult(kind string, slots []player.ItemStack, selection int)
 		normalizeStack(&slots[index])
 	}
 	UpdateWorkstationResult(kind, slots, selection)
-	return operation.result, true
+	return operation.result, operation.xp, true
 }
 
 func workstationOperationFor(kind string, slots []player.ItemStack, selection int) workstationOperation {
@@ -440,14 +543,59 @@ func workstationOperationFor(kind string, slots []player.ItemStack, selection in
 
 func anvilOperation(slots []player.ItemStack) workstationOperation {
 	left, right := slots[0], slots[1]
-	if left.IsEmpty() || right.IsEmpty() || player.MaxDurability(left.ItemID) == 0 {
+	if left.IsEmpty() {
+		return workstationOperation{}
+	}
+	// Rename-only: right slot empty, item has a custom name pending.
+	if right.IsEmpty() {
+		name := left.DisplayName()
+		if name == "" {
+			return workstationOperation{}
+		}
+		result := left
+		result.Count = 1
+		return workstationOperation{result: result, consume: []int{1, 0}, levelCost: 1}
+	}
+	name := left.DisplayName()
+
+	// Enchanted book: transfer enchantments to the left item.
+	if right.ItemID == "minecraft:enchanted_book" && player.MaxDurability(left.ItemID) > 0 {
+		result := left
+		result.Count = 1
+		if name != "" {
+			_ = result.SetComponent("minecraft:custom_name", name)
+		}
+		before := result.EnchantmentLevels()
+		if mergeEnchantments(&result, right) {
+			after := result.EnchantmentLevels()
+			added := int32(len(after) - len(before))
+			if added < 0 {
+				added = 0
+			}
+			return workstationOperation{result: result, consume: []int{1, 1}, levelCost: 1 + added}
+		}
+		return workstationOperation{}
+	}
+
+	if player.MaxDurability(left.ItemID) == 0 {
 		return workstationOperation{}
 	}
 	if left.ItemID == right.ItemID {
-		return workstationOperation{
-			result:  repairedStack(left, right, 12),
-			consume: []int{1, 1},
+		result := repairedStack(left, right, 12)
+		// Carry left's enchantments and name into the repaired result, then merge right's.
+		result.Enchantments = left.Enchantments
+		result.Components = left.Components
+		before := result.EnchantmentLevels()
+		mergeEnchantments(&result, right)
+		after := result.EnchantmentLevels()
+		merged := int32(len(after) - len(before))
+		if merged < 0 {
+			merged = 0
 		}
+		if name != "" {
+			_ = result.SetComponent("minecraft:custom_name", name)
+		}
+		return workstationOperation{result: result, consume: []int{1, 1}, levelCost: 1 + merged}
 	}
 	if !itemregistry.RepairsWith(left.ItemID, right.ItemID) {
 		return workstationOperation{}
@@ -458,7 +606,49 @@ func anvilOperation(slots []player.ItemStack) workstationOperation {
 	if result.Damage < 0 {
 		result.Damage = 0
 	}
-	return workstationOperation{result: result, consume: []int{1, 1}}
+	if name != "" {
+		_ = result.SetComponent("minecraft:custom_name", name)
+	}
+	return workstationOperation{result: result, consume: []int{1, 1}, levelCost: 1}
+}
+
+// mergeEnchantments applies compatible enchantments from src to dst. It uses
+// vanilla merging rules: same level → combined to level+1 (capped at MaxLevel);
+// src level higher → src level wins; dst level higher → dst wins (no change).
+// Returns true if at least one enchantment was added or upgraded.
+func mergeEnchantments(dst *player.ItemStack, src player.ItemStack) bool {
+	srcLevels := src.EnchantmentLevels()
+	if len(srcLevels) == 0 {
+		return false
+	}
+	changed := false
+	for _, el := range srcLevels {
+		ench, ok := player.EnchantmentByID(el.ID)
+		if !ok {
+			continue
+		}
+		// Check compatibility: skip enchantments that conflict with existing ones.
+		if !ench.CompatibleWith(*dst) && dst.EnchantmentLevel(el.ID) == 0 {
+			continue
+		}
+		// Check the enchantment is valid for this item type (unless it's a book destination).
+		if dst.ItemID != "minecraft:enchanted_book" && !ench.Supports(dst.ItemID) {
+			continue
+		}
+		existing := dst.EnchantmentLevel(el.ID)
+		var newLevel int
+		if existing == el.Level {
+			newLevel = min(el.Level+1, ench.MaxLevel)
+		} else if el.Level > existing {
+			newLevel = el.Level
+		} else {
+			continue // dst already has higher level
+		}
+		if dst.Enchant(el.ID, newLevel) {
+			changed = true
+		}
+	}
+	return changed
 }
 
 func grindstoneOperation(slots []player.ItemStack) workstationOperation {
@@ -467,19 +657,80 @@ func grindstoneOperation(slots []player.ItemStack) workstationOperation {
 		return workstationOperation{}
 	}
 	if first.IsEmpty() || second.IsEmpty() {
-		result, index := first, 0
-		if result.IsEmpty() {
-			result, index = second, 1
+		single, index := first, 0
+		if single.IsEmpty() {
+			single, index = second, 1
 		}
-		result.Count = 1
+		stripped, xp := grindstoneStrip(single)
+		stripped.Count = 1
 		consume := make([]int, 2)
 		consume[index] = 1
-		return workstationOperation{result: result, consume: consume}
+		return workstationOperation{result: stripped, consume: consume, xp: xp}
 	}
 	if first.ItemID != second.ItemID || player.MaxDurability(first.ItemID) == 0 {
 		return workstationOperation{}
 	}
-	return workstationOperation{result: repairedStack(first, second, 5), consume: []int{1, 1}}
+	repaired := repairedStack(first, second, 5)
+	xp := grindstoneXP(first) + grindstoneXP(second)
+	repaired.Enchantments = grindstoneKeepCurses(first, second)
+	return workstationOperation{result: repaired, consume: []int{1, 1}, xp: xp}
+}
+
+// grindstoneStrip removes all non-curse enchantments from a stack, returning
+// the stripped stack and the XP value of the removed enchantments.
+func grindstoneStrip(s player.ItemStack) (player.ItemStack, int32) {
+	xp := grindstoneXP(s)
+	curses := grindstoneKeepCurses(s)
+	result := s
+	result.Enchantments = curses
+	return result, xp
+}
+
+// grindstoneXP returns the XP refund for stripping enchantments from a stack.
+// Each enchantment level contributes ~8 XP (a rough vanilla approximation).
+func grindstoneXP(s player.ItemStack) int32 {
+	var total int32
+	for _, e := range s.EnchantmentLevels() {
+		if e.ID == "minecraft:binding_curse" || e.ID == "minecraft:vanishing_curse" {
+			continue
+		}
+		total += int32(e.Level) * 8
+	}
+	if total < 0 {
+		total = 0
+	}
+	return total
+}
+
+// grindstoneKeepCurses encodes only the curse enchantments from one or two
+// stacks for the grindstone output.
+func grindstoneKeepCurses(stacks ...player.ItemStack) string {
+	curses := []player.EnchantmentLevel{}
+	for _, s := range stacks {
+		for _, e := range s.EnchantmentLevels() {
+			if e.ID != "minecraft:binding_curse" && e.ID != "minecraft:vanishing_curse" {
+				continue
+			}
+			found := false
+			for i, c := range curses {
+				if c.ID == e.ID {
+					if e.Level > c.Level {
+						curses[i].Level = e.Level
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				curses = append(curses, e)
+			}
+		}
+	}
+	if len(curses) == 0 {
+		return ""
+	}
+	encoded, _ := player.EncodeEnchantments(curses)
+	return encoded
 }
 
 func repairedStack(first, second player.ItemStack, bonusPercent int) player.ItemStack {

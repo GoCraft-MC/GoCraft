@@ -111,9 +111,12 @@ var (
 	packetIDSoundEntity            = protocoldata.MustCB("play", "minecraft:sound_entity")
 	packetIDSound                  = protocoldata.MustCB("play", "minecraft:sound")
 	packetIDUpdateMobEffect        = protocoldata.MustCB("play", "minecraft:update_mob_effect")
+	packetIDRemoveMobEffect        = protocoldata.MustCB("play", "minecraft:remove_mob_effect")
 	packetIDUpdateAttributes       = protocoldata.MustCB("play", "minecraft:update_attributes")
 	packetIDUpdateRecipes          = protocoldata.MustCB("play", "minecraft:update_recipes")
 	packetIDSetPassengers          = protocoldata.MustCB("play", "minecraft:set_passengers")
+	packetIDCloseContainerSC       = protocoldata.MustCB("play", "minecraft:container_close")
+	packetIDOpenBook               = protocoldata.MustCB("play", "minecraft:open_book")
 )
 
 // ── Play state — serverbound (C→S) ───────────────────────────────────────────
@@ -138,6 +141,9 @@ var (
 	packetIDUseItem                      = protocoldata.MustSB("play", "minecraft:use_item")
 	packetIDSwingArm                     = protocoldata.MustSB("play", "minecraft:swing")
 	packetIDInteract                     = protocoldata.MustSB("play", "minecraft:interact")
+	packetIDSignUpdate                   = protocoldata.MustSB("play", "minecraft:sign_update")
+	packetIDOpenSignEditor               = protocoldata.MustCB("play", "minecraft:open_sign_editor")
+	packetIDRenameItem                   = protocoldata.MustSB("play", "minecraft:rename_item")
 	packetIDContainerButtonClick         = protocoldata.MustSB("play", "minecraft:container_button_click")
 	packetIDContainerClick               = protocoldata.MustSB("play", "minecraft:container_click")
 	packetIDContainerClose               = protocoldata.MustSB("play", "minecraft:container_close")

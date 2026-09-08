@@ -15,6 +15,7 @@ import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -24,7 +25,9 @@ import (
 const (
 	entityMetadataPoseIndex              byte  = 6
 	livingEntityMetadataSleepingPosIndex byte  = 14
+	endermanMetadataCarriedBlockIndex    byte  = 16
 	metadataTypeOptionalBlockPos         int32 = 11
+	metadataTypeOptionalBlockState       int32 = 15
 	metadataTypePose                     int32 = 21
 	entityPoseStanding                   int32 = 0
 	entityPoseSleeping                   int32 = 2
@@ -92,9 +95,7 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			VarInt(e.EntityID).
 			Byte(8).  // ItemEntity DATA_ITEM metadata index
 			VarInt(7) // ItemStack metadata serializer
-		encodeSlot(b, player.ItemStack{
-			ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage, PotDecorations: e.ItemPotDecorations,
-		})
+		encodeSlot(b, e.DroppedItem())
 		return b.Byte(0xff).Build()
 	}
 	if e.Type == corentity.TypeFireworkRocket {
@@ -107,8 +108,35 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		})
 		return b.Byte(0xff).Build()
 	}
+	if e.Type == corentity.TypePotion && !e.ProjectileItem.IsEmpty() {
+		b := protocol.NewBuilder(packetIDSetEntityData).
+			VarInt(e.EntityID).
+			Byte(8).
+			VarInt(7)
+		encodeSlot(b, e.ProjectileItem)
+		return b.Byte(0xff).Build()
+	}
+	if e.Type == corentity.TypeAreaEffectCloud {
+		return protocol.NewBuilder(packetIDSetEntityData).
+			VarInt(e.EntityID).
+			Byte(8).VarInt(3).Float(float32(e.CloudRadius)).
+			Byte(9).VarInt(8).Bool(e.AgeTicks < 10).
+			Byte(0xff).Build()
+	}
 	b := protocol.NewBuilder(packetIDSetEntityData).VarInt(e.EntityID)
 	hasMetadata := false
+	if e.DisplayName != "" {
+		// Index 2: CUSTOM_NAME — Optional Text Component (type 5).
+		// Encoded as: present=true (0x01) + JSON string.
+		nameJSON := `{"text":"` + e.DisplayName + `"}`
+		b = b.Byte(2).VarInt(5).Bool(true).String(nameJSON)
+		hasMetadata = true
+	}
+	if e.CustomNameVisible {
+		// Index 3: CUSTOM_NAME_VISIBLE — Boolean (type 8).
+		b = b.Byte(3).VarInt(8).Bool(true)
+		hasMetadata = true
+	}
 	if e.FireTicks > 0 {
 		b = b.Byte(0).VarInt(0).Byte(0x01)
 		hasMetadata = true
@@ -139,6 +167,15 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		b = b.Byte(18).VarInt(13).Bool(e.HasTameOwner)
 		if e.HasTameOwner {
 			b = b.UUID(protocol.UUID(e.TameOwnerUUID))
+		}
+		// Collar color: send when explicitly set (non-empty).
+		// DyeColor index: Wolf=19, Cat=21.
+		if e.Tamed && e.CollarColor != "" && (e.Type == corentity.TypeWolf || e.Type == corentity.TypeCat) {
+			collarIndex := byte(19)
+			if e.Type == corentity.TypeCat {
+				collarIndex = 21
+			}
+			b = b.Byte(collarIndex).VarInt(1).VarInt(int32(dyeColorID(e.CollarColor)))
 		}
 	}
 	if isJavaAbstractHorse(e.Type) {
@@ -175,6 +212,30 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		b = b.Byte(17).VarInt(1).VarInt(e.PufferState)
 		hasMetadata = true
 	}
+	if e.Type == corentity.TypeSheep {
+		color := sheepColorID(e.WoolColor)
+		flags := byte(color & 0x0F)
+		if e.Sheared {
+			flags |= 0x10
+		}
+		b = b.Byte(17).VarInt(0).Byte(flags)
+		hasMetadata = true
+	}
+	if e.Type == corentity.TypeSnowGolem {
+		// Index 17 flags byte: bit 0x10 = has pumpkin.
+		flags := byte(0)
+		if e.HasPumpkin {
+			flags |= 0x10
+		}
+		b = b.Byte(17).VarInt(0).Byte(flags)
+		hasMetadata = true
+	}
+	if e.Type == corentity.TypeEnderman && e.EndermanCarriedBlock != "" {
+		b = b.Byte(endermanMetadataCarriedBlockIndex).
+			VarInt(metadataTypeOptionalBlockState).
+			VarInt(javaworld.StateID(coreworld.BlockFromResourceLocation(e.EndermanCarriedBlock)))
+		hasMetadata = true
+	}
 	if e.Type != corentity.TypeVillager {
 		if !hasMetadata {
 			return nil
@@ -206,6 +267,63 @@ func buildMobEquipment(e *corentity.Entity) *protocol.Packet {
 		Byte(0) // Main hand, final equipment entry.
 	encodeSlot(b, player.ItemStack{ItemID: e.MainHandItemID, Count: 1})
 	return b.Build()
+}
+
+// DyeColorID maps a dye colour name to the Java DyeColor ordinal (0-15).
+// Unknown or empty values default to red (14), the vanilla collar default.
+// Exported for Bedrock collar color metadata.
+func DyeColorID(color string) int { return dyeColorID(color) }
+
+func dyeColorID(color string) int {
+	id := sheepColorID(color)
+	if color == "" {
+		return 14 // red
+	}
+	return id
+}
+
+// SheepColorID maps a canonical dye color name to the Java DyeColor ordinal
+// (0-15). Unknown or empty values default to white (0).
+// Exported for Bedrock sheep color metadata.
+func SheepColorID(color string) int { return sheepColorID(color) }
+
+// sheepColorID maps a canonical dye color name to the Java DyeColor ordinal
+// (0-15). Unknown or empty values default to white (0).
+func sheepColorID(color string) int {
+	switch color {
+	case "orange":
+		return 1
+	case "magenta":
+		return 2
+	case "light_blue":
+		return 3
+	case "yellow":
+		return 4
+	case "lime":
+		return 5
+	case "pink":
+		return 6
+	case "gray":
+		return 7
+	case "light_gray":
+		return 8
+	case "cyan":
+		return 9
+	case "purple":
+		return 10
+	case "blue":
+		return 11
+	case "brown":
+		return 12
+	case "green":
+		return 13
+	case "red":
+		return 14
+	case "black":
+		return 15
+	default:
+		return 0 // white
+	}
 }
 
 func isJavaTamableAnimal(t corentity.EntityType) bool {
@@ -248,6 +366,57 @@ func BroadcastMobMetadata(e *corentity.Entity, mgr *session.Manager) {
 			_ = s.Conn.WritePacket(pkt)
 		}
 	}()
+}
+
+// BroadcastMobMetadataInDimension publishes metadata only to viewers of the
+// dimension containing the entity.
+func BroadcastMobMetadataInDimension(e *corentity.Entity, mgr *session.Manager, dimension int32) {
+	if e == nil || mgr == nil {
+		return
+	}
+	pkt := buildMobMetadata(e)
+	if pkt == nil {
+		return
+	}
+	go func() {
+		for _, current := range mgr.SnapshotAll() {
+			if current.Player != nil && current.Player.Dimension == dimension {
+				_ = current.Conn.WritePacket(pkt)
+			}
+		}
+	}()
+}
+
+// PlayerSharedFlags computes the shared entity flags byte for a player.
+// Bit 0x20 = Invisibility effect active; bit 0x40 = Glowing effect active.
+func PlayerSharedFlags(p *player.Player) byte {
+	flags := byte(0)
+	if _, ok := p.StatusEffect("minecraft:invisibility"); ok {
+		flags |= 0x20
+	}
+	if _, ok := p.StatusEffect("minecraft:glowing"); ok {
+		flags |= 0x40
+	}
+	return flags
+}
+
+// BroadcastPlayerSharedFlags sends the shared entity flags byte (metadata
+// index 0) for a player entity to all connected sessions. Call whenever fire
+// or Glowing effect state changes so other players see the updated outline.
+func BroadcastPlayerSharedFlags(entityID int32, flags byte, mgr *session.Manager) {
+	if mgr == nil {
+		return
+	}
+	pkt := protocol.NewBuilder(packetIDSetEntityData).
+		VarInt(entityID).
+		Byte(0).
+		VarInt(0).
+		Byte(flags).
+		Byte(0xff).
+		Build()
+	for _, s := range mgr.SnapshotAll() {
+		_ = s.Conn.WritePacket(pkt)
+	}
 }
 
 // BroadcastMobFireState updates the shared entity flags even when fire was

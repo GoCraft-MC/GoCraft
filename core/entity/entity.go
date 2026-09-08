@@ -94,6 +94,7 @@ const (
 	TypeEnderPearl       EntityType = "minecraft:ender_pearl"
 	TypeExperienceBottle EntityType = "minecraft:experience_bottle"
 	TypePotion           EntityType = "minecraft:potion"
+	TypeAreaEffectCloud  EntityType = "minecraft:area_effect_cloud"
 	TypeSmallFireball    EntityType = "minecraft:small_fireball"
 	TypeFireball         EntityType = "minecraft:fireball"
 	TypeEyeOfEnder       EntityType = "minecraft:eye_of_ender"
@@ -236,6 +237,33 @@ type Entity struct {
 	FallingBlockStateID int32
 	FallingBlockName    string
 
+	// DisplayName is the custom name set by a name tag. "" means no custom name.
+	// CustomNameVisible controls whether the name floats above the entity.
+	DisplayName       string
+	CustomNameVisible bool
+
+	// Sheep fields — only used when Type == TypeSheep.
+	// Sheared tracks whether the wool has been harvested. WoolColor is the
+	// canonical dye name ("white", "black", etc.); "" defaults to "white".
+	// WoolRegrowTicks counts down to wool regrowth after shearing.
+	Sheared        bool
+	WoolColor      string
+	WoolRegrowTicks int32
+
+	// CollarColor is the dye colour of a wolf or cat collar. "" defaults to
+	// "red" (vanilla default). Only meaningful when Tamed == true.
+	CollarColor string
+
+	// SnowGolem fields — only used when Type == TypeSnowGolem.
+	// HasPumpkin tracks whether the golem still has its pumpkin head. Starts true;
+	// shears interaction removes it, drops a carved pumpkin.
+	HasPumpkin bool
+
+	// Enderman fields - only used when type == TypeEnderman
+	// EndermanCarriedBlock is the canonical resource location of the block
+	// an enderman is holding, or "" when empty. Adapters resolve their own IDs.
+	EndermanCarriedBlock string
+
 	// PrimedTNT fields — only used when Type == TypePrimedTNT.
 	// FuseTicks counts down from 80 to 0; at 0 the entity explodes.
 	FuseTicks                                               int32
@@ -247,10 +275,12 @@ type Entity struct {
 	// Passenger mutations are owned by the simulation tick.
 	RiderEntityID       int32
 	SecondRiderEntityID int32
+	Storage             *player.StorageInventory // chest boat contents, shared by all viewers
 
 	// Projectile fields.
 	OwnerEntityID    int32
 	ProjectileDamage float32
+	ProjectileItem   player.ItemStack
 	EyeTarget        spatial.Vec3
 	HasEyeTarget     bool
 	EyeSurvives      bool
@@ -258,13 +288,24 @@ type Entity struct {
 	FireworkData      player.FireworkData
 	FireworkLifeTicks int32
 	FireworkLifetime  int32
+	// Area-effect cloud fields hold lingering-potion lifecycle state.
+	CloudRadius             float64
+	CloudRadiusGrowth       float64
+	CloudRadiusOnUse        float64
+	CloudDurationTicks      int64
+	CloudReapplicationDelay int64
+	CloudTargets            map[int32]int64
 
 	// Dropped-item fields. These are used only when Type == TypeItem and are
 	// encoded as the ItemEntity's tracked ItemStack at metadata index 8.
 	ItemID             string
 	ItemCount          int
 	ItemDamage         int
+	ItemEnchantments   string
 	ItemPotDecorations [4]string
+	ItemHasFireworks   bool
+	ItemFireworks      player.FireworkData
+	ItemComponents     string
 	// ExperienceAmount is the number of points carried by an experience orb.
 	// ExperienceKillerUUID records the player whose damage caused a living
 	// entity's death so the simulation can apply player-kill XP rewards.
@@ -323,6 +364,33 @@ type Entity struct {
 	DeathTicks int
 }
 
+// SetDroppedItem copies a complete stack into this entity's dropped-item
+// state. Callers should use this instead of assigning individual fields.
+func (e *Entity) SetDroppedItem(stack player.ItemStack) {
+	if e == nil {
+		return
+	}
+	e.ItemID, e.ItemCount, e.ItemDamage = stack.ItemID, stack.Count, stack.Damage
+	e.ItemEnchantments = stack.Enchantments
+	e.ItemPotDecorations = stack.PotDecorations
+	e.ItemHasFireworks, e.ItemFireworks = stack.HasFireworks, stack.Fireworks
+	e.ItemComponents = stack.Components
+}
+
+// DroppedItem reconstructs the complete canonical stack carried by an item
+// entity.
+func (e *Entity) DroppedItem() player.ItemStack {
+	if e == nil {
+		return player.ItemStack{}
+	}
+	return player.ItemStack{
+		ItemID: e.ItemID, Count: e.ItemCount, Damage: e.ItemDamage,
+		Enchantments: e.ItemEnchantments, PotDecorations: e.ItemPotDecorations,
+		HasFireworks: e.ItemHasFireworks, Fireworks: e.ItemFireworks,
+		Components: e.ItemComponents,
+	}
+}
+
 // CanTradeAsVillager reports whether a villager is old enough and has a
 // profession that may expose merchant offers. Unemployed villagers and
 // nitwits use the vanilla/Pumpkin unhappy interaction instead.
@@ -357,6 +425,12 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	if t == TypeSkeletonHorse || t == TypeZombieHorse {
 		e.Tamed = true
 	}
+	if t == TypeSnowGolem {
+		e.HasPumpkin = true
+	}
+	if IsChestBoat(t) {
+		e.Storage = player.NewStorageInventory(27)
+	}
 	if t == TypeTNTMinecart {
 		e.FuseTicks = -1
 	}
@@ -373,8 +447,22 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	return e
 }
 
+// NewPrimedTNT creates an ignited TNT entity with the vanilla fuse and initial
+// upward motion shared by block, redstone, and dispenser activation paths.
+func NewPrimedTNT(id int32, uuid [16]byte, x, y, z float64) *Entity {
+	tnt := New(id, uuid, TypePrimedTNT, x, y, z)
+	tnt.FuseTicks = 80
+	tnt.VY = 0.2
+	return tnt
+}
+
 // defaultMaxHealth returns the base max health for all entity types.
 // Unknown types default to 20 (10 hearts).
+// DefaultMaxHealth returns the base max health for a given entity type, or 0
+// when the type is unknown / not a living entity. Used by spawn-egg handlers
+// to validate the entity type before spawning.
+func DefaultMaxHealth(t EntityType) float32 { return defaultMaxHealth(t) }
+
 func defaultMaxHealth(t EntityType) float32 {
 	switch t {
 	// Passive — low health

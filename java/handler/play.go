@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -613,6 +614,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		},
 	}
 	mgr.Add(sess)
+	SyncPlayerStatusEffects(conn, p)
 	defer mgr.Remove(p.UUID)
 	defer onPlayerLeave(mgr, sess)
 	// Entities generated before this player joined are included in the full
@@ -709,6 +711,9 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if destinationWorld == nil {
 			return fmt.Errorf("dimension %d is unavailable", dimension)
 		}
+		if err := closeBoatInventory(p, conn); err != nil {
+			return err
+		}
 		target = destinationWorld.EnsureSafeArrival(target, dimension)
 		p.InvulnerableUntil = time.Now().Add(10 * time.Second)
 		p.Dimension = dimension
@@ -720,6 +725,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			return fmt.Errorf("respawn packet: %w", err)
 		}
 		_ = sendUpdateHealth(conn, p)
+		SyncPlayerStatusEffects(conn, p)
 		_ = sendPlayerAbilities(conn, p)
 		_ = sendCombatAttributes(conn, p)
 		_ = sendArmorAttributes(conn, p)
@@ -768,6 +774,11 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		default:
 		}
 		broadcastGeneratedEntities(w, mgr)
+		if p.OpenContainerKind == boatContainerKind && !validBoatInventory(p, w) {
+			if err := closeBoatInventory(p, conn); err != nil {
+				return err
+			}
+		}
 		if len(pendingRespawnChunks) > 0 {
 			batchSize := 8
 			if len(pendingRespawnChunks) < batchSize {
@@ -975,6 +986,18 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 		}
 
+		if pkt.ID == packetIDSignUpdate {
+			if err := handleSignUpdate(pkt, p, w, mgr); err != nil {
+				slog.Warn("sign update error", "player", p.Username, "err", err)
+			}
+		}
+
+		if pkt.ID == packetIDRenameItem {
+			if err := handleAnvilRename(pkt, p, conn); err != nil {
+				slog.Warn("rename item error", "player", p.Username, "err", err)
+			}
+		}
+
 		// ── Chunk streaming on boundary crossing ─────────────────────────────
 		newChunkX := posToChunk(p.Position.X)
 		newChunkZ := posToChunk(p.Position.Z)
@@ -1058,6 +1081,55 @@ func resolveBedRespawn(p *player.Player, w *coreworld.World) (spatial.Vec3, bool
 // Bedrock respawn intent without duplicating safety rules in another adapter.
 func ResolveBedRespawn(p *player.Player, w *coreworld.World) (spatial.Vec3, bool) {
 	return resolveBedRespawn(p, w)
+}
+
+// ResolveAnchorRespawn validates the player's respawn-anchor spawn point.
+// netherWorld must be the Nether world. On success it decrements the anchor's
+// charge and returns the position to spawn at (inside the Nether). On failure
+// it clears the spawn point and returns false, causing a fall-through to world
+// spawn.
+func ResolveAnchorRespawn(p *player.Player, netherWorld *coreworld.World) (spatial.Vec3, bool) {
+	if p == nil || netherWorld == nil || !p.HasSpawnPoint || !p.SpawnIsAnchor {
+		return spatial.Vec3{}, false
+	}
+	x, y, z := int(p.SpawnPoint.X), int(p.SpawnPoint.Y), int(p.SpawnPoint.Z)
+	anchor := netherWorld.GetBlock(x, y, z)
+	if anchor.ResourceLocation() != "minecraft:respawn_anchor" {
+		p.HasSpawnPoint = false
+		p.SpawnIsAnchor = false
+		return spatial.Vec3{}, false
+	}
+	charges, _ := strconv.Atoi(anchor.Properties["charges"])
+	if charges <= 0 {
+		p.HasSpawnPoint = false
+		p.SpawnIsAnchor = false
+		return spatial.Vec3{}, false
+	}
+	// Find a safe spot adjacent or above the anchor.
+	offsets := [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+	for _, off := range offsets {
+		tx, tz := x+off[0], z+off[1]
+		if safeRespawnSpace(netherWorld, tx, y, tz) {
+			decrementAnchorCharge(netherWorld, x, y, z, anchor, charges)
+			return spatial.Vec3{X: float64(tx) + 0.5, Y: float64(y), Z: float64(tz) + 0.5}, true
+		}
+	}
+	if respawnPassable(netherWorld.GetBlock(x, y+1, z)) && respawnPassable(netherWorld.GetBlock(x, y+2, z)) {
+		decrementAnchorCharge(netherWorld, x, y, z, anchor, charges)
+		return spatial.Vec3{X: float64(x) + 0.5, Y: float64(y + 1), Z: float64(z) + 0.5}, true
+	}
+	p.HasSpawnPoint = false
+	p.SpawnIsAnchor = false
+	return spatial.Vec3{}, false
+}
+
+func decrementAnchorCharge(w *coreworld.World, x, y, z int, anchor coreworld.Block, charges int) {
+	props := make(map[string]string, len(anchor.Properties))
+	for k, v := range anchor.Properties {
+		props[k] = v
+	}
+	props["charges"] = strconv.Itoa(charges - 1)
+	w.SetBlock(x, y, z, coreworld.Block{Namespace: anchor.Namespace, Name: anchor.Name, Properties: props})
 }
 
 func respawnPlayerInOverworld(p *player.Player, w *coreworld.World) {
@@ -1338,7 +1410,9 @@ func applyPlayerFallDamage(sess *session.Session, previousY float64, previousOnG
 	if !previousOnGround {
 		fallDistance := p.FallDistance
 		p.FallDistance = 0
-		damage := float32(math.Floor(fallDistance - 3))
+		// Feather Falling reduces safe fall height by 3 blocks per level.
+		safeHeight := 3.0 + float64(p.Inventory[8].EnchantmentLevel("minecraft:feather_falling"))*3.0
+		damage := float32(math.Floor(fallDistance - safeHeight))
 		if damage > 0 {
 			DamagePlayer(sess, damage, "hit the ground too hard", mgr)
 		}

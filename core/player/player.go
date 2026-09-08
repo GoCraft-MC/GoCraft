@@ -88,10 +88,15 @@ type Player struct {
 	Food                 int32
 	Saturation           float32
 	Exhaustion           float32
+	Absorption           float32
+	StatusEffects        []StatusEffect
 	ExperienceLevel      int32
 	ExperienceTotal      int32
 	ExperienceProgress   float32
 	experiencePickupTick int64
+	// PendingWorkstationXP accumulates XP from grindstone disenchanting that
+	// has not yet been broadcast; crafting.go drains and syncs it.
+	PendingWorkstationXP int32
 	tags                 map[string]struct{}
 	Dead                 bool
 	LastDamageCause      string
@@ -118,7 +123,8 @@ type Player struct {
 	DrowningTicks         int32
 	LastVibrationPosition spatial.Vec3
 	HasVibrationPosition  bool
-	LastWindChargeUse     time.Time
+	LastWindChargeUse time.Time
+	LastGoatHornUse   time.Time
 	// LastAttackerEntityID is the entity ID of the last mob that dealt damage to
 	// this player. Used by tamed wolves to select a retaliation target.
 	// Reset to 0 when the player respawns or the wolf loses the target.
@@ -141,10 +147,12 @@ type Player struct {
 	VehicleEntityID int32
 
 	// SpawnPoint is the player's individual respawn position (set by sleeping in
-	// a bed).  HasSpawnPoint is false until the player has slept in a bed, in
-	// which case the world spawn is used on death.
+	// a bed or right-clicking a charged respawn anchor in the Nether).
+	// HasSpawnPoint is false until one of these is used; world spawn is used on death.
+	// SpawnIsAnchor distinguishes a respawn-anchor spawn from a bed spawn.
 	SpawnPoint    spatial.BlockPos
 	HasSpawnPoint bool
+	SpawnIsAnchor bool // true when SpawnPoint is a respawn anchor in the Nether
 	WorldSpawn    spatial.Vec3
 	Raining       bool
 	Thundering    bool
@@ -176,6 +184,8 @@ type Player struct {
 	OpenContainerPos        spatial.BlockPos // right-half pos (slots 0-26) or sole chest
 	OpenContainerPartnerPos spatial.BlockPos // left-half pos (slots 27-53); zero if single
 	OpenContainerHasPartner bool
+	OpenContainerEntityID   int32
+	OpenContainerStorage    *StorageInventory
 	ContainerStateID        int32
 	ContainerSlots          []ItemStack
 	// WorkstationSelection is the zero-based recipe selected in a workstation
@@ -249,6 +259,16 @@ func (p *Player) ApplyDamage(amount float32, cause string) (health float32, died
 	p.healthMu.Lock()
 	defer p.healthMu.Unlock()
 	if amount <= 0 || p.Dead {
+		return p.Health, false
+	}
+	if isFireDamageCause(cause) && p.hasStatusEffectLocked("minecraft:fire_resistance") {
+		return p.Health, false
+	}
+	amount = p.resistedDamageLocked(amount, cause)
+	absorbed := min(amount, p.Absorption)
+	p.Absorption -= absorbed
+	amount -= absorbed
+	if amount <= 0 {
 		return p.Health, false
 	}
 	p.Health -= amount
