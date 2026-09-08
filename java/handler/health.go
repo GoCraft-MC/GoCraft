@@ -264,6 +264,13 @@ func damagePlayer(target *session.Session, rawDamage float32, cause string, mgr 
 	if damage <= 0 {
 		return false
 	}
+	if p.BeforeDamage != nil {
+		var allowed bool
+		damage, allowed = p.BeforeDamage(damage, cause)
+		if !allowed || damage <= 0 || math.IsNaN(float64(damage)) || math.IsInf(float64(damage), 0) {
+			return false
+		}
+	}
 	_, died := p.ApplyDamage(damage, cause)
 
 	if !bypassInvulnerability && !bypassArmor {
