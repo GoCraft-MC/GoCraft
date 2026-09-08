@@ -282,6 +282,9 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 	}
 
 	if windowID == chestContainerID && p.OpenContainerID == windowID && isJavaStorageContainer(p.OpenContainerKind) {
+		if p.OpenContainerKind == boatContainerKind && !validBoatInventory(p, w) {
+			return closeBoatInventory(p, conn)
+		}
 		handleChestClick(p, w, int(slot), button, mode)
 		return sendChestContainerContent(conn, p)
 	}
@@ -351,8 +354,12 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 		p.OpenContainerPos = spatial.BlockPos{}
 		p.OpenContainerPartnerPos = spatial.BlockPos{}
 		p.OpenContainerHasPartner = false
+		p.OpenContainerEntityID, p.OpenContainerStorage = 0, nil
 		p.ContainerSlots = nil
 		p.ContainerStateID++
+		if conn == nil {
+			return nil
+		}
 		return sendSetContainerContent(conn, p, p.ContainerStateID)
 	}
 	if windowID == craftingTableContainerID && p.OpenContainerID == windowID && p.OpenContainerKind == "minecraft:crafting_table" {

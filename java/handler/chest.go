@@ -48,7 +48,7 @@ func openChest(p *player.Player, conn *network.ClientConn, w *coreworld.World, p
 
 func isJavaStorageContainer(kind string) bool {
 	switch kind {
-	case "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
+	case boatContainerKind, "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel",
 		"minecraft:hopper", "minecraft:dispenser", "minecraft:dropper", "minecraft:crafter",
 		"minecraft:ender_chest",
 		"minecraft:shulker_box",
@@ -416,19 +416,34 @@ func sendChestContainerContent(conn *network.ClientConn, p *player.Player) error
 }
 
 func handleChestClick(p *player.Player, w *coreworld.World, slot int, button byte, mode int32) {
+	if p.OpenContainerKind == boatContainerKind {
+		p.OpenContainerStorage.Update(func(slots []player.ItemStack) []player.ItemStack {
+			p.ContainerSlots = slots
+			applyChestClick(p, slot, button, mode)
+			return p.ContainerSlots
+		})
+	} else {
+		applyChestClick(p, slot, button, mode)
+		persistStorageContents(p, w)
+	}
+	p.ContainerStateID++
+}
+
+func applyChestClick(p *player.Player, slot int, button byte, mode int32) {
 	switch mode {
 	case 0:
 		clickChestSlot(p, slot, button)
 	case 1:
 		shiftChestSlot(p, slot)
 	}
-	p.ContainerStateID++
-	persistStorageContents(p, w)
 }
 
 func persistStorageContents(p *player.Player, w *coreworld.World) {
 	if p == nil || w == nil || !isJavaStorageContainer(p.OpenContainerKind) {
 		return
+	}
+	if p.OpenContainerKind == boatContainerKind {
+		return // each click updates entity storage directly
 	}
 	if p.OpenContainerKind == "minecraft:chest" || p.OpenContainerKind == "minecraft:trapped_chest" {
 		persistChestContents(p, w)

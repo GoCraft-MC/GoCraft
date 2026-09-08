@@ -261,6 +261,7 @@ func TestProtocol769PlayPacketIDs(t *testing.T) {
 		{"clientbound", "minecraft:acknowledge_block_change", 0x05},
 		{"clientbound", "minecraft:block_update", 0x09},
 		{"clientbound", "minecraft:commands", 0x11},
+		{"clientbound", "minecraft:container_close", 0x12},
 		{"clientbound", "minecraft:set_container_content", 0x13},
 		{"clientbound", "minecraft:disconnect", 0x1d},
 		{"clientbound", "minecraft:forget_level_chunk", 0x22},
