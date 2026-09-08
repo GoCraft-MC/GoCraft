@@ -465,6 +465,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// Installed once s exists, and before any listener opens: the registry is
 	// empty until plugins load, so an early line simply finds nothing there.
 	cmds.SetPluginCommands(s.runPluginCommand)
+	cmds.SetEventBus(s.plugins)
 	cmds.SetCommandRegistry(pluginRegistry.Commands())
 
 	s.registerSpawnCommands()
@@ -1792,10 +1793,14 @@ func (s *Server) applyChat(i intent.ChatIntent) {
 	// §x hex colors and gradients; Bedrock only supports basic §-codes.
 	// Use the Java-only broadcast so the Bedrock observer is not triggered
 	// with the Java-formatted (gradient) string.
-	javaMsg := s.cmds.FormatChat(i.DisplayName, i.Message)
+	p := s.game.GetPlayer(i.PlayerUUID)
+	if p == nil || !s.cmds.FilterPlayerChat(p, &i.Message) {
+		return
+	}
+	javaMsg := s.cmds.FormatChat(p.Username, i.Message)
 	handler.BroadcastSystemMessageJavaOnly(s.sessions, javaMsg)
 	if s.bedrockListener != nil {
-		bedrockMsg := s.cmds.FormatBedrockChat(i.DisplayName, i.Message)
+		bedrockMsg := s.cmds.FormatBedrockChat(p.Username, i.Message)
 		s.bedrockListener.BroadcastMessage(bedrockMsg)
 	}
 }
