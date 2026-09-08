@@ -416,6 +416,7 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	ctx.FindPlayer = findPlayer
 	ctx.ListPlayers = listPlayers
 	ctx.TeleportPlayer = teleportPlayer
+	ctx.TeleportTo = d.eventTeleport(ctx.Player, ctx.TeleportTo)
 	ctx.DisconnectPlayer = disconnectPlayer
 	ctx.MaxPlayers = maxPlayers
 	ctx.AvailableCommands = d.VisibleCommands(ctx.Player)
