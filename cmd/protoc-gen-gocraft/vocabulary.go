@@ -32,6 +32,21 @@ type binding struct {
 	// JavaDecode reads it out of the positional payload. %d is the index.
 	JavaDecode string
 
+	// GoBlank is one value of this shape carrying nothing, as a Go expression.
+	//
+	// It is what the host sends in a warm dispatch, so the first real event of a
+	// type meets no cold code on either side of the socket: the marshal here,
+	// the protobuf parse over there, and the conversion back into a payload a
+	// handler could read. Measured, that path costs about 2 ms once per process
+	// and lands on whichever event carries values first — which is why the blank
+	// starts here rather than being built by the runtime that receives it.
+	//
+	// Shape and never content: an empty name, a zero, a player who is nobody.
+	// The shape has to be right, though — every decoder on the far side refuses
+	// a kind it does not expect and falls back, so a blank of the wrong shape
+	// warms the refusal and leaves the real branch cold.
+	GoBlank string
+
 	// SDKType is what the plugin-side Go struct holds, e.g. BlockPos.
 	SDKType string
 
@@ -46,13 +61,14 @@ type binding struct {
 
 var vocabulary = map[string]binding{
 	"PlayerRef": {
-		SDKType:    "Player",
-		SDKDecode:  "playerFrom({v})",
+		SDKType:    "*PlayerRef",
+		SDKDecode:  "playerFrom({v}, sink)",
 		GoImport:   `"GoCraft/core/player"`,
 		GoType:     "*player.Player",
 		GoEncode:   "playerReference(%s)",
 		JavaType:   "PlayerRef",
-		JavaDecode: "PlayerRef.of(field(%d))",
+		JavaDecode: "PlayerRef.of(field(%d), sink())",
+		GoBlank:    `abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String(""))`,
 	},
 	"BlockPos": {
 		SDKType:    "BlockPos",
@@ -62,6 +78,7 @@ var vocabulary = map[string]binding{
 		GoEncode:   "positionValue(%s)",
 		JavaType:   "BlockPos",
 		JavaDecode: "BlockPos.of(field(%d))",
+		GoBlank:    `abi.List(abi.Int64(0), abi.Int64(0), abi.Int64(0))`,
 	},
 	"Block": {
 		SDKType:    "Block",
@@ -71,6 +88,7 @@ var vocabulary = map[string]binding{
 		GoEncode:   "blockValue(%s)",
 		JavaType:   "Block",
 		JavaDecode: "Block.of(field(%d))",
+		GoBlank:    `abi.List(abi.String(""), abi.List())`,
 	},
 	"string": {
 		SDKType:    "string",
@@ -79,30 +97,35 @@ var vocabulary = map[string]binding{
 		GoEncode:   "abi.String(%s)",
 		JavaType:   "String",
 		JavaDecode: "text(%d)",
+		GoBlank:    `abi.String("")`,
 	},
 	"bool": {
 		GoType:     "bool",
 		GoEncode:   "abi.Bool(%s)",
 		JavaType:   "boolean",
 		JavaDecode: "flag(%d)",
+		GoBlank:    `abi.Bool(false)`,
 	},
 	"int64": {
 		GoType:     "int64",
 		GoEncode:   "abi.Int64(%s)",
 		JavaType:   "long",
 		JavaDecode: "number(%d)",
+		GoBlank:    `abi.Int64(0)`,
 	},
 	"double": {
 		GoType:     "float64",
 		GoEncode:   "abi.Double(%s)",
 		JavaType:   "double",
 		JavaDecode: "decimal(%d)",
+		GoBlank:    `abi.Double(0)`,
 	},
 	"bytes": {
 		GoType:     "[]byte",
 		GoEncode:   "abi.Bytes(%s)",
 		JavaType:   "byte[]",
 		JavaDecode: "bytes(%d)",
+		GoBlank:    `abi.Bytes(nil)`,
 	},
 }
 
@@ -112,6 +135,14 @@ var vocabulary = map[string]binding{
 // if the answer had to be fetched while the tick waits.
 const permissionKind = "map<string,bool>"
 
+// permissionsBlank is that map's placeholder for a warm dispatch. One pair
+// rather than none, so the loop that reads them runs a round instead of being
+// skipped.
+//
+// It has no vocabulary row because the map has no row: it is never a parameter
+// and never an accessor, so there is nothing else about it for a row to say.
+const permissionsBlank = `abi.List(abi.List(abi.String(""), abi.Bool(false)))`
+
 func bindingFor(kind string) (binding, error) {
 	if kind == permissionKind {
 		return binding{}, fmt.Errorf("the permission map is injected and has no binding")
@@ -120,46 +151,6 @@ func bindingFor(kind string) (binding, error) {
 	if !ok {
 		return binding{}, fmt.Errorf("no vocabulary binding for %q; add one to "+
 			"cmd/protoc-gen-gocraft/vocabulary.go and a hand-written type on each side", kind)
-	}
-	return found, nil
-}
-
-// Effects a handler may request. Each becomes a method on the generated event
-// class that appends to the verdict, so a handler that sends three messages
-// still costs one round trip.
-type effect struct {
-	JavaMethod string
-	JavaParams string
-	// HostCall is the type the host dispatches on when it drains the queue.
-	HostCall string
-	// Values are the abi values the effect carries, as Java expressions. %d is
-	// the index of the event's PlayerRef when NeedsActor is set.
-	Values string
-	// NeedsActor marks an effect that has to say who it is for. Without it the
-	// host drains a "send this message" with no recipient and can do nothing
-	// with it — which is worse than the effect not existing, because the plugin
-	// looks like it worked.
-	NeedsActor bool
-}
-
-var effects = map[string]effect{
-	"message": {
-		JavaMethod: "sendMessage",
-		JavaParams: "String message",
-		HostCall:   "chat.message",
-		// The whole PlayerRef, not just the uuid: the host already knows how to
-		// read one, and passing the same vocabulary value the event carried
-		// means the effect and the event cannot disagree about who acted.
-		Values:     "field(%d), Values.text(message)",
-		NeedsActor: true,
-	},
-}
-
-func effectFor(name string) (effect, error) {
-	found, ok := effects[name]
-	if !ok {
-		return effect{}, fmt.Errorf("no binding for effect %q; add one to "+
-			"cmd/protoc-gen-gocraft/vocabulary.go", name)
 	}
 	return found, nil
 }

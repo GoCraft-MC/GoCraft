@@ -44,6 +44,11 @@ func generateGo(plugin *protogen.Plugin, events []event) error {
 	file.P(")")
 	file.P()
 
+	nativeEventPredicate(file, events)
+	if err := blankPayloads(file, events); err != nil {
+		return err
+	}
+
 	for _, declared := range events {
 		if err := emitter(file, declared); err != nil {
 			return err
@@ -51,6 +56,102 @@ func generateGo(plugin *protogen.Plugin, events []event) error {
 	}
 
 	return nil
+}
+
+// blankPayloads emits a payload of each native event's own shape, carrying
+// nothing.
+//
+// It is what a warm dispatch sends. The first event to carry values costs about
+// two milliseconds once per process — the marshal here, the protobuf parse in
+// the runtime, the conversion back into something a handler could read — and
+// that lands on whichever real event happens to be first, out of a budget
+// shared by every subscriber. Sent from here instead, before READY, where the
+// host is waiting anyway and no budget is running.
+//
+// Built on this side rather than by the runtime receiving it, and that is the
+// whole point: a blank the runtime made for itself never crosses the socket, so
+// the path that carries values stays exactly as cold as it was. The first
+// attempt at this did precisely that and moved nothing.
+//
+// Generated, because the shape is the schema's. A list written by hand beside
+// the vocabulary would drift the day a field is added, and a blank of the wrong
+// shape is worse than none: every decoder on the far side refuses a kind it
+// does not expect and falls back, so it would warm the refusal.
+func blankPayloads(file *protogen.GeneratedFile, events []event) error {
+	file.P("// BlankEvent is a payload of one native event's shape, carrying nothing.")
+	file.P("//")
+	file.P("// Shape and never content — an empty name, a zero, a player who is nobody")
+	file.P("// — because nothing built from this is meant to be read as data. It is")
+	file.P("// sent in a warm dispatch and reaches no handler.")
+	file.P("//")
+	file.P("// Nil for a type this host does not emit, which is the honest answer for a")
+	file.P("// plugin-defined event: its shape is in the manifest that declared it.")
+	file.P("func BlankEvent(eventType string) []abi.Value {")
+	file.P("	switch eventType {")
+	for _, declared := range events {
+		file.P(fmt.Sprintf("	case %s:", declared.ConstName()))
+		file.P("		return []abi.Value{")
+		for _, f := range declared.Fields {
+			if f.Injected {
+				file.P("			" + permissionsBlank + ",")
+				continue
+			}
+			bound, err := bindingFor(f.Kind)
+			if err != nil {
+				return fmt.Errorf("%s.%s: %w", declared.Type, f.Name, err)
+			}
+			file.P("			" + bound.GoBlank + ",")
+		}
+		file.P("		}")
+	}
+	file.P("	}")
+	file.P("	return nil")
+	file.P("}")
+	file.P()
+	return nil
+}
+
+// nativeEventPredicate emits the closed set of events the host itself emits.
+//
+// Generated rather than written beside the vocabulary, because it is only worth
+// anything if it is exhaustive: a hand-kept list that misses the next native
+// event refuses a subscription that would have worked, which is worse than not
+// checking at all. Both forms come out of the same slice here, so the predicate
+// and the listing cannot disagree either.
+func nativeEventPredicate(file *protogen.GeneratedFile, events []event) {
+	names := make([]string, 0, len(events))
+	for _, declared := range events {
+		names = append(names, declared.ConstName())
+	}
+	joined := strings.Join(names, ", ")
+
+	file.P("// IsNativeEvent reports whether the host itself emits this event.")
+	file.P("//")
+	file.P("// Anything else a manifest names has to be a plugin-defined type. If no")
+	file.P("// scanned manifest provides one, the subscription is a typo that would")
+	file.P("// otherwise load cleanly and never fire.")
+	file.P("func IsNativeEvent(eventType string) bool {")
+	if len(names) == 0 {
+		file.P("	return false")
+	} else {
+		file.P("	switch eventType {")
+		file.P("	case " + joined + ":")
+		file.P("		return true")
+		file.P("	}")
+		file.P("	return false")
+	}
+	file.P("}")
+	file.P()
+
+	file.P("// NativeEvents lists them, in schema order, for a message that has to tell")
+	file.P("// someone what they could have subscribed to.")
+	file.P("//")
+	file.P("// A fresh slice every call: the host's vocabulary is fixed at build time and")
+	file.P("// no caller may extend it.")
+	file.P("func NativeEvents() []string {")
+	file.P("	return []string{" + joined + "}")
+	file.P("}")
+	file.P()
 }
 
 // imports lists the vocabulary packages this event set needs, sorted and

@@ -19,6 +19,55 @@ const (
 	EventPlayerJoin = "player.join"
 )
 
+// IsNativeEvent reports whether the host itself emits this event.
+//
+// Anything else a manifest names has to be a plugin-defined type. If no
+// scanned manifest provides one, the subscription is a typo that would
+// otherwise load cleanly and never fire.
+func IsNativeEvent(eventType string) bool {
+	switch eventType {
+	case EventBlockBreak, EventPlayerJoin:
+		return true
+	}
+	return false
+}
+
+// NativeEvents lists them, in schema order, for a message that has to tell
+// someone what they could have subscribed to.
+//
+// A fresh slice every call: the host's vocabulary is fixed at build time and
+// no caller may extend it.
+func NativeEvents() []string {
+	return []string{EventBlockBreak, EventPlayerJoin}
+}
+
+// BlankEvent is a payload of one native event's shape, carrying nothing.
+//
+// Shape and never content — an empty name, a zero, a player who is nobody
+// — because nothing built from this is meant to be read as data. It is
+// sent in a warm dispatch and reaches no handler.
+//
+// Nil for a type this host does not emit, which is the honest answer for a
+// plugin-defined event: its shape is in the manifest that declared it.
+func BlankEvent(eventType string) []abi.Value {
+	switch eventType {
+	case EventBlockBreak:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.List(abi.Int64(0), abi.Int64(0), abi.Int64(0)),
+			abi.List(abi.String(""), abi.List()),
+			abi.String(""),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerJoin:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	}
+	return nil
+}
+
 // EmitBlockBreak publishes block.break to every subscriber, in the same shape whatever
 // edition the player is on and whatever runtime the plugin uses.
 //

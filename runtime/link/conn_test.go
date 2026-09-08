@@ -148,6 +148,75 @@ func TestConnWakesWaitersWhenThePeerDies(t *testing.T) {
 	}
 }
 
+// A dispatch that outran the §06 budget is abandoned while the plugin is still
+// working, so its verdict arrives with nobody waiting on it. It has to be
+// dropped: the supervisor reads an envelope that answers no request as a
+// protocol violation and kills the runtime for it, which would make every
+// budget overrun cost a respawn — and the first dispatch into a cold runtime
+// overruns it once per restart.
+func TestConnDropsAReplyItsCallerGaveUpOn(t *testing.T) {
+	unsolicited := make(chan *wire.Envelope, 1)
+	conn, peer := testPair(t, func(envelope *wire.Envelope) { unsolicited <- envelope })
+
+	gaveUp := make(chan struct{})
+	go func() {
+		request, err := peer.Receive()
+		if err != nil {
+			return
+		}
+		<-gaveUp
+		peer.Send(&wire.Envelope{
+			Seq:  request.GetSeq(),
+			Body: &wire.Envelope_Loaded{Loaded: &wire.Loaded{PluginId: "fr.oreo.hello"}},
+		})
+		// A marker behind it on the same stream. Ordering is guaranteed, so
+		// what the handler sees first says whether the late reply was dropped
+		// — no sleep deciding it.
+		peer.Send(&wire.Envelope{
+			Body: &wire.Envelope_Fail{Fail: &wire.Fail{Reason: "marker"}},
+		})
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := conn.Request(ctx, loadEnvelope("fr.oreo.hello")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Request() error = %v, want a deadline", err)
+	}
+	close(gaveUp)
+
+	select {
+	case envelope := <-unsolicited:
+		if got := envelope.GetFail().GetReason(); got != "marker" {
+			t.Fatalf("the handler was given a %T answering a request nobody waits for",
+				envelope.GetBody())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the handler was never called")
+	}
+}
+
+// The other half of the same rule. An odd sequence number this side never
+// issued is not a late answer, it is a runtime numbering an exchange out of the
+// host's own space — still a violation, and still the handler's.
+func TestConnRoutesAnOddSequenceItNeverIssuedToTheHandler(t *testing.T) {
+	unsolicited := make(chan *wire.Envelope, 1)
+	_, peer := testPair(t, func(envelope *wire.Envelope) { unsolicited <- envelope })
+
+	go peer.Send(&wire.Envelope{
+		Seq:  7,
+		Body: &wire.Envelope_Fail{Fail: &wire.Fail{PluginId: "fr.oreo.hello", Reason: "invented"}},
+	})
+
+	select {
+	case envelope := <-unsolicited:
+		if got := envelope.GetFail().GetReason(); got != "invented" {
+			t.Fatalf("handler received %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the handler was never called")
+	}
+}
+
 // Sequence numbers start at 1, so an envelope arriving with zero answers
 // nothing and belongs to the handler.
 func TestConnRoutesUnsolicitedEnvelopesToTheHandler(t *testing.T) {
@@ -224,5 +293,75 @@ func TestConnRejectsANilEnvelope(t *testing.T) {
 	conn, _ := testPair(t, nil)
 	if _, err := conn.Request(t.Context(), nil); err == nil {
 		t.Fatal("Request() accepted nil")
+	}
+}
+
+// The host and a runtime both number the exchanges they start, from their own
+// counters. Splitting the space by parity is what keeps the two apart: without
+// it, host request 4 and an emission numbered 4 are the same key in one table.
+func TestConnNumbersItsOwnRequestsOdd(t *testing.T) {
+	conn, peer := testPair(t, nil)
+	seen := make(chan uint64, 3)
+	go func() {
+		for {
+			request, err := peer.Receive()
+			if err != nil {
+				return
+			}
+			seen <- request.GetSeq()
+			peer.Send(&wire.Envelope{
+				Seq:  request.GetSeq(),
+				Body: &wire.Envelope_Loaded{Loaded: &wire.Loaded{PluginId: "fr.oreo.hello"}},
+			})
+		}
+	}()
+
+	for range 3 {
+		if _, err := conn.Request(t.Context(), loadEnvelope("fr.oreo.hello")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 3 {
+		select {
+		case seq := <-seen:
+			if seq%2 == 0 {
+				t.Fatalf("Request() used seq %d, want an odd number", seq)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the peer never saw the request")
+		}
+	}
+}
+
+// An even sequence number belongs to the runtime's own numbering, so it must
+// never be looked up in the pending table — even when a caller happens to be
+// waiting on that number.
+func TestConnNeverAnswersAWaiterWithAnEvenSequence(t *testing.T) {
+	unsolicited := make(chan *wire.Envelope, 1)
+	conn, peer := testPair(t, func(envelope *wire.Envelope) { unsolicited <- envelope })
+	go func() {
+		request, err := peer.Receive()
+		if err != nil {
+			return
+		}
+		// Answer on the neighbouring even number rather than the one asked.
+		peer.Send(&wire.Envelope{
+			Seq:  request.GetSeq() + 1,
+			Body: &wire.Envelope_Loaded{Loaded: &wire.Loaded{PluginId: "impostor"}},
+		})
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := conn.Request(ctx, loadEnvelope("fr.oreo.hello")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Request() = %v, want it to keep waiting rather than take an even reply", err)
+	}
+	select {
+	case envelope := <-unsolicited:
+		if got := envelope.GetLoaded().GetPluginId(); got != "impostor" {
+			t.Fatalf("handler saw %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the even envelope reached neither the waiter nor the handler")
 	}
 }

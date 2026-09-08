@@ -34,6 +34,20 @@ const RuntimeName = "jvm"
 // refused during the handshake rather than negotiated with.
 const abiVersion = 1
 
+// warmRounds is how many times each subscription's path is run before READY.
+//
+// Chosen against HotSpot and then measured, which agreed: a method is compiled
+// once it has been entered a couple of hundred times, and below that a warm-up
+// only loads classes — the smaller half of the cost. Probed on the reference
+// plugin, the first dispatch of block.break went 2.5 ms with no rounds, 1.5 ms
+// with a hundred, and no further with a thousand or two thousand. The knee is
+// where the theory said it would be.
+//
+// Two hundred, then: past the knee for margin, since each round is a real round
+// trip and the boot pays for every one — two thousand cost six hundred
+// milliseconds of startup and bought nothing.
+const warmRounds = 200
+
 // Config is everything the Java runtime needs that is not derivable.
 type Config struct {
 	// JavaPath forces a specific java binary and outranks JAVA_HOME and PATH.
@@ -65,6 +79,14 @@ type Config struct {
 
 	// Respawn decides what happens when the JVM dies while players are online.
 	Respawn Respawn
+
+	// OnEmit dispatches a plugin-defined event one of this runtime's plugins
+	// published.
+	//
+	// The host supplies it rather than this package building one: dispatching
+	// means reaching the registry, and runtime/link must never see core/plugin.
+	// The closure is built where both are already in scope — the server.
+	OnEmit func(ctx context.Context, emission abi.Emission) abi.EmissionResult
 
 	// OnRespawn is called after the runtime came back and its plugins were
 	// reloaded, with the ids that made it.
@@ -135,6 +157,10 @@ type loadedBundle struct {
 	data        string
 	commandTree string
 	events      []string
+	// eventTypes is replayed with the rest. A plugin that came back without its
+	// id table would load, subscribe, and then fail to emit anything — the one
+	// failure mode a respawn is supposed to hide.
+	eventTypes []abi.EventBinding
 }
 
 // New prepares the runtime. Nothing is spawned and nothing is downloaded until
@@ -185,15 +211,7 @@ func (r *Runtime) Start(ctx context.Context, host plugin.Host) error {
 	r.host = host
 	r.mu.Unlock()
 
-	supervisor := link.NewSupervisor(link.Config{
-		Runtime:      RuntimeName,
-		Directory:    r.socketDirectory(),
-		ABI:          abiVersion,
-		TickRate:     r.config.TickRate,
-		EventBudget:  r.config.EventBudget,
-		StartTimeout: r.config.StartTimeout,
-		Spawn:        r.spawn(java, jar),
-	}, r.config.Liveness)
+	supervisor := link.NewSupervisor(r.linkConfig(java, jar), r.config.Liveness)
 
 	if err := supervisor.Start(ctx); err != nil {
 		return err
@@ -235,6 +253,24 @@ func (r *Runtime) spawn(java, jar string) link.Spawn {
 	}
 }
 
+// linkConfig is the transport configuration for one JVM process.
+//
+// One function rather than a literal at each call site: a respawned runtime is
+// built here too, and a field added to only one of the two would give the
+// replacement a quietly different connection from the one it replaced.
+func (r *Runtime) linkConfig(java, jar string) link.Config {
+	return link.Config{
+		Runtime:      RuntimeName,
+		Directory:    r.socketDirectory(),
+		ABI:          abiVersion,
+		TickRate:     r.config.TickRate,
+		EventBudget:  r.config.EventBudget,
+		StartTimeout: r.config.StartTimeout,
+		Spawn:        r.spawn(java, jar),
+		OnEmit:       r.config.OnEmit,
+	}
+}
+
 func (r *Runtime) socketDirectory() string {
 	if r.config.SocketDirectory != "" {
 		return r.config.SocketDirectory
@@ -260,6 +296,7 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 		DataDirectory: bundle.DataDirectory,
 		CommandTree:   bundle.Manifest.CommandTree,
 		Events:        events,
+		EventTypes:    bundle.EventTypes,
 	}); err != nil {
 		return nil, err
 	}
@@ -267,6 +304,7 @@ func (r *Runtime) Load(ctx context.Context, bundle plugin.Bundle) (plugin.Instan
 		id: bundle.Manifest.ID, path: bundle.Path,
 		entry: bundle.Manifest.Entry, data: bundle.DataDirectory,
 		commandTree: bundle.Manifest.CommandTree, events: events,
+		eventTypes: bundle.EventTypes,
 	})
 	return &Instance{runtime: r, manifest: bundle.Manifest}, nil
 }
@@ -366,6 +404,32 @@ func (i *Instance) Dispatch(ctx context.Context, event *abi.Event) (abi.Verdict,
 		return abi.Verdict{}, err
 	}
 	return supervisor.Dispatch(ctx, i.manifest.ID, event)
+}
+
+// Warm runs one subscription's dispatch path in the JVM without its handlers.
+//
+// Repeated rather than done once, and that is the whole difficulty of warming a
+// JVM: a single pass loads the classes and links the call sites, but the code
+// stays interpreted until HotSpot has been through it a few hundred times.
+// Measured on this path, one pass left the first real event at 7.9 ms of a 2 ms
+// budget; crossing the compilation threshold is what actually moves it.
+//
+// The rounds are the host's, not a constant buried in the runtime, because the
+// host is what pays for them: they run between LOAD and READY while it waits.
+func (i *Instance) Warm(ctx context.Context, event *abi.Event) error {
+	supervisor, err := i.runtime.running()
+	if err != nil {
+		return err
+	}
+	for round := 0; round < warmRounds; round++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := supervisor.Warm(ctx, i.manifest.ID, event); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // InvokeCommand runs one of the plugin's command executors in the JVM.
