@@ -1354,8 +1354,13 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 	}
 	// Track if we are placing into water so we can waterlog the block.
 	placingInWater := existing.ResourceLocation() == "minecraft:water"
-	if !existing.IsAir() && existing.ResourceLocation() != "minecraft:water" && existing.ResourceLocation() != "minecraft:lava" {
-		breakLinkedPlantHalf(px, py, pz, existing, w, mgr)
+	beforePlacement := javaPlacementCheck(p, w, mgr, conn, seq, buses...)
+	place := func(x, y, z int, placed coreworld.Block) bool {
+		if !beforePlacement(x, y, z, placed) {
+			return false
+		}
+		applyBlockChange(x, y, z, placed, w, mgr)
+		return true
 	}
 
 	block := javaworld.ItemIDToBlock(held.ItemID)
