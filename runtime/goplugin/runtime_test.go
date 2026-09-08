@@ -23,7 +23,7 @@ const commandTreeEntry = "commands.pb"
 
 // helperCommandTree declares the one command the helper plugin registers. The
 // executor id lives here and nowhere else: the plugin binds to the path.
-func helperCommandTree(t *testing.T) []byte {
+func helperCommandTree(t testing.TB) []byte {
 	t.Helper()
 	encoded, err := proto.Marshal(&wire.CommandTree{Version: 1, Children: []*wire.CommandNode{{
 		Kind: wire.CommandNodeKind_COMMAND_NODE_KIND_LITERAL, Name: "give",
