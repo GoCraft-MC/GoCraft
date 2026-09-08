@@ -184,6 +184,8 @@ type Player struct {
 	OpenContainerPos        spatial.BlockPos // right-half pos (slots 0-26) or sole chest
 	OpenContainerPartnerPos spatial.BlockPos // left-half pos (slots 27-53); zero if single
 	OpenContainerHasPartner bool
+	OpenContainerEntityID   int32
+	OpenContainerStorage    *StorageInventory
 	ContainerStateID        int32
 	ContainerSlots          []ItemStack
 	// WorkstationSelection is the zero-based recipe selected in a workstation

@@ -275,6 +275,7 @@ type Entity struct {
 	// Passenger mutations are owned by the simulation tick.
 	RiderEntityID       int32
 	SecondRiderEntityID int32
+	Storage             *player.StorageInventory // chest boat contents, shared by all viewers
 
 	// Projectile fields.
 	OwnerEntityID    int32
@@ -426,6 +427,9 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	}
 	if t == TypeSnowGolem {
 		e.HasPumpkin = true
+	}
+	if IsChestBoat(t) {
+		e.Storage = player.NewStorageInventory(27)
 	}
 	if t == TypeTNTMinecart {
 		e.FuseTicks = -1

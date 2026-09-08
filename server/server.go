@@ -3334,6 +3334,10 @@ func (s *Server) tickEntities() {
 // drops are intentionally left for the enchantment/loot-table layer.
 func (s *Server) spawnMobDrops(e *corentity.Entity) []*corentity.Entity {
 	stacks := mobDrops(e.Type, s.spawnRNG)
+	if corentity.IsBoat(e.Type) {
+		stacks = append(stacks, player.ItemStack{ItemID: string(e.Type), Count: 1})
+	}
+	stacks = append(stacks, e.Storage.Drain()...)
 	// A killed enderman drops the block it was carrying.
 	if e.EndermanCarriedBlock != "" {
 		stacks = append(stacks, player.ItemStack{ItemID: e.EndermanCarriedBlock, Count: 1})
@@ -3487,6 +3491,7 @@ func (s *Server) dropPlayerInventory(p *player.Player) {
 	p.CraftingResult = player.ItemStack{}
 	p.ContainerSlots = nil
 	p.OpenContainerKind = ""
+	p.OpenContainerEntityID, p.OpenContainerStorage = 0, nil
 
 	for index, stack := range stacks {
 		if dropped := s.newDroppedItemForPlayer(p, stack, p.Position, index); dropped != nil {
