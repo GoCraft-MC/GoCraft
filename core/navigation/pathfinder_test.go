@@ -68,6 +68,46 @@ func TestFindPathDoesNotLoadMissingChunks(t *testing.T) {
 	}
 }
 
+func TestFindPathOpeningDoorsUsesClosedWoodenDoor(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+	stone := coreworld.Block{Namespace: "minecraft", Name: "stone"}
+	for z := 2; z <= 14; z++ {
+		world.SetBlock(7, 64, z, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+		world.SetBlock(7, 65, z, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+		for _, x := range []int{1, 14} {
+			world.SetBlock(x, 64, z, stone)
+			world.SetBlock(x, 65, z, stone)
+		}
+	}
+	for x := 1; x <= 14; x++ {
+		for _, z := range []int{2, 14} {
+			world.SetBlock(x, 64, z, stone)
+			world.SetBlock(x, 65, z, stone)
+		}
+	}
+	door := coreworld.Block{Namespace: "minecraft", Name: "oak_door", Properties: map[string]string{"open": "false"}}
+	world.SetBlock(7, 64, 8, door)
+	world.SetBlock(7, 65, 8, door)
+	start := spatial.Vec3{X: 3.5, Y: 64, Z: 8.5}
+	goal := spatial.Vec3{X: 11.5, Y: 64, Z: 8.5}
+	if path, reached := FindPath(world, start, goal, 2048); reached {
+		t.Fatalf("ordinary path unexpectedly crossed a closed door: %+v", path)
+	}
+	path, reached := FindPathOpeningDoors(world, start, goal, 2048)
+	if !reached {
+		t.Fatalf("door-opening path did not reach goal: %+v", path)
+	}
+	foundDoor := false
+	for _, waypoint := range path {
+		foundDoor = foundDoor || waypoint.X == 7.5 && waypoint.Z == 8.5
+	}
+	if !foundDoor {
+		t.Fatalf("door-opening path omitted door node: %+v", path)
+	}
+}
+
 func BenchmarkFindPath(b *testing.B) {
 	for _, unreachable := range []bool{false, true} {
 		name := "reachable"
