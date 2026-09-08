@@ -62,7 +62,67 @@ func IsNativeEvent(eventType string) bool {
 // A fresh slice every call: the host's vocabulary is fixed at build time and
 // no caller may extend it.
 func NativeEvents() []string {
-	return []string{EventBlockBreak, EventPlayerJoin}
+	return []string{EventBlockBreak, EventPlayerJoin, EventBlockPlace, EventPlayerQuit, EventPlayerChat, EventPlayerCommand, EventPlayerDamage, EventPlayerDeath, EventPlayerRespawn, EventPlayerTeleport, EventPlayerInteract, EventInventoryClick, EventItemUse, EventEntityDamage}
+}
+
+func nativeCancellable(eventType string) bool {
+	switch eventType {
+	case EventBlockBreak:
+		return true
+	case EventBlockPlace:
+		return true
+	case EventPlayerChat:
+		return true
+	case EventPlayerCommand:
+		return true
+	case EventPlayerDamage:
+		return true
+	case EventPlayerTeleport:
+		return true
+	case EventPlayerInteract:
+		return true
+	case EventInventoryClick:
+		return true
+	case EventItemUse:
+		return true
+	case EventEntityDamage:
+		return true
+	}
+	return false
+}
+func nativeMutationAllowed(eventType string, mutation abi.Mutation) bool {
+	if len(mutation.Path) != 1 {
+		return false
+	}
+	switch eventType {
+	case EventPlayerChat:
+		if mutation.Path[0] == 1 {
+			return mutation.Value.Kind == abi.ValueString
+		}
+	case EventPlayerCommand:
+		if mutation.Path[0] == 1 {
+			return mutation.Value.Kind == abi.ValueString
+		}
+	case EventPlayerDamage:
+		if mutation.Path[0] == 1 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+	case EventPlayerTeleport:
+		if mutation.Path[0] == 4 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+		if mutation.Path[0] == 5 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+		if mutation.Path[0] == 6 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+	case EventEntityDamage:
+		if mutation.Path[0] == 2 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+	}
+	return false
 }
 
 // BlankEvent is a payload of one native event's shape, carrying nothing.
