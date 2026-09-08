@@ -106,6 +106,11 @@ type Player struct {
 	// dropping the survival inventory.
 	OnDeath func(*Player)
 
+	// BeforeDamage is installed before publishing the player. It runs outside
+	// healthMu, after armour reduction but before resistance and absorption.
+	// False prevents the hit, including durability loss and hurt animations.
+	BeforeDamage func(float32, string) (float32, bool)
+
 	// FallDistance accumulates downward travel while airborne. Sprinting is
 	// tracked from the client command packet and is used by legacy knockback.
 	FallDistance   float64
@@ -123,8 +128,8 @@ type Player struct {
 	DrowningTicks         int32
 	LastVibrationPosition spatial.Vec3
 	HasVibrationPosition  bool
-	LastWindChargeUse time.Time
-	LastGoatHornUse   time.Time
+	LastWindChargeUse     time.Time
+	LastGoatHornUse       time.Time
 	// LastAttackerEntityID is the entity ID of the last mob that dealt damage to
 	// this player. Used by tamed wolves to select a retaliation target.
 	// Reset to 0 when the player respawns or the wolf loses the target.
