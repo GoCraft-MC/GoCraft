@@ -87,7 +87,7 @@ func handleBlockPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.Worl
 	case packetIDPlayerAction:
 		return handlePlayerActionWithContext(pkt, p, w, mgr, conn, nextEntityID, plugins)
 	case packetIDUseItemOn:
-		return handleUseItemOnWithIntents(pkt, p, w, mgr, conn, nextEntityID, intents)
+		return handleUseItemOnWithIntents(pkt, p, w, mgr, conn, nextEntityID, intents, plugins)
 	}
 	return nil
 }
