@@ -339,6 +339,19 @@ func (re *RedstoneEngine) analogOutputAt(x, y, z int) int {
 	case "minecraft:chiseled_bookshelf":
 		be := re.world.GetBlockEntity(x, y, z)
 		return int(be.LastBookshelfSlot) // 0 = no interaction, 1-6 = last slot
+	case "minecraft:lectern":
+		if block.Properties["has_book"] != "true" {
+			return 0
+		}
+		be := re.world.GetBlockEntity(x, y, z)
+		if LecternBook(be) == "" {
+			return 0
+		}
+		if be.LecternPageCount <= 1 {
+			return 1
+		}
+		page := min(max(be.LecternPage, 0), be.LecternPageCount-1)
+		return 1 + page*14/(be.LecternPageCount-1)
 	case "minecraft:water_cauldron", "minecraft:powder_snow_cauldron":
 		return atoi(block.Properties["level"]) // 0–3
 	case "minecraft:lava_cauldron":
