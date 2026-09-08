@@ -17,6 +17,30 @@ const (
 	EventBlockBreak = "block.break"
 	// Observational, never cancelled. Introduced in ABI 1.
 	EventPlayerJoin = "player.join"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventBlockPlace = "block.place"
+	// Observational, never cancelled. Introduced in ABI 1.
+	EventPlayerQuit = "player.quit"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerChat = "player.chat"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerCommand = "player.command"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerDamage = "player.damage"
+	// Observational, never cancelled. Introduced in ABI 1.
+	EventPlayerDeath = "player.death"
+	// Observational, never cancelled. Introduced in ABI 1.
+	EventPlayerRespawn = "player.respawn"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerTeleport = "player.teleport"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerInteract = "player.interact"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventInventoryClick = "inventory.click"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventItemUse = "item.use"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventEntityDamage = "entity.damage"
 )
 
 // IsNativeEvent reports whether the host itself emits this event.
