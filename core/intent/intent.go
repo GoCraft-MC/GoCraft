@@ -188,6 +188,8 @@ type EntityInteractIntent struct {
 	TargetID   int32
 	Attack     bool
 	HotbarSlot int32
+	// EventChecked is internal adapter state, never read from a client packet.
+	EventChecked bool
 }
 
 // VehicleMoveIntent carries the controlling passenger's authoritative vehicle
