@@ -1,4 +1,5 @@
 .claude/
+/.review/
 gocraft-linux-amd64
 gocraft-windows-amd64.exe
 *.exe
