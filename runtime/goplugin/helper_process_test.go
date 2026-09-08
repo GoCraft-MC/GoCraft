@@ -14,6 +14,16 @@ import (
 type helperPlugin struct{}
 
 func (*helperPlugin) OnLoad(context gocraft.Context) error {
+	if os.Getenv("GOCRAFT_NATIVE_EVENTS") == "1" {
+		if err := context.Events().OnPlayerChat(func(event *gocraft.PlayerChatEvent, control gocraft.EventControl) {
+			if event.Message == "cancel" {
+				control.Cancel()
+			}
+			event.Message = "rewritten"
+		}); err != nil {
+			return err
+		}
+	}
 	if os.Getenv("GOCRAFT_NATIVE_PLUGIN_FAILURE") == "load" {
 		return errors.New("load failure")
 	}
