@@ -466,6 +466,9 @@ func New(cfg *config.Config) (*Server, error) {
 	// empty until plugins load, so an early line simply finds nothing there.
 	cmds.SetPluginCommands(s.runPluginCommand)
 	cmds.SetEventBus(s.plugins)
+	s.installWorldEvents(s.world, dimensionOverworld)
+	s.installWorldEvents(s.netherWorld, dimensionNether)
+	s.installWorldEvents(s.endWorld, dimensionEnd)
 	cmds.SetCommandRegistry(pluginRegistry.Commands())
 
 	s.registerSpawnCommands()
@@ -651,6 +654,9 @@ func New(cfg *config.Config) (*Server, error) {
 func (s *Server) teleportPlayer(target *player.Player, x, y, z float64) error {
 	if target == nil {
 		return fmt.Errorf("target player is unavailable")
+	}
+	if err := handler.FilterPluginTeleport(s.plugins, target, &x, &y, &z); err != nil {
+		return err
 	}
 	position := spatial.Vec3{X: x, Y: y, Z: z}
 	switch target.Edition {
@@ -1245,7 +1251,7 @@ func (s *Server) applyJoin(i intent.JoinIntent) {
 	p.AttackCooldown = s.cfg.Combat.AttackCooldown
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical
-	p.OnDeath = s.dropPlayerInventory
+	s.installPlayerEvents(p)
 	p.Position = s.currentWorldSpawn()
 	p.WorldSpawn = p.Position
 	s.loadPlayerData(p)
@@ -1328,7 +1334,7 @@ func (s *Server) applyDisconnect(i intent.DisconnectIntent) {
 		}
 		s.savePlayerData(p)
 	}
-	s.game.RemovePlayer(i.PlayerUUID)
+	s.unregisterPlayer(i.PlayerUUID, i.Reason)
 	delete(s.bedrockBlockUse, i.PlayerUUID)
 	handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 	slog.Info("player disconnected via intent",
@@ -1407,6 +1413,12 @@ func (s *Server) applyBedrockStartUseItem(i intent.StartUseItemIntent) {
 		return
 	}
 	stack := p.Inventory[player.HotbarStart+hotbar]
+	if !stack.IsEmpty() && s.plugins != nil &&
+		(p.UsingItemID != stack.ItemID || p.UsingItemSlot != hotbar || p.UsingItemSince.IsZero()) &&
+		!s.plugins.EmitItemUse(p, stack.ItemID, 0) {
+		p.UsingItemID, p.UsingItemSince = "", time.Time{}
+		return
+	}
 	previousHeldSlot := p.HeldSlot
 	p.HeldSlot = hotbar
 	if handler.UseThrowable(p, s.worldForPlayer(p), s.sessions, nil, s.game.NextEntityID) {
@@ -1605,6 +1617,7 @@ func (s *Server) dimensionSimulation(dimension int32, dimensionWorld *coreworld.
 		cfg: s.cfg, game: s.game,
 		world: dimensionWorld, netherWorld: s.netherWorld, endWorld: s.endWorld,
 		simulationDimension: dimension,
+		plugins:             s.plugins,
 		spawnX:              s.spawnX,
 		spawnZ:              s.spawnZ,
 		spawnState:          s.spawnState,
@@ -1932,6 +1945,10 @@ func (s *Server) applyBedrockBlockInteract(i intent.BlockInteractIntent) {
 	case intent.BlockActionUse:
 		held := p.HeldItem()
 		clicked := actionWorld.GetBlock(x, y, z)
+		if s.plugins != nil && !s.plugins.EmitPlayerInteract(p, "block", i.Position, 0, held.ItemID, int64(p.Dimension)) {
+			s.resyncBedrockEventBlocks(p, x, y, z)
+			return
+		}
 		// Item behaviour has priority over the clicked block, matching vanilla
 		// and Pumpkin (for example, a hoe tills dirt before placement is tried).
 		if s.applyBedrockItemAction(p, i, clicked) {
@@ -2108,6 +2125,9 @@ func (s *Server) applyEntityInteract(i intent.EntityInteractIntent) {
 			return
 		}
 		if entity, ok := s.worldForPlayer(attacker).Entities.Get(i.TargetID); ok && attacker.Position.Distance(entity.Position) <= 4 {
+			if !i.EventChecked && s.plugins != nil && !s.plugins.EmitPlayerInteract(attacker, "entity", spatial.BlockPos{}, int64(i.TargetID), attacker.HeldItem().ItemID, int64(attacker.Dimension)) {
+				return
+			}
 			if attacker.Edition == player.ClientEditionBedrock &&
 				attacker.HeldItem().ItemID == "minecraft:name_tag" &&
 				attacker.GameMode != player.GameModeSpectator {
@@ -2315,6 +2335,9 @@ func (s *Server) applyBedrockRespawn(i intent.RespawnIntent) {
 	if previousDimension != p.Dimension && s.bedrockListener != nil {
 		s.bedrockListener.ChangeDimensionForRespawn(p, p.Dimension, p.Position)
 	}
+	if s.plugins != nil {
+		s.plugins.EmitPlayerRespawn(p, p.Position.X, p.Position.Y, p.Position.Z, int64(p.Dimension))
+	}
 }
 
 func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
@@ -2326,6 +2349,9 @@ func (s *Server) applyBedrockInventory(i intent.InventoryIntent) {
 	}()
 	p := s.game.GetPlayer(i.PlayerUUID)
 	if p == nil || p.Edition != player.ClientEditionBedrock || p.Dead || len(i.Actions) == 0 {
+		return
+	}
+	if s.plugins != nil && !s.plugins.EmitInventoryClick(p, inventoryEventContainer(p), -1, 0, 0) {
 		return
 	}
 	inventory := p.Inventory
@@ -5170,7 +5196,7 @@ func (s *Server) handleConn(conn *network.ClientConn) {
 				s.dismountPlayer(p)
 			}
 			s.savePlayerData(p)
-			s.game.RemovePlayer(p.UUID)
+			s.unregisterPlayer(p.UUID, "disconnected")
 			handler.OnlineCount.Store(int32(s.game.OnlineCount()))
 		}()
 
@@ -5196,7 +5222,7 @@ func (s *Server) registerPlayer(result *handler.LoginResult, remoteAddress strin
 	p.AttackCooldown = s.cfg.Combat.AttackCooldown
 	p.KnockbackHorizontal = s.cfg.Combat.KnockbackHorizontal
 	p.KnockbackVertical = s.cfg.Combat.KnockbackVertical
-	p.OnDeath = s.dropPlayerInventory
+	s.installPlayerEvents(p)
 	p.Position = s.currentWorldSpawn()
 	p.WorldSpawn = p.Position
 	s.loadPlayerData(p)
