@@ -1395,7 +1395,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			if canMerge {
 				double := copyBlockProperties(targetSlab)
 				double.Properties["type"] = "double"
-				applyBlockChange(int(bx), int(by), int(bz), double, w, mgr)
+				if !place(int(bx), int(by), int(bz), double) {
+					return nil
+				}
 				if p.GameMode == player.GameModeSurvival {
 					slot := player.HotbarStart + p.HeldSlot
 					p.Inventory[slot].Count--
@@ -1423,10 +1425,6 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		}
 		block.Properties = redstoneWireConnections(px, py, pz, w)
 	}
-	broadcastSoundAt(mgr, blockBreakSound(block.ResourceLocation()), soundCategoryBlocks,
-		float64(bx)+0.5, float64(by)+0.5, float64(bz)+0.5, 1, 0.8)
-	slog.Info("block place", "player", p.Username,
-		"block", block.ResourceLocation(), "x", px, "y", py, "z", pz)
 	switch {
 	case coreworld.IsAttachmentPlacementItem(block.ResourceLocation()):
 		placed, _, ok := coreworld.AttachmentPlacementState(w, block, px, py, pz, face, javaAttachmentRotation(p.Rotation.Yaw), placingInWater)
@@ -1434,22 +1432,28 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
-		applyBlockChange(px, py, pz, placed, w, mgr)
+		if !place(px, py, pz, placed) {
+			return nil
+		}
 	case block.ResourceLocation() == "minecraft:chest" || block.ResourceLocation() == "minecraft:trapped_chest":
-		placeChestBlock(p, px, py, pz, block.ResourceLocation(), w, mgr)
+		if !placeChestBlock(p, px, py, pz, block.ResourceLocation(), w, mgr, beforePlacement) {
+			return nil
+		}
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
 	case IsFurnaceContainer(block.ResourceLocation()):
 		block.Properties = map[string]string{"facing": chestFacingFromYaw(p.Rotation.Yaw), "lit": "false"}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
 	case isBedBlock(block.ResourceLocation()):
-		if !placeBedBlock(p, px, py, pz, block.ResourceLocation(), w, mgr) {
+		if !placeBedBlock(p, px, py, pz, block.ResourceLocation(), w, mgr, beforePlacement) {
 			// No room for the head half — cancel placement entirely.
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
 	case isDoorBlock(block.ResourceLocation()):
-		if !placeDoorBlock(p, px, py, pz, block.ResourceLocation(), cursorX, cursorZ, w, mgr) {
+		if !placeDoorBlock(p, px, py, pz, block.ResourceLocation(), cursorX, cursorZ, w, mgr, beforePlacement) {
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
@@ -1459,14 +1463,18 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
-		applyBlockChange(px, py, pz, placed, w, mgr)
+		if !place(px, py, pz, placed) {
+			return nil
+		}
 	case strings.HasSuffix(block.ResourceLocation(), "_button"):
 		placed, ok := javaButtonPlacementState(block, face, p.Rotation.Yaw, w, px, py, pz)
 		if !ok {
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
 		}
-		applyBlockChange(px, py, pz, placed, w, mgr)
+		if !place(px, py, pz, placed) {
+			return nil
+		}
 	case block.ResourceLocation() == "minecraft:lever":
 		// Lever uses the same face/facing layout as buttons.
 		placed, ok := javaButtonPlacementState(block, face, p.Rotation.Yaw, w, px, py, pz)
@@ -1475,7 +1483,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			return nil
 		}
 		placed.Properties["powered"] = "false"
-		applyBlockChange(px, py, pz, placed, w, mgr)
+		if !place(px, py, pz, placed) {
+			return nil
+		}
 	case block.ResourceLocation() == "minecraft:torch" || block.ResourceLocation() == "minecraft:soul_torch" ||
 		block.ResourceLocation() == "minecraft:redstone_torch":
 		if face == 1 && coreworld.IsSolidLandingSurface(w.GetBlock(px, py-1, pz).ResourceLocation()) {
@@ -1484,7 +1494,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			} else {
 				block.Properties = nil
 			}
-			applyBlockChange(px, py, pz, block, w, mgr)
+			if !place(px, py, pz, block) {
+				return nil
+			}
 		} else if face >= 2 && face <= 5 {
 			offset := faceOffset[face]
 			support := w.GetBlock(px-int(offset[0]), py-int(offset[1]), pz-int(offset[2]))
@@ -1500,7 +1512,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			if strings.Contains(block.Name, "redstone") {
 				block.Properties["lit"] = "true"
 			}
-			applyBlockChange(px, py, pz, block, w, mgr)
+			if !place(px, py, pz, block) {
+				return nil
+			}
 		} else {
 			sendAcknowledgeBlockChange(mgr, p, seq)
 			return nil
@@ -1528,7 +1542,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			axis = "x"
 		}
 		block.Properties = map[string]string{"axis": axis}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 	case block.ResourceLocation() == "minecraft:repeater":
 		if !javaSupportsRedstoneComponent(w.GetBlock(px, py-1, pz)) {
 			sendAcknowledgeBlockChange(mgr, p, seq)
@@ -1540,7 +1556,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			"delay": "1", "facing": chestFacingFromYaw(p.Rotation.Yaw),
 			"locked": "false", "powered": "false",
 		}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 	case block.ResourceLocation() == "minecraft:comparator":
 		if !javaSupportsRedstoneComponent(w.GetBlock(px, py-1, pz)) {
 			sendAcknowledgeBlockChange(mgr, p, seq)
@@ -1550,7 +1568,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			"facing": chestFacingFromYaw(p.Rotation.Yaw),
 			"mode":   "compare", "powered": "false",
 		}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 	case strings.HasSuffix(block.ResourceLocation(), "_pressure_plate"):
 		if !javaSupportsRedstoneComponent(w.GetBlock(px, py-1, pz)) {
 			sendAcknowledgeBlockChange(mgr, p, seq)
@@ -1562,7 +1582,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		} else {
 			block.Properties = map[string]string{"powered": "false"}
 		}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 		w.BlockPhysics.SchedulePressurePlate(px, py, pz, w.PhysicsTime(), 1)
 	case isJavaStorageContainer(block.ResourceLocation()):
 		switch block.ResourceLocation() {
@@ -1577,27 +1599,37 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 				block.Properties = map[string]string{"facing": shulkerBoxFacing(face)}
 			}
 		}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
 	case block.ResourceLocation() == "minecraft:decorated_pot":
 		block.Properties = map[string]string{
 			"facing": chestFacingFromYaw(p.Rotation.Yaw), "cracked": "false",
 			"waterlogged": strconv.FormatBool(placingInWater),
 		}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 		w.SetContainerItems(px, py, pz, block.ResourceLocation(), nil)
 		w.SetDecoratedPotDecorations(px, py, pz, held.NormalizedPotDecorations())
 	case block.ResourceLocation() == "minecraft:grindstone":
 		block.Properties = javaGrindstonePlacementState(face, p.Rotation.Yaw)
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 	case block.ResourceLocation() == "minecraft:loom" ||
 		block.ResourceLocation() == "minecraft:stonecutter" ||
 		block.ResourceLocation() == "minecraft:cartography_table" ||
 		block.ResourceLocation() == "minecraft:smithing_table":
 		block.Properties = map[string]string{"facing": chestFacingFromYaw(p.Rotation.Yaw)}
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 	default:
-		applyBlockChange(px, py, pz, block, w, mgr)
+		if !place(px, py, pz, block) {
+			return nil
+		}
 	}
 	if blockEntityType, ok := coreworld.PlacementBlockEntityType(block.ResourceLocation()); ok {
 		w.SetBlockEntity(px, py, pz, blockEntityType, []byte{10, 0})
@@ -2549,7 +2581,7 @@ func doorHinge(facing string, clickX, clickZ float32) string {
 	return "left"
 }
 
-func placeDoorBlock(p *player.Player, x, y, z int, kind string, clickX, clickZ float32, w *coreworld.World, mgr *session.Manager) bool {
+func placeDoorBlock(p *player.Player, x, y, z int, kind string, clickX, clickZ float32, w *coreworld.World, mgr *session.Manager, checks ...placementCheck) bool {
 	if y >= coreworld.WorldMaxY || !placementReplaceable(w.GetBlock(x, y+1, z).ResourceLocation()) ||
 		!coreworld.IsSolidLandingSurface(w.GetBlock(x, y-1, z).ResourceLocation()) {
 		return false
@@ -2562,6 +2594,9 @@ func placeDoorBlock(p *player.Player, x, y, z int, kind string, clickX, clickZ f
 	}}
 	upper := copyBlockProperties(lower)
 	upper.Properties["half"] = "upper"
+	if !approvePlacement(checks, x, y, z, lower) {
+		return false
+	}
 	applyBlockChange(x, y, z, lower, w, mgr)
 	applyBlockChange(x, y+1, z, upper, w, mgr)
 	return true
@@ -2662,7 +2697,7 @@ func prepareJavaBedWake(p *player.Player, w *coreworld.World, mgr *session.Manag
 }
 
 // placeBedBlock places both halves of a bed at (fx, fy, fz) facing the player.
-func placeBedBlock(p *player.Player, fx, fy, fz int, kind string, w *coreworld.World, mgr *session.Manager) bool {
+func placeBedBlock(p *player.Player, fx, fy, fz int, kind string, w *coreworld.World, mgr *session.Manager, checks ...placementCheck) bool {
 	facing := bedFacingFromYaw(p.Rotation.Yaw)
 	dx, dz := bedHeadOffset(facing)
 	hx, hz := fx+dx, fz+dz
@@ -2676,7 +2711,11 @@ func placeBedBlock(p *player.Player, fx, fy, fz int, kind string, w *coreworld.W
 	footProps := map[string]string{"facing": facing, "occupied": "false", "part": "foot"}
 	headProps := map[string]string{"facing": facing, "occupied": "false", "part": "head"}
 
-	applyBlockChange(fx, fy, fz, coreworld.Block{Namespace: ns, Name: name, Properties: footProps}, w, mgr)
+	foot := coreworld.Block{Namespace: ns, Name: name, Properties: footProps}
+	if !approvePlacement(checks, fx, fy, fz, foot) {
+		return false
+	}
+	applyBlockChange(fx, fy, fz, foot, w, mgr)
 	applyBlockChange(hx, fy, hz, coreworld.Block{Namespace: ns, Name: name, Properties: headProps}, w, mgr)
 	data := bedBlockEntityData(kind)
 	w.SetBlockEntity(fx, fy, fz, "minecraft:bed", data)
