@@ -9,6 +9,7 @@ import (
 	"GoCraft/core/intent"
 	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
@@ -186,10 +187,10 @@ func addStackToInventory(inventory *[player.InventorySize]player.ItemStack, item
 	return remaining == 0
 }
 
-func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus) error {
+func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus, plugins ...*coreplugin.Bus) error {
 	switch pkt.ID {
 	case packetIDContainerClick:
-		return handleContainerClick(pkt, p, conn, w, bus)
+		return handleContainerClick(pkt, p, conn, w, bus, plugins...)
 	case packetIDContainerClose:
 		return handleContainerClose(pkt, p, conn, w)
 	case packetIDContainerButtonClick:
@@ -212,7 +213,7 @@ func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network
 	return nil
 }
 
-func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus) error {
+func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus, plugins ...*coreplugin.Bus) error {
 	r := pkt.Reader()
 	windowID, err := protocol.ReadVarInt(r)
 	if err != nil {
@@ -250,6 +251,16 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 	}
 	if r.Len() != 0 {
 		return fmt.Errorf("container click: %d trailing bytes", r.Len())
+	}
+	if windowID != 0 && (p.OpenContainerID != windowID || p.OpenContainerKind == "") {
+		return nil
+	}
+	container := p.OpenContainerKind
+	if windowID == 0 {
+		container = "minecraft:inventory"
+	}
+	if len(plugins) > 0 && plugins[0] != nil && !plugins[0].EmitInventoryClick(p, container, int64(slot), int64(button), int64(mode)) {
+		return resyncEventInventory(p, conn, windowID)
 	}
 
 	if windowID == 0 {
