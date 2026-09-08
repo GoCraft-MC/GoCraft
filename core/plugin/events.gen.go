@@ -148,6 +148,96 @@ func BlankEvent(eventType string) []abi.Value {
 			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
 			abi.List(abi.List(abi.String(""), abi.Bool(false))),
 		}
+	case EventBlockPlace:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.List(abi.Int64(0), abi.Int64(0), abi.Int64(0)),
+			abi.List(abi.String(""), abi.List()),
+			abi.List(abi.String(""), abi.List()),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerQuit:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+		}
+	case EventPlayerChat:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerCommand:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerDamage:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.Double(0),
+			abi.String(""),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerDeath:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+		}
+	case EventPlayerRespawn:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Int64(0),
+		}
+	case EventPlayerTeleport:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerInteract:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.List(abi.Int64(0), abi.Int64(0), abi.Int64(0)),
+			abi.Int64(0),
+			abi.String(""),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventInventoryClick:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.Int64(0),
+			abi.Int64(0),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventItemUse:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventEntityDamage:
+		return []abi.Value{
+			abi.Int64(0),
+			abi.String(""),
+			abi.Double(0),
+			abi.String(""),
 	}
 	return nil
 }
