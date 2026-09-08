@@ -466,6 +466,8 @@ func containerMenuType(blockName string) int32 {
 		return 2 // minecraft:generic_9x3
 	case "minecraft:hopper":
 		return 16 // minecraft:hopper
+	case "minecraft:lectern":
+		return 17 // minecraft:lectern
 	case "minecraft:dispenser", "minecraft:dropper":
 		return 6 // minecraft:generic_3x3
 	case "minecraft:crafter":
@@ -1029,8 +1031,8 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 		targetBlock.ResourceLocation() == "minecraft:lectern" {
 		be := w.GetBlockEntity(int(bx), int(by), int(bz))
 		stored := coreworld.LecternBook(be)
-		if stored != "" && !coreworld.IsLecternBook(held.ItemID) {
-			if p.Sneaking {
+		if stored != "" {
+			if p.Sneaking && !coreworld.IsLecternBook(held.ItemID) {
 				// Sneak + right-click: eject book.
 				if _, cleared, ok := coreworld.EjectLecternBook(targetBlock, stored); ok {
 					applyBlockChange(int(bx), int(by), int(bz), cleared, w, mgr)
@@ -1049,10 +1051,8 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 				}
 			} else {
 				// Right-click without sneaking: open the book reading UI.
-				// The client already has the book data from the block entity; we
-				// just need to open the lectern screen (menu type 17).
-				if conn != nil {
-					_ = sendOpenScreen(conn, chestContainerID, 17, "Lectern")
+				if err := openLectern(p, conn, spatial.BlockPos{X: bx, Y: by, Z: bz}, be); err != nil {
+					return err
 				}
 				sendAcknowledgeBlockChange(mgr, p, seq)
 				return nil
@@ -1061,7 +1061,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			// Place book.
 			if updated, ok := coreworld.InsertLecternBook(targetBlock, held.ItemID); ok {
 				applyBlockChange(int(bx), int(by), int(bz), updated, w, mgr)
-				items := []coreworld.ContainerItem{{Slot: 0, ItemID: held.ItemID, Count: 1}}
+				book := held
+				book.Count = 1
+				items := []coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, book)}
 				w.SetContainerItems(int(bx), int(by), int(bz), "minecraft:lectern", items)
 				if p.GameMode != player.GameModeCreative {
 					slot := player.HotbarStart + p.HeldSlot
