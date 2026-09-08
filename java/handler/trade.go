@@ -129,7 +129,8 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 		}
 		mainHand = hand == 0
 	}
-	if _, err := protocol.ReadBool(r); err != nil {
+	sneaking, err := protocol.ReadBool(r)
+	if err != nil {
 		return fmt.Errorf("interact: reading sneaking flag: %w", err)
 	}
 	if r.Len() != 0 {
@@ -225,7 +226,23 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 
 	// Boat boarding: right-clicking a boat mounts the player.
 	if corentity.IsBoat(entity.Type) || corentity.IsMinecart(entity.Type) {
+		// Java tries INTERACT_AT before INTERACT. Processing both would
+		// board on the first packet and immediately open storage on the second.
+		if interactType != 0 || p.Dead || entity.Dead || p.GameMode == player.GameModeSpectator ||
+			(p.Position.Distance(entity.Position) > 4 && !entity.HasPassenger(p.EntityID)) {
+			return nil
+		}
+		if corentity.IsChestBoat(entity.Type) && (sneaking || entity.HasPassenger(p.EntityID) || len(entity.PassengerIDs()) >= corentity.VehicleCapacity(entity.Type)) {
+			return openBoatInventory(p, conn, entity)
+		}
+		if sneaking {
+			return nil
+		}
 		if p.VehicleEntityID == 0 {
+			if len(buses) > 0 && buses[0] != nil {
+				buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: entity.EntityID, HotbarSlot: int32(p.HeldSlot)})
+				return nil
+			}
 			MountPlayer(p, entity.EntityID, w, mgr)
 			slog.Info("player boarded vehicle", "player", p.Username, "vehicleID", entity.EntityID)
 		}

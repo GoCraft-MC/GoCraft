@@ -428,7 +428,7 @@ func (s *Server) dismountPlayer(p *player.Player) bool {
 	}
 	vehicleID := p.VehicleEntityID
 	p.VehicleEntityID = 0
-	if vehicle, ok := s.world.Entities.Get(vehicleID); ok {
+	if vehicle, ok := s.worldForPlayer(p).Entities.Get(vehicleID); ok {
 		vehicle.RemovePassenger(p.EntityID)
 		p.Position.X = vehicle.Position.X + 1.5
 		p.Position.Y = vehicle.Position.Y

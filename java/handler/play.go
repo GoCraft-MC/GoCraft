@@ -711,6 +711,9 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if destinationWorld == nil {
 			return fmt.Errorf("dimension %d is unavailable", dimension)
 		}
+		if err := closeBoatInventory(p, conn); err != nil {
+			return err
+		}
 		target = destinationWorld.EnsureSafeArrival(target, dimension)
 		p.InvulnerableUntil = time.Now().Add(10 * time.Second)
 		p.Dimension = dimension
@@ -771,6 +774,11 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		default:
 		}
 		broadcastGeneratedEntities(w, mgr)
+		if p.OpenContainerKind == boatContainerKind && !validBoatInventory(p, w) {
+			if err := closeBoatInventory(p, conn); err != nil {
+				return err
+			}
+		}
 		if len(pendingRespawnChunks) > 0 {
 			batchSize := 8
 			if len(pendingRespawnChunks) < batchSize {

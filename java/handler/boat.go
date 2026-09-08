@@ -8,9 +8,9 @@ package handler
 //
 // Relevant packets (Java 1.21.4 / protocol 769):
 //   CB  set_passengers  (0x65 = 101) — tells client who is riding what
-//   SB  move_vehicle    (0x1B = 27)  — client updates boat position while riding
-//   SB  player_input    (0x20 = 32)  — input flags; shift = dismount
-//   SB  player_command  (0x19 = 25)  — action 8 = start fall flying (elytra)
+//   SB  move_vehicle    (0x20 = 32)  — client updates boat position while riding
+//   SB  player_input    (0x29 = 41)  — input flags; shift = dismount
+//   SB  player_command  (0x28 = 40)  — sneak, inventory and elytra actions
 
 import (
 	"fmt"
@@ -45,9 +45,14 @@ func buildSetPassengers(vehicleEntityID int32, passengerIDs []int32) *protocol.P
 
 // BroadcastSetPassengers sends a Set Passengers packet to all sessions.
 func BroadcastSetPassengers(vehicleEntityID int32, passengerIDs []int32, mgr *session.Manager) {
+	if mgr == nil {
+		return
+	}
 	pkt := buildSetPassengers(vehicleEntityID, passengerIDs)
 	for _, s := range mgr.SnapshotAll() {
-		_ = s.Conn.WritePacket(pkt)
+		if s.Conn != nil {
+			_ = s.Conn.WritePacket(pkt)
+		}
 	}
 }
 
@@ -132,12 +137,9 @@ func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 	if err != nil {
 		return fmt.Errorf("player_input: flags: %w", err)
 	}
-	if flags&0x20 != 0 && p.VehicleEntityID != 0 {
-		if len(buses) > 0 && buses[0] != nil {
-			buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: 0, HotbarSlot: int32(p.HeldSlot)})
-			return nil
-		}
-		DismountPlayer(p, w, conn, mgr)
+	p.Sneaking = flags&0x20 != 0
+	if p.Sneaking {
+		return requestVehicleDismount(p, w, conn, mgr, buses...)
 	}
 	return nil
 }
@@ -151,12 +153,13 @@ func HandlePlayerInputPacket(pkt *protocol.Packet, p *coreplayer.Player, w *core
 //	2 = leave bed
 //	3 = start sprinting
 //	4 = stop sprinting
+//	7 = open the mounted vehicle's inventory
 //	8 = start fall flying (elytra)
 //
 // Previous GoCraft code incorrectly treated action 8 as LEAVE_VEHICLE. That
 // made an elytra start packet hit the vehicle path and left fall-flying state
-// effectively unsupported. Vehicle dismount remains handled by Player Input's
-// shift flag, which is the packet path used by modern clients.
+// effectively unsupported. Both sneak commands and Player Input's shift flag
+// request a dismount, including when the input flags have not changed.
 func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 	if _, err := protocol.ReadVarInt(r); err != nil {
@@ -175,6 +178,7 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 	switch action {
 	case 0: // START_SNEAKING
 		p.Sneaking = true
+		return requestVehicleDismount(p, w, conn, mgr, buses...)
 	case 1: // STOP_SNEAKING
 		p.Sneaking = false
 	case 2: // LEAVE_BED
@@ -188,6 +192,12 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 		p.Sprinting = true
 	case 4: // STOP_SPRINTING
 		p.Sprinting = false
+	case 7: // OPEN_INVENTORY while riding
+		if w != nil {
+			if boat, ok := w.Entities.Get(p.VehicleEntityID); ok && boat.HasPassenger(p.EntityID) {
+				return openBoatInventory(p, conn, boat)
+			}
+		}
 	case 8: // START_FALL_FLYING
 		// The client may only begin gliding while airborne with an elytra in the
 		// chest slot. The actual movement remains client-driven like ordinary
@@ -200,9 +210,26 @@ func HandlePlayerCommandPacket(pkt *protocol.Packet, p *coreplayer.Player, w *co
 	return nil
 }
 
+func requestVehicleDismount(p *coreplayer.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
+	if p.VehicleEntityID == 0 {
+		return nil
+	}
+	if len(buses) > 0 && buses[0] != nil {
+		if !buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, HotbarSlot: int32(p.HeldSlot)}) {
+			return fmt.Errorf("dismount queue is full")
+		}
+		return nil
+	}
+	DismountPlayer(p, w, conn, mgr)
+	return nil
+}
+
 // ── Mount / dismount ──────────────────────────────────────────────────────────
 
 func MountPlayer(p *coreplayer.Player, boatEntityID int32, w *coreworld.World, mgr *session.Manager) bool {
+	if p == nil || p.Dead || p.VehicleEntityID != 0 || p.GameMode == coreplayer.GameModeSpectator {
+		return false
+	}
 	boat, ok := w.Entities.Get(boatEntityID)
 	if !ok || (!corentity.IsBoat(boat.Type) && !corentity.IsMinecart(boat.Type)) {
 		return false
@@ -234,7 +261,9 @@ func DismountPlayer(p *coreplayer.Player, w *coreworld.World, conn *network.Clie
 	} else {
 		BroadcastSetPassengers(boatID, nil, mgr)
 	}
-	_ = sendSyncPosition(conn, p, 0)
+	if conn != nil {
+		_ = sendSyncPosition(conn, p, 0)
+	}
 }
 
 // ── Broadcast helpers ─────────────────────────────────────────────────────────
