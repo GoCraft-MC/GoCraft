@@ -22,6 +22,7 @@ func (s *Server) tickPassiveAIParallel(entities []*corentity.Entity, players []n
 		}
 		ai := s.mobAIFor(entity)
 		if entity.Type == corentity.TypeVillager {
+			s.tickVillagerDoor(entity, ai)
 			s.tickVillagerBedClaim(entity, ai)
 		}
 		candidates = append(candidates, entity)

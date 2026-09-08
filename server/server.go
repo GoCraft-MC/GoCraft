@@ -3721,6 +3721,7 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 				previous := entity.Position
 				if isPassiveMob(entity.Type) {
 					if entity.Type == corentity.TypeVillager {
+						simulation.tickVillagerDoor(entity, simulation.mobAIFor(entity))
 						simulation.tickVillagerBedClaim(entity, simulation.mobAIFor(entity))
 					}
 					if simulation.tickPassiveMobAI(entity) && entity.Type == corentity.TypeVillager {
@@ -4202,6 +4203,10 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 				return changed
 			}
 			e.Sleeping = false
+			ai.hasWanderGoal = false
+			if ai.hasPathGoal && ai.pathGoal != e.VillageBed {
+				ai.hasPathGoal = false
+			}
 			if distanceSquared > 4 && !s.navigateMob(e, ai, spatial.Vec3{X: targetX, Y: targetY, Z: targetZ}, pumpkinMovementSpeed(e.Type, 1.0)) {
 				distance := math.Hypot(dx, dz)
 				if distance > 0 {
