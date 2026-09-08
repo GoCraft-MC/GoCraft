@@ -20,6 +20,8 @@ type healthSample struct {
 type healthTracker struct {
 	mu       sync.Mutex
 	samples  []healthSample
+	failures int
+	total    time.Duration
 	starved  map[string]uint64
 	disabled bool
 }
@@ -42,13 +44,11 @@ func (h *healthTracker) record(now time.Time, failed bool, took time.Duration) {
 	defer h.mu.Unlock()
 	h.prune(now)
 	h.samples = append(h.samples, healthSample{at: now, failed: failed, took: took})
-	failures := 0
-	for _, sample := range h.samples {
-		if sample.failed {
-			failures++
-		}
+	h.total += took
+	if failed {
+		h.failures++
 	}
-	if len(h.samples) >= minimumHealthSamples && float64(failures)/float64(len(h.samples)) > maximumFailureRatio {
+	if len(h.samples) >= minimumHealthSamples && float64(h.failures)/float64(len(h.samples)) > maximumFailureRatio {
 		h.disabled = true
 	}
 }
@@ -69,16 +69,9 @@ func (h *healthTracker) snapshot(now time.Time) HealthSnapshot {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.prune(now)
-	snapshot := HealthSnapshot{Calls: len(h.samples), Starved: make(map[string]uint64), Disabled: h.disabled}
-	var total time.Duration
-	for _, sample := range h.samples {
-		total += sample.took
-		if sample.failed {
-			snapshot.Failures++
-		}
-	}
+	snapshot := HealthSnapshot{Calls: len(h.samples), Failures: h.failures, Starved: make(map[string]uint64), Disabled: h.disabled}
 	if snapshot.Calls != 0 {
-		snapshot.AverageDuration = total / time.Duration(snapshot.Calls)
+		snapshot.AverageDuration = h.total / time.Duration(snapshot.Calls)
 	}
 	for event, count := range h.starved {
 		snapshot.Starved[event] = count
@@ -90,6 +83,10 @@ func (h *healthTracker) prune(now time.Time) {
 	cutoff := now.Add(-healthWindow)
 	first := 0
 	for first < len(h.samples) && h.samples[first].at.Before(cutoff) {
+		h.total -= h.samples[first].took
+		if h.samples[first].failed {
+			h.failures--
+		}
 		first++
 	}
 	h.samples = h.samples[first:]
