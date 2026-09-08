@@ -158,6 +158,9 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if candleCake, ok := coreworld.AddCandleToCake(target, item); ok {
+		if !s.allowBedrockPlacement(p, x, y, z, candleCake) {
+			return true
+		}
 		s.setBedrockActionBlock(x, y, z, candleCake)
 		s.consumeBedrockHeldItem(p, 1)
 		return true
@@ -606,8 +609,9 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 			replacement := bedrockCopyBlock(block)
 			replacement.Properties["lit"] = "false"
 			s.setBedrockActionBlock(x, y, z, replacement)
+			return true
 		}
-		return true
+		return p.HeldItem().ItemID != name || strings.HasSuffix(name, "_candle_cake")
 	}
 	if replacement, ready := coreworld.EmptyComposter(block); ready {
 		s.setBedrockActionBlock(x, y, z, replacement)
@@ -639,6 +643,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	if strings.HasSuffix(block.Name, "_slab") && clicked.ResourceLocation() == block.ResourceLocation() && clicked.Properties["type"] != "double" {
 		replacement := bedrockCopyBlock(clicked)
 		replacement.Properties["type"] = "double"
+		if !s.allowBedrockPlacement(p, x, y, z, replacement) {
+			return true
+		}
 		s.setBedrockActionBlock(x, y, z, replacement)
 		s.consumeBedrockHeldItem(p, 1)
 		return true
@@ -648,6 +655,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		if candles < 4 {
 			replacement := bedrockCopyBlock(clicked)
 			replacement.Properties["candles"] = strconv.Itoa(candles + 1)
+			if !s.allowBedrockPlacement(p, x, y, z, replacement) {
+				return true
+			}
 			s.setBedrockActionBlock(x, y, z, replacement)
 			s.consumeBedrockHeldItem(p, 1)
 		}
@@ -658,6 +668,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		if layers < 8 {
 			replacement := bedrockCopyBlock(clicked)
 			replacement.Properties["layers"] = strconv.Itoa(layers + 1)
+			if !s.allowBedrockPlacement(p, x, y, z, replacement) {
+				return true
+			}
 			s.setBedrockActionBlock(x, y, z, replacement)
 			s.consumeBedrockHeldItem(p, 1)
 		}
@@ -684,6 +697,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		}
 		foot := bedrockBlock(block.Name, map[string]string{"facing": facing, "occupied": "false", "part": "foot"})
 		head := bedrockBlock(block.Name, map[string]string{"facing": facing, "occupied": "false", "part": "head"})
+		if !s.allowBedrockPlacement(p, px, py, pz, foot) {
+			return true
+		}
 		s.setBedrockActionBlock(px, py, pz, foot)
 		s.setBedrockActionBlock(hx, py, hz, head)
 		data := bedrockBedBlockEntityData(name)
@@ -703,6 +719,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		lower := bedrockBlock(block.Name, props)
 		upper := bedrockCopyBlock(lower)
 		upper.Properties["half"] = "upper"
+		if !s.allowBedrockPlacement(p, px, py, pz, lower) {
+			return true
+		}
 		s.setBedrockActionBlock(px, py, pz, lower)
 		s.setBedrockActionBlock(px, py+1, pz, upper)
 		s.consumeBedrockHeldItem(p, 1)
@@ -710,7 +729,7 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	}
 
 	placed, valid := s.bedrockPlacementState(p, block, px, py, pz, i)
-	if !valid {
+	if !valid || !s.allowBedrockPlacement(p, px, py, pz, placed) {
 		return true
 	}
 	s.setBedrockActionBlock(px, py, pz, placed)
