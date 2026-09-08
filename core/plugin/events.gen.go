@@ -306,3 +306,93 @@ func (b *Bus) EmitPlayerJoinTo(plugins []string, playerRef *player.Player) {
 	}
 	b.EmitObservationalTo(event, plugins)
 }
+
+// EmitBlockPlace publishes block.place to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitBlockPlace(playerRef *player.Player, pos spatial.BlockPos, block coreworld.Block, replaced coreworld.Block, dimension int64) bool {
+	if !b.hasSubscribers(EventBlockPlace) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventBlockPlace,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			positionValue(pos),
+			blockValue(block),
+			blockValue(replaced),
+			abi.Int64(dimension),
+			b.injectedPermissions(EventBlockPlace, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitPlayerQuit publishes player.quit to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// Observational: the tick does not wait, and nothing a subscriber does can
+// prevent what already happened.
+func (b *Bus) EmitPlayerQuit(playerRef *player.Player, reason string) {
+	if !b.hasSubscribers(EventPlayerQuit) {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerQuit,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(reason),
+		},
+	}
+	b.EmitObservational(event)
+}
+
+// EmitPlayerQuitTo replays player.quit to named plugins only.
+//
+// For a runtime that died and was brought back: its plugins missed what
+// happened while they were down, and the ones that stayed up did not.
+func (b *Bus) EmitPlayerQuitTo(plugins []string, playerRef *player.Player, reason string) {
+	if len(plugins) == 0 {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerQuit,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(reason),
+		},
+	}
+	b.EmitObservationalTo(event, plugins)
+}
+
+// EmitPlayerChat publishes player.chat to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerChat(playerRef *player.Player, message *string) bool {
+	if !b.hasSubscribers(EventPlayerChat) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerChat,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(*message),
+			b.injectedPermissions(EventPlayerChat, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*message = event.Fields[1].String
+	return allowed
+}
+
+// EmitPlayerCommand publishes player.command to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
