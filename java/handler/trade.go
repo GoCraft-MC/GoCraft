@@ -19,6 +19,8 @@ import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/intent"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
+	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
@@ -99,6 +101,10 @@ func VillagerTrades(profession corentity.VillagerProfession, levels ...int32) []
 // If the targeted entity is a villager and the interaction is INTERACT with the
 // main hand, the trading UI is opened.
 func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, buses ...*intent.Bus) error {
+	return handleInteractPacketWithEvents(pkt, p, w, conn, mgr, nil, buses...)
+}
+
+func handleInteractPacketWithEvents(pkt *protocol.Packet, p *player.Player, w *coreworld.World, conn *network.ClientConn, mgr *session.Manager, plugins *coreplugin.Bus, buses ...*intent.Bus) error {
 	r := pkt.Reader()
 
 	entityID, err := protocol.ReadVarInt(r)
@@ -185,12 +191,17 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 		}
 		return nil
 	}
-	if !mainHand {
+	// Point-specific interactions have no separate action here. Java follows
+	// INTERACT_AT with INTERACT; only the latter executes the logical use.
+	if !mainHand || interactType != 0 {
 		return nil
 	}
 
 	entity, ok := w.Entities.Get(entityID)
-	if !ok {
+	if !ok || p.Dead || entity.Dead || p.GameMode == player.GameModeSpectator || p.Position.Distance(entity.Position) > 4 {
+		return nil
+	}
+	if plugins != nil && !plugins.EmitPlayerInteract(p, "entity", spatial.BlockPos{}, int64(entityID), p.HeldItem().ItemID, int64(p.Dimension)) {
 		return nil
 	}
 	// Name tag: applying a name tag to any entity sets its custom name.
@@ -217,9 +228,10 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 	}
 	if (corentity.IsAgeableAnimal(entity.Type) || corentity.IsTameableAnimal(entity.Type) || corentity.IsAnimalVehicle(entity.Type)) && len(buses) > 0 && buses[0] != nil {
 		buses[0].PostEntityInteract(intent.EntityInteractIntent{
-			PlayerUUID: p.UUID,
-			TargetID:   entityID,
-			HotbarSlot: int32(p.HeldSlot),
+			EventChecked: plugins != nil,
+			PlayerUUID:   p.UUID,
+			TargetID:     entityID,
+			HotbarSlot:   int32(p.HeldSlot),
 		})
 		return nil
 	}
@@ -240,7 +252,7 @@ func handleInteractPacket(pkt *protocol.Packet, p *player.Player, w *coreworld.W
 		}
 		if p.VehicleEntityID == 0 {
 			if len(buses) > 0 && buses[0] != nil {
-				buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: entity.EntityID, HotbarSlot: int32(p.HeldSlot)})
+				buses[0].PostEntityInteract(intent.EntityInteractIntent{PlayerUUID: p.UUID, TargetID: entity.EntityID, HotbarSlot: int32(p.HeldSlot), EventChecked: plugins != nil})
 				return nil
 			}
 			MountPlayer(p, entity.EntityID, w, mgr)
