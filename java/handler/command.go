@@ -15,6 +15,7 @@ import (
 
 	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
 )
@@ -130,6 +131,7 @@ type Dispatcher struct {
 	permission           PermissionChecker
 	registry             *dispatch.Registry
 	pluginCommands       PluginCommands
+	pluginEvents         *coreplugin.Bus
 	messenger            func(*player.Player, string) error
 	linkMessenger        func(*player.Player, string, string) error
 	syncAbilities        func(*player.Player)
@@ -378,6 +380,15 @@ func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 // one keeps it, which is what lets a test inject its own without a server.
 func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	input = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(input), "/"))
+	if events := d.EventBus(); events != nil && ctx.Player != nil {
+		if !events.EmitPlayerCommand(ctx.Player, &input) {
+			return
+		}
+		input = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(input), "/"))
+		if !validEventText(input) {
+			return
+		}
+	}
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return
