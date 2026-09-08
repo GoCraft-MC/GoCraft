@@ -197,6 +197,8 @@ type mobAI struct {
 	lookTick       int
 	lookX, lookZ   float64
 	bedClaimTick   int // ticks until next unclaimed-bed scan (villagers only)
+	openedDoor     spatial.BlockPos
+	doorCloseTick  int
 }
 
 type crossPlayerView struct {
