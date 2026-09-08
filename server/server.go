@@ -1094,6 +1094,8 @@ func (s *Server) tickIntents() {
 			s.applyBedrockBlockInteract(i)
 		case intent.BellRingIntent:
 			s.applyBellRing(i)
+		case intent.LecternPageIntent:
+			s.applyLecternPage(i)
 		case intent.FireworkUseIntent:
 			s.applyFireworkUse(i)
 		case intent.ConsumeFoodIntent:
@@ -1131,6 +1133,30 @@ func (s *Server) tickIntents() {
 			}
 		}
 	}
+}
+
+func (s *Server) applyLecternPage(i intent.LecternPageIntent) {
+	p := s.game.GetPlayer(i.PlayerUUID)
+	if p == nil || p.Dead || p.Dimension != i.Dimension {
+		return
+	}
+	center := spatial.Vec3{X: float64(i.Position.X) + 0.5, Y: float64(i.Position.Y) + 0.5, Z: float64(i.Position.Z) + 0.5}
+	if p.Position.Distance(center) > 6.5 {
+		return
+	}
+	w := s.worldForDimension(i.Dimension)
+	if w == nil {
+		return
+	}
+	entity := w.GetBlockEntity(int(i.Position.X), int(i.Position.Y), int(i.Position.Z))
+	page, pageCount := i.Page, i.PageCount
+	if pageCount < 1 {
+		pageCount = entity.LecternPageCount
+	}
+	if i.Relative {
+		page += entity.LecternPage
+	}
+	w.SetLecternPage(int(i.Position.X), int(i.Position.Y), int(i.Position.Z), page, pageCount)
 }
 
 func (s *Server) applyArmSwing(i intent.ArmSwingIntent) {
