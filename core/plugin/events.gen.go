@@ -50,7 +50,7 @@ const (
 // otherwise load cleanly and never fire.
 func IsNativeEvent(eventType string) bool {
 	switch eventType {
-	case EventBlockBreak, EventPlayerJoin:
+	case EventBlockBreak, EventPlayerJoin, EventBlockPlace, EventPlayerQuit, EventPlayerChat, EventPlayerCommand, EventPlayerDamage, EventPlayerDeath, EventPlayerRespawn, EventPlayerTeleport, EventPlayerInteract, EventInventoryClick, EventItemUse, EventEntityDamage:
 		return true
 	}
 	return false
