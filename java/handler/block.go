@@ -660,6 +660,16 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 	// Tool and seed interactions run before generic block/container handling.
 	targetBlock := w.GetBlock(int(bx), int(by), int(bz))
 	held := p.HeldItem()
+	if hand != 0 || p.Dead {
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
+	if len(buses) > 0 && buses[0] != nil && !buses[0].EmitPlayerInteract(p, "block",
+		spatial.BlockPos{X: bx, Y: by, Z: bz}, 0, held.ItemID, int64(p.Dimension)) {
+		resyncPlacement(p, w, mgr, conn, int(bx), int(by), int(bz))
+		sendAcknowledgeBlockChange(mgr, p, seq)
+		return nil
+	}
 	if hand == 0 && held.ItemID == "minecraft:firework_rocket" &&
 		p.GameMode != player.GameModeSpectator {
 		if intents != nil {
