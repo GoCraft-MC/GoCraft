@@ -1263,6 +1263,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 			if candles < 4 {
 				added := copyBlockProperties(targetBlock)
 				added.Properties["candles"] = strconv.Itoa(candles + 1)
+				if !javaPlacementCheck(p, w, mgr, conn, seq, buses...)(int(bx), int(by), int(bz), added) {
+					return nil
+				}
 				applyBlockChange(int(bx), int(by), int(bz), added, w, mgr)
 				if p.GameMode == player.GameModeSurvival {
 					slot := player.HotbarStart + p.HeldSlot
