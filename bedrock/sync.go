@@ -1647,6 +1647,8 @@ func bedrockContainerType(blockName string) (byte, bool) {
 		return protocol.ContainerTypeGrindstone, true
 	case "minecraft:loom":
 		return protocol.ContainerTypeLoom, true
+	case "minecraft:lectern":
+		return protocol.ContainerTypeLectern, true
 	case "minecraft:smithing_table":
 		return protocol.ContainerTypeSmithingTable, true
 	case "minecraft:stonecutter":

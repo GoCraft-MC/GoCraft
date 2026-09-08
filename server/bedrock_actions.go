@@ -434,8 +434,10 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 			updated, ok := coreworld.InsertLecternBook(target, item)
 			if ok {
 				s.setBedrockActionBlock(x, y, z, updated)
+				book := held
+				book.Count = 1
 				s.bedrockWorld().SetContainerItems(x, y, z, "minecraft:lectern",
-					[]coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, player.ItemStack{ItemID: item, Count: 1})})
+					[]coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, book)})
 				s.consumeBedrockHeldItem(p, 1)
 				return true
 			}
@@ -463,16 +465,10 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		return true
 	}
 	if name == "minecraft:lectern" {
-		held := p.HeldItem()
 		be := s.bedrockWorld().GetBlockEntity(x, y, z)
-		stored := coreworld.LecternBook(be)
-		if stored != "" && !coreworld.IsLecternBook(held.ItemID) {
-			// Eject when not holding a book.
-			if _, cleared, ok := coreworld.EjectLecternBook(block, stored); ok {
-				s.setBedrockActionBlock(x, y, z, cleared)
-				s.bedrockWorld().SetContainerItems(x, y, z, "minecraft:lectern", nil)
-				s.giveBedrockActionItem(p, player.ItemStack{ItemID: stored, Count: 1})
-			}
+		if coreworld.LecternBook(be) != "" {
+			// Let the caller open the reading screen.
+			return false
 		}
 		return true
 	}
