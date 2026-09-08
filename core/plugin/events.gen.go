@@ -264,7 +264,8 @@ func (b *Bus) EmitBlockBreak(playerRef *player.Player, pos spatial.BlockPos, blo
 			b.injectedPermissions(EventBlockBreak, playerRef),
 		},
 	}
-	return b.EmitCancellable(event)
+	allowed := b.EmitCancellable(event)
+	return allowed
 }
 
 // EmitPlayerJoin publishes player.join to every subscriber, in the same shape whatever
