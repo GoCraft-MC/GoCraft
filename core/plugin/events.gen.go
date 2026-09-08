@@ -486,3 +486,93 @@ func (b *Bus) EmitPlayerDeathTo(plugins []string, playerRef *player.Player, caus
 // Observational: the tick does not wait, and nothing a subscriber does can
 // prevent what already happened.
 func (b *Bus) EmitPlayerRespawn(playerRef *player.Player, x float64, y float64, z float64, dimension int64) {
+	if !b.hasSubscribers(EventPlayerRespawn) {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerRespawn,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(x),
+			abi.Double(y),
+			abi.Double(z),
+			abi.Int64(dimension),
+		},
+	}
+	b.EmitObservational(event)
+}
+
+// EmitPlayerRespawnTo replays player.respawn to named plugins only.
+//
+// For a runtime that died and was brought back: its plugins missed what
+// happened while they were down, and the ones that stayed up did not.
+func (b *Bus) EmitPlayerRespawnTo(plugins []string, playerRef *player.Player, x float64, y float64, z float64, dimension int64) {
+	if len(plugins) == 0 {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerRespawn,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(x),
+			abi.Double(y),
+			abi.Double(z),
+			abi.Int64(dimension),
+		},
+	}
+	b.EmitObservationalTo(event, plugins)
+}
+
+// EmitPlayerTeleport publishes player.teleport to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerTeleport(playerRef *player.Player, fromX float64, fromY float64, fromZ float64, x *float64, y *float64, z *float64, dimension int64) bool {
+	if !b.hasSubscribers(EventPlayerTeleport) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerTeleport,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(fromX),
+			abi.Double(fromY),
+			abi.Double(fromZ),
+			abi.Double(*x),
+			abi.Double(*y),
+			abi.Double(*z),
+			abi.Int64(dimension),
+			b.injectedPermissions(EventPlayerTeleport, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*x = event.Fields[4].Double
+	*y = event.Fields[5].Double
+	*z = event.Fields[6].Double
+	return allowed
+}
+
+// EmitPlayerInteract publishes player.interact to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerInteract(playerRef *player.Player, target string, pos spatial.BlockPos, entityID int64, item string, dimension int64) bool {
+	if !b.hasSubscribers(EventPlayerInteract) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerInteract,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(target),
+			positionValue(pos),
+			abi.Int64(entityID),
+			abi.String(item),
+			abi.Int64(dimension),
+			b.injectedPermissions(EventPlayerInteract, playerRef),
