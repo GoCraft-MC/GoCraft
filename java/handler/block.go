@@ -820,6 +820,9 @@ func handleUseItemOnWithIntents(pkt *protocol.Packet, p *player.Player, w *corew
 	}
 	if hand == 0 && p.GameMode != player.GameModeSpectator {
 		if candleCake, ok := coreworld.AddCandleToCake(targetBlock, held.ItemID); ok {
+			if !javaPlacementCheck(p, w, mgr, conn, seq, buses...)(int(bx), int(by), int(bz), candleCake) {
+				return nil
+			}
 			applyBlockChange(int(bx), int(by), int(bz), candleCake, w, mgr)
 			if p.GameMode != player.GameModeCreative {
 				slot := player.HotbarStart + p.HeldSlot
