@@ -25,7 +25,7 @@ func (s *Server) tickAnimalLifecycle(entities []*corentity.Entity) {
 		if e.PoisonTicks > 0 {
 			e.PoisonTicks--
 			if e.PoisonTicks == 0 {
-				e.Damage(e.MaxHealth)
+				s.damageEnvironmentalEntity(e, e.MaxHealth, "poison")
 			}
 		}
 		// Sheep wool regrowth: count down and regrow when zero.
