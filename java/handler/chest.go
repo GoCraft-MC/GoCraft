@@ -247,7 +247,7 @@ func chestDoubleHalves(block coreworld.Block, pos spatial.BlockPos, w *coreworld
 // type properties, linking it to any adjacent single chest of the same kind.
 // It calls applyBlockChange for the new block and, when a pair forms, for the
 // updated neighbour as well.
-func placeChestBlock(p *player.Player, px, py, pz int, kind string, w *coreworld.World, mgr *session.Manager) {
+func placeChestBlock(p *player.Player, px, py, pz int, kind string, w *coreworld.World, mgr *session.Manager, checks ...placementCheck) bool {
 	facing := chestFacingFromYaw(p.Rotation.Yaw)
 	rPos, lPos := chestSidePositions(facing, spatial.BlockPos{X: int32(px), Y: int32(py), Z: int32(pz)})
 
@@ -276,12 +276,16 @@ func placeChestBlock(p *player.Player, px, py, pz int, kind string, w *coreworld
 	}
 
 	newBlock := chestBlockWithProps(kind, facing, chestTypeOrSingle(newType))
+	if !approvePlacement(checks, px, py, pz, newBlock) {
+		return false
+	}
 	applyBlockChange(px, py, pz, newBlock, w, mgr)
 
 	if neighborType != "" {
 		updatedNeighbor := chestBlockWithProps(kind, chestFacingFromBlock(neighborBlock, facing), neighborType)
 		applyBlockChange(int(neighborPos.X), int(neighborPos.Y), int(neighborPos.Z), updatedNeighbor, w, mgr)
 	}
+	return true
 }
 
 // unlinkChestPartner resets the partner of a broken double-chest half back to
