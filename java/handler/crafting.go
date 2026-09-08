@@ -193,6 +193,9 @@ func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network
 	case packetIDContainerClose:
 		return handleContainerClose(pkt, p, conn, w)
 	case packetIDContainerButtonClick:
+		if p != nil && p.OpenContainerKind == "minecraft:lectern" {
+			return handleLecternButtonClick(pkt, p, bus)
+		}
 		if p.OpenContainerKind == "minecraft:crafter" {
 			r := pkt.Reader()
 			if _, err := protocol.ReadVarInt(r); err != nil { // windowID
@@ -332,6 +335,14 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 	windowID, err := protocol.ReadVarInt(r)
 	if err != nil {
 		return fmt.Errorf("container close: reading ID: %w", err)
+	}
+	if windowID == chestContainerID && p.OpenContainerID == windowID && p.OpenContainerKind == "minecraft:lectern" {
+		p.OpenContainerID = 0
+		p.OpenContainerKind = ""
+		p.OpenContainerPos = spatial.BlockPos{}
+		p.ContainerSlots = nil
+		p.ContainerStateID++
+		return nil
 	}
 	if windowID == chestContainerID && p.OpenContainerID == windowID && isJavaStorageContainer(p.OpenContainerKind) {
 		persistStorageContents(p, w)
