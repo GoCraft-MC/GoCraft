@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
@@ -169,7 +170,7 @@ func GoatHornSound(stack player.ItemStack) string {
 	return goatHornSounds[0]
 }
 
-func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32) error {
+func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, mgr *session.Manager, nextEntityID func() int32, buses ...*coreplugin.Bus) error {
 	r := pkt.Reader()
 	hand, err := protocol.ReadVarInt(r)
 	if err != nil {
@@ -196,6 +197,14 @@ func handleUseItem(pkt *protocol.Packet, p *player.Player, conn *network.ClientC
 		return nil
 	}
 	heldSlot := player.HotbarStart + p.HeldSlot
+	if len(buses) > 0 && buses[0] != nil && !p.HeldItem().IsEmpty() && !buses[0].EmitItemUse(p, p.HeldItem().ItemID, int64(hand)) {
+		p.UsingItemID, p.UsingItemSince = "", time.Time{}
+		if conn != nil {
+			_ = SyncPlayerInventory(conn, p)
+			return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
+		}
+		return nil
+	}
 	if UseThrowable(p, w, mgr, conn, nextEntityID) {
 		return conn.WritePacket(buildAcknowledgeBlockChange(sequence))
 	}
