@@ -916,6 +916,9 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 				if err := teleportTo(p.Position.X, p.Position.Y, p.Position.Z); err != nil {
 					return fmt.Errorf("play loop: respawn position: %w", err)
 				}
+				if plugins != nil {
+					plugins.EmitPlayerRespawn(p, p.Position.X, p.Position.Y, p.Position.Z, int64(p.Dimension))
+				}
 				broadcastPosition(mgr, p)
 			}
 		}
@@ -936,7 +939,7 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 
 		// Entity interaction (right-click mob) — villager trading + boat mount.
 		if pkt.ID == packetIDInteract {
-			if err := handleInteractPacket(pkt, p, w, conn, mgr, intentBus); err != nil {
+			if err := handleInteractPacketWithEvents(pkt, p, w, conn, mgr, plugins, intentBus); err != nil {
 				slog.Warn("interact error", "player", p.Username, "err", err)
 			}
 		}
@@ -970,12 +973,12 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 			}
 		}
 		if pkt.ID == packetIDUseItem {
-			if err := handleUseItem(pkt, p, conn, w, mgr, nextEntityID); err != nil {
+			if err := handleUseItem(pkt, p, conn, w, mgr, nextEntityID, plugins); err != nil {
 				slog.Warn("use item error", "player", p.Username, "err", err)
 			}
 		}
 		if pkt.ID == packetIDContainerClick || pkt.ID == packetIDContainerClose || pkt.ID == packetIDContainerButtonClick {
-			if err := handleContainerPacket(pkt, p, conn, w, intentBus); err != nil {
+			if err := handleContainerPacket(pkt, p, conn, w, intentBus, plugins); err != nil {
 				slog.Warn("container error", "player", p.Username, "err", err)
 			}
 		}
