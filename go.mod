@@ -3,8 +3,8 @@ module GoCraft
 go 1.26.0
 
 require (
-	github.com/GoCraft-MC/gocraft-abi v0.3.1-0.20260908120207-f5440be234ac
-	github.com/GoCraft-MC/gocraft-api-go v0.2.1-0.20260908121317-56ca886c28e2
+	github.com/GoCraft-MC/gocraft-abi v0.4.1-0.20260909091520-46f15c995cb4
+	github.com/GoCraft-MC/gocraft-api-go v0.3.1-0.20260909092105-c01a15fc60a3
 	github.com/df-mc/dragonfly v0.11.0
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
