@@ -31,8 +31,12 @@ type BedrockConfig struct {
 	OnlineMode bool `yaml:"online_mode"`
 }
 
+// MetricsConfig holds configuration for the GoCraft metrics listener.
 type MetricsConfig struct {
-	Enabled bool   `yaml:"enabled"`
+
+	// Enabled indicates whether the metrics listener is active. Set to true to enable metrics collection.
+	Enabled bool `yaml:"enabled"`
+	// Address is the TCP listen address for metrics collection.
 	Address string `yaml:"address"`
 }
 

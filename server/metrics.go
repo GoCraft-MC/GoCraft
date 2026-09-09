@@ -36,7 +36,7 @@ func newServerMetrics(s *Server) *serverMetrics {
 		}, func() float64 { return float64(s.cfg.MaxPlayers) }),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "gocraft_java_connections",
-			Help: "Number of active Java TCP connections, including login and stat request.",
+			Help: "Number of active Java TCP connections, including login and status requests.",
 		}, func() float64 { return float64(s.connCount.Load()) }),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "gocraft_tps",
