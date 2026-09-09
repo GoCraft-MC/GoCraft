@@ -72,3 +72,24 @@ func TestAllTargetsGenerateFromOneSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratedJavaDocumentsSnapshotOwnership(t *testing.T) {
+	plugin, events := schemaGenerator(t)
+	if err := generateJava(plugin, events); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range plugin.Response().File {
+		if strings.HasSuffix(file.GetName(), "/GeneratedEvents.java") {
+			continue
+		}
+		content := file.GetContent()
+		for _, documentation := range []string{"event-owned working copy", "caller's baseline stays unchanged", "@return the current value"} {
+			if !strings.Contains(content, documentation) {
+				t.Errorf("%s omits %q", file.GetName(), documentation)
+			}
+		}
+		if strings.Contains(content, "public void set") && !strings.Contains(content, "host validates it") {
+			t.Errorf("%s does not explain mutation validation", file.GetName())
+		}
+	}
+}
