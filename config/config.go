@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,6 +29,11 @@ type BedrockConfig struct {
 	// Disable only for LAN testing; unauthenticated XUIDs are NOT treated as
 	// trusted global identities.
 	OnlineMode bool `yaml:"online_mode"`
+}
+
+type MetricsConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Address string `yaml:"address"`
 }
 
 const (
@@ -291,6 +297,7 @@ type Config struct {
 	PermissionEditor PermissionEditorConfig `yaml:"permission_editor"`
 	Plugins          PluginsConfig          `yaml:"plugins"`
 	Debug            DebugConfig            `yaml:"debug"`
+	Metrics          MetricsConfig          `yaml:"metrics"`
 
 	// Combat timing and knockback settings.
 	Combat CombatConfig `yaml:"combat"`
@@ -383,6 +390,10 @@ func defaults() *Config {
 			Enabled:    false,
 			Address:    "0.0.0.0:19106",
 			OnlineMode: true,
+		},
+		Metrics: MetricsConfig{
+			Enabled: false,
+			Address: "127.0.0.1:9225",
 		},
 	}
 }
@@ -496,6 +507,16 @@ func (c *Config) validate() error {
 	if c.Bedrock.Enabled && c.Bedrock.Address == "" {
 		return errors.New("bedrock.address must not be empty when bedrock is enabled")
 	}
+	c.Metrics.Address = strings.TrimSpace(c.Metrics.Address)
+	if c.Metrics.Enabled {
+		_, port, err := net.SplitHostPort(c.Metrics.Address)
+		if err != nil {
+			return fmt.Errorf("metrics.address %q must be a host:port address: %w", c.Metrics.Address, err)
+		}
+		if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
+			return fmt.Errorf("metrics.address %q must have a numeric port between 1 and 65535", c.Metrics.Address)
+		}
+	}
 	if c.PermissionEditor.Enabled {
 		if parsed, err := url.ParseRequestURI(c.PermissionEditor.EditorURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("permission_editor.editor_url %q must be a valid http/https URL", c.PermissionEditor.EditorURL)
@@ -545,6 +566,8 @@ func (c *Config) validate() error {
 //	GOCRAFT_BEDROCK_ENABLED            "true"/"false"              (default: false)
 //	GOCRAFT_BEDROCK_ADDR               Bedrock UDP address         (default: 0.0.0.0:19106)
 //	GOCRAFT_BEDROCK_ONLINE_MODE        Xbox Live auth required     (default: true)
+//	GOCRAFT_METRICS_ENABLED            "true"/"false"              (default: false)
+//	GOCRAFT_METRICS_ADDR               Metrics HTTP address        (default: 127.0.0.1:9225)
 //	GOCRAFT_PERMISSION_EDITOR_ENABLED  "true"/"false"              (default: true)
 //	GOCRAFT_PERMISSION_EDITOR_URL      Editor GitHub Pages URL
 //	GOCRAFT_PERMISSION_EDITOR_BYTEBIN  Bytebin base URL
@@ -668,6 +691,16 @@ func (c *Config) ApplyEnvOverrides() error {
 		}
 		c.Bedrock.OnlineMode = b
 	}
+	if v := os.Getenv("GOCRAFT_METRICS_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_METRICS_ENABLED %q: %w", v, err)
+		}
+		c.Metrics.Enabled = b
+	}
+	if v := os.Getenv("GOCRAFT_METRICS_ADDR"); v != "" {
+		c.Metrics.Address = v
+	}
 	if v := os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -714,6 +747,8 @@ func logEnvOverrides() {
 		{"GOCRAFT_BEDROCK_ENABLED", os.Getenv("GOCRAFT_BEDROCK_ENABLED")},
 		{"GOCRAFT_BEDROCK_ADDR", os.Getenv("GOCRAFT_BEDROCK_ADDR")},
 		{"GOCRAFT_BEDROCK_ONLINE_MODE", os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE")},
+		{"GOCRAFT_METRICS_ENABLED", os.Getenv("GOCRAFT_METRICS_ENABLED")},
+		{"GOCRAFT_METRICS_ADDR", os.Getenv("GOCRAFT_METRICS_ADDR")},
 		{"GOCRAFT_PERMISSION_EDITOR_ENABLED", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED")},
 		{"GOCRAFT_PERMISSION_EDITOR_URL", os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL")},
 		{"GOCRAFT_PERMISSION_EDITOR_BYTEBIN", os.Getenv("GOCRAFT_PERMISSION_EDITOR_BYTEBIN")},

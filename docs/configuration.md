@@ -96,6 +96,10 @@ bedrock:
   address: 0.0.0.0:19106
   online_mode: true
 
+metrics:
+  enabled: false
+  address: 127.0.0.1:9225
+
 debug:
   startup_registry: false
   environment_overrides: false
@@ -140,7 +144,42 @@ debug:
 | `custom_items.*` | See [Custom Items](custom-items.md) |
 | `permission_editor.*` | See [Permissions](permissions.md) |
 | `bedrock.*` | Enables the RakNet/UDP listener and Xbox auth |
+| `metrics.enabled` | Enables the Prometheus HTTP endpoint at `/metrics` (default `false`) |
+| `metrics.address` | Metrics HTTP bind address with a numeric port `1`–`65535` (default `127.0.0.1:9225`) |
 | `debug.*` | Verbose per-category logging; disable for production |
+
+## Prometheus metrics
+
+Enable the separate metrics listener in `server.yml`:
+
+```yaml
+metrics:
+  enabled: true
+  address: 127.0.0.1:9225
+```
+
+The endpoint is available at `http://127.0.0.1:9225/metrics`. Add this job to a Prometheus instance running on the same host:
+
+```yaml
+scrape_configs:
+  - job_name: gocraft
+    static_configs:
+      - targets: ['127.0.0.1:9225']
+```
+
+The listener binds to localhost by default. For a remote scraper, bind to an interface it can reach, such as `0.0.0.0:9225`, and use the GoCraft host's address in `targets`.
+| Metric | Description |
+| --- | --- |
+| `gocraft_players_online` | Connected Java and Bedrock players combined |
+| `gocraft_players_max` | Configured player limit |
+| `gocraft_java_connections` | Active Java connections, including login and status requests |
+| `gocraft_tps` | TPS estimate from the last 1200 tick processing durations, capped at 20 |
+| `gocraft_tick_duration_average_seconds` | Average tick processing time over the same rolling window |
+| `gocraft_tick_duration_seconds` | Tick processing duration histogram, with `_bucket`, `_sum`, and `_count` series |
+| `gocraft_chunks_loaded{dimension}` | Loaded chunks by dimension |
+| `gocraft_entities{dimension}` | Non-player entities by dimension |
+
+Dimension labels are `overworld`, `nether`, and `end`. Standard Go runtime (`go_*`) and process (`process_*`) metrics are also exposed; availability depends on the platform.
 
 ## World storage
 
@@ -180,6 +219,8 @@ All critical fields can be overridden at runtime via environment variables. Usef
 | `GOCRAFT_BEDROCK_ENABLED` | `bedrock.enabled` |
 | `GOCRAFT_BEDROCK_ADDR` | `bedrock.address` |
 | `GOCRAFT_BEDROCK_ONLINE_MODE` | `bedrock.online_mode` |
+| `GOCRAFT_METRICS_ENABLED` | `metrics.enabled` |
+| `GOCRAFT_METRICS_ADDR` | `metrics.address` |
 | `GOCRAFT_PERMISSION_EDITOR_ENABLED` | `permission_editor.enabled` |
 | `GOCRAFT_PERMISSION_EDITOR_URL` | `permission_editor.editor_url` |
 | `GOCRAFT_PERMISSION_EDITOR_BYTEBIN` | `permission_editor.bytebin_url` |

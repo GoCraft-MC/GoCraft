@@ -157,6 +157,7 @@ type Server struct {
 
 	// timings collects per-subsystem tick durations for /timings and /tps.
 	timings         *tickTimings
+	metrics         *serverMetrics
 	autosaveEnabled atomic.Bool
 	difficulty      atomic.Int32
 	defaultGameMode atomic.Uint32
@@ -638,6 +639,9 @@ func New(cfg *config.Config) (*Server, error) {
 	if err := s.registerPluginRuntimes(cfg); err != nil {
 		return nil, err
 	}
+	if cfg.Metrics.Enabled {
+		s.metrics = newServerMetrics(s)
+	}
 	return s, nil
 }
 
@@ -687,6 +691,12 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.runConsole(ctx)
 	if err := s.loadPlugins(ctx); err != nil {
 		slog.Error("plugins: startup aborted", "err", err)
+		return err
+	}
+	metricsServer, err := s.startMetricsServer()
+	if err != nil {
+		cancel()
+		s.shutdown()
 		return err
 	}
 	if s.cfg.JavaEnabled {
@@ -767,10 +777,15 @@ func (s *Server) Run(ctx context.Context) error {
 		<-ctx.Done()
 	}
 	cancel()
+	stopMetricsServer(metricsServer)
 
 	// ctx is now done: wait for entity tick and Bedrock listener to finish.
 	wg.Wait()
+	s.shutdown()
+	return listenErr
+}
 
+func (s *Server) shutdown() {
 	// Unload plugins while world storage is still open, so a runtime that
 	// persists on shutdown can still write.
 	s.unloadPlugins()
@@ -783,7 +798,6 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}
 	s.saveWorldAge()
-	return listenErr
 }
 
 // runConsole executes commands written to stdin by Pterodactyl or a local
@@ -3098,6 +3112,9 @@ func (s *Server) tickEntities() {
 	// Record this tick into the rolling timing window.
 	elapsed := time.Since(start)
 	s.timings.commit(elapsed)
+	if s.metrics != nil {
+		s.metrics.tickDuration.Observe(elapsed.Seconds())
+	}
 
 	// Warn when the CPU work in a tick exceeds the tick budget.
 	// Network I/O is off-goroutine and does not count toward this budget.
