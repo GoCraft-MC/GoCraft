@@ -552,29 +552,29 @@ func (c *Config) validate() error {
 //
 // Environment variables (all optional; empty = no override):
 //
-//	GOCRAFT_JAVA_HOST         Java TCP bind host          (default: 0.0.0.0)
-//	GOCRAFT_JAVA_PORT         Java TCP port number        (default: 25565)
-//	GOCRAFT_JAVA_ENABLED      "true"/"false"              (default: true)
-//	GOCRAFT_ONLINE_MODE       Java auth required          (default: false)
-//	GOCRAFT_MOTD              Server MOTD string
-//	GOCRAFT_SERVER_ICON       Java server-list icon path
-//	GOCRAFT_MAX_PLAYERS       Max concurrent players
-//	GOCRAFT_WORLD_STORAGE     disk or memory              (default: disk)
-//	GOCRAFT_WORLD_DIR         Anvil world directory path
-//	GOCRAFT_WORLD_SEED        Signed 64-bit terrain seed
-//	GOCRAFT_VIEW_DISTANCE     Java chunk view radius        (default: 8)
-//	GOCRAFT_PREGENERATE_RADIUS Background generation radius (default: 12)
-//	GOCRAFT_MAX_CACHED_CHUNKS Clean chunk cache limit       (default: 768)
-//	GOCRAFT_DIFFICULTY        peaceful/easy/normal/hard    (default: normal)
-//	GOCRAFT_WHITELIST_ENABLED "true"/"false"              (default: false)
-//	GOCRAFT_BEDROCK_ENABLED            "true"/"false"              (default: false)
-//	GOCRAFT_BEDROCK_ADDR               Bedrock UDP address         (default: 0.0.0.0:19106)
-//	GOCRAFT_BEDROCK_ONLINE_MODE        Xbox Live auth required     (default: true)
-//	GOCRAFT_METRICS_ENABLED            "true"/"false"              (default: false)
-//	GOCRAFT_METRICS_ADDR               Metrics HTTP address        (default: 127.0.0.1:9225)
-//	GOCRAFT_PERMISSION_EDITOR_ENABLED  "true"/"false"              (default: true)
-//	GOCRAFT_PERMISSION_EDITOR_URL      Editor GitHub Pages URL
-//	GOCRAFT_PERMISSION_EDITOR_BYTEBIN  Bytebin base URL
+//	GOCRAFT_JAVA_HOST					Java TCP bind host				(default: 0.0.0.0)
+//	GOCRAFT_JAVA_PORT					Java TCP port number			(default: 25565)
+//	GOCRAFT_JAVA_ENABLED				"true"/"false"					(default: true)
+//	GOCRAFT_ONLINE_MODE					Java auth required				(default: false)
+//	GOCRAFT_MOTD						Server MOTD string
+//	GOCRAFT_SERVER_ICON					Java server-list icon path
+//	GOCRAFT_MAX_PLAYERS					Max concurrent players
+//	GOCRAFT_WORLD_STORAGE				disk or memory					(default: disk)
+//	GOCRAFT_WORLD_DIR					Anvil world directory path
+//	GOCRAFT_WORLD_SEED					Signed 64-bit terrain seed
+//	GOCRAFT_VIEW_DISTANCE				Java chunk view radius			(default: 8)
+//	GOCRAFT_PREGENERATE_RADIUS			Background generation radius	(default: 12)
+//	GOCRAFT_MAX_CACHED_CHUNKS			Clean chunk cache limit			(default: 768)
+//	GOCRAFT_DIFFICULTY					peaceful/easy/normal/hard		(default: normal)
+//	GOCRAFT_WHITELIST_ENABLED			"true"/"false"					(default: false)
+//	GOCRAFT_BEDROCK_ENABLED				"true"/"false"					(default: false)
+//	GOCRAFT_BEDROCK_ADDR				Bedrock UDP address				(default: 0.0.0.0:19106)
+//	GOCRAFT_BEDROCK_ONLINE_MODE			Xbox Live auth required			(default: true)
+//	GOCRAFT_METRICS_ENABLED				"true"/"false"					(default: false)
+//	GOCRAFT_METRICS_ADDR				Metrics HTTP address			(default: 127.0.0.1:9225)
+//	GOCRAFT_PERMISSION_EDITOR_ENABLED	"true"/"false"					(default: true)
+//	GOCRAFT_PERMISSION_EDITOR_URL		Editor GitHub Pages URL
+//	GOCRAFT_PERMISSION_EDITOR_BYTEBIN	Bytebin base URL
 func (c *Config) ApplyEnvOverrides() error {
 	if v := os.Getenv("GOCRAFT_JAVA_HOST"); v != "" {
 		c.Host = v
