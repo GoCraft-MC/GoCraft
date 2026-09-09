@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
 	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
@@ -59,7 +58,7 @@ func TestRuntimeLoadsDispatchesCommandsAndStops(t *testing.T) {
 	defer os.RemoveAll(socketDirectory)
 	runtime := New(Config{
 		ExtractDirectory: t.TempDir(), SocketDirectory: socketDirectory,
-		StartTimeout: 3 * time.Second, Spawn: helperSpawn,
+		StartTimeout: helperStartTimeout, Spawn: helperSpawn,
 	})
 	if err := runtime.Start(t.Context(), nil); err != nil {
 		t.Fatal(err)

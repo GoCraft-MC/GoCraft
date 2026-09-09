@@ -22,7 +22,7 @@ func nativeEventRuntime(t testing.TB) (*Runtime, plugin.Bundle, *plugin.Bus) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(sockets) })
-	runtime := New(Config{ExtractDirectory: t.TempDir(), SocketDirectory: sockets, StartTimeout: 3 * time.Second,
+	runtime := New(Config{ExtractDirectory: t.TempDir(), SocketDirectory: sockets, StartTimeout: helperStartTimeout,
 		Spawn: func(entry string) link.Spawn {
 			return func(socket string) *exec.Cmd {
 				command := helperSpawn(entry)(socket)
