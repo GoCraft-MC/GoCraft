@@ -54,7 +54,7 @@ custom_items:
 
 permission_editor:
   enabled: true
-  editor_url: https://el211.github.io/GoCraft/editor
+  editor_url: https://gocraft-mc.github.io/GoCraft/editor
   bytebin_url: https://bytebin.lucko.me
 
 combat:
