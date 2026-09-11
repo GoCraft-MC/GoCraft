@@ -1,8 +1,9 @@
 .claude/
 /.review/
-gocraft-linux-amd64
-gocraft-windows-amd64.exe
-*.exe
+/gocraft-linux-amd64
+/gocraft-windows-amd64.exe
+/gocraft
+/*.exe
 
 # The event generator, built at the root. *.exe covered the Windows build and
 # nothing covered the one without an extension, which is how an 11 MB ELF got
@@ -31,5 +32,4 @@ whitelist.json
 banned-players.json
 banned-ips.json
 GoCraftWebsite
-gocraft
 im.png

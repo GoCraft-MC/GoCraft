@@ -1,0 +1,9 @@
+---
+# vim: filetype=yaml :
+formatter:
+  type: basic
+  indent: 2
+  retain_line_breaks: true
+  indentless_arrays: false
+  include_document_start: true
+  line_ending: lf

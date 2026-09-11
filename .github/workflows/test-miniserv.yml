@@ -1,42 +1,41 @@
-name: CI
-
+---
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
+    paths:
+      - 'miniserv/**'
   pull_request:
-    branches: ["main"]
-
+    branches:
+      - main
+    paths:
+      - 'miniserv/**'
+env:
+  GO_VERSION: ${{ vars.GO_VERSION || '1.24' }}
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
-
-      - name: Build
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: build gocraft
         run: go build ./...
-
-      - name: Vet
+      - name: vet gocraft
         run: go vet ./...
-
-      - name: Test
+      - name: test gocraft
         run: go test ./...
-
       # miniserv is a module of its own, so the steps above never reach it:
       # `./...` stops at a module boundary. That is how a stale go.sum
       # survived a fork bump and an emptied one survived a push, both under
       # a green tick. Two checks, because they fail differently: the lockfile
       # can be wrong while the source compiles, and the source can break on a
       # dependency the lockfile records perfectly well.
-      - name: Miniserv lockfile
+      - name: modtidy miniserv
         working-directory: miniserv
         run: go mod tidy -diff
-
-      - name: Miniserv build
+      - name: build miniserv
         working-directory: miniserv
         run: go build ./...
