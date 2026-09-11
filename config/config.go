@@ -342,7 +342,7 @@ func defaults() *Config {
 		}(),
 		PermissionEditor: PermissionEditorConfig{
 			Enabled:    true,
-			EditorURL:  "https://el211.github.io/GoCraft/editor",
+			EditorURL:  "https://gocraft-mc.github.io/GoCraft/editor",
 			BytebinURL: "https://bytebin.lucko.me",
 		},
 		Plugins: PluginsConfig{

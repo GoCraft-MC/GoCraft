@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
 	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
@@ -23,7 +22,7 @@ const commandTreeEntry = "commands.pb"
 
 // helperCommandTree declares the one command the helper plugin registers. The
 // executor id lives here and nowhere else: the plugin binds to the path.
-func helperCommandTree(t *testing.T) []byte {
+func helperCommandTree(t testing.TB) []byte {
 	t.Helper()
 	encoded, err := proto.Marshal(&wire.CommandTree{Version: 1, Children: []*wire.CommandNode{{
 		Kind: wire.CommandNodeKind_COMMAND_NODE_KIND_LITERAL, Name: "give",
@@ -59,7 +58,7 @@ func TestRuntimeLoadsDispatchesCommandsAndStops(t *testing.T) {
 	defer os.RemoveAll(socketDirectory)
 	runtime := New(Config{
 		ExtractDirectory: t.TempDir(), SocketDirectory: socketDirectory,
-		StartTimeout: 3 * time.Second, Spawn: helperSpawn,
+		StartTimeout: helperStartTimeout, Spawn: helperSpawn,
 	})
 	if err := runtime.Start(t.Context(), nil); err != nil {
 		t.Fatal(err)

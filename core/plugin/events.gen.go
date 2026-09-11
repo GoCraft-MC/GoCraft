@@ -17,6 +17,30 @@ const (
 	EventBlockBreak = "block.break"
 	// Observational, never cancelled. Introduced in ABI 1.
 	EventPlayerJoin = "player.join"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventBlockPlace = "block.place"
+	// Observational, never cancelled. Introduced in ABI 1.
+	EventPlayerQuit = "player.quit"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerChat = "player.chat"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerCommand = "player.command"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerDamage = "player.damage"
+	// Observational, never cancelled. Introduced in ABI 1.
+	EventPlayerDeath = "player.death"
+	// Observational, never cancelled. Introduced in ABI 1.
+	EventPlayerRespawn = "player.respawn"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerTeleport = "player.teleport"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventPlayerInteract = "player.interact"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventInventoryClick = "inventory.click"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventItemUse = "item.use"
+	// Cancellable, blocks the tick, defaults to allow. Introduced in ABI 1.
+	EventEntityDamage = "entity.damage"
 )
 
 // IsNativeEvent reports whether the host itself emits this event.
@@ -26,7 +50,7 @@ const (
 // otherwise load cleanly and never fire.
 func IsNativeEvent(eventType string) bool {
 	switch eventType {
-	case EventBlockBreak, EventPlayerJoin:
+	case EventBlockBreak, EventPlayerJoin, EventBlockPlace, EventPlayerQuit, EventPlayerChat, EventPlayerCommand, EventPlayerDamage, EventPlayerDeath, EventPlayerRespawn, EventPlayerTeleport, EventPlayerInteract, EventInventoryClick, EventItemUse, EventEntityDamage:
 		return true
 	}
 	return false
@@ -38,7 +62,67 @@ func IsNativeEvent(eventType string) bool {
 // A fresh slice every call: the host's vocabulary is fixed at build time and
 // no caller may extend it.
 func NativeEvents() []string {
-	return []string{EventBlockBreak, EventPlayerJoin}
+	return []string{EventBlockBreak, EventPlayerJoin, EventBlockPlace, EventPlayerQuit, EventPlayerChat, EventPlayerCommand, EventPlayerDamage, EventPlayerDeath, EventPlayerRespawn, EventPlayerTeleport, EventPlayerInteract, EventInventoryClick, EventItemUse, EventEntityDamage}
+}
+
+func nativeCancellable(eventType string) bool {
+	switch eventType {
+	case EventBlockBreak:
+		return true
+	case EventBlockPlace:
+		return true
+	case EventPlayerChat:
+		return true
+	case EventPlayerCommand:
+		return true
+	case EventPlayerDamage:
+		return true
+	case EventPlayerTeleport:
+		return true
+	case EventPlayerInteract:
+		return true
+	case EventInventoryClick:
+		return true
+	case EventItemUse:
+		return true
+	case EventEntityDamage:
+		return true
+	}
+	return false
+}
+func nativeMutationAllowed(eventType string, mutation abi.Mutation) bool {
+	if len(mutation.Path) != 1 {
+		return false
+	}
+	switch eventType {
+	case EventPlayerChat:
+		if mutation.Path[0] == 1 {
+			return mutation.Value.Kind == abi.ValueString
+		}
+	case EventPlayerCommand:
+		if mutation.Path[0] == 1 {
+			return mutation.Value.Kind == abi.ValueString
+		}
+	case EventPlayerDamage:
+		if mutation.Path[0] == 1 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+	case EventPlayerTeleport:
+		if mutation.Path[0] == 4 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+		if mutation.Path[0] == 5 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+		if mutation.Path[0] == 6 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+	case EventEntityDamage:
+		if mutation.Path[0] == 2 {
+			return mutation.Value.Kind == abi.ValueDouble
+		}
+	}
+	return false
 }
 
 // BlankEvent is a payload of one native event's shape, carrying nothing.
@@ -64,6 +148,98 @@ func BlankEvent(eventType string) []abi.Value {
 			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
 			abi.List(abi.List(abi.String(""), abi.Bool(false))),
 		}
+	case EventBlockPlace:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.List(abi.Int64(0), abi.Int64(0), abi.Int64(0)),
+			abi.List(abi.String(""), abi.List()),
+			abi.List(abi.String(""), abi.List()),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerQuit:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+		}
+	case EventPlayerChat:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerCommand:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerDamage:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.Double(0),
+			abi.String(""),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerDeath:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+		}
+	case EventPlayerRespawn:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Int64(0),
+		}
+	case EventPlayerTeleport:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Double(0),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventPlayerInteract:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.List(abi.Int64(0), abi.Int64(0), abi.Int64(0)),
+			abi.Int64(0),
+			abi.String(""),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventInventoryClick:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.Int64(0),
+			abi.Int64(0),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventItemUse:
+		return []abi.Value{
+			abi.List(abi.Bytes(make([]byte, 16)), abi.String(""), abi.String("")),
+			abi.String(""),
+			abi.Int64(0),
+			abi.List(abi.List(abi.String(""), abi.Bool(false))),
+		}
+	case EventEntityDamage:
+		return []abi.Value{
+			abi.Int64(0),
+			abi.String(""),
+			abi.Double(0),
+			abi.String(""),
+			abi.Int64(0),
+		}
 	}
 	return nil
 }
@@ -88,7 +264,8 @@ func (b *Bus) EmitBlockBreak(playerRef *player.Player, pos spatial.BlockPos, blo
 			b.injectedPermissions(EventBlockBreak, playerRef),
 		},
 	}
-	return b.EmitCancellable(event)
+	allowed := b.EmitCancellable(event)
+	return allowed
 }
 
 // EmitPlayerJoin publishes player.join to every subscriber, in the same shape whatever
@@ -128,4 +305,352 @@ func (b *Bus) EmitPlayerJoinTo(plugins []string, playerRef *player.Player) {
 		},
 	}
 	b.EmitObservationalTo(event, plugins)
+}
+
+// EmitBlockPlace publishes block.place to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitBlockPlace(playerRef *player.Player, pos spatial.BlockPos, block coreworld.Block, replaced coreworld.Block, dimension int64) bool {
+	if !b.hasSubscribers(EventBlockPlace) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventBlockPlace,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			positionValue(pos),
+			blockValue(block),
+			blockValue(replaced),
+			abi.Int64(dimension),
+			b.injectedPermissions(EventBlockPlace, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitPlayerQuit publishes player.quit to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// Observational: the tick does not wait, and nothing a subscriber does can
+// prevent what already happened.
+func (b *Bus) EmitPlayerQuit(playerRef *player.Player, reason string) {
+	if !b.hasSubscribers(EventPlayerQuit) {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerQuit,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(reason),
+		},
+	}
+	b.EmitObservational(event)
+}
+
+// EmitPlayerQuitTo replays player.quit to named plugins only.
+//
+// For a runtime that died and was brought back: its plugins missed what
+// happened while they were down, and the ones that stayed up did not.
+func (b *Bus) EmitPlayerQuitTo(plugins []string, playerRef *player.Player, reason string) {
+	if len(plugins) == 0 {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerQuit,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(reason),
+		},
+	}
+	b.EmitObservationalTo(event, plugins)
+}
+
+// EmitPlayerChat publishes player.chat to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerChat(playerRef *player.Player, message *string) bool {
+	if !b.hasSubscribers(EventPlayerChat) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerChat,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(*message),
+			b.injectedPermissions(EventPlayerChat, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*message = event.Fields[1].String
+	return allowed
+}
+
+// EmitPlayerCommand publishes player.command to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerCommand(playerRef *player.Player, command *string) bool {
+	if !b.hasSubscribers(EventPlayerCommand) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerCommand,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(*command),
+			b.injectedPermissions(EventPlayerCommand, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*command = event.Fields[1].String
+	return allowed
+}
+
+// EmitPlayerDamage publishes player.damage to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerDamage(playerRef *player.Player, damage *float64, cause string) bool {
+	if !b.hasSubscribers(EventPlayerDamage) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerDamage,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(*damage),
+			abi.String(cause),
+			b.injectedPermissions(EventPlayerDamage, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*damage = event.Fields[1].Double
+	return allowed
+}
+
+// EmitPlayerDeath publishes player.death to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// Observational: the tick does not wait, and nothing a subscriber does can
+// prevent what already happened.
+func (b *Bus) EmitPlayerDeath(playerRef *player.Player, cause string) {
+	if !b.hasSubscribers(EventPlayerDeath) {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerDeath,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(cause),
+		},
+	}
+	b.EmitObservational(event)
+}
+
+// EmitPlayerDeathTo replays player.death to named plugins only.
+//
+// For a runtime that died and was brought back: its plugins missed what
+// happened while they were down, and the ones that stayed up did not.
+func (b *Bus) EmitPlayerDeathTo(plugins []string, playerRef *player.Player, cause string) {
+	if len(plugins) == 0 {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerDeath,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(cause),
+		},
+	}
+	b.EmitObservationalTo(event, plugins)
+}
+
+// EmitPlayerRespawn publishes player.respawn to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// Observational: the tick does not wait, and nothing a subscriber does can
+// prevent what already happened.
+func (b *Bus) EmitPlayerRespawn(playerRef *player.Player, x float64, y float64, z float64, dimension int64) {
+	if !b.hasSubscribers(EventPlayerRespawn) {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerRespawn,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(x),
+			abi.Double(y),
+			abi.Double(z),
+			abi.Int64(dimension),
+		},
+	}
+	b.EmitObservational(event)
+}
+
+// EmitPlayerRespawnTo replays player.respawn to named plugins only.
+//
+// For a runtime that died and was brought back: its plugins missed what
+// happened while they were down, and the ones that stayed up did not.
+func (b *Bus) EmitPlayerRespawnTo(plugins []string, playerRef *player.Player, x float64, y float64, z float64, dimension int64) {
+	if len(plugins) == 0 {
+		return
+	}
+	event := &abi.Event{
+		Type:      EventPlayerRespawn,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(x),
+			abi.Double(y),
+			abi.Double(z),
+			abi.Int64(dimension),
+		},
+	}
+	b.EmitObservationalTo(event, plugins)
+}
+
+// EmitPlayerTeleport publishes player.teleport to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerTeleport(playerRef *player.Player, fromX float64, fromY float64, fromZ float64, x *float64, y *float64, z *float64, dimension int64) bool {
+	if !b.hasSubscribers(EventPlayerTeleport) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerTeleport,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.Double(fromX),
+			abi.Double(fromY),
+			abi.Double(fromZ),
+			abi.Double(*x),
+			abi.Double(*y),
+			abi.Double(*z),
+			abi.Int64(dimension),
+			b.injectedPermissions(EventPlayerTeleport, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*x = event.Fields[4].Double
+	*y = event.Fields[5].Double
+	*z = event.Fields[6].Double
+	return allowed
+}
+
+// EmitPlayerInteract publishes player.interact to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitPlayerInteract(playerRef *player.Player, target string, pos spatial.BlockPos, entityID int64, item string, dimension int64) bool {
+	if !b.hasSubscribers(EventPlayerInteract) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventPlayerInteract,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(target),
+			positionValue(pos),
+			abi.Int64(entityID),
+			abi.String(item),
+			abi.Int64(dimension),
+			b.injectedPermissions(EventPlayerInteract, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitInventoryClick publishes inventory.click to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitInventoryClick(playerRef *player.Player, container string, slot int64, button int64, mode int64) bool {
+	if !b.hasSubscribers(EventInventoryClick) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventInventoryClick,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(container),
+			abi.Int64(slot),
+			abi.Int64(button),
+			abi.Int64(mode),
+			b.injectedPermissions(EventInventoryClick, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitItemUse publishes item.use to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitItemUse(playerRef *player.Player, item string, hand int64) bool {
+	if !b.hasSubscribers(EventItemUse) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventItemUse,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			playerReference(playerRef),
+			abi.String(item),
+			abi.Int64(hand),
+			b.injectedPermissions(EventItemUse, playerRef),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	return allowed
+}
+
+// EmitEntityDamage publishes entity.damage to every subscriber, in the same shape whatever
+// edition the player is on and whatever runtime the plugin uses.
+//
+// It blocks the tick under the budget shared by every subscriber, and reports
+// whether the action may proceed. A false return means a plugin refused it.
+func (b *Bus) EmitEntityDamage(entityID int64, entityType string, damage *float64, cause string, dimension int64) bool {
+	if !b.hasSubscribers(EventEntityDamage) {
+		return true
+	}
+	event := &abi.Event{
+		Type:      EventEntityDamage,
+		OnFailure: abi.FailureAllow,
+		Fields: []abi.Value{
+			abi.Int64(entityID),
+			abi.String(entityType),
+			abi.Double(*damage),
+			abi.String(cause),
+			abi.Int64(dimension),
+		},
+	}
+	allowed := b.EmitCancellable(event)
+	*damage = event.Fields[2].Double
+	return allowed
 }

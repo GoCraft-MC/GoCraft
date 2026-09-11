@@ -16,8 +16,8 @@ func TestPermissionEditorDefaultsAreSafeAndPersisted(t *testing.T) {
 	if !cfg.PermissionEditor.Enabled {
 		t.Fatalf("permission editor should be enabled by default, got %+v", cfg.PermissionEditor)
 	}
-	if !strings.HasPrefix(cfg.PermissionEditor.EditorURL, "https://") {
-		t.Fatalf("editor_url should be an https URL, got %q", cfg.PermissionEditor.EditorURL)
+	if cfg.PermissionEditor.EditorURL != "https://gocraft-mc.github.io/GoCraft/editor" {
+		t.Fatalf("unexpected default editor_url %q", cfg.PermissionEditor.EditorURL)
 	}
 	if !strings.HasPrefix(cfg.PermissionEditor.BytebinURL, "https://") {
 		t.Fatalf("bytebin_url should be an https URL, got %q", cfg.PermissionEditor.BytebinURL)

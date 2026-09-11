@@ -29,6 +29,12 @@ func TestVillageHouseHasBiomeDoorRoofBedAndWorkstation(t *testing.T) {
 	assertVillageBlock(t, chunk, 8, 79, 8, "minecraft:acacia_planks")
 	assertVillageBlock(t, chunk, 7, 71, 9, "minecraft:red_bed")
 	assertVillageBlock(t, chunk, 7, 71, 8, "minecraft:red_bed")
+	if part := chunkBlock(chunk, 7, 71, 9).Properties["part"]; part != "foot" {
+		t.Fatalf("bed entrance half part = %q, want foot", part)
+	}
+	if part := chunkBlock(chunk, 7, 71, 8).Properties["part"]; part != "head" {
+		t.Fatalf("assigned sleeping half part = %q, want head", part)
+	}
 	assertVillageBlock(t, chunk, 10, 71, 7, "minecraft:lectern")
 	if got := chunkBlock(chunk, 8, 71, 8); !got.IsAir() {
 		t.Fatalf("cleared interior block = %s, want air", got.Key())
@@ -127,6 +133,7 @@ func TestGeneratedVillageSpawnsResidentsAndIronGolem(t *testing.T) {
 	world.Chunk(int32(floorDiv(center.WorldX, SectionSize)), int32(floorDiv(center.WorldZ, SectionSize)))
 
 	villagers, golems := 0, 0
+	claimedBeds := make(map[spatial.BlockPos]struct{})
 	for _, spawned := range world.Entities.Snapshot() {
 		switch spawned.Type {
 		case entity.TypeVillager:
@@ -139,6 +146,14 @@ func TestGeneratedVillageSpawnsResidentsAndIronGolem(t *testing.T) {
 			}
 			if spawned.VillageCenter == (spatial.BlockPos{}) {
 				t.Fatal("villager has no village-wide roaming center")
+			}
+			if _, duplicate := claimedBeds[spawned.VillageBed]; duplicate {
+				t.Fatalf("multiple villagers claimed bed %+v", spawned.VillageBed)
+			}
+			claimedBeds[spawned.VillageBed] = struct{}{}
+			bed := world.GetBlock(int(spawned.VillageBed.X), int(spawned.VillageBed.Y), int(spawned.VillageBed.Z))
+			if bed.ResourceLocation() != "minecraft:red_bed" || bed.Properties["part"] != "head" {
+				t.Fatalf("villager bed %+v = %s, want red bed head", spawned.VillageBed, bed.Key())
 			}
 		case entity.TypeIronGolem:
 			golems++

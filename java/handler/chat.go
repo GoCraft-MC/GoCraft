@@ -81,6 +81,9 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 		return nil
 	}
 
+	if !cmds.FilterPlayerChat(p, &msg) {
+		return nil
+	}
 	text := cmds.FormatChat(p.Username, msg)
 	slog.Info("chat", "player", p.Username, "message", msg)
 	broadcastSystemMessage(mgr, text)

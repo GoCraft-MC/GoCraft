@@ -353,6 +353,97 @@ func TestEveryCropSupportRule(t *testing.T) {
 	}
 }
 
+func TestCocoaBreaksWhenJungleLogRemoved(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	// Place a jungle log and a cocoa pod facing the log (east, so log is at x+1).
+	w.SetBlock(1, 64, 0, Block{Namespace: "minecraft", Name: "jungle_log"})
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "cocoa",
+		Properties: map[string]string{"facing": "east", "age": "0"}})
+	// Remove the log; cocoa at (0,64,0) should break.
+	w.SetBlock(1, 64, 0, Air)
+	changes := w.BreakUnsupportedCocoaAdjacentTo(1, 64, 0)
+	if len(changes) != 1 || !w.GetBlock(0, 64, 0).IsAir() {
+		t.Fatalf("cocoa did not break: changes=%v block=%s", changes, w.GetBlock(0, 64, 0).Key())
+	}
+}
+
+func TestGrassBoneMealScattersVegetation(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	// Place a large grass platform so 128 scatter attempts have many valid spots.
+	for dx := -4; dx <= 4; dx++ {
+		for dz := -4; dz <= 4; dz++ {
+			w.SetBlock(dx, 64, dz, Block{Namespace: "minecraft", Name: "grass_block"})
+		}
+	}
+	changes, used := w.ApplyBoneMeal(0, 64, 0, 12345)
+	if !used {
+		t.Fatal("ApplyBoneMeal on grass_block returned used=false")
+	}
+	if len(changes) == 0 {
+		t.Fatal("ApplyBoneMeal on grass_block produced no plant changes")
+	}
+	for _, c := range changes {
+		b := w.GetBlock(c.X, c.Y, c.Z)
+		if b.IsAir() {
+			t.Fatalf("plant block at (%d,%d,%d) is air after bone meal scatter", c.X, c.Y, c.Z)
+		}
+	}
+}
+
+func TestMyceliumBoneMealScattersMushrooms(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	for dx := -4; dx <= 4; dx++ {
+		for dz := -4; dz <= 4; dz++ {
+			w.SetBlock(dx, 64, dz, Block{Namespace: "minecraft", Name: "mycelium"})
+		}
+	}
+	changes, used := w.ApplyBoneMeal(0, 64, 0, 99999)
+	if !used {
+		t.Fatal("ApplyBoneMeal on mycelium returned used=false")
+	}
+	if len(changes) == 0 {
+		t.Fatal("ApplyBoneMeal on mycelium placed no mushrooms")
+	}
+	for _, c := range changes {
+		name := c.Block.ResourceLocation()
+		if name != "minecraft:brown_mushroom" && name != "minecraft:red_mushroom" {
+			t.Fatalf("unexpected block %q placed by mycelium bone meal", name)
+		}
+	}
+}
+
+func TestMossBoneMealSpreadsAndConverts(t *testing.T) {
+	w := New(&FlatGenerator{}, nil, false)
+	defer w.Close()
+	// Place dirt blocks around the central moss block so the scatter has targets.
+	for dx := -4; dx <= 4; dx++ {
+		for dz := -4; dz <= 4; dz++ {
+			w.SetBlock(dx, 64, dz, Block{Namespace: "minecraft", Name: "dirt"})
+		}
+	}
+	w.SetBlock(0, 64, 0, Block{Namespace: "minecraft", Name: "moss_block"})
+	changes, used := w.ApplyBoneMeal(0, 64, 0, 77777)
+	if !used {
+		t.Fatal("ApplyBoneMeal on moss_block returned used=false")
+	}
+	if len(changes) == 0 {
+		t.Fatal("ApplyBoneMeal on moss_block produced no changes")
+	}
+	// Some non-moss surface should have been converted.
+	anyMoss := false
+	for _, c := range changes {
+		if c.Block.ResourceLocation() == "minecraft:moss_block" {
+			anyMoss = true
+		}
+	}
+	if !anyMoss {
+		t.Fatal("moss bone meal did not convert any surface to moss_block")
+	}
+}
+
 func TestCoveredCropUsesCurrentPumpkinLightTODOBehaviour(t *testing.T) {
 	world := New(&FlatGenerator{}, nil, false)
 	defer world.Close()

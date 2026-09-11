@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
 	"GoCraft/runtime/link"
 	gocraft "github.com/GoCraft-MC/gocraft-api-go"
@@ -13,7 +14,21 @@ import (
 
 type helperPlugin struct{}
 
+// Race-instrumented helpers also initialize the imported gameplay registries.
+// Match the normal runtime startup allowance, not its per-event budget.
+const helperStartTimeout = 30 * time.Second
+
 func (*helperPlugin) OnLoad(context gocraft.Context) error {
+	if os.Getenv("GOCRAFT_NATIVE_EVENTS") == "1" {
+		if err := context.Events().OnPlayerChat(func(event *gocraft.PlayerChatEvent, control gocraft.EventControl) {
+			if event.Message == "cancel" {
+				control.Cancel()
+			}
+			event.Message = "rewritten"
+		}); err != nil {
+			return err
+		}
+	}
 	if os.Getenv("GOCRAFT_NATIVE_PLUGIN_FAILURE") == "load" {
 		return errors.New("load failure")
 	}
@@ -73,6 +88,7 @@ func helperSpawnFailure(failure string) link.Spawn {
 			"--sock", socket, "--abi", "1")
 		command.Env = append(os.Environ(), "GOCRAFT_NATIVE_PLUGIN_HELPER=1",
 			"GOCRAFT_NATIVE_PLUGIN_FAILURE="+failure)
+		command.Stderr = os.Stderr
 		return command
 	}
 }

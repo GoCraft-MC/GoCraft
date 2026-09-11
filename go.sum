@@ -1,7 +1,7 @@
-github.com/GoCraft-MC/gocraft-abi v0.4.0 h1:5cgYWdpK5eAOK2Fc8HooY05D3haJxyfZAcAbpL9EgoI=
-github.com/GoCraft-MC/gocraft-abi v0.4.0/go.mod h1:PxAFmtTamYvRFzYO7g5jf1/8Vs9JwAJvT8vnYHP0exI=
-github.com/GoCraft-MC/gocraft-api-go v0.3.0 h1:7X5Cq9rMMxwqlxTiITA5cpTqXCJLQeSb6AOX/zOCtcI=
-github.com/GoCraft-MC/gocraft-api-go v0.3.0/go.mod h1:Bz5VtS6X4T7/xk8lF/qmGNtO5Tree5t1VIepUrgKVUs=
+github.com/GoCraft-MC/gocraft-abi v0.4.1-0.20260909091520-46f15c995cb4 h1:C2rwNJUaGhJqw/Z0R5a0i5JM4pxo0UasyvFS7Bf/dH8=
+github.com/GoCraft-MC/gocraft-abi v0.4.1-0.20260909091520-46f15c995cb4/go.mod h1:PxAFmtTamYvRFzYO7g5jf1/8Vs9JwAJvT8vnYHP0exI=
+github.com/GoCraft-MC/gocraft-api-go v0.3.1-0.20260909092105-c01a15fc60a3 h1:eV1/6Gnd8HnlBKA80qYywaRvpTeL9W+4zv3U+EpfUMU=
+github.com/GoCraft-MC/gocraft-api-go v0.3.1-0.20260909092105-c01a15fc60a3/go.mod h1:bA0x4oMFOUee1EFCEwBadY0KMIZHfN3pqwHQg0adpHw=
 github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6 h1:C05p0vLRkLkLLBMmkvmpMBIBT+CSEafqCXzT5hUEdKA=
 github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6/go.mod h1:JMKsf8DmVmn+qEVJ1IA9m7zEo9qHJ3ZN6IEvySEk9bs=
 github.com/brentp/intintmap v0.0.0-20251106190759-56907b1f8479 h1:UZbbt19ACBOFO+CiDQFjaEoPJkBhj7GNGtIq59WR6Os=

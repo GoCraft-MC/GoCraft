@@ -50,9 +50,12 @@ func (g *Game) NextEntityID() int32 {
 	return g.nextEntityID.Add(1) - 1
 }
 
-// RemovePlayer deregisters the player identified by uuid.
-func (g *Game) RemovePlayer(uuid [16]byte) {
-	g.players.Delete(uuid)
+// RemovePlayer deregisters and returns the player, or nil if already removed.
+func (g *Game) RemovePlayer(uuid [16]byte) *player.Player {
+	if value, loaded := g.players.LoadAndDelete(uuid); loaded {
+		return value.(*player.Player)
+	}
+	return nil
 }
 
 // GetPlayer returns the player with uuid, or nil if not online.

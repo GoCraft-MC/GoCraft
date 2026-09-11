@@ -53,6 +53,7 @@ type field struct {
 	// Injected fields are filled in by the host before dispatch rather than
 	// supplied by whoever emits the event, so they are not parameters.
 	Injected bool
+	Mutable  bool
 }
 
 // GoName is the field name as a Go identifier.
@@ -172,18 +173,30 @@ func read(message *protogen.Message) (*event, error) {
 			"the tick never waits for it, so nothing could act on the answer", result.Type)
 	}
 	for index, f := range message.Fields {
+		if int(f.Desc.Number()) != index+1 {
+			return nil, fmt.Errorf("%s: positional fields must be numbered consecutively", result.Type)
+		}
 		kind, err := kindOf(f)
 		if err != nil {
 			return nil, fmt.Errorf("%s.%s: %w", result.Type, f.Desc.Name(), err)
+		}
+		mutable, _ := proto.GetExtension(f.Desc.Options(), wire.E_Mutable).(bool)
+		if mutable && (result.Observational || injected(f) || !mutableScalar(kind)) {
+			return nil, fmt.Errorf("%s.%s: only non-injected scalar fields in blocking events may be mutable", result.Type, f.Desc.Name())
 		}
 		result.Fields = append(result.Fields, field{
 			Name:     string(f.Desc.Name()),
 			Index:    index,
 			Kind:     kind,
 			Injected: injected(f),
+			Mutable:  mutable,
 		})
 	}
 	return result, nil
+}
+
+func mutableScalar(kind string) bool {
+	return kind == "string" || kind == "bool" || kind == "int64" || kind == "double"
 }
 
 func injected(f *protogen.Field) bool {
@@ -242,5 +255,13 @@ func exported(name string) string {
 	if name == "" {
 		return ""
 	}
-	return strings.ToUpper(name[:1]) + name[1:]
+	parts := strings.Split(name, "_")
+	for i, part := range parts {
+		if part == "id" || part == "uuid" {
+			parts[i] = strings.ToUpper(part)
+		} else if part != "" {
+			parts[i] = strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	return strings.Join(parts, "")
 }

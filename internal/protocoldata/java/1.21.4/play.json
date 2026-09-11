@@ -14,6 +14,7 @@
     "minecraft:chunk_batch_finished": 12,
     "minecraft:chunk_batch_start": 13,
     "minecraft:commands": 17,
+    "minecraft:container_close": 18,
     "minecraft:set_container_content": 19,
     "minecraft:set_container_data": 20,
     "minecraft:forget_level_chunk": 34,
@@ -29,6 +30,7 @@
     "minecraft:player_info_update": 64,
     "minecraft:player_position": 66,
     "minecraft:remove_entities": 71,
+    "minecraft:remove_mob_effect": 72,
     "minecraft:respawn": 76,
     "minecraft:player_info_remove": 63,
     "minecraft:rotate_head": 77,
@@ -58,7 +60,8 @@
     "minecraft:update_attributes": 124,
     "minecraft:update_recipes": 126,
     "minecraft:set_passengers": 101,
-    "minecraft:update_health": 98
+    "minecraft:update_health": 98,
+    "minecraft:open_book": 22
   },
   "serverbound": {
     "minecraft:accept_teleportation": 0,
@@ -86,6 +89,8 @@
 	"minecraft:move_vehicle": 32,
 	"minecraft:paddle_boat": 33,
 	"minecraft:player_input": 41,
-	"minecraft:player_command": 40
+	"minecraft:player_command": 40,
+		"minecraft:sign_update": 52,
+		"minecraft:rename_item": 48
   }
 }

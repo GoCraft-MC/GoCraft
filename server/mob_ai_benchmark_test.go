@@ -50,3 +50,20 @@ func BenchmarkNightHostileAI(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkVillagerBedSearch(b *testing.B) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	for cx := int32(-1); cx <= 1; cx++ {
+		for cz := int32(-1); cz <= 1; cz++ {
+			w.Chunk(cx, cz)
+		}
+	}
+	s := &Server{world: w}
+	villager := corentity.New(1, [16]byte{}, corentity.TypeVillager, 0.5, 64, 0.5)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		s.claimVillagerBed(villager)
+	}
+}

@@ -124,6 +124,7 @@ type bedrockSession struct {
 	lastExperienceLevel int32
 	lastExperience      float32
 	experienceSent      bool
+	lastStatusEffects   []player.StatusEffect
 	wasDead             bool
 	inventorySent       bool
 	lastInventory       [player.InventorySize]player.ItemStack
@@ -949,6 +950,13 @@ func (l *Listener) playLoop(ctx context.Context, conn *minecraft.Conn, bedrockSe
 				l.bus.PostArmSwing(intent.ArmSwingIntent{PlayerUUID: playerUUID, Hand: 0})
 			}
 
+		case *packet.LecternUpdate:
+			l.bus.PostLecternPage(intent.LecternPageIntent{
+				PlayerUUID: playerUUID, Dimension: bedrockSess.dimension.Load(),
+				Position: spatial.BlockPos{X: p.Position[0], Y: p.Position[1], Z: p.Position[2]},
+				Page:     int(p.Page), PageCount: int(p.PageCount),
+			})
+
 		case *packet.RequestAbility:
 			if p.Ability == packet.AbilityFlying {
 				if enabled, ok := p.Value.(bool); ok {
@@ -1665,6 +1673,7 @@ func (l *Listener) canonicalInventoryActions(
 					Damage:       int(ki.meta),
 					HasFireworks: ki.hasFireworks,
 					Fireworks:    ki.fireworks,
+					Components:   ki.components,
 				},
 			})
 			creativeSelected = true

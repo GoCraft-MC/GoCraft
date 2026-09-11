@@ -15,6 +15,7 @@ import (
 
 	"GoCraft/core/dispatch"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/session"
 )
@@ -83,7 +84,8 @@ type CommandContext struct {
 	// SyncAbilities republishes the issuing player's local state — game mode,
 	// flight, speeds — after a command changed it. Both adapters send their own
 	// packets for this; neither is reachable from here.
-	SyncAbilities func(*player.Player)
+	SyncAbilities    func(*player.Player)
+	SyncStatusEffect func(*player.Player, player.StatusEffect)
 
 	DisconnectPlayer func(*player.Player, string) error
 }
@@ -129,9 +131,11 @@ type Dispatcher struct {
 	permission           PermissionChecker
 	registry             *dispatch.Registry
 	pluginCommands       PluginCommands
+	pluginEvents         *coreplugin.Bus
 	messenger            func(*player.Player, string) error
 	linkMessenger        func(*player.Player, string, string) error
 	syncAbilities        func(*player.Player)
+	syncStatusEffect     func(*player.Player, player.StatusEffect)
 	chatFormatter        ChatFormatter
 	bedrockChatFormatter ChatFormatter
 	groupPrefix          func(username string) string
@@ -348,6 +352,13 @@ func (d *Dispatcher) SetAbilitySync(sync func(*player.Player)) {
 	d.mu.Unlock()
 }
 
+// SetStatusEffectSync installs the cross-edition effect packet bridge.
+func (d *Dispatcher) SetStatusEffectSync(sync func(*player.Player, player.StatusEffect)) {
+	d.mu.Lock()
+	d.syncStatusEffect = sync
+	d.mu.Unlock()
+}
+
 // SetMaxPlayers publishes the configured player capacity to commands.
 func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 	d.mu.Lock()
@@ -369,6 +380,15 @@ func (d *Dispatcher) SetMaxPlayers(maxPlayers int) {
 // one keeps it, which is what lets a test inject its own without a server.
 func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	input = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(input), "/"))
+	if events := d.EventBus(); events != nil && ctx.Player != nil {
+		if !events.EmitPlayerCommand(ctx.Player, &input) {
+			return
+		}
+		input = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(input), "/"))
+		if !validEventText(input) {
+			return
+		}
+	}
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return
@@ -390,15 +410,17 @@ func (d *Dispatcher) Dispatch(input string, ctx CommandContext) {
 	messenger := d.messenger
 	linkMessenger := d.linkMessenger
 	syncAbilities := d.syncAbilities
+	syncStatusEffect := d.syncStatusEffect
 	d.mu.RUnlock()
 	ctx.NextEntityID = allocateEntityID
 	ctx.FindPlayer = findPlayer
 	ctx.ListPlayers = listPlayers
 	ctx.TeleportPlayer = teleportPlayer
+	ctx.TeleportTo = d.eventTeleport(ctx.Player, ctx.TeleportTo)
 	ctx.DisconnectPlayer = disconnectPlayer
 	ctx.MaxPlayers = maxPlayers
 	ctx.AvailableCommands = d.VisibleCommands(ctx.Player)
-	fillFeedback(&ctx, messenger, linkMessenger, syncAbilities)
+	fillFeedback(&ctx, messenger, linkMessenger, syncAbilities, syncStatusEffect)
 
 	if !ok {
 		// Plugins are asked only once no built-in answers to the name. That

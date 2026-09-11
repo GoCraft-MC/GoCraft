@@ -1,4 +1,5 @@
 .claude/
+/.review/
 gocraft-linux-amd64
 gocraft-windows-amd64.exe
 *.exe
@@ -29,3 +30,6 @@ permissions.json
 whitelist.json
 banned-players.json
 banned-ips.json
+GoCraftWebsite
+gocraft
+im.png

@@ -40,7 +40,8 @@ Panics at every callback boundary are recovered and logged with a stack trace.
 
 ## Events
 
-The first API version exposes:
+The shared schema exposes the native events listed in [the event guide](native-events.md).
+The original two events remain available:
 
 | Event | Timing | Cancellable |
 | --- | --- | --- |
@@ -52,9 +53,9 @@ protocol IDs are exposed. Cancelling `BlockBreakEvent` keeps the block intact
 for either edition.
 
 ```go
-ctx.Events().OnBlockBreak(func(event *gocraft.BlockBreakEvent) {
+ctx.Events().OnBlockBreak(func(event *gocraft.BlockBreakEvent, control gocraft.EventControl) {
     if event.Block.ID == "minecraft:diamond_block" {
-        event.Cancel()
+        control.Cancel()
     }
 })
 ```

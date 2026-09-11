@@ -25,7 +25,15 @@ func (s *Server) tickAnimalLifecycle(entities []*corentity.Entity) {
 		if e.PoisonTicks > 0 {
 			e.PoisonTicks--
 			if e.PoisonTicks == 0 {
-				e.Damage(e.MaxHealth)
+				s.damageEnvironmentalEntity(e, e.MaxHealth, "poison")
+			}
+		}
+		// Sheep wool regrowth: count down and regrow when zero.
+		if e.Type == corentity.TypeSheep && e.Sheared && e.WoolRegrowTicks > 0 {
+			e.WoolRegrowTicks--
+			if e.WoolRegrowTicks == 0 {
+				e.Sheared = false
+				handler.BroadcastMobMetadata(e, s.sessions)
 			}
 		}
 		if !corentity.IsAgeableAnimal(e.Type) {

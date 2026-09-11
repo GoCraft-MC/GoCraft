@@ -239,7 +239,7 @@ func (g *OverworldGenerator) VillageResidents(v VillageCenter) []VillageResident
 		spawnPos := spatial.BlockPos{X: int32(house.centerX), Y: int32(g.SurfaceHeight(house.centerX, house.centerZ+hd+1) + 1), Z: int32(house.centerZ + hd + 1)}
 
 		// Resident 1 — left bed
-		bed1 := spatial.BlockPos{X: int32(house.centerX - hw + 2), Y: int32(house.groundY + 1), Z: int32(house.centerZ + hd - 1)}
+		bed1 := spatial.BlockPos{X: int32(house.centerX - hw + 2), Y: int32(house.groundY + 1), Z: int32(house.centerZ + hd - 2)}
 		residents = append(residents, VillageResident{
 			Home: home, Center: center, Spawn: spawnPos,
 			Bed: bed1, Workstation: workstation, Profession: profession,
@@ -247,7 +247,7 @@ func (g *OverworldGenerator) VillageResidents(v VillageCenter) []VillageResident
 
 		// Resident 2 — right bed (only present when house is wide enough)
 		if hw >= 3 {
-			bed2 := spatial.BlockPos{X: int32(house.centerX + hw - 2), Y: int32(house.groundY + 1), Z: int32(house.centerZ + hd - 1)}
+			bed2 := spatial.BlockPos{X: int32(house.centerX + hw - 2), Y: int32(house.groundY + 1), Z: int32(house.centerZ + hd - 2)}
 			residents = append(residents, VillageResident{
 				Home: home, Center: center,
 				Spawn:      spatial.BlockPos{X: spawnPos.X + 2, Y: spawnPos.Y, Z: spawnPos.Z},

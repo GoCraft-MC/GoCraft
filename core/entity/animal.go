@@ -75,6 +75,9 @@ func IsAnimalVehicle(t EntityType) bool {
 func IsRideableVehicle(t EntityType) bool { return IsBoat(t) || IsMinecart(t) || IsAnimalVehicle(t) }
 
 func VehicleCapacity(t EntityType) int {
+	if IsChestBoat(t) {
+		return 1
+	}
 	if IsBoat(t) || t == TypeCamel {
 		return 2
 	}
@@ -85,6 +88,16 @@ func VehicleCapacity(t EntityType) int {
 		return 1
 	}
 	return 0
+}
+
+func IsChestBoat(t EntityType) bool {
+	switch t {
+	case TypeOakChestBoat, TypeSpruceChestBoat, TypeBirchChestBoat,
+		TypeJungleChestBoat, TypeAcaciaChestBoat, TypeDarkOakChestBoat,
+		TypeMangroveChestBoat, TypeCherryChestBoat, TypeBambooChestRaft:
+		return true
+	}
+	return false
 }
 
 // PassengerIDs returns the occupied seats in vanilla passenger order.

@@ -130,3 +130,48 @@ func TestLegacyArmorReduction(t *testing.T) {
 		t.Fatalf("legacy full diamond damage = %v, want 2", got)
 	}
 }
+
+func TestMagicDamageBypassesArmor(t *testing.T) {
+	p := player.New([16]byte{}, "tank", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[5] = player.ItemStack{ItemID: "minecraft:diamond_helmet", Count: 1}
+	p.Inventory[6] = player.ItemStack{ItemID: "minecraft:diamond_chestplate", Count: 1}
+	p.Inventory[7] = player.ItemStack{ItemID: "minecraft:diamond_leggings", Count: 1}
+	p.Inventory[8] = player.ItemStack{ItemID: "minecraft:diamond_boots", Count: 1}
+	target := &session.Session{Player: p}
+	if !DamagePlayerMagic(target, 4, "withered away", nil) {
+		t.Fatal("magic damage was rejected")
+	}
+	health, _, _, _ := p.HealthSnapshot()
+	if health != 16 {
+		t.Fatalf("health = %v, want 16", health)
+	}
+	for slot := 5; slot <= 8; slot++ {
+		if p.Inventory[slot].Damage != 0 {
+			t.Fatalf("armour slot %d was damaged", slot)
+		}
+	}
+}
+
+func TestTotemStoresSurvivalEffects(t *testing.T) {
+	p := player.New([16]byte{}, "survivor", player.ClientEditionJava)
+	p.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:totem_of_undying", Count: 1}
+	p.Health = 0
+	p.Dead = true
+	if !tryConsumeTotem(&session.Session{Player: p}) {
+		t.Fatal("totem was not consumed")
+	}
+	health, _, _, dead := p.HealthSnapshot()
+	if health != 1 || dead {
+		t.Fatalf("restored state = health %v dead %v", health, dead)
+	}
+	if !p.Inventory[player.OffhandSlot].IsEmpty() {
+		t.Fatal("totem remains in offhand")
+	}
+	if effects := p.StatusEffectsSnapshot(); len(effects) != 3 {
+		t.Fatalf("stored effects = %+v", effects)
+	}
+	if absorption := p.AbsorptionSnapshot(); absorption != 8 {
+		t.Fatalf("absorption = %v, want 8", absorption)
+	}
+}

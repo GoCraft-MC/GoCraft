@@ -166,18 +166,17 @@ func TestValidateSubscriptionsAcceptsWhatSomethingEmits(t *testing.T) {
 }
 
 func TestValidateSubscriptionsRefusesAMistypedNativeEvent(t *testing.T) {
-	// The live example: WorldGuard-GO subscribes to block.place, which loads
-	// cleanly today and never fires.
-	bundles := []Bundle{subscribing("fr.oreo.guard", "block.place")}
+	// A typo must still fail now that block.place is a native event.
+	bundles := []Bundle{subscribing("fr.oreo.guard", "block.plcae")}
 	types, err := newEventTypes(bundles)
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = validateSubscriptions(bundles, types)
 	if err == nil {
-		t.Fatal("validateSubscriptions() accepted a subscription to block.place")
+		t.Fatal("validateSubscriptions() accepted a subscription to block.plcae")
 	}
-	for _, mentioned := range []string{"fr.oreo.guard", "block.place", "block.break", "player.join"} {
+	for _, mentioned := range []string{"fr.oreo.guard", "block.plcae", "block.break", "player.join"} {
 		if !strings.Contains(err.Error(), mentioned) {
 			t.Fatalf("validateSubscriptions() error = %v, want it to name %s", err, mentioned)
 		}
@@ -245,7 +244,7 @@ func TestPreflightRefusesAnUnknownSubscriptionWithoutProvisioning(t *testing.T) 
 	if err := registry.RegisterRuntime(runtime); err != nil {
 		t.Fatal(err)
 	}
-	err := registry.Preflight(context.Background(), []Bundle{subscribing("fr.oreo.guard", "block.place")})
+	err := registry.Preflight(context.Background(), []Bundle{subscribing("fr.oreo.guard", "block.plcae")})
 	if err == nil {
 		t.Fatal("Preflight() accepted a subscription to an event nothing emits")
 	}

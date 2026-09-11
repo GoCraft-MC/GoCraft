@@ -66,6 +66,9 @@ type javaAccessor struct {
 	Name      string
 	Reader    string
 	FieldName string
+	Setter    string
+	Writer    string
+	Index     int
 }
 
 type javaEvent struct {
@@ -102,12 +105,18 @@ func javaModel(declared event) (javaEvent, error) {
 		if err != nil {
 			return javaEvent{}, fmt.Errorf("%s.%s: %w", declared.Type, f.Name, err)
 		}
-		model.Accessors = append(model.Accessors, javaAccessor{
+		accessor := javaAccessor{
 			Type:      bound.JavaType,
 			Name:      f.JavaName(),
 			Reader:    fmt.Sprintf(bound.JavaDecode, f.Index),
 			FieldName: f.Name,
-		})
+			Index:     f.Index,
+		}
+		if f.Mutable {
+			accessor.Setter = "set" + exported(f.Name)
+			accessor.Writer = map[string]string{"string": "Text", "bool": "Bool", "int64": "Int", "double": "Decimal"}[f.Kind]
+		}
+		model.Accessors = append(model.Accessors, accessor)
 	}
 	model.Imports = javaImports(model)
 	return model, nil
@@ -151,18 +160,38 @@ package {{ .Package }};
 {{- end }}
 ///
 /// Introduced in ABI {{ .Since }}.
+/// Values belong to this dispatch, not to a live server object. Keep event
+/// instances on the handler thread and do not retain them after dispatch.
 public final class {{ .Class }} extends fr.gocraft.api.Event {
 
+    /// The event name used in ABI dispatch and plugin subscriptions.
     public static final String TYPE = "{{ .Type }}";
 
+    /// Creates the runtime's typed view with an event-owned working copy.
+    ///
+    /// @param fields positional ABI values; the caller's baseline stays unchanged
+    /// @param sink the effect collector for this dispatch
     public {{ .Class }}(java.util.List<fr.gocraft.api.Value> fields, fr.gocraft.api.EffectSink sink) {
         super(TYPE, fields, {{ if .Permissions }}fr.gocraft.api.Events.permissions(fields, {{ .PermissionsIndex }}){{ else }}java.util.Map.of(){{ end }}, sink);
     }
 {{ range .Accessors }}
     /// The {@code {{ .FieldName }}} the event carries.
+    ///
+    /// @return the current value in this event's snapshot
     public {{ .Type }} {{ .Name }}() {
         return {{ .Reader }};
     }
+{{- if .Setter }}
+
+    /// Updates the working value seen by subsequent handlers in this dispatch.
+    /// The runtime returns the change as a mutation; the host validates it
+    /// before applying the original action. Cancellation can prevent that action.
+    ///
+    /// @param value the replacement for {@code {{ .FieldName }}}
+    public void {{ .Setter }}({{ .Type }} value) {
+        field({{ .Index }}, new fr.gocraft.api.Value.{{ .Writer }}(value));
+    }
+{{- end }}
 {{ end }}
 {{- if .Permissions }}
     /// Whether the acting player holds a permission.
@@ -173,6 +202,9 @@ public final class {{ .Class }} extends fr.gocraft.api.Event {
     ///
     /// A node the manifest never declared reads as false, because the host was
     /// never asked about it. That is a manifest bug, not a denial.
+    ///
+    /// @param node the permission name declared by the subscription
+    /// @return the host's permission answer, or false for an undeclared node
     public boolean can(String node) {
         return permission(node);
     }

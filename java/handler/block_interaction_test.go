@@ -302,6 +302,226 @@ func javaWorldHasDroppedItem(w *coreworld.World, itemID string, count int) bool 
 	return false
 }
 
+func TestJavaPlayerDropActionsPreserveStacks(t *testing.T) {
+	p := player.New([16]byte{}, "dropper", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:diamond", Count: 3, Components: `{"custom_name":"Gem"}`}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	nextID := int32(0)
+	for _, status := range []int32{actionStatusDropItem, actionStatusDropStack} {
+		pkt := protocol.NewBuilder(packetIDPlayerAction).
+			VarInt(status).Long(packBlockPos(0, 64, 0)).Byte(1).VarInt(status).Build()
+		if err := handlePlayerActionWithContext(pkt, p, w, session.NewManager(), nil, func() int32 {
+			nextID++
+			return nextID
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stack := p.Inventory[player.HotbarStart]; !stack.IsEmpty() {
+		t.Fatalf("held stack remains: %+v", stack)
+	}
+	counts := map[int]bool{}
+	for _, entity := range w.Entities.Snapshot() {
+		stack := entity.DroppedItem()
+		if stack.ItemID == "minecraft:diamond" && stack.Components == `{"custom_name":"Gem"}` {
+			counts[stack.Count] = true
+		}
+	}
+	if !counts[1] || !counts[2] {
+		t.Fatalf("dropped stack counts = %+v", counts)
+	}
+}
+
+func TestJavaPlayerActionSwapsOffhand(t *testing.T) {
+	p := player.New([16]byte{}, "swapper", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:torch", Count: 4}
+	p.Inventory[player.OffhandSlot] = player.ItemStack{ItemID: "minecraft:shield", Count: 1}
+	pkt := protocol.NewBuilder(packetIDPlayerAction).
+		VarInt(actionStatusSwapOffhand).Long(packBlockPos(0, 64, 0)).Byte(1).VarInt(1).Build()
+	if err := handlePlayerAction(pkt, p, nil, session.NewManager()); err != nil {
+		t.Fatal(err)
+	}
+	if p.Inventory[player.HotbarStart].ItemID != "minecraft:shield" || p.Inventory[player.OffhandSlot].ItemID != "minecraft:torch" {
+		t.Fatalf("swapped inventory = main %+v offhand %+v", p.Inventory[player.HotbarStart], p.Inventory[player.OffhandSlot])
+	}
+}
+
+func TestJavaHoneycombWaxesCopper(t *testing.T) {
+	p := player.New([16]byte{}, "waxer", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honeycomb", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(4, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "exposed_cut_copper", Properties: map[string]string{"axis": "x"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(4, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(2).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	block := w.GetBlock(4, 64, 0)
+	if block.ResourceLocation() != "minecraft:waxed_exposed_cut_copper" || block.Properties["axis"] != "x" {
+		t.Fatalf("waxed block = %+v", block)
+	}
+	if count := p.Inventory[player.HotbarStart].Count; count != 1 {
+		t.Fatalf("honeycomb count = %d, want 1", count)
+	}
+}
+
+func TestJavaShearsCarvePumpkin(t *testing.T) {
+	p := player.New([16]byte{}, "carver", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Rotation.Yaw = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:shears", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(5, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "pumpkin"})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(5, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(3).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	block := w.GetBlock(5, 64, 0)
+	if block.ResourceLocation() != "minecraft:carved_pumpkin" || block.Properties["facing"] != "north" {
+		t.Fatalf("carved pumpkin = %+v", block)
+	}
+	if p.Inventory[player.HotbarStart].Damage != 1 {
+		t.Fatal("carving did not damage shears")
+	}
+	foundSeeds := false
+	for _, stack := range p.Inventory {
+		foundSeeds = foundSeeds || stack.ItemID == "minecraft:pumpkin_seeds" && stack.Count == 4
+	}
+	if !foundSeeds {
+		t.Fatal("carving did not produce four pumpkin seeds")
+	}
+}
+
+func TestJavaBottleHarvestsFullBeehive(t *testing.T) {
+	p := player.New([16]byte{}, "beekeeper", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:glass_bottle", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(6, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "bee_nest", Properties: map[string]string{"honey_level": "5", "facing": "west"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(6, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(4).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	nest := w.GetBlock(6, 64, 0)
+	if nest.Properties["honey_level"] != "0" || nest.Properties["facing"] != "west" {
+		t.Fatalf("harvested nest = %+v", nest)
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:honey_bottle" || stack.Count != 1 {
+		t.Fatalf("harvest result = %+v", stack)
+	}
+}
+
+func TestJavaAddsCandleToCake(t *testing.T) {
+	p := player.New([16]byte{}, "baker", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:blue_candle", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(7, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "cake", Properties: map[string]string{"bites": "0"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(7, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(5).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(7, 64, 0); got.ResourceLocation() != "minecraft:blue_candle_cake" || got.Properties["lit"] != "false" {
+		t.Fatalf("candle cake = %+v", got)
+	}
+	if !p.Inventory[player.HotbarStart].IsEmpty() {
+		t.Fatal("candle was not consumed")
+	}
+}
+
+func TestJavaFlowerPotInsertAndRemove(t *testing.T) {
+	p := player.New([16]byte{}, "gardener", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:poppy", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(8, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "flower_pot"})
+	use := func(sequence int32) {
+		pkt := protocol.NewBuilder(packetIDUseItemOn).
+			VarInt(0).Long(packBlockPos(8, 64, 0)).VarInt(1).
+			Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(sequence).Build()
+		if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	use(6)
+	if got := w.GetBlock(8, 64, 0).ResourceLocation(); got != "minecraft:potted_poppy" {
+		t.Fatalf("potted block = %q", got)
+	}
+	use(7)
+	if got := w.GetBlock(8, 64, 0).ResourceLocation(); got != "minecraft:flower_pot" {
+		t.Fatalf("emptied pot = %q", got)
+	}
+	if p.HeldItem().ItemID != "minecraft:poppy" {
+		t.Fatalf("returned plant = %+v", p.HeldItem())
+	}
+}
+
+func TestJavaComposterLifecycle(t *testing.T) {
+	p := player.New([16]byte{}, "composter", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:cake", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(9, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "composter", Properties: map[string]string{"level": "6"}})
+	use := func(sequence int32) {
+		pkt := protocol.NewBuilder(packetIDUseItemOn).
+			VarInt(0).Long(packBlockPos(9, 64, 0)).VarInt(1).
+			Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(sequence).Build()
+		if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	use(8)
+	if got := w.GetBlock(9, 64, 0).Properties["level"]; got != "7" {
+		t.Fatalf("filled composter level = %q", got)
+	}
+	w.SetBlock(9, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "composter", Properties: map[string]string{"level": "8"}})
+	use(9)
+	if got := w.GetBlock(9, 64, 0).Properties["level"]; got != "0" {
+		t.Fatalf("emptied composter level = %q", got)
+	}
+	if p.HeldItem().ItemID != "minecraft:bone_meal" {
+		t.Fatalf("collected item = %+v", p.HeldItem())
+	}
+}
+
+func TestJavaChargesRespawnAnchor(t *testing.T) {
+	p := player.New([16]byte{}, "charger", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:glowstone", Count: 2}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(10, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "respawn_anchor", Properties: map[string]string{"charges": "2"}})
+	pkt := protocol.NewBuilder(packetIDUseItemOn).
+		VarInt(0).Long(packBlockPos(10, 64, 0)).VarInt(1).
+		Float(0.5).Float(1).Float(0.5).Bool(false).Bool(false).VarInt(10).Build()
+	if err := handleUseItemOn(pkt, p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(10, 64, 0).Properties["charges"]; got != "3" {
+		t.Fatalf("anchor charges = %q", got)
+	}
+	if count := p.HeldItem().Count; count != 1 {
+		t.Fatalf("glowstone count = %d", count)
+	}
+}
+
 func TestHoeTillsAndSeedsPlant(t *testing.T) {
 	p := player.New([16]byte{}, "farmer", player.ClientEditionJava)
 	p.GameMode = player.GameModeSurvival
@@ -810,5 +1030,147 @@ func TestJavaPlacesFoodOnCampfire(t *testing.T) {
 	}
 	if got := p.HeldItem().Count; got != 1 {
 		t.Fatalf("held beef = %d, want 1", got)
+	}
+}
+
+func TestJavaIgnitesTNTWithBothIgniters(t *testing.T) {
+	tests := []struct {
+		item       string
+		wantDamage int
+	}{
+		{item: "minecraft:flint_and_steel", wantDamage: 1},
+		{item: "minecraft:fire_charge"},
+	}
+	for index, test := range tests {
+		t.Run(test.item, func(t *testing.T) {
+			p := player.New([16]byte{byte(index + 1)}, "demolitionist", player.ClientEditionJava)
+			p.GameMode = player.GameModeSurvival
+			p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: test.item, Count: 1}
+			w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+			defer w.Close()
+			w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "tnt"})
+
+			if err := handleUseItemOn(useItemOnPacket(0, 64, 0, 1, int32(710+index)),
+				p, w, session.NewManager(), nil, func() int32 { return 91 }); err != nil {
+				t.Fatal(err)
+			}
+			if !w.GetBlock(0, 64, 0).IsAir() {
+				t.Fatalf("TNT block was not removed")
+			}
+			tnt, ok := w.Entities.Get(91)
+			if !ok || tnt.Type != corentity.TypePrimedTNT || tnt.FuseTicks != 80 {
+				t.Fatalf("primed TNT = %+v, exists=%v", tnt, ok)
+			}
+			if got := p.HeldItem(); got.Damage != test.wantDamage ||
+				(test.item == "minecraft:fire_charge" && !got.IsEmpty()) {
+				t.Fatalf("igniter after use = %+v", got)
+			}
+		})
+	}
+}
+
+func TestJavaHoeReturnsHangingRoots(t *testing.T) {
+	p := player.New([16]byte{95}, "gardener", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:iron_hoe", Count: 1}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	w.SetBlock(3, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "rooted_dirt"})
+
+	if err := handleUseItemOn(useItemOnPacket(3, 64, 0, 0, 720), p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.GetBlock(3, 64, 0).ResourceLocation(); got != "minecraft:dirt" {
+		t.Fatalf("worked block = %s", got)
+	}
+	if got := p.HeldItem().Damage; got != 1 {
+		t.Fatalf("hoe damage = %d, want 1", got)
+	}
+	roots := 0
+	for _, stack := range p.Inventory {
+		if stack.ItemID == "minecraft:hanging_roots" {
+			roots += stack.Count
+		}
+	}
+	if roots != 1 {
+		t.Fatalf("hanging roots = %d, want 1", roots)
+	}
+}
+
+func TestJavaTunesNoteBlock(t *testing.T) {
+	p := player.New([16]byte{95}, "musician", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	// Place clay below so instrument derives to "flute".
+	w.SetBlock(2, 63, 0, coreworld.Block{Namespace: "minecraft", Name: "clay"})
+	w.SetBlock(2, 64, 0, coreworld.Block{
+		Namespace: "minecraft",
+		Name:      "note_block",
+		Properties: map[string]string{
+			"instrument": "harp", "note": "24", "powered": "false",
+		},
+	})
+
+	if err := handleUseItemOn(useItemOnPacket(2, 64, 0, 1, 720),
+		p, w, session.NewManager(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := w.GetBlock(2, 64, 0)
+	// note wraps from 24 → 0; instrument updates to "flute" (block below = clay).
+	if got.Properties["note"] != "0" || got.Properties["instrument"] != "flute" || got.Properties["powered"] != "false" {
+		t.Fatalf("tuned note block = %s", got.Key())
+	}
+}
+
+func TestHoneycombWaxesSignAndBlocksEditing(t *testing.T) {
+	p := player.New([16]byte{1}, "dave", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honeycomb", Count: 3}
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	mgr := session.NewManager()
+	w.SetBlock(0, 64, 0, coreworld.Block{Namespace: "minecraft", Name: "oak_sign",
+		Properties: map[string]string{"rotation": "0", "waterlogged": "false"}})
+
+	// Set some initial text so there is a block entity to wax.
+	state := coreworld.SignState{FrontLines: [4]string{"hello", "", "", ""}}
+	w.SetBlockEntitySign(0, 64, 0, nil, state)
+
+	// Wax the sign with honeycomb.
+	if err := handleUseItemOn(useItemOnPacket(0, 64, 0, 1, 400),
+		p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !w.GetBlockEntity(0, 64, 0).SignWaxed {
+		t.Fatal("sign should be waxed after honeycomb use")
+	}
+	if p.Inventory[player.HotbarStart].Count != 2 {
+		t.Fatalf("honeycomb count = %d, want 2", p.Inventory[player.HotbarStart].Count)
+	}
+
+	// Attempt to edit the sign — should be rejected.
+	signPkt := protocol.NewBuilder(packetIDSignUpdate).
+		Long(packBlockPos(0, 64, 0)).
+		Bool(true). // is_front_text
+		String("new text").
+		String("").
+		String("").
+		String("").
+		Build()
+	if err := handleSignUpdate(signPkt, p, w, mgr); err != nil {
+		t.Fatalf("handleSignUpdate: %v", err)
+	}
+	if w.GetBlockEntity(0, 64, 0).SignFrontLines[0] != "hello" {
+		t.Fatal("waxed sign text should not be editable")
+	}
+
+	// Second honeycomb on already-waxed sign should be a no-op (returns false from WaxSign).
+	countBefore := p.Inventory[player.HotbarStart].Count
+	if err := handleUseItemOn(useItemOnPacket(0, 64, 0, 1, 401),
+		p, w, mgr, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if p.Inventory[player.HotbarStart].Count != countBefore {
+		t.Fatal("honeycomb consumed on already-waxed sign")
 	}
 }
