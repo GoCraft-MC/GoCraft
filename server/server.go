@@ -4229,6 +4229,7 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 			if distanceSquared <= 4 && (e.Sleeping || bed.Properties["occupied"] != "true") {
 				if !e.Sleeping {
 					s.setVillagerBedOccupied(e, true)
+					e.Position = spatial.Vec3{X: targetX, Y: targetY, Z: targetZ}
 				}
 				e.VX, e.VY, e.VZ = 0, 0, 0
 				e.Sleeping = true

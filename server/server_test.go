@@ -84,8 +84,8 @@ func TestVillagerSleepsNearBedAndWakesBesideIt(t *testing.T) {
 	if !server.tickPassiveMobAI(villager) || !villager.Sleeping {
 		t.Fatal("villager did not enter sleeping state")
 	}
-	if villager.Position.X != 2.4 || villager.Position.Y != 64 || villager.Position.Z != 0.5 {
-		t.Fatalf("sleep changed canonical navigation position: %+v", villager.Position)
+	if villager.Position.X != 0.5 || villager.Position.Y != 64 || villager.Position.Z != 0.5 {
+		t.Fatalf("sleep position = %+v, want bed center", villager.Position)
 	}
 	if got := w.GetBlock(0, 64, 0).Properties["occupied"]; got != "true" {
 		t.Fatalf("sleeping bed occupied = %q, want true", got)
