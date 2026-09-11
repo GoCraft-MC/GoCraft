@@ -23,7 +23,7 @@
   "scripts": {
     "installation": {
       "script": "#!/bin/bash\nset -euo pipefail\n\nmkdir -p /mnt/server\ncd /mnt/server\n\nexport DEBIAN_FRONTEND=noninteractive\napt-get update\napt-get install -y --no-install-recommends ca-certificates git\n\nBUILD_DIR=\"$(mktemp -d)\"\ntrap 'rm -rf \"${BUILD_DIR}\"' EXIT\n\necho \"Cloning ${REPO_OWNER}/${REPO_NAME} (${BRANCH})...\"\ngit clone --depth 1 --branch \"${BRANCH}\" \"https://github.com/${REPO_OWNER}/${REPO_NAME}.git\" \"${BUILD_DIR}\"\n\ncd \"${BUILD_DIR}\"\ngo mod download\n\necho \"Building GoCraft for Linux amd64...\"\nCGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags=\"-s -w -X main.version=${BRANCH}\" -o /mnt/server/gocraft .\nchmod 755 /mnt/server/gocraft\n\nif [ ! -f /mnt/server/server.yml ] && [ -f \"${BUILD_DIR}/server.yml\" ]; then\n  cp \"${BUILD_DIR}/server.yml\" /mnt/server/server.yml\nfi\n\ncd /mnt/server\n./gocraft --version\necho \"GoCraft installation complete.\"",
-      "container": "golang:1.24-bookworm",
+      "container": "golang:1.26-bookworm",
       "entrypoint": "bash"
     }
   },
@@ -32,7 +32,7 @@
       "name": "Repository Owner",
       "description": "GitHub account or organization that owns the GoCraft repository.",
       "env_variable": "REPO_OWNER",
-      "default_value": "el211",
+      "default_value": "GoCraft-MC",
       "user_viewable": true,
       "user_editable": true,
       "rules": "required|string|max:191",
@@ -52,7 +52,7 @@
       "name": "Branch or Tag",
       "description": "Git branch or tag to clone and build during installation.",
       "env_variable": "BRANCH",
-      "default_value": "main",
+      "default_value": "v5.2.0",
       "user_viewable": true,
       "user_editable": true,
       "rules": "required|string|max:191",
