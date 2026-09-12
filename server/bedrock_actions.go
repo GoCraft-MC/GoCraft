@@ -1,10 +1,12 @@
 package server
 
 import (
+	"math/rand"
 	"strconv"
 	"strings"
 
 	"GoCraft/core/blockloot"
+	corentity "GoCraft/core/entity"
 	"GoCraft/core/intent"
 	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
@@ -22,7 +24,9 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 	held := p.HeldItem()
 	if held.IsEmpty() {
-		return false
+		if _, potted := coreworld.PottedItem(target); !potted {
+			return false
+		}
 	}
 	if held.ItemID == "minecraft:firework_rocket" && p.GameMode != player.GameModeSpectator {
 		return s.applyFireworkUse(intent.FireworkUseIntent{
@@ -48,7 +52,9 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 				if usedSlots[slot] {
 					continue
 				}
-				items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: item, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations})
+				cooking := held
+				cooking.Count = 1
+				items = append(items, coreworld.ContainerItemFromStack(slot, cooking))
 				s.bedrockWorld().SetContainerItems(x, y, z, name, items)
 				s.consumeBedrockHeldItem(p, 1)
 				return true
@@ -67,29 +73,15 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if bedrockIsHoe(item) {
-		var replacement coreworld.Block
-		changed := false
-		switch name {
-		case "minecraft:grass_block", "minecraft:dirt", "minecraft:dirt_path":
-			if i.Face != 0 && s.bedrockWorld().GetBlock(x, y+1, z).IsAir() {
-				replacement = bedrockBlock("farmland", map[string]string{"moisture": "0"})
-				changed = true
+		canMakeFarmland := i.Face != 0 && s.bedrockWorld().GetBlock(x, y+1, z).IsAir()
+		if replacement, drop, ok := coreworld.UseHoe(target, canMakeFarmland); ok {
+			s.setBedrockActionBlock(x, y, z, replacement)
+			if p.GameMode != player.GameModeCreative && !drop.IsEmpty() {
+				s.giveBedrockActionItem(p, drop)
 			}
-		case "minecraft:coarse_dirt", "minecraft:rooted_dirt":
-			// Pumpkin matches vanilla here: coarse/rooted dirt first become dirt,
-			// and rooted dirt may also be worked from its bottom face.
-			replacement = bedrockBlock("dirt", nil)
-			changed = true
+			s.damageBedrockHeldItem(p, 1)
+			return true
 		}
-		if !changed {
-			return false
-		}
-		s.setBedrockActionBlock(x, y, z, replacement)
-		if name == "minecraft:rooted_dirt" && p.GameMode != player.GameModeCreative {
-			s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:hanging_roots", Count: 1})
-		}
-		s.damageBedrockHeldItem(p, 1)
-		return true
 	}
 
 	if bedrockIsAxe(item) {
@@ -122,102 +114,172 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 	}
 
 	if item == "minecraft:honeycomb" {
-		if waxed, ok := bedrockWaxCopper(target); ok {
+		if waxed, ok := coreworld.WaxCopper(target); ok {
 			s.setBedrockActionBlock(x, y, z, waxed)
 			s.consumeBedrockHeldItem(p, 1)
 			return true
 		}
+		if handler.IsSignBlock(name) {
+			if s.bedrockWorld().WaxSign(x, y, z) {
+				s.consumeBedrockHeldItem(p, 1)
+				return true
+			}
+		}
+	}
+
+	if item == "minecraft:shears" && name == "minecraft:tripwire" && target.Properties["disarmed"] != "true" {
+		disarmed := bedrockCopyBlock(target)
+		disarmed.Properties["disarmed"] = "true"
+		s.setBedrockActionBlock(x, y, z, disarmed)
+		if target.Properties["powered"] != "true" {
+			s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:string", Count: 1})
+		}
+		s.damageBedrockHeldItem(p, 1)
+		return true
 	}
 
 	if item == "minecraft:shears" && name == "minecraft:pumpkin" {
-		s.setBedrockActionBlock(x, y, z, bedrockBlock("carved_pumpkin", map[string]string{
-			"facing": bedrockOppositeFacing(bedrockPlayerFacing(p.Rotation.Yaw)),
-		}))
+		carved, _ := coreworld.CarvePumpkin(target, bedrockOppositeFacing(bedrockPlayerFacing(p.Rotation.Yaw)))
+		s.setBedrockActionBlock(x, y, z, carved)
 		s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:pumpkin_seeds", Count: 4})
 		s.damageBedrockHeldItem(p, 1)
 		return true
 	}
-	if (name == "minecraft:beehive" || name == "minecraft:bee_nest") && target.Properties["honey_level"] == "5" {
+	if replacement, output, harvested := coreworld.HarvestBeehive(target, item); harvested {
+		s.setBedrockActionBlock(x, y, z, replacement)
 		switch item {
 		case "minecraft:shears":
-			replacement := bedrockCopyBlock(target)
-			replacement.Properties["honey_level"] = "0"
-			s.setBedrockActionBlock(x, y, z, replacement)
-			s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:honeycomb", Count: 3})
+			s.giveBedrockActionItem(p, output)
 			s.damageBedrockHeldItem(p, 1)
-			return true
 		case "minecraft:glass_bottle":
-			replacement := bedrockCopyBlock(target)
-			replacement.Properties["honey_level"] = "0"
-			s.setBedrockActionBlock(x, y, z, replacement)
-			s.replaceBedrockHeldItem(p, "minecraft:honey_bottle")
-			return true
+			s.replaceBedrockHeldItem(p, output.ItemID)
 		}
+		return true
 	}
 
-	if name == "minecraft:cake" && bedrockIsCandleItem(item) {
-		candleCake := strings.TrimPrefix(item, "minecraft:") + "_cake"
-		if item == "minecraft:candle" {
-			candleCake = "candle_cake"
+	if candleCake, ok := coreworld.AddCandleToCake(target, item); ok {
+		if !s.allowBedrockPlacement(p, x, y, z, candleCake) {
+			return true
 		}
-		s.setBedrockActionBlock(x, y, z, bedrockBlock(candleCake, map[string]string{"lit": "false"}))
+		s.setBedrockActionBlock(x, y, z, candleCake)
 		s.consumeBedrockHeldItem(p, 1)
 		return true
 	}
 
 	if name == "minecraft:flower_pot" {
-		if potted, ok := bedrockPottedBlock(item); ok {
-			s.setBedrockActionBlock(x, y, z, bedrockBlock(potted, nil))
+		if potted, ok := coreworld.PottedBlock(item); ok {
+			s.setBedrockActionBlock(x, y, z, potted)
 			s.consumeBedrockHeldItem(p, 1)
 			return true
 		}
-	} else if strings.HasPrefix(name, "minecraft:potted_") {
-		if _, canPot := bedrockPottedBlock(item); canPot {
+	} else if pottedItem, ok := coreworld.PottedItem(target); ok {
+		if _, canPot := coreworld.PottedBlock(item); canPot {
 			return true
 		}
 		s.setBedrockActionBlock(x, y, z, bedrockBlock("flower_pot", nil))
-		s.giveBedrockActionItem(p, player.ItemStack{ItemID: bedrockPottedItem(name), Count: 1})
+		s.giveBedrockActionItem(p, player.ItemStack{ItemID: pottedItem, Count: 1})
 		return true
 	}
 
-	if name == "minecraft:composter" && bedrockCompostable(item) {
-		level, _ := strconv.Atoi(target.Properties["level"])
-		if level <= 7 {
-			s.consumeBedrockHeldItem(p, 1)
-			if level < 7 && (level == 0 || bedrockComposterRoll(x, y, z, s.worldAge, item)) {
-				replacement := bedrockCopyBlock(target)
-				replacement.Properties["level"] = strconv.Itoa(level + 1)
-				s.setBedrockActionBlock(x, y, z, replacement)
-				if level+1 == 7 {
-					s.bedrockWorld().BlockPhysics.ScheduleComposter(x, y, z, s.worldAge, 20)
-				}
-			}
+	if replacement, consumed, schedule := coreworld.AddToComposter(target, item, x, y, z, s.worldAge); consumed {
+		s.consumeBedrockHeldItem(p, 1)
+		s.setBedrockActionBlock(x, y, z, replacement)
+		if schedule {
+			s.bedrockWorld().BlockPhysics.ScheduleComposter(x, y, z, s.worldAge, 20)
+		}
+		return true
+	}
+
+	if charged, ok := coreworld.ChargeRespawnAnchor(target, item); ok {
+		s.setBedrockActionBlock(x, y, z, charged)
+		s.consumeBedrockHeldItem(p, 1)
+		return true
+	}
+	// Right-clicking a charged anchor without glowstone in the Nether sets spawn.
+	if name == "minecraft:respawn_anchor" && p.Dimension == dimensionNether {
+		charges, _ := strconv.Atoi(target.Properties["charges"])
+		if charges > 0 {
+			p.SpawnPoint = spatial.BlockPos{X: int32(x), Y: int32(y), Z: int32(z)}
+			p.HasSpawnPoint = true
+			p.SpawnIsAnchor = true
 			return true
 		}
-	}
-
-	if name == "minecraft:respawn_anchor" && item == "minecraft:glowstone" {
-		charges, _ := strconv.Atoi(target.Properties["charges"])
-		if charges < 4 {
-			replacement := bedrockCopyBlock(target)
-			replacement.Properties["charges"] = strconv.Itoa(charges + 1)
-			s.setBedrockActionBlock(x, y, z, replacement)
-			s.consumeBedrockHeldItem(p, 1)
-		}
-		return true
 	}
 
 	if item == "minecraft:bone_meal" {
-		if name == "minecraft:grass_block" && s.bedrockWorld().GetBlock(x, y+1, z).IsAir() {
-			s.setBedrockActionBlock(x, y+1, z, bedrockBlock("short_grass", nil))
-			s.consumeBedrockHeldItem(p, 1)
-			return true
-		}
 		seed := uint64(s.worldAge) + uint64(coreworld.CropAge(target)+1)*0x9e3779b97f4a7c15
 		if changes, used := s.bedrockWorld().ApplyBoneMeal(x, y, z, seed); used {
 			s.broadcastCanonicalCropChanges(changes)
 			s.consumeBedrockHeldItem(p, 1)
 			return true
+		}
+	}
+
+	if handler.IsSignBlock(name) {
+		if item == "minecraft:glow_ink_sac" || item == "minecraft:ink_sac" {
+			entity := s.bedrockWorld().GetBlockEntity(x, y, z)
+			glowing := item == "minecraft:glow_ink_sac"
+			if entity.SignFrontGlowing == glowing {
+				return true
+			}
+			state := coreworld.SignState{
+				FrontLines: entity.SignFrontLines, BackLines: entity.SignBackLines,
+				FrontGlowing: glowing, BackGlowing: entity.SignBackGlowing,
+				FrontColor: entity.SignFrontColor, BackColor: entity.SignBackColor,
+				Waxed: entity.SignWaxed,
+			}
+			data := handler.BuildSignNBTFromState(state)
+			s.bedrockWorld().SetBlockEntitySign(x, y, z, data, state)
+			s.consumeBedrockHeldItem(p, 1)
+			return true
+		}
+		if color := handler.SignDyeColor(item); color != "" {
+			entity := s.bedrockWorld().GetBlockEntity(x, y, z)
+			if entity.SignFrontColor == color {
+				return true
+			}
+			state := coreworld.SignState{
+				FrontLines: entity.SignFrontLines, BackLines: entity.SignBackLines,
+				FrontGlowing: entity.SignFrontGlowing, BackGlowing: entity.SignBackGlowing,
+				FrontColor: color, BackColor: entity.SignBackColor,
+				Waxed: entity.SignWaxed,
+			}
+			data := handler.BuildSignNBTFromState(state)
+			s.bedrockWorld().SetBlockEntitySign(x, y, z, data, state)
+			s.consumeBedrockHeldItem(p, 1)
+			return true
+		}
+	}
+
+	if item == "minecraft:glass_bottle" {
+		var waterBottle player.ItemStack
+		waterBottle.ItemID = "minecraft:potion"
+		waterBottle.Count = 1
+		_ = waterBottle.SetComponent("potion_contents", map[string]string{"potion": "minecraft:water"})
+		switch {
+		case name == "minecraft:water" && coreworld.FluidLevel(target) == 0:
+			s.replaceBedrockHeldItem(p, "")
+			s.giveBedrockActionItem(p, waterBottle)
+			return true
+		case name == "minecraft:water_cauldron":
+			levelStr := target.Properties["level"]
+			level := 0
+			if levelStr != "" {
+				level, _ = strconv.Atoi(levelStr)
+			}
+			if level > 0 {
+				s.giveBedrockActionItem(p, waterBottle)
+				s.consumeBedrockHeldItem(p, 1)
+				newLevel := level - 1
+				if newLevel <= 0 {
+					s.setBedrockActionBlock(x, y, z, bedrockBlock("cauldron", nil))
+				} else {
+					updated := bedrockCopyBlock(target)
+					updated.Properties["level"] = strconv.Itoa(newLevel)
+					s.setBedrockActionBlock(x, y, z, updated)
+				}
+				return true
+			}
 		}
 	}
 
@@ -245,6 +307,22 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 			return true
 		}
 	}
+	if entityType := bedrockFishBucketEntity(item); entityType != "" && s.game != nil {
+		dx, dy, dz := bedrockFaceOffset(i.Face)
+		px, py, pz := x+dx, y+dy, z+dz
+		w := s.bedrockWorld()
+		if py >= coreworld.WorldMinY && py <= coreworld.WorldMaxY && bedrockPlacementReplaceable(w.GetBlock(px, py, pz).ResourceLocation()) {
+			s.setBedrockActionBlock(px, py, pz, coreworld.MakeFluid("minecraft:water", 0))
+			fish := corentity.New(s.game.NextEntityID(), newRandomUUID(), entityType,
+				float64(px)+0.5, float64(py)+0.5, float64(pz)+0.5)
+			fish.OnGround = true
+			w.Entities.Add(fish)
+			handler.BroadcastSpawnMobInDimension(fish, s.sessions, p.Dimension)
+			s.replaceBedrockHeldItem(p, "minecraft:bucket")
+		}
+		return true
+	}
+
 	if item == "minecraft:water_bucket" || item == "minecraft:lava_bucket" || item == "minecraft:powder_snow_bucket" {
 		if name == "minecraft:cauldron" {
 			var filled coreworld.Block
@@ -280,6 +358,21 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 		s.setBedrockActionBlock(px, py, pz, placed)
 		s.replaceBedrockHeldItem(p, "minecraft:bucket")
 		return true
+	}
+
+	if strings.HasSuffix(item, "_spawn_egg") && s.game != nil {
+		entityType := corentity.EntityType("minecraft:" + strings.TrimSuffix(strings.TrimPrefix(item, "minecraft:"), "_spawn_egg"))
+		if corentity.DefaultMaxHealth(entityType) > 0 {
+			dx, dy, dz := bedrockFaceOffset(i.Face)
+			sx, sy, sz := x+dx, y+dy, z+dz
+			e := corentity.New(s.game.NextEntityID(), newRandomUUID(), entityType,
+				float64(sx)+0.5, float64(sy)+0.5, float64(sz)+0.5)
+			e.OnGround = true
+			s.bedrockWorld().Entities.Add(e)
+			handler.BroadcastSpawnMobInDimension(e, s.sessions, p.Dimension)
+			s.consumeBedrockHeldItem(p, 1)
+			return true
+		}
 	}
 
 	if item == "minecraft:flint_and_steel" || item == "minecraft:fire_charge" {
@@ -323,6 +416,36 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 		s.consumeBedrockHeldItem(p, 1)
 		return true
 	}
+
+	if name == "minecraft:jukebox" && coreworld.IsMusicDisc(item) {
+		be := s.bedrockWorld().GetBlockEntity(x, y, z)
+		stored := coreworld.JukeboxRecordItem(be)
+		if stored == "" {
+			updated, ok := coreworld.InsertJukeboxRecord(target, item)
+			if ok {
+				s.setBedrockActionBlock(x, y, z, updated)
+				s.bedrockWorld().SetContainerItems(x, y, z, "minecraft:jukebox",
+					[]coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, player.ItemStack{ItemID: item, Count: 1})})
+				s.consumeBedrockHeldItem(p, 1)
+				return true
+			}
+		}
+	}
+	if name == "minecraft:lectern" && coreworld.IsLecternBook(item) {
+		be := s.bedrockWorld().GetBlockEntity(x, y, z)
+		if coreworld.LecternBook(be) == "" {
+			updated, ok := coreworld.InsertLecternBook(target, item)
+			if ok {
+				s.setBedrockActionBlock(x, y, z, updated)
+				book := held
+				book.Count = 1
+				s.bedrockWorld().SetContainerItems(x, y, z, "minecraft:lectern",
+					[]coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, book)})
+				s.consumeBedrockHeldItem(p, 1)
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -331,6 +454,27 @@ func (s *Server) applyBedrockItemAction(p *player.Player, i intent.BlockInteract
 func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.BlockPos, block coreworld.Block) bool {
 	x, y, z := int(pos.X), int(pos.Y), int(pos.Z)
 	name := block.ResourceLocation()
+	if name == "minecraft:jukebox" {
+		be := s.bedrockWorld().GetBlockEntity(x, y, z)
+		stored := coreworld.JukeboxRecordItem(be)
+		if stored != "" {
+			_, updated, ok := coreworld.EjectJukeboxRecord(block, stored)
+			if ok {
+				s.setBedrockActionBlock(x, y, z, updated)
+				s.bedrockWorld().SetContainerItems(x, y, z, "minecraft:jukebox", nil)
+				s.giveBedrockActionItem(p, player.ItemStack{ItemID: stored, Count: 1})
+			}
+		}
+		return true
+	}
+	if name == "minecraft:lectern" {
+		be := s.bedrockWorld().GetBlockEntity(x, y, z)
+		if coreworld.LecternBook(be) != "" {
+			// Let the caller open the reading screen.
+			return false
+		}
+		return true
+	}
 	if name == "minecraft:sweet_berry_bush" {
 		seed := uint64(s.worldAge) + uint64(coreworld.CropAge(block)+1)*0x9e3779b97f4a7c15
 		if count, changes, harvested := s.bedrockWorld().HarvestSweetBerryBush(x, y, z, seed); harvested {
@@ -347,17 +491,18 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		items := s.bedrockWorld().ContainerItems(x, y, z)
 		var stored player.ItemStack
 		if len(items) > 0 {
-			stored = player.ItemStack{ItemID: items[0].ItemID, Count: items[0].Count, Damage: items[0].Damage, Enchantments: items[0].Enchantments}
+			stored = items[0].Stack()
 		}
-		if !stored.IsEmpty() && (stored.ItemID != held.ItemID || stored.Damage != held.Damage || stored.Count >= player.MaxStackSize(stored.ItemID)) {
+		if !stored.IsEmpty() && (!stored.SameItem(held) || stored.Count >= player.MaxStackSize(stored.ItemID)) {
 			return true
 		}
 		if stored.IsEmpty() {
-			stored = player.ItemStack{ItemID: held.ItemID, Count: 1, Damage: held.Damage, Enchantments: held.Enchantments, PotDecorations: held.PotDecorations}
+			stored = held
+			stored.Count = 1
 		} else {
 			stored.Count++
 		}
-		s.bedrockWorld().SetContainerItems(x, y, z, name, []coreworld.ContainerItem{{Slot: 0, ItemID: stored.ItemID, Count: stored.Count, Damage: stored.Damage, Enchantments: stored.Enchantments}})
+		s.bedrockWorld().SetContainerItems(x, y, z, name, []coreworld.ContainerItem{coreworld.ContainerItemFromStack(0, stored)})
 		s.consumeBedrockHeldItem(p, 1)
 		return true
 	}
@@ -442,11 +587,11 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 		return true
 	}
 	if name == "minecraft:note_block" {
-		replacement := bedrockCopyBlock(block)
-		note, _ := strconv.Atoi(block.Properties["note"])
-		replacement.Properties["note"] = strconv.Itoa((note + 1) % 25)
-		s.setBedrockActionBlock(x, y, z, replacement)
-		return true
+		blockBelow := s.bedrockWorld().GetBlock(x, y-1, z)
+		if replacement, ok := coreworld.TuneNoteBlock(block, blockBelow); ok {
+			s.setBedrockActionBlock(x, y, z, replacement)
+			return true
+		}
 	}
 	if name == "minecraft:cake" && p.ConsumeFood(2, 0.1) {
 		bites, _ := strconv.Atoi(block.Properties["bites"])
@@ -464,12 +609,11 @@ func (s *Server) applyBedrockBlockActivation(p *player.Player, pos spatial.Block
 			replacement := bedrockCopyBlock(block)
 			replacement.Properties["lit"] = "false"
 			s.setBedrockActionBlock(x, y, z, replacement)
+			return true
 		}
-		return true
+		return p.HeldItem().ItemID != name || strings.HasSuffix(name, "_candle_cake")
 	}
-	if name == "minecraft:composter" && block.Properties["level"] == "8" {
-		replacement := bedrockCopyBlock(block)
-		replacement.Properties["level"] = "0"
+	if replacement, ready := coreworld.EmptyComposter(block); ready {
 		s.setBedrockActionBlock(x, y, z, replacement)
 		s.giveBedrockActionItem(p, player.ItemStack{ItemID: "minecraft:bone_meal", Count: 1})
 		return true
@@ -499,6 +643,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	if strings.HasSuffix(block.Name, "_slab") && clicked.ResourceLocation() == block.ResourceLocation() && clicked.Properties["type"] != "double" {
 		replacement := bedrockCopyBlock(clicked)
 		replacement.Properties["type"] = "double"
+		if !s.allowBedrockPlacement(p, x, y, z, replacement) {
+			return true
+		}
 		s.setBedrockActionBlock(x, y, z, replacement)
 		s.consumeBedrockHeldItem(p, 1)
 		return true
@@ -508,6 +655,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		if candles < 4 {
 			replacement := bedrockCopyBlock(clicked)
 			replacement.Properties["candles"] = strconv.Itoa(candles + 1)
+			if !s.allowBedrockPlacement(p, x, y, z, replacement) {
+				return true
+			}
 			s.setBedrockActionBlock(x, y, z, replacement)
 			s.consumeBedrockHeldItem(p, 1)
 		}
@@ -518,6 +668,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		if layers < 8 {
 			replacement := bedrockCopyBlock(clicked)
 			replacement.Properties["layers"] = strconv.Itoa(layers + 1)
+			if !s.allowBedrockPlacement(p, x, y, z, replacement) {
+				return true
+			}
 			s.setBedrockActionBlock(x, y, z, replacement)
 			s.consumeBedrockHeldItem(p, 1)
 		}
@@ -544,6 +697,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		}
 		foot := bedrockBlock(block.Name, map[string]string{"facing": facing, "occupied": "false", "part": "foot"})
 		head := bedrockBlock(block.Name, map[string]string{"facing": facing, "occupied": "false", "part": "head"})
+		if !s.allowBedrockPlacement(p, px, py, pz, foot) {
+			return true
+		}
 		s.setBedrockActionBlock(px, py, pz, foot)
 		s.setBedrockActionBlock(hx, py, hz, head)
 		data := bedrockBedBlockEntityData(name)
@@ -563,6 +719,9 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 		lower := bedrockBlock(block.Name, props)
 		upper := bedrockCopyBlock(lower)
 		upper.Properties["half"] = "upper"
+		if !s.allowBedrockPlacement(p, px, py, pz, lower) {
+			return true
+		}
 		s.setBedrockActionBlock(px, py, pz, lower)
 		s.setBedrockActionBlock(px, py+1, pz, upper)
 		s.consumeBedrockHeldItem(p, 1)
@@ -570,7 +729,7 @@ func (s *Server) placeBedrockHeldBlock(p *player.Player, i intent.BlockInteractI
 	}
 
 	placed, valid := s.bedrockPlacementState(p, block, px, py, pz, i)
-	if !valid {
+	if !valid || !s.allowBedrockPlacement(p, px, py, pz, placed) {
 		return true
 	}
 	s.setBedrockActionBlock(px, py, pz, placed)
@@ -742,7 +901,8 @@ func (s *Server) bedrockPlacementState(p *player.Player, block coreworld.Block, 
 		}
 		props = map[string]string{"facing": frontFacing, "eye": "false"}
 	case name == "minecraft:note_block":
-		props = map[string]string{"instrument": "harp", "note": "0", "powered": "false"}
+		instrument := coreworld.NoteBlockInstrument(s.bedrockWorld().GetBlock(x, y-1, z))
+		props = map[string]string{"instrument": instrument, "note": "0", "powered": "false"}
 	case name == "minecraft:chest" || name == "minecraft:trapped_chest":
 		props = map[string]string{"facing": frontFacing, "type": "single", "waterlogged": "false"}
 	case name == "minecraft:barrel":
@@ -1018,6 +1178,7 @@ func (s *Server) breakBedrockUnsupportedAbove(p *player.Player, x, y, z int) {
 		}
 	}
 	s.broadcastCanonicalCropChanges(world.BreakUnsupportedCropsAbove(x, y, z))
+	s.broadcastCanonicalCropChanges(world.BreakUnsupportedCocoaAdjacentTo(x, y, z))
 	for plantY := y + 1; plantY <= coreworld.WorldMaxY; plantY++ {
 		plant := world.GetBlock(x, plantY, z)
 		if !coreworld.RequiresGroundSupport(plant) || !world.GetBlock(x, plantY-1, z).IsAir() {
@@ -1105,75 +1266,6 @@ func bedrockCropMaxAge(name string) (int, bool) {
 	return coreworld.CropMaxAge(name)
 }
 
-func bedrockIsCandleItem(item string) bool {
-	return item == "minecraft:candle" || strings.HasSuffix(item, "_candle")
-}
-
-func bedrockPottedBlock(item string) (string, bool) {
-	name := strings.TrimPrefix(item, "minecraft:")
-	switch name {
-	case "oak_sapling", "spruce_sapling", "birch_sapling", "jungle_sapling", "acacia_sapling",
-		"dark_oak_sapling", "mangrove_propagule", "cherry_sapling", "pale_oak_sapling",
-		"fern", "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet", "red_tulip",
-		"orange_tulip", "white_tulip", "pink_tulip", "oxeye_daisy", "cornflower",
-		"lily_of_the_valley", "wither_rose", "red_mushroom", "brown_mushroom", "dead_bush",
-		"cactus", "bamboo", "crimson_fungus", "warped_fungus", "crimson_roots", "warped_roots",
-		"azalea", "flowering_azalea", "torchflower", "closed_eyeblossom", "open_eyeblossom":
-		if name == "azalea" || name == "flowering_azalea" {
-			name += "_bush"
-		}
-		return "potted_" + name, true
-	}
-	return "", false
-}
-
-func bedrockPottedItem(blockName string) string {
-	name := strings.TrimPrefix(blockName, "minecraft:potted_")
-	name = strings.TrimSuffix(name, "_bush")
-	return "minecraft:" + name
-}
-
-func bedrockCompostable(item string) bool {
-	name := strings.TrimPrefix(item, "minecraft:")
-	if strings.HasSuffix(name, "_leaves") || strings.HasSuffix(name, "_sapling") ||
-		strings.HasSuffix(name, "_seeds") || strings.HasSuffix(name, "_flower") {
-		return true
-	}
-	switch name {
-	case "short_grass", "grass", "fern", "seagrass", "kelp", "dried_kelp", "cactus", "sugar_cane",
-		"vine", "glow_lichen", "lily_pad", "moss_carpet", "moss_block", "hanging_roots", "mangrove_roots",
-		"apple", "melon_slice", "melon", "pumpkin", "carved_pumpkin", "potato", "baked_potato",
-		"poisonous_potato", "carrot", "beetroot", "wheat", "bread", "cookie", "cake", "pumpkin_pie",
-		"sweet_berries", "glow_berries", "brown_mushroom", "red_mushroom", "mushroom_stem",
-		"crimson_fungus", "warped_fungus", "crimson_roots", "warped_roots", "nether_sprouts",
-		"weeping_vines", "twisting_vines", "azalea", "flowering_azalea", "big_dripleaf", "small_dripleaf",
-		"spore_blossom", "sea_pickle", "hay_block", "dried_kelp_block", "shroomlight":
-		return true
-	}
-	return false
-}
-
-func bedrockComposterRoll(x, y, z int, worldAge int64, item string) bool {
-	chance := uint64(650)
-	name := strings.TrimPrefix(item, "minecraft:")
-	if strings.HasSuffix(name, "_leaves") || strings.HasSuffix(name, "_sapling") || strings.HasSuffix(name, "_seeds") ||
-		name == "short_grass" || name == "grass" || name == "fern" {
-		chance = 300
-	}
-	switch name {
-	case "cake", "pumpkin_pie":
-		chance = 1000
-	case "baked_potato", "bread", "cookie", "hay_block", "dried_kelp_block", "shroomlight":
-		chance = 850
-	}
-	hash := uint64(int64(x))*0x9e3779b185ebca87 ^ uint64(int64(y))*0xc2b2ae3d27d4eb4f ^
-		uint64(int64(z))*0x165667b19e3779f9 ^ uint64(worldAge) ^ uint64(len(item))*0x27d4eb2f165667c5
-	hash ^= hash >> 33
-	hash *= 0xff51afd7ed558ccd
-	hash ^= hash >> 33
-	return hash%1000 < chance
-}
-
 func bedrockAxeTransformation(block coreworld.Block) (coreworld.Block, bool) {
 	replacement := bedrockCopyBlock(block)
 	name := block.Name
@@ -1194,15 +1286,6 @@ func bedrockAxeTransformation(block coreworld.Block) (coreworld.Block, bool) {
 		return replacement, true
 	}
 	return coreworld.Block{}, false
-}
-
-func bedrockWaxCopper(block coreworld.Block) (coreworld.Block, bool) {
-	if block.Namespace != "minecraft" || strings.HasPrefix(block.Name, "waxed_") || !strings.Contains(block.Name, "copper") {
-		return coreworld.Block{}, false
-	}
-	replacement := bedrockCopyBlock(block)
-	replacement.Name = "waxed_" + replacement.Name
-	return replacement, true
 }
 
 func bedrockIsHoe(item string) bool {
@@ -1493,4 +1576,43 @@ func bedrockDoorHinge(facing string, clickX, clickZ float32) string {
 func bedrockSignRotation(yaw float32) int {
 	rotation := int((yaw+180)*16/360+0.5) & 15
 	return rotation
+}
+
+func bedrockFishBucketEntity(itemID string) corentity.EntityType {
+	switch itemID {
+	case "minecraft:cod_bucket":
+		return corentity.TypeCod
+	case "minecraft:salmon_bucket":
+		return corentity.TypeSalmon
+	case "minecraft:pufferfish_bucket":
+		return corentity.TypePufferfish
+	case "minecraft:tropical_fish_bucket":
+		return corentity.TypeTropicalFish
+	case "minecraft:axolotl_bucket":
+		return corentity.TypeAxolotl
+	case "minecraft:tadpole_bucket":
+		return corentity.TypeTadpole
+	default:
+		return ""
+	}
+}
+
+func (s *Server) bedrockDragonEggTeleport(w *coreworld.World, x, y, z int) {
+	const tries = 1000
+	for range tries {
+		nx := x + (rand.Intn(15) - 7) //nolint:gosec
+		ny := y + (rand.Intn(3) - 1)
+		nz := z + (rand.Intn(15) - 7)
+		if nx == x && ny == y && nz == z {
+			continue
+		}
+		if !handler.PlacementReplaceable(w.GetBlock(nx, ny, nz).ResourceLocation()) {
+			continue
+		}
+		if !w.GetBlock(nx, ny-1, nz).IsAir() {
+			s.setBedrockActionBlock(x, y, z, coreworld.Air)
+			s.setBedrockActionBlock(nx, ny, nz, coreworld.Block{Namespace: "minecraft", Name: "dragon_egg"})
+			return
+		}
+	}
 }

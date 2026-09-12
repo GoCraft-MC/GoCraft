@@ -348,6 +348,7 @@ func TestBedrockFoodCompletesOnServerTickAndReturnsContainer(t *testing.T) {
 	p.Food = 10
 	p.Saturation = 0
 	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honey_bottle", Count: 1}
+	p.AddStatusEffect(player.StatusEffect{ID: "poison", Duration: 100})
 	if err := g.AddPlayer(p); err != nil {
 		t.Fatal(err)
 	}
@@ -362,6 +363,9 @@ func TestBedrockFoodCompletesOnServerTickAndReturnsContainer(t *testing.T) {
 	}
 	if got := p.Inventory[player.HotbarStart]; got.ItemID != "minecraft:glass_bottle" || got.Count != 1 {
 		t.Fatalf("consumed honey bottle remainder = %+v, want one glass bottle", got)
+	}
+	if _, poisoned := p.StatusEffect("poison"); poisoned {
+		t.Fatal("poison remained after drinking honey")
 	}
 	if p.UsingItemID != "" || p.UsingItemSlot != -1 || !p.UsingItemSince.IsZero() {
 		t.Fatalf("completed food retained active state: %q/%d/%v", p.UsingItemID, p.UsingItemSlot, p.UsingItemSince)
@@ -388,5 +392,46 @@ func TestBedrockCreativeFoodAnimatesWithoutConsumingStack(t *testing.T) {
 	}
 	if p.UsingItemID != "" {
 		t.Fatalf("creative eating animation did not complete: %q", p.UsingItemID)
+	}
+}
+
+func TestBedrockTimedFoodStoresAuthoritativeEffects(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{45}, "bedrock-golden-eater", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:golden_apple", Count: 1}
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g}
+	s.applyBedrockStartUseItem(intent.StartUseItemIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
+	p.UsingItemSince = time.Now().Add(-2 * time.Second)
+	s.tickBedrockItemUse()
+	regeneration, regenOK := p.StatusEffect("regeneration")
+	absorption, absorptionOK := p.StatusEffect("absorption")
+	if !regenOK || !absorptionOK || regeneration.Amplifier != 1 || absorption.Duration != 2400 || p.AbsorptionSnapshot() != 4 {
+		t.Fatalf("stored effects = regeneration %#v absorption %#v hearts %.1f", regeneration, absorption, p.AbsorptionSnapshot())
+	}
+}
+
+func TestBedrockMilkBucketClearsEffects(t *testing.T) {
+	g := game.New()
+	p := player.New([16]byte{46}, "bedrock-milk", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:milk_bucket", Count: 1}
+	p.AddStatusEffect(player.StatusEffect{ID: "poison", Duration: 100})
+	p.AddStatusEffect(player.StatusEffect{ID: "speed", Duration: 100})
+	if err := g.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{game: g}
+	s.applyBedrockStartUseItem(intent.StartUseItemIntent{PlayerUUID: p.UUID, HotbarSlot: 0})
+	p.UsingItemSince = time.Now().Add(-player.FoodUseDuration("minecraft:milk_bucket"))
+	s.tickBedrockItemUse()
+	if effects := p.StatusEffectsSnapshot(); len(effects) != 0 {
+		t.Fatalf("effects remain after milk: %+v", effects)
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:bucket" || stack.Count != 1 {
+		t.Fatalf("milk remainder = %+v", stack)
 	}
 }

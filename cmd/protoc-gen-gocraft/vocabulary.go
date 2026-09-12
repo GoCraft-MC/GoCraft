@@ -100,6 +100,8 @@ var vocabulary = map[string]binding{
 		GoBlank:    `abi.String("")`,
 	},
 	"bool": {
+		SDKType:    "bool",
+		SDKDecode:  "boolFrom({v}, {d})",
 		GoType:     "bool",
 		GoEncode:   "abi.Bool(%s)",
 		JavaType:   "boolean",
@@ -107,6 +109,8 @@ var vocabulary = map[string]binding{
 		GoBlank:    `abi.Bool(false)`,
 	},
 	"int64": {
+		SDKType:    "int64",
+		SDKDecode:  "int64From({v}, {d})",
 		GoType:     "int64",
 		GoEncode:   "abi.Int64(%s)",
 		JavaType:   "long",
@@ -114,6 +118,8 @@ var vocabulary = map[string]binding{
 		GoBlank:    `abi.Int64(0)`,
 	},
 	"double": {
+		SDKType:    "float64",
+		SDKDecode:  "doubleFrom({v}, {d})",
 		GoType:     "float64",
 		GoEncode:   "abi.Double(%s)",
 		JavaType:   "double",
@@ -121,6 +127,8 @@ var vocabulary = map[string]binding{
 		GoBlank:    `abi.Double(0)`,
 	},
 	"bytes": {
+		SDKType:    "[]byte",
+		SDKDecode:  "bytesFrom({v}, {d})",
 		GoType:     "[]byte",
 		GoEncode:   "abi.Bytes(%s)",
 		JavaType:   "byte[]",

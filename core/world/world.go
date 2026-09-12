@@ -65,6 +65,9 @@ type World struct {
 	// and applies it so health retains a single writer.
 	damageMu      sync.Mutex
 	pendingDamage map[int32]EntityDamage
+	// BeforeEntityDamage is installed before listeners start. It runs before
+	// coalescing hits, outside damageMu; false prevents enqueueing the action.
+	BeforeEntityDamage func(*entity.Entity, float32) (float32, bool)
 
 	// Container block entities share canonical contents across Java sessions.
 	containerMu sync.RWMutex
@@ -80,6 +83,7 @@ type World struct {
 	worldTime     atomic.Int64
 	physicsTime   atomic.Int64
 	lavaTickDelay atomic.Int64
+	ultrawarm     atomic.Bool
 
 	// requestTimeSkip is set by the bed-sleep handler and drained by the
 	// server tick goroutine which then advances worldAge to the next morning.
@@ -481,11 +485,19 @@ func (w *World) QueueEntityDamageFromPlayer(entityID int32, amount float32, sour
 }
 
 func (w *World) queueEntityDamage(entityID int32, amount float32, sourceX, sourceZ float64, hasSource bool, playerUUID [16]byte, hasPlayerSource bool) bool {
-	if amount <= 0 {
+	if amount <= 0 || math.IsNaN(float64(amount)) || math.IsInf(float64(amount), 0) {
 		return false
 	}
-	if _, ok := w.Entities.Get(entityID); !ok {
+	target, ok := w.Entities.Get(entityID)
+	if !ok {
 		return false
+	}
+	if w.BeforeEntityDamage != nil {
+		var allowed bool
+		amount, allowed = w.BeforeEntityDamage(target, amount)
+		if !allowed || amount <= 0 || math.IsNaN(float64(amount)) || math.IsInf(float64(amount), 0) {
+			return false
+		}
 	}
 	w.damageMu.Lock()
 	event := w.pendingDamage[entityID]
@@ -686,10 +698,9 @@ func (w *World) GroundYAtOrBelow(x, z, maxY int) int {
 		maxY = WorldMaxY
 	}
 	for y := maxY; y >= WorldMinY; y-- {
-		block := w.GetBlock(x, y, z)
-		if entitySupportBlock(block.ResourceLocation()) &&
-			!entitySupportBlock(w.GetBlock(x, y+1, z).ResourceLocation()) &&
-			!entitySupportBlock(w.GetBlock(x, y+2, z).ResourceLocation()) {
+		if IsEntityCollisionBlock(w.GetBlock(x, y, z)) &&
+			!IsEntityCollisionBlock(w.GetBlock(x, y+1, z)) &&
+			!IsEntityCollisionBlock(w.GetBlock(x, y+2, z)) {
 			return y
 		}
 	}
@@ -702,13 +713,23 @@ func (w *World) CanEntityOccupy(x, y, z float64) bool {
 	for _, sampleX := range [...]float64{x - 0.3, x + 0.3} {
 		for _, sampleZ := range [...]float64{z - 0.3, z + 0.3} {
 			for blockY := int(math.Floor(y)); blockY <= int(math.Floor(y))+1; blockY++ {
-				if entitySupportBlock(w.GetBlock(int(math.Floor(sampleX)), blockY, int(math.Floor(sampleZ))).ResourceLocation()) {
+				if IsEntityCollisionBlock(w.GetBlock(int(math.Floor(sampleX)), blockY, int(math.Floor(sampleZ)))) {
 					return false
 				}
 			}
 		}
 	}
 	return true
+}
+
+// IsEntityCollisionBlock reports full-block collision using block state. Open
+// doors have no doorway collision even though their block identifier is solid.
+func IsEntityCollisionBlock(block Block) bool {
+	name := block.ResourceLocation()
+	if strings.HasSuffix(name, "_door") && !strings.HasSuffix(name, "_trapdoor") && block.Properties["open"] == "true" {
+		return false
+	}
+	return entitySupportBlock(name)
 }
 
 func entitySupportBlock(name string) bool {
@@ -902,6 +923,25 @@ func (w *World) ContainerItems(x, y, z int) []ContainerItem {
 	return nil
 }
 
+// GetBlockEntity returns a snapshot of the block entity at (x, y, z), or a
+// zero-value BlockEntity when none is stored there.
+func (w *World) GetBlockEntity(x, y, z int) BlockEntity {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	w.containerMu.RLock()
+	defer w.containerMu.RUnlock()
+	for _, entity := range c.BlockEntities {
+		if entity.X == x && entity.Y == y && entity.Z == z {
+			copy := entity
+			copy.Items = append([]ContainerItem(nil), entity.Items...)
+			copy.Data = append([]byte(nil), entity.Data...)
+			return copy
+		}
+	}
+	return BlockEntity{}
+}
+
 // LoadedBlockEntities returns a deep snapshot of block entities from chunks
 // already resident in memory. Automation uses this to tick hoppers without
 // generating or loading unrelated chunks.
@@ -964,6 +1004,10 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 		}
 		clean = append(clean, item)
 	}
+	pageCount := 0
+	if blockEntityType == "minecraft:lectern" {
+		pageCount = LecternPageCount(clean)
+	}
 
 	w.containerMu.Lock()
 	updated := false
@@ -974,6 +1018,10 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 		}
 		entity.Type = blockEntityType
 		entity.Items = append([]ContainerItem(nil), clean...)
+		if blockEntityType == "minecraft:lectern" {
+			entity.LecternPage = 0
+			entity.LecternPageCount = pageCount
+		}
 		if len(entity.Data) < 2 {
 			entity.Data = []byte{10, 0}
 		}
@@ -983,7 +1031,7 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 	if !updated {
 		c.BlockEntities = append(c.BlockEntities, BlockEntity{
 			X: x, Y: y, Z: z, Type: blockEntityType, Data: []byte{10, 0},
-			Items: append([]ContainerItem(nil), clean...),
+			Items: append([]ContainerItem(nil), clean...), LecternPageCount: pageCount,
 		})
 	}
 	w.containerMu.Unlock()
@@ -995,6 +1043,67 @@ func (w *World) SetContainerItems(x, y, z int, blockEntityType string, items []C
 	w.dirty[key] = struct{}{}
 	w.mu.Unlock()
 	w.Redstone.NotifyChange(x, y, z)
+}
+
+// SetBookshelfLastSlot records which slot (1-based, 1–6) was most recently
+// interacted with on a chiseled bookshelf at (x,y,z). This drives the
+// comparator output. Call after every insert or eject.
+func (w *World) SetBookshelfLastSlot(x, y, z, slot int) {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	w.containerMu.Lock()
+	for i := range c.BlockEntities {
+		e := &c.BlockEntities[i]
+		if e.X == x && e.Y == y && e.Z == z {
+			e.LastBookshelfSlot = int8(slot)
+			w.containerMu.Unlock()
+			w.Redstone.NotifyChange(x, y, z)
+			return
+		}
+	}
+	// No existing entity — create one and record the slot.
+	c.BlockEntities = append(c.BlockEntities, BlockEntity{
+		X: x, Y: y, Z: z, Type: "minecraft:chiseled_bookshelf",
+		Data: []byte{10, 0}, LastBookshelfSlot: int8(slot),
+	})
+	w.containerMu.Unlock()
+	w.Redstone.NotifyChange(x, y, z)
+}
+
+// SetLecternPage validates and stores a zero-based lectern page. It returns
+// false for an invalid page count or a position without a book-bearing lectern.
+func (w *World) SetLecternPage(x, y, z, page, pageCount int) bool {
+	block := w.GetBlock(x, y, z)
+	if pageCount < 1 || block.ResourceLocation() != "minecraft:lectern" || block.Properties["has_book"] != "true" {
+		return false
+	}
+	page = min(max(page, 0), pageCount-1)
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+	updated := false
+	w.containerMu.Lock()
+	for i := range c.BlockEntities {
+		e := &c.BlockEntities[i]
+		if e.X == x && e.Y == y && e.Z == z && LecternBook(*e) != "" {
+			e.LecternPage = page
+			e.LecternPageCount = pageCount
+			updated = true
+			break
+		}
+	}
+	w.containerMu.Unlock()
+	if !updated {
+		return false
+	}
+	w.mu.Lock()
+	key := [2]int32{cx, cz}
+	w.dirty[key] = struct{}{}
+	w.touchChunkLocked(key)
+	w.mu.Unlock()
+	w.Redstone.NotifyChange(x, y, z)
+	return true
 }
 
 // SetBlockEntity stores or replaces the non-container block entity at a world
@@ -1033,6 +1142,107 @@ func (w *World) SetBlockEntity(x, y, z int, blockEntityType string, data []byte)
 	w.dirty[key] = struct{}{}
 	w.mu.Unlock()
 	w.notifyBlockEntityObserver(snapshot)
+}
+
+// SignState bundles all sign-specific state that must survive text edits and
+// item interactions (glow ink sac, dye).
+type SignState struct {
+	FrontLines   [4]string
+	BackLines    [4]string
+	FrontGlowing bool
+	BackGlowing  bool
+	FrontColor   string // "" = default ("black")
+	BackColor    string // "" = default ("black")
+	Waxed        bool   // honeycomb applied; editing locked
+}
+
+// SetBlockEntitySign stores or replaces a sign block entity, persisting the
+// sign state (lines, glowing, color) alongside the raw NBT data.
+func (w *World) SetBlockEntitySign(x, y, z int, data []byte, state SignState) {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+
+	w.containerMu.Lock()
+	updated := false
+	var snapshot BlockEntity
+	for index := range c.BlockEntities {
+		entity := &c.BlockEntities[index]
+		if entity.X == x && entity.Y == y && entity.Z == z {
+			entity.Type = "minecraft:sign"
+			entity.Data = append([]byte(nil), data...)
+			entity.SignFrontLines = state.FrontLines
+			entity.SignBackLines = state.BackLines
+			entity.SignFrontGlowing = state.FrontGlowing
+			entity.SignBackGlowing = state.BackGlowing
+			entity.SignFrontColor = state.FrontColor
+			entity.SignBackColor = state.BackColor
+			entity.SignWaxed = state.Waxed
+			snapshot = *entity
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		snapshot = BlockEntity{
+			X: x, Y: y, Z: z, Type: "minecraft:sign",
+			Data:           append([]byte(nil), data...),
+			SignFrontLines: state.FrontLines, SignBackLines: state.BackLines,
+			SignFrontGlowing: state.FrontGlowing, SignBackGlowing: state.BackGlowing,
+			SignFrontColor: state.FrontColor, SignBackColor: state.BackColor,
+			SignWaxed: state.Waxed,
+		}
+		c.BlockEntities = append(c.BlockEntities, snapshot)
+	}
+	w.containerMu.Unlock()
+
+	w.mu.Lock()
+	key := [2]int32{cx, cz}
+	w.chunks[key] = c
+	w.touchChunkLocked(key)
+	w.dirty[key] = struct{}{}
+	w.mu.Unlock()
+	w.notifyBlockEntityObserver(snapshot)
+}
+
+// WaxSign locks a sign against further text editing by setting SignWaxed=true.
+// Returns false if there is no sign block entity at the given position.
+func (w *World) WaxSign(x, y, z int) bool {
+	cx := int32(math.Floor(float64(x) / SectionSize))
+	cz := int32(math.Floor(float64(z) / SectionSize))
+	c := w.Chunk(cx, cz)
+
+	w.containerMu.Lock()
+	var snapshot BlockEntity
+	found := false
+	for index := range c.BlockEntities {
+		entity := &c.BlockEntities[index]
+		if entity.X == x && entity.Y == y && entity.Z == z {
+			if entity.SignWaxed {
+				w.containerMu.Unlock()
+				return false // already waxed
+			}
+			entity.SignWaxed = true
+			snapshot = *entity
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Create a minimal block entity with just the waxed flag set.
+		snapshot = BlockEntity{X: x, Y: y, Z: z, Type: "minecraft:sign", SignWaxed: true}
+		c.BlockEntities = append(c.BlockEntities, snapshot)
+	}
+	w.containerMu.Unlock()
+
+	w.mu.Lock()
+	key := [2]int32{cx, cz}
+	w.chunks[key] = c
+	w.touchChunkLocked(key)
+	w.dirty[key] = struct{}{}
+	w.mu.Unlock()
+	w.notifyBlockEntityObserver(snapshot)
+	return true
 }
 
 // SetBlock places block at absolute world coordinates (x, y, z).
@@ -1091,6 +1301,12 @@ func (w *World) SetBlock(x, y, z int, block Block) {
 	}
 	if IsRailBlock(oldBlock.ResourceLocation()) || IsRailBlock(block.ResourceLocation()) {
 		w.UpdateRailShapesAround(x, y, z)
+	}
+	if block.ResourceLocation() == "minecraft:sponge" && oldBlock.ResourceLocation() != "minecraft:sponge" {
+		w.absorbWaterAround(x, y, z)
+	}
+	if block.ResourceLocation() == "minecraft:wet_sponge" && w.ultrawarm.Load() {
+		w.SetBlock(x, y, z, Block{Namespace: "minecraft", Name: "sponge"})
 	}
 }
 
@@ -1204,6 +1420,19 @@ func (w *World) scheduleBlockNeighborUpdates(x, y, z int, old, placed Block) {
 		w.BlockPhysics.ScheduleIce(x, y, z, age, IceMeltDelay)
 	}
 
+	// 6b. Live coral schedules a death check when placed; removing a neighbouring
+	// block (for example draining water) rechecks any adjacent coral.
+	if IsLiveCoral(placedName) {
+		w.BlockPhysics.ScheduleCoralDeath(x, y, z, age, coralDeathDelay)
+	}
+	if placed.IsAir() {
+		for _, pos := range neighbors6(x, y, z) {
+			if IsLiveCoral(w.GetBlock(pos[0], pos[1], pos[2]).ResourceLocation()) {
+				w.BlockPhysics.ScheduleCoralDeath(pos[0], pos[1], pos[2], age, coralDeathDelay)
+			}
+		}
+	}
+
 	// 7. Notify redstone engine of any change near redstone components.
 	if IsRedstoneConductor(placedName) || IsRedstoneSource(placedName) || IsRedstoneLoad(placedName) ||
 		IsRedstoneConductor(oldName) || IsRedstoneSource(oldName) || IsRedstoneLoad(oldName) ||
@@ -1247,12 +1476,30 @@ func (w *World) GetBlock(x, y, z int) Block {
 	cx := int32(math.Floor(float64(x) / SectionSize))
 	cz := int32(math.Floor(float64(z) / SectionSize))
 	c := w.Chunk(cx, cz)
+	return blockInChunk(c, x, y, z)
+}
 
+// BlockIfLoaded reads terrain already in memory, without waiting for chunk
+// generation or loading an evicted chunk. The returned bool distinguishes
+// missing terrain from air so simulation callers can defer their work.
+func (w *World) BlockIfLoaded(x, y, z int) (Block, bool) {
+	if y < WorldMinY || y > WorldMaxY {
+		return Air, true
+	}
+	cx, cz := ChunkCoordsFor(x, z)
+	c, loaded := w.ChunkIfLoaded(cx, cz)
+	if !loaded {
+		return Air, false
+	}
+	return blockInChunk(c, x, y, z), true
+}
+
+func blockInChunk(c *Chunk, x, y, z int) Block {
 	relY := y - WorldMinY
 	sIdx := relY / SectionSize
-	lx := x - int(cx)*SectionSize
+	lx := x & (SectionSize - 1)
 	ly := relY % SectionSize
-	lz := z - int(cz)*SectionSize
+	lz := z & (SectionSize - 1)
 
 	if c.Sections[sIdx] == nil {
 		return Air
@@ -1355,6 +1602,12 @@ func (w *World) SetLavaTickDelay(delay int64) {
 	if delay > 0 {
 		w.lavaTickDelay.Store(delay)
 	}
+}
+
+// SetUltrawarm marks this dimension as ultrawarm (Nether), causing wet sponges
+// placed here to dry instantly.
+func (w *World) SetUltrawarm(ultrawarm bool) {
+	w.ultrawarm.Store(ultrawarm)
 }
 
 func (w *World) fluidTickDelay(name string) int64 {

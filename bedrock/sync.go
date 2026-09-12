@@ -63,6 +63,11 @@ type bedrockEntityView struct {
 	onFire             bool
 	usingItem          bool
 	pufferState        int32
+	cloudRadius        float64
+	woolColor          string
+	sheared            bool
+	collarColor        string
+	hasPumpkin         bool
 }
 
 func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
@@ -78,6 +83,11 @@ func newBedrockEntityView(entity *corentity.Entity) bedrockEntityView {
 		onFire:      entity.FireTicks > 0,
 		usingItem:   entity.UsingItem,
 		pufferState: entity.PufferState,
+		cloudRadius: entity.CloudRadius,
+		woolColor:   entity.WoolColor,
+		sheared:     entity.Sheared,
+		collarColor: entity.CollarColor,
+		hasPumpkin:  entity.HasPumpkin,
 	}
 }
 
@@ -116,6 +126,7 @@ func (l *Listener) Sync(tick uint64) {
 		l.syncLocalHealth(viewer, tick)
 		l.syncLocalHunger(viewer, tick)
 		l.syncLocalExperience(viewer, tick)
+		l.syncLocalStatusEffects(viewer, tick)
 		l.syncLocalPlayerState(viewer)
 		l.syncLocalInventory(viewer)
 	}
@@ -671,6 +682,9 @@ func (l *Listener) syncEntities(viewer *bedrockSession, entities []*corentity.En
 			previous.onFire != (entity.FireTicks > 0) ||
 			previous.usingItem != entity.UsingItem ||
 			previous.pufferState != entity.PufferState ||
+			previous.cloudRadius != entity.CloudRadius ||
+			previous.woolColor != entity.WoolColor || previous.sheared != entity.Sheared ||
+			previous.collarColor != entity.CollarColor || previous.hasPumpkin != entity.HasPumpkin ||
 			entity.Type == corentity.TypeVillager &&
 				(previous.villagerVariant != entity.VillagerVariant || previous.villagerProfession != entity.VillagerProfession ||
 					previous.villagerLevel != entity.VillagerLevel) {
@@ -732,9 +746,7 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 	}
 
 	if entity.Type == corentity.TypeItem {
-		item := l.itemInstance(player.ItemStack{
-			ItemID: entity.ItemID, Count: entity.ItemCount, Damage: entity.ItemDamage, PotDecorations: entity.ItemPotDecorations,
-		}, 1)
+		item := l.itemInstance(entity.DroppedItem(), 1)
 		if item.Stack.NetworkID == 0 {
 			return nil
 		}
@@ -778,7 +790,7 @@ func (l *Listener) buildAddEntity(viewer *bedrockSession, entity *corentity.Enti
 
 func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corentity.Entity) protocol.EntityMetadata {
 	metadata := protocol.NewEntityMetadata()
-	if entity == nil || entity.Type != corentity.TypeFireworkRocket {
+	if entity == nil || entity.Type != corentity.TypeFireworkRocket && entity.Type != corentity.TypeAreaEffectCloud {
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
 		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasCollision)
 	}
@@ -840,6 +852,33 @@ func (l *Listener) bedrockEntityMetadata(viewer *bedrockSession, entity *corenti
 	}
 	if entity.Type == corentity.TypeFireworkRocket {
 		metadata[protocol.EntityDataKeyDisplayFirework] = bedrockFireworkNBT(entity.FireworkData)
+	}
+	if entity.Type == corentity.TypePotion {
+		if potionID, ok := bedrockPotionID(entity.ProjectileItem); ok {
+			metadata[protocol.EntityDataKeyAuxValueData] = potionID
+			if potionID > 4 {
+				metadata[protocol.EntityDataKeyCustomDisplay] = byte(potionID + 1)
+			}
+		}
+	}
+	if entity.Type == corentity.TypeAreaEffectCloud {
+		metadata[protocol.EntityDataKeyDataRadius] = float32(entity.CloudRadius)
+		metadata[protocol.EntityDataKeyDataDuration] = int32(math.MaxInt32)
+		metadata[protocol.EntityDataKeyDataChangeOnPickup] = float32(math.SmallestNonzeroFloat32)
+		metadata[protocol.EntityDataKeyDataChangeRate] = float32(math.SmallestNonzeroFloat32)
+	}
+	if entity.Type == corentity.TypeSheep {
+		metadata[protocol.EntityDataKeyColorIndex] = byte(handler.SheepColorID(entity.WoolColor))
+		if entity.Sheared {
+			metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSheared)
+		}
+	}
+	if entity.Tamed && entity.CollarColor != "" &&
+		(entity.Type == corentity.TypeWolf || entity.Type == corentity.TypeCat) {
+		metadata[protocol.EntityDataKeyColorIndex] = byte(handler.DyeColorID(entity.CollarColor))
+	}
+	if entity.Type == corentity.TypeSnowGolem && !entity.HasPumpkin {
+		metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSheared)
 	}
 	return metadata
 }
@@ -1570,6 +1609,23 @@ func (l *Listener) SyncFurnaceContainer(p *player.Player, cookTime, burnTime, bu
 	}
 }
 
+// SyncBrewingContainer sends updated brewing stand slot contents and the two
+// progress data values (key 0 = brew_time 400→0, key 1 = fuel_amount 0-20).
+func (l *Listener) SyncBrewingContainer(p *player.Player, brewTime, fuelAmount int) {
+	if p == nil || p.OpenContainerKind != "minecraft:brewing_stand" {
+		return
+	}
+	l.SyncWorkstationContainer(p)
+	l.sessionsMu.RLock()
+	viewer := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if viewer == nil {
+		return
+	}
+	_ = viewer.conn.WritePacket(&packet.ContainerSetData{WindowID: 1, Key: 0, Value: int32(brewTime)})
+	_ = viewer.conn.WritePacket(&packet.ContainerSetData{WindowID: 1, Key: 1, Value: int32(fuelAmount)})
+}
+
 // bedrockContainerType maps a block resource location to the Bedrock protocol
 // container type used in the ContainerOpen packet. Returns false if the block
 // is not an interactive container.
@@ -1591,6 +1647,8 @@ func bedrockContainerType(blockName string) (byte, bool) {
 		return protocol.ContainerTypeGrindstone, true
 	case "minecraft:loom":
 		return protocol.ContainerTypeLoom, true
+	case "minecraft:lectern":
+		return protocol.ContainerTypeLectern, true
 	case "minecraft:smithing_table":
 		return protocol.ContainerTypeSmithingTable, true
 	case "minecraft:stonecutter":
@@ -1702,6 +1760,25 @@ func (l *Listener) SendPlayerMobEffect(p *player.Player, effectType, amplifier, 
 		Amplifier:       amplifier,
 		Particles:       true,
 		Duration:        duration,
+		Tick:            uint64(time.Now().UnixMilli() / 50),
+	})
+}
+
+// RemovePlayerMobEffect removes one expired canonical effect from a Bedrock client.
+func (l *Listener) RemovePlayerMobEffect(p *player.Player, effectType int32) {
+	if l == nil || p == nil || effectType == 0 {
+		return
+	}
+	l.sessionsMu.RLock()
+	session := l.sessions[p.UUID]
+	l.sessionsMu.RUnlock()
+	if session == nil {
+		return
+	}
+	_ = session.conn.WritePacket(&packet.MobEffect{
+		EntityRuntimeID: bedrockSelfRuntimeID,
+		Operation:       packet.MobEffectRemove,
+		EffectType:      effectType,
 		Tick:            uint64(time.Now().UnixMilli() / 50),
 	})
 }
@@ -1959,6 +2036,12 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 			metadata = uint32(uint16(meta))
 		}
 	}
+	if potionID, ok := bedrockPotionID(stack); ok {
+		metadata = uint32(uint16(potionID))
+	}
+	if stewVariant, ok := bedrockStewVariant(stack); ok {
+		metadata = uint32(uint16(stewVariant))
+	}
 	nbtData := map[string]any{}
 	if stack.Damage > 0 && lightLevel < 0 {
 		nbtData["Damage"] = int32(stack.Damage)
@@ -1979,6 +2062,9 @@ func (l *Listener) itemInstance(stack player.ItemStack, stackNetworkID int32) pr
 		for key, value := range bedrockFireworkNBT(stack.EffectiveFireworks()) {
 			nbtData[key] = value
 		}
+	}
+	if stack.Components != "" {
+		nbtData[goCraftComponentsNBTKey] = stack.NormalizedComponents()
 	}
 	if len(nbtData) == 0 {
 		nbtData = nil
@@ -2127,7 +2213,11 @@ func bedrockBlockEntityData(entity coreworld.BlockEntity, block coreworld.Block)
 		position["sherds"] = []string{decorations[0], decorations[1], decorations[2], decorations[3]}
 	case "sign", "hanging_sign":
 		position["id"] = "Sign"
-		position["IsWaxed"] = uint8(0)
+		if entity.SignWaxed {
+			position["IsWaxed"] = uint8(1)
+		} else {
+			position["IsWaxed"] = uint8(0)
+		}
 		position["FrontText"] = emptyBedrockSignSide()
 		position["BackText"] = emptyBedrockSignSide()
 	case "banner":

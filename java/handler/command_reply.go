@@ -13,6 +13,7 @@ func fillFeedback(
 	messenger func(*player.Player, string) error,
 	linkMessenger func(*player.Player, string, string) error,
 	syncAbilities func(*player.Player),
+	syncStatusEffect func(*player.Player, player.StatusEffect),
 ) {
 	if ctx.Reply == nil && messenger != nil {
 		issuer := ctx.Player
@@ -26,6 +27,9 @@ func fillFeedback(
 	}
 	if ctx.SyncAbilities == nil && syncAbilities != nil {
 		ctx.SyncAbilities = syncAbilities
+	}
+	if ctx.SyncStatusEffect == nil && syncStatusEffect != nil {
+		ctx.SyncStatusEffect = syncStatusEffect
 	}
 }
 

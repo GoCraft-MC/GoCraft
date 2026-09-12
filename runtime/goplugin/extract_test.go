@@ -69,7 +69,7 @@ func writeTestBundle(t *testing.T, entry string, content []byte) string {
 
 // writeTestBundleWith packs an executable and, when one is given, the command
 // tree a plugin registers its handlers against.
-func writeTestBundleWith(t *testing.T, entry string, content, commandTree []byte) string {
+func writeTestBundleWith(t testing.TB, entry string, content, commandTree []byte) string {
 	t.Helper()
 	name := filepath.Join(t.TempDir(), "example.gcpkg")
 	file, err := os.Create(name)

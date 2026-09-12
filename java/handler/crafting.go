@@ -9,6 +9,7 @@ import (
 	"GoCraft/core/intent"
 	"GoCraft/core/itemregistry"
 	"GoCraft/core/player"
+	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/java/network"
@@ -186,13 +187,16 @@ func addStackToInventory(inventory *[player.InventorySize]player.ItemStack, item
 	return remaining == 0
 }
 
-func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus) error {
+func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus, plugins ...*coreplugin.Bus) error {
 	switch pkt.ID {
 	case packetIDContainerClick:
-		return handleContainerClick(pkt, p, conn, w, bus)
+		return handleContainerClick(pkt, p, conn, w, bus, plugins...)
 	case packetIDContainerClose:
 		return handleContainerClose(pkt, p, conn, w)
 	case packetIDContainerButtonClick:
+		if p != nil && p.OpenContainerKind == "minecraft:lectern" {
+			return handleLecternButtonClick(pkt, p, bus)
+		}
 		if p.OpenContainerKind == "minecraft:crafter" {
 			r := pkt.Reader()
 			if _, err := protocol.ReadVarInt(r); err != nil { // windowID
@@ -209,7 +213,7 @@ func handleContainerPacket(pkt *protocol.Packet, p *player.Player, conn *network
 	return nil
 }
 
-func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus) error {
+func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.ClientConn, w *coreworld.World, bus *intent.Bus, plugins ...*coreplugin.Bus) error {
 	r := pkt.Reader()
 	windowID, err := protocol.ReadVarInt(r)
 	if err != nil {
@@ -248,6 +252,16 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 	if r.Len() != 0 {
 		return fmt.Errorf("container click: %d trailing bytes", r.Len())
 	}
+	if windowID != 0 && (p.OpenContainerID != windowID || p.OpenContainerKind == "") {
+		return nil
+	}
+	container := p.OpenContainerKind
+	if windowID == 0 {
+		container = "minecraft:inventory"
+	}
+	if len(plugins) > 0 && plugins[0] != nil && !plugins[0].EmitInventoryClick(p, container, int64(slot), int64(button), int64(mode)) {
+		return resyncEventInventory(p, conn, windowID)
+	}
 
 	if windowID == 0 {
 		before := p.ArmorPoints()
@@ -279,6 +293,9 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 	}
 
 	if windowID == chestContainerID && p.OpenContainerID == windowID && isJavaStorageContainer(p.OpenContainerKind) {
+		if p.OpenContainerKind == boatContainerKind && !validBoatInventory(p, w) {
+			return closeBoatInventory(p, conn)
+		}
 		handleChestClick(p, w, int(slot), button, mode)
 		return sendChestContainerContent(conn, p)
 	}
@@ -288,6 +305,22 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 	}
 	if windowID == workstationContainerID && p.OpenContainerID == windowID && IsWorkstation(p.OpenContainerKind) {
 		handleWorkstationClick(p, int(slot), button, mode)
+		if xp := p.PendingWorkstationXP; xp != 0 {
+			p.PendingWorkstationXP = 0
+			if xp > 0 {
+				// Grindstone disenchant: award XP points.
+				p.AddExperience(xp)
+			} else {
+				// Anvil: deduct levels. xp is encoded as -(levelCost).
+				cost := int32(-xp)
+				level, _, _ := p.ExperienceSnapshot()
+				if level >= cost {
+					p.SetTotalExperience(player.ExperienceForLevel(level - cost))
+				}
+			}
+			_ = sendExperience(conn, p)
+		}
+		_ = sendAnvilCost(conn, AnvilLevelCost(p.OpenContainerKind, p.ContainerSlots))
 		return sendChestContainerContent(conn, p)
 	}
 	if windowID != craftingTableContainerID || p.OpenContainerID != windowID || p.OpenContainerKind != "minecraft:crafting_table" {
@@ -317,6 +350,14 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 	if err != nil {
 		return fmt.Errorf("container close: reading ID: %w", err)
 	}
+	if windowID == chestContainerID && p.OpenContainerID == windowID && p.OpenContainerKind == "minecraft:lectern" {
+		p.OpenContainerID = 0
+		p.OpenContainerKind = ""
+		p.OpenContainerPos = spatial.BlockPos{}
+		p.ContainerSlots = nil
+		p.ContainerStateID++
+		return nil
+	}
 	if windowID == chestContainerID && p.OpenContainerID == windowID && isJavaStorageContainer(p.OpenContainerKind) {
 		persistStorageContents(p, w)
 		p.OpenContainerID = 0
@@ -324,8 +365,12 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 		p.OpenContainerPos = spatial.BlockPos{}
 		p.OpenContainerPartnerPos = spatial.BlockPos{}
 		p.OpenContainerHasPartner = false
+		p.OpenContainerEntityID, p.OpenContainerStorage = 0, nil
 		p.ContainerSlots = nil
 		p.ContainerStateID++
+		if conn == nil {
+			return nil
+		}
 		return sendSetContainerContent(conn, p, p.ContainerStateID)
 	}
 	if windowID == craftingTableContainerID && p.OpenContainerID == windowID && p.OpenContainerKind == "minecraft:crafting_table" {
@@ -376,12 +421,19 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	var potDecorations [4]string
 	var fireworks player.FireworkData
 	hasFireworks := false
+	components := ""
+	potionName := ""
 	for i := int32(0); i < added; i++ {
 		componentType, err := protocol.ReadVarInt(r)
 		if err != nil {
 			return player.ItemStack{}, err
 		}
 		switch componentType {
+		case 0: // custom_data: preserve GoCraft's canonical extension object
+			components, err = readGoCraftComponents(r)
+			if err != nil {
+				return player.ItemStack{}, fmt.Errorf("reading custom item data: %w", err)
+			}
 		case 2: // max_damage
 			if _, err := protocol.ReadVarInt(r); err != nil {
 				return player.ItemStack{}, err
@@ -460,6 +512,31 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 			if _, readErr = protocol.ReadBool(r); readErr != nil {
 				return player.ItemStack{}, readErr
 			}
+		case 41: // potion_contents: optional potion, colour, custom effects
+			hasPotion, readErr := protocol.ReadBool(r)
+			if readErr != nil {
+				return player.ItemStack{}, readErr
+			}
+			if hasPotion {
+				potionRegistryID, idErr := protocol.ReadVarInt(r)
+				if idErr != nil || javaworld.PotionName(potionRegistryID) == "" {
+					return player.ItemStack{}, fmt.Errorf("invalid potion registry ID %d", potionRegistryID)
+				}
+				potionName = javaworld.PotionName(potionRegistryID)
+			}
+			hasColour, colourErr := protocol.ReadBool(r)
+			if colourErr != nil {
+				return player.ItemStack{}, colourErr
+			}
+			if hasColour {
+				if _, colourErr = protocol.ReadInt(r); colourErr != nil {
+					return player.ItemStack{}, colourErr
+				}
+			}
+			customEffects, effectErr := protocol.ReadVarInt(r)
+			if effectErr != nil || customEffects != 0 {
+				return player.ItemStack{}, fmt.Errorf("unsupported custom potion effect count %d", customEffects)
+			}
 		case 56: // fireworks: flight duration and bounded explosion list
 			flight, readErr := protocol.ReadVarInt(r)
 			if readErr != nil || flight < 0 || flight > 255 {
@@ -495,10 +572,23 @@ func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
 	if damage < 0 {
 		damage = 0
 	}
-	return player.ItemStack{
+	stack := player.ItemStack{
 		ItemID: name, Count: int(count), Damage: int(damage), Enchantments: enchantments, PotDecorations: potDecorations,
 		HasFireworks: hasFireworks, Fireworks: fireworks,
-	}, nil
+	}
+	if components != "" {
+		if err := stack.SetComponents(components); err != nil {
+			return player.ItemStack{}, fmt.Errorf("invalid canonical item components: %w", err)
+		}
+	}
+	if potionName != "" {
+		if existing, _ := player.PotionName(stack); existing == "" {
+			if err := stack.SetComponent("potion_contents", map[string]string{"potion": potionName}); err != nil {
+				return player.ItemStack{}, err
+			}
+		}
+	}
+	return stack, nil
 }
 
 func readJavaFireworkExplosion(r *bytes.Reader) (player.FireworkExplosion, error) {
@@ -632,11 +722,24 @@ func readNBTLength(r *bytes.Reader) (int, error) {
 }
 
 func skipNBTString(r *bytes.Reader) error {
+	_, err := readNBTStringValue(r)
+	return err
+}
+
+func readNBTStringValue(r *bytes.Reader) (string, error) {
 	var raw [2]byte
 	if _, err := io.ReadFull(r, raw[:]); err != nil {
-		return err
+		return "", err
 	}
-	return skipReaderBytes(r, int(binary.BigEndian.Uint16(raw[:])))
+	length := int(binary.BigEndian.Uint16(raw[:]))
+	if length > r.Len() {
+		return "", io.ErrUnexpectedEOF
+	}
+	value := make([]byte, length)
+	if _, err := io.ReadFull(r, value); err != nil {
+		return "", err
+	}
+	return string(value), nil
 }
 
 func skipReaderBytes(r *bytes.Reader, n int) error {
@@ -671,7 +774,7 @@ func clickPlayerInventorySlot(p *player.Player, slot int, button byte) {
 			return
 		case target.IsEmpty():
 			*target, p.CarriedItem = p.CarriedItem, player.ItemStack{}
-		case target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage:
+		case target.SameItem(p.CarriedItem):
 			limit := player.MaxStackSize(target.ItemID)
 			add := minInt(limit-target.Count, p.CarriedItem.Count)
 			if add > 0 {
@@ -708,7 +811,7 @@ func clickPlayerInventorySlot(p *player.Player, slot int, button byte) {
 		normalizeStack(&p.CarriedItem)
 		return
 	}
-	if target.ItemID == p.CarriedItem.ItemID && target.Damage == p.CarriedItem.Damage &&
+	if target.SameItem(p.CarriedItem) &&
 		target.Count < player.MaxStackSize(target.ItemID) {
 		target.Count++
 		p.CarriedItem.Count--
@@ -792,7 +895,7 @@ func handleQuickCraft(p *player.Player, slot int, button byte, targetFor func(in
 		remainingSlots := len(p.QuickCraftSlots)
 		for _, selected := range p.QuickCraftSlots {
 			target := targetFor(selected)
-			if target == nil || (!target.IsEmpty() && (target.ItemID != p.CarriedItem.ItemID || target.Damage != p.CarriedItem.Damage)) {
+			if target == nil || (!target.IsEmpty() && !target.SameItem(p.CarriedItem)) {
 				remainingSlots--
 				continue
 			}
@@ -837,7 +940,7 @@ func updatePersonalCraftingResult(p *player.Player) {
 
 func takePersonalCraftingResult(p *player.Player) {
 	result := p.Inventory[0]
-	if result.IsEmpty() || (!p.CarriedItem.IsEmpty() && p.CarriedItem.ItemID != result.ItemID) {
+	if result.IsEmpty() || (!p.CarriedItem.IsEmpty() && !p.CarriedItem.SameItem(result)) {
 		return
 	}
 	if p.CarriedItem.Count+result.Count > player.MaxStackSize(result.ItemID) {
@@ -960,7 +1063,7 @@ func takeCraftingResult(p *player.Player) {
 	if p.CraftingResult.IsEmpty() {
 		return
 	}
-	if !p.CarriedItem.IsEmpty() && p.CarriedItem.ItemID != p.CraftingResult.ItemID {
+	if !p.CarriedItem.IsEmpty() && !p.CarriedItem.SameItem(p.CraftingResult) {
 		return
 	}
 	if p.CarriedItem.Count+p.CraftingResult.Count > 64 {

@@ -45,6 +45,8 @@ func generateGo(plugin *protogen.Plugin, events []event) error {
 	file.P()
 
 	nativeEventPredicate(file, events)
+	nativeCancellation(file, events)
+	nativeMutationPaths(file, events)
 	if err := blankPayloads(file, events); err != nil {
 		return err
 	}
@@ -217,8 +219,12 @@ func emitter(file *protogen.GeneratedFile, declared event) error {
 			return fmt.Errorf("%s.%s: %w", declared.Type, f.Name, err)
 		}
 		name := parameterName(f)
-		parameters = append(parameters, name+" "+bound.GoType)
-		values = append(values, fmt.Sprintf(bound.GoEncode, name))
+		goType, value := bound.GoType, name
+		if f.Mutable {
+			goType, value = "*"+goType, "*"+name
+		}
+		parameters = append(parameters, name+" "+goType)
+		values = append(values, fmt.Sprintf(bound.GoEncode, value))
 		if f.Kind == "PlayerRef" && actor == "" {
 			actor = name
 		}
@@ -265,7 +271,13 @@ func emitter(file *protogen.GeneratedFile, declared event) error {
 	file.P("\t\t},")
 	file.P("\t}")
 	if declared.Cancellable {
-		file.P("\treturn b.EmitCancellable(event)")
+		file.P("\tallowed := b.EmitCancellable(event)")
+		for _, f := range declared.Fields {
+			if f.Mutable {
+				file.P(fmt.Sprintf("\t*%s = event.Fields[%d].%s", parameterName(f), f.Index, scalarMember(f.Kind)))
+			}
+		}
+		file.P("\treturn allowed")
 	} else {
 		file.P("\tb.EmitObservational(event)")
 	}

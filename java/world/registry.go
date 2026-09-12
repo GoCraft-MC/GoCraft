@@ -186,6 +186,7 @@ func loadRegistries() {
 	soundEventIDs = soundMap
 	effectMap, _ := loadRegistry(raw, "minecraft:mob_effect", "registries.json")
 	mobEffectIDs = effectMap
+	potionIDs, potionNames = loadRegistry(raw, "minecraft:potion", "registries.json")
 	enchantmentIDs, enchantmentNames = loadNetworkRegistry("minecraft:enchantment")
 }
 

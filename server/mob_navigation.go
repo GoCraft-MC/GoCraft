@@ -36,7 +36,12 @@ func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial
 	// every change made all nearby mobs run A* together. Offset refreshes by
 	// entity ID so herds and hostile groups do not create a 15-tick CPU spike.
 	if !ai.hasPathGoal || ai.repathTick <= 0 {
-		path, _ := navigation.FindPath(s.world, e.Position, destination, 4096)
+		var path []spatial.Vec3
+		if e.Type == corentity.TypeVillager {
+			path, _ = navigation.FindPathOpeningDoors(s.world, e.Position, destination, 4096)
+		} else {
+			path, _ = navigation.FindPath(s.world, e.Position, destination, 4096)
+		}
 		ai.path = path
 		ai.pathIndex = 0
 		ai.pathGoal = goal
@@ -127,7 +132,7 @@ func (s *Server) tickPassiveIdleGoals(e *corentity.Entity, ai *mobAI) {
 	ai.wanderTick--
 	if ai.wanderTick <= 0 {
 		ai.wanderTick = 2
-		if ai.rng.Intn(600) == 0 {
+		if ai.rng.Intn(60) == 0 {
 			ai.wanderTarget = spatial.Vec3{
 				X: e.Position.X + ai.rng.Float64()*20 - 10,
 				Y: e.Position.Y + ai.rng.Float64()*14 - 7,
@@ -231,7 +236,7 @@ func (s *Server) tickHostileIdleGoals(e *corentity.Entity, ai *mobAI) {
 	ai.wanderTick--
 	if ai.wanderTick <= 0 {
 		ai.wanderTick = 2
-		if ai.rng.Intn(600) == 0 {
+		if ai.rng.Intn(60) == 0 {
 			ai.wanderTarget = spatial.Vec3{
 				X: e.Position.X + ai.rng.Float64()*20 - 10,
 				Y: e.Position.Y + ai.rng.Float64()*14 - 7,

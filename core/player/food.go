@@ -20,7 +20,7 @@ func FoodValue(itemID string) (nutrition int32, saturationModifier float32, ok b
 // Unknown items retain the historical 32-tick fallback.
 func FoodUseDuration(itemID string) time.Duration {
 	definition, ok := itemregistry.Lookup(itemID)
-	if ok && definition.Food != nil && definition.Consumable != nil {
+	if ok && definition.Consumable != nil {
 		return time.Duration(definition.Consumable.UseDurationTicks) * 50 * time.Millisecond
 	}
 	return 1600 * time.Millisecond
@@ -33,10 +33,17 @@ func CanAlwaysEat(itemID string) bool {
 	return ok && definition.Food != nil && definition.Food.AlwaysEdible
 }
 
+// IsConsumable reports items with a vanilla timed use action, including
+// drinks such as milk and potions that do not restore hunger.
+func IsConsumable(itemID string) bool {
+	definition, ok := itemregistry.Lookup(itemID)
+	return ok && definition.Consumable != nil
+}
+
 // FoodRemainder returns the container left behind after a food item is eaten.
 func FoodRemainder(itemID string) string {
 	definition, ok := itemregistry.Lookup(itemID)
-	if !ok || definition.Food == nil || definition.Consumable == nil {
+	if !ok || definition.Consumable == nil {
 		return ""
 	}
 	return definition.Consumable.Remainder

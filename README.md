@@ -47,6 +47,73 @@ Connect a Java 1.21.4 client to `localhost:25565`.
 
 > **Windows:** use `go build -o gocraft.exe .` and `.\gocraft.exe`
 
+## Docker
+
+A prebuilt image is published for every release:
+
+```bash
+docker pull ghcr.io/gocraft-mc/gocraft:latest
+```
+
+Run a persistent cross-play server in one command — everything GoCraft writes (config, worlds, logs, plugins) lives under the `/data` volume, and `docker stop` triggers a clean world flush:
+
+```bash
+docker run -d \
+  --name gocraft \
+  -e GOCRAFT_MOTD="Mon serveur" \
+  -e GOCRAFT_MAX_PLAYERS=100 \
+  -e GOCRAFT_ONLINE_MODE=true \
+  -e GOCRAFT_DIFFICULTY=hard \
+  -v ./data:/data \
+  -p 25565:25565/tcp \
+  -p 19106:19106/udp \
+  ghcr.io/gocraft-mc/gocraft:latest
+```
+
+On first start, if `/data/server.yml` does not exist, GoCraft writes a default configuration there. An existing `server.yml` is **never** overwritten — edit it directly, or override individual fields with `GOCRAFT_*` environment variables (they win over the YAML):
+
+| Variable | Field |
+| --- | --- |
+| `GOCRAFT_MOTD` | `motd` |
+| `GOCRAFT_MAX_PLAYERS` | `max_players` |
+| `GOCRAFT_ONLINE_MODE` | `online_mode` |
+| `GOCRAFT_DIFFICULTY` | `difficulty` |
+| `GOCRAFT_DEFAULT_GAMEMODE` | `default_gamemode` |
+| `GOCRAFT_VERSION_NAME` | `version_name` |
+| `GOCRAFT_PROTOCOL_VERSION` | `protocol_version` |
+| `GOCRAFT_VILLAGERS` | `villagers` |
+| `GOCRAFT_HOST` / `GOCRAFT_JAVA_HOST` | `host` |
+| `GOCRAFT_PORT` / `GOCRAFT_JAVA_PORT` | `port` |
+| `GOCRAFT_JAVA_ENABLED` | `java_enabled` |
+| `GOCRAFT_WORLD_STORAGE` | `world_storage` |
+| `GOCRAFT_WORLD_DIR` | `world_dir` |
+| `GOCRAFT_WORLD_SEED` | `world_seed` |
+| `GOCRAFT_VIEW_DISTANCE` | `view_distance` |
+| `GOCRAFT_BEDROCK_ENABLED` | `bedrock.enabled` |
+| `GOCRAFT_BEDROCK_ADDRESS` / `GOCRAFT_BEDROCK_ADDR` | `bedrock.address` |
+| `GOCRAFT_BEDROCK_ONLINE_MODE` | `bedrock.online_mode` |
+
+See [Configuration](docs/configuration.md) for the full list. The Bedrock listener is **disabled by default** — set `GOCRAFT_BEDROCK_ENABLED=true` to accept Bedrock clients on UDP 19106.
+
+`/data` layout after first start:
+
+```
+/data/
+├── server.yml          # main configuration (created on first start, never overwritten)
+├── configuration/      # chatformat.yml, glyphs.yml
+├── world/              # overworld (Anvil region files)
+├── world_nether/
+├── world_end/
+├── logs/               # latest.log + compressed archives
+└── plugins/            # .gcpkg plugin bundles
+```
+
+Or use Docker Compose — a ready-to-edit `docker-compose.yml` sits at the repository root:
+
+```bash
+docker compose up -d
+```
+
 ## Documentation
 
 | Page | Description |

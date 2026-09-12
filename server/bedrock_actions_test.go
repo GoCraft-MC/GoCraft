@@ -144,13 +144,27 @@ func TestBedrockCropBoneMealMatchesCoreAndRejectsNetherWart(t *testing.T) {
 func TestBedrockBoneMealWorksOnGrassAndSaplings(t *testing.T) {
 	t.Run("grass", func(t *testing.T) {
 		s, p := newBedrockActionTestServer(t)
-		s.world.SetBlock(8, 64, 8, bedrockBlock("grass_block", nil))
+		// Provide a 9×9 bed of grass blocks so the scatter has eligible tiles.
+		for dx := -4; dx <= 4; dx++ {
+			for dz := -4; dz <= 4; dz++ {
+				s.world.SetBlock(8+dx, 64, 8+dz, bedrockBlock("grass_block", nil))
+			}
+		}
 		p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:bone_meal", Count: 1}
 		if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 8, Y: 64, Z: 8}}, s.world.GetBlock(8, 64, 8)) {
 			t.Fatal("grass rejected bone meal")
 		}
-		if got := s.world.GetBlock(8, 65, 8).ResourceLocation(); got != "minecraft:short_grass" {
-			t.Fatalf("grass bonemeal placed %q", got)
+		// At least one vegetation block should have been placed somewhere in the ±4 area.
+		placed := false
+		for dx := -4; dx <= 4 && !placed; dx++ {
+			for dz := -4; dz <= 4 && !placed; dz++ {
+				if b := s.world.GetBlock(8+dx, 65, 8+dz); !b.IsAir() {
+					placed = true
+				}
+			}
+		}
+		if !placed {
+			t.Fatal("grass bone meal placed nothing in ±4 area")
 		}
 	})
 
@@ -586,6 +600,56 @@ func TestBedrockPumpkinShearsAndComposterLifecycle(t *testing.T) {
 			t.Fatalf("emptied compost level = %q, want 0", got)
 		}
 	})
+}
+
+func TestBedrockHarvestsFullBeehive(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("beehive", map[string]string{"honey_level": "5", "facing": "east"}))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:glass_bottle", Count: 1}
+	if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}}, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("glass bottle did not harvest the beehive")
+	}
+	hive := s.world.GetBlock(1, 64, 0)
+	if hive.Properties["honey_level"] != "0" || hive.Properties["facing"] != "east" {
+		t.Fatalf("harvested hive = %+v", hive)
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:honey_bottle" || stack.Count != 1 {
+		t.Fatalf("harvest result = %+v", stack)
+	}
+}
+
+func TestBedrockAddsCandleToCake(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("cake", map[string]string{"bites": "0"}))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:red_candle", Count: 1}
+	if !s.applyBedrockItemAction(p, intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}}, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("candle was not added to cake")
+	}
+	if got := s.world.GetBlock(1, 64, 0); got.ResourceLocation() != "minecraft:red_candle_cake" || got.Properties["lit"] != "false" {
+		t.Fatalf("candle cake = %+v", got)
+	}
+}
+
+func TestBedrockFlowerPotInsertAndRemove(t *testing.T) {
+	s, p := newBedrockActionTestServer(t)
+	s.world.SetBlock(1, 64, 0, bedrockBlock("flower_pot", nil))
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:azalea", Count: 1}
+	interaction := intent.BlockInteractIntent{Position: spatial.BlockPos{X: 1, Y: 64, Z: 0}}
+	if !s.applyBedrockItemAction(p, interaction, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("azalea was not inserted into flower pot")
+	}
+	if got := s.world.GetBlock(1, 64, 0).ResourceLocation(); got != "minecraft:potted_azalea_bush" {
+		t.Fatalf("potted block = %q", got)
+	}
+	if !s.applyBedrockItemAction(p, interaction, s.world.GetBlock(1, 64, 0)) {
+		t.Fatal("azalea was not removed from flower pot")
+	}
+	if got := s.world.GetBlock(1, 64, 0).ResourceLocation(); got != "minecraft:flower_pot" {
+		t.Fatalf("emptied pot = %q", got)
+	}
+	if p.HeldItem().ItemID != "minecraft:azalea" {
+		t.Fatalf("returned plant = %+v", p.HeldItem())
+	}
 }
 
 func TestBedrockBucketFillsAndEmptiesCauldron(t *testing.T) {

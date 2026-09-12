@@ -62,3 +62,56 @@ func TestJavaStewLeavesBowl(t *testing.T) {
 		t.Fatalf("stew remainder = %+v, want bowl", stack)
 	}
 }
+
+func TestJavaGoldenAppleStoresAuthoritativeEffects(t *testing.T) {
+	p := player.New([16]byte{75}, "golden-eater", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.HeldSlot = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:golden_apple", Count: 1}
+	started := time.Now().Add(-player.FoodUseDuration("minecraft:golden_apple"))
+	if !startJavaFoodUse(p, player.HotbarStart, started) || !TickJavaFoodUse(p, nil, nil, time.Now()) {
+		t.Fatal("golden apple use did not complete")
+	}
+	regeneration, regenOK := p.StatusEffect("regeneration")
+	absorption, absorptionOK := p.StatusEffect("absorption")
+	if !regenOK || !absorptionOK || regeneration.Amplifier != 1 || absorption.Duration != 2400 || p.AbsorptionSnapshot() != 4 {
+		t.Fatalf("stored effects = regeneration %#v absorption %#v hearts %.1f", regeneration, absorption, p.AbsorptionSnapshot())
+	}
+}
+
+func TestJavaHoneyBottleCuresPoison(t *testing.T) {
+	p := player.New([16]byte{76}, "honey-drinker", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.HeldSlot = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:honey_bottle", Count: 1}
+	p.AddStatusEffect(player.StatusEffect{ID: "poison", Duration: 100})
+	started := time.Now().Add(-player.FoodUseDuration("minecraft:honey_bottle"))
+	if !startJavaFoodUse(p, player.HotbarStart, started) || !TickJavaFoodUse(p, nil, nil, time.Now()) {
+		t.Fatal("honey bottle use did not complete")
+	}
+	if _, poisoned := p.StatusEffect("poison"); poisoned {
+		t.Fatal("poison remained after drinking honey")
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:glass_bottle" || stack.Count != 1 {
+		t.Fatalf("honey remainder = %+v", stack)
+	}
+}
+
+func TestJavaMilkBucketClearsEffects(t *testing.T) {
+	p := player.New([16]byte{77}, "milk-drinker", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
+	p.HeldSlot = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:milk_bucket", Count: 1}
+	p.AddStatusEffect(player.StatusEffect{ID: "poison", Duration: 100})
+	p.AddStatusEffect(player.StatusEffect{ID: "speed", Duration: 100})
+	started := time.Now().Add(-player.FoodUseDuration("minecraft:milk_bucket"))
+	if !startJavaFoodUse(p, player.HotbarStart, started) || !TickJavaFoodUse(p, nil, nil, time.Now()) {
+		t.Fatal("milk bucket use did not complete")
+	}
+	if effects := p.StatusEffectsSnapshot(); len(effects) != 0 {
+		t.Fatalf("effects remain after milk: %+v", effects)
+	}
+	if stack := p.Inventory[player.HotbarStart]; stack.ItemID != "minecraft:bucket" || stack.Count != 1 {
+		t.Fatalf("milk remainder = %+v", stack)
+	}
+}

@@ -23,7 +23,7 @@ func openFurnace(p *player.Player, conn *network.ClientConn, w *coreworld.World,
 	p.ContainerSlots = make([]player.ItemStack, 3)
 	for _, item := range w.ContainerItems(int(pos.X), int(pos.Y), int(pos.Z)) {
 		if item.Slot >= 0 && item.Slot < 3 && item.ItemID != "" && item.Count > 0 {
-			p.ContainerSlots[item.Slot] = player.ItemStack{ItemID: item.ItemID, Count: item.Count, Damage: item.Damage, Enchantments: item.Enchantments, PotDecorations: item.PotDecorations}
+			p.ContainerSlots[item.Slot] = item.Stack()
 		}
 	}
 	p.ContainerStateID++
@@ -105,7 +105,7 @@ func clickFurnaceSlot(p *player.Player, slot int, button byte) {
 		}
 		if p.CarriedItem.IsEmpty() {
 			p.CarriedItem, *target = *target, player.ItemStack{}
-		} else if p.CarriedItem.ItemID == target.ItemID && p.CarriedItem.Damage == target.Damage &&
+		} else if p.CarriedItem.SameItem(*target) &&
 			p.CarriedItem.Count+target.Count <= player.MaxStackSize(target.ItemID) {
 			p.CarriedItem.Count += target.Count
 			*target = player.ItemStack{}
@@ -152,7 +152,7 @@ func addStackToFurnaceSlot(destination *player.ItemStack, source player.ItemStac
 		*destination = source
 		return true
 	}
-	if destination.ItemID != source.ItemID || destination.Damage != source.Damage ||
+	if !destination.SameItem(source) ||
 		destination.Count+source.Count > player.MaxStackSize(destination.ItemID) {
 		return false
 	}
@@ -199,7 +199,7 @@ func persistFurnaceContents(p *player.Player, w *coreworld.World) {
 	items := make([]coreworld.ContainerItem, 0, 3)
 	for slot := 0; slot < 3 && slot < len(p.ContainerSlots); slot++ {
 		if stack := p.ContainerSlots[slot]; !stack.IsEmpty() {
-			items = append(items, coreworld.ContainerItem{Slot: slot, ItemID: stack.ItemID, Count: stack.Count, Damage: stack.Damage, Enchantments: stack.Enchantments, PotDecorations: stack.PotDecorations})
+			items = append(items, coreworld.ContainerItemFromStack(slot, stack))
 		}
 	}
 	pos := p.OpenContainerPos

@@ -4,6 +4,7 @@ package navigation
 import (
 	"container/heap"
 	"math"
+	"strings"
 
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
@@ -15,6 +16,29 @@ const (
 )
 
 type nodeKey struct{ x, y, z int }
+
+type standableResult struct {
+	y  int
+	ok bool
+}
+
+// Adjacent A* nodes test the same columns repeatedly. Cache each result only
+// for this search, so the next search observes terrain edits.
+type walkEvaluator struct {
+	world        *coreworld.World
+	cache        map[nodeKey]standableResult
+	canOpenDoors bool
+}
+
+func (e *walkEvaluator) standableY(x, y, z int) (int, bool) {
+	key := nodeKey{x: x, y: y, z: z}
+	if result, found := e.cache[key]; found {
+		return result.y, result.ok
+	}
+	standY, ok := findStandableY(e, x, y, z)
+	e.cache[key] = standableResult{y: standY, ok: ok}
+	return standY, ok
+}
 
 type searchNode struct {
 	key       nodeKey
@@ -57,19 +81,30 @@ func (h *openHeap) Pop() any {
 // positions and omit the starting node. reached is false when the best partial
 // path is returned because the exact goal could not be occupied.
 func FindPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) ([]spatial.Vec3, bool) {
+	return findPath(world, start, goal, maxVisited, false)
+}
+
+// FindPathOpeningDoors allows routes through non-iron doors. Callers must open
+// a closed door before moving through its path node.
+func FindPathOpeningDoors(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) ([]spatial.Vec3, bool) {
+	return findPath(world, start, goal, maxVisited, true)
+}
+
+func findPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int, canOpenDoors bool) ([]spatial.Vec3, bool) {
 	if world == nil || maxVisited <= 0 {
 		return nil, false
 	}
-	startKey, ok := nearestStandable(world, int(math.Floor(start.X)), int(math.Floor(start.Y)), int(math.Floor(start.Z)))
+	evaluator := &walkEvaluator{world: world, cache: make(map[nodeKey]standableResult), canOpenDoors: canOpenDoors}
+	startKey, ok := nearestStandable(evaluator, int(math.Floor(start.X)), int(math.Floor(start.Y)), int(math.Floor(start.Z)))
 	if !ok {
 		return nil, false
 	}
-	goalKey, goalStandable := nearestStandable(world, int(math.Floor(goal.X)), int(math.Floor(goal.Y)), int(math.Floor(goal.Z)))
+	goalKey, goalStandable := nearestStandable(evaluator, int(math.Floor(goal.X)), int(math.Floor(goal.Y)), int(math.Floor(goal.Z)))
 	if !goalStandable {
 		goalKey = nodeKey{x: int(math.Floor(goal.X)), y: int(math.Floor(goal.Y)), z: int(math.Floor(goal.Z))}
 	}
 
-	nodes := make(map[nodeKey]*searchNode, maxVisited)
+	nodes := make(map[nodeKey]*searchNode, min(maxVisited, 128))
 	startNode := &searchNode{key: startKey, h: heuristic(startKey, goalKey), heapIndex: -1}
 	nodes[startKey] = startNode
 	open := openHeap{startNode}
@@ -86,10 +121,10 @@ func FindPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) 
 			best = current
 		}
 		if current.key == goalKey && goalStandable {
-			return reconstruct(current), true
+			return reconstruct(current, canOpenDoors), true
 		}
 
-		for _, candidate := range neighbours(world, current.key) {
+		for _, candidate := range neighbours(evaluator, current.key) {
 			stepCost := movementCost(current.key, candidate)
 			newCost := current.g + stepCost
 			node, exists := nodes[candidate]
@@ -112,17 +147,17 @@ func FindPath(world *coreworld.World, start, goal spatial.Vec3, maxVisited int) 
 	if best == startNode {
 		return nil, false
 	}
-	return reconstruct(best), false
+	return reconstruct(best, canOpenDoors), false
 }
 
-func nearestStandable(world *coreworld.World, x, y, z int) (nodeKey, bool) {
+func nearestStandable(evaluator *walkEvaluator, x, y, z int) (nodeKey, bool) {
 	for radius := 0; radius <= 2; radius++ {
 		for dx := -radius; dx <= radius; dx++ {
 			for dz := -radius; dz <= radius; dz++ {
 				if radius > 0 && abs(dx) != radius && abs(dz) != radius {
 					continue
 				}
-				if standY, ok := standableY(world, x+dx, y, z+dz); ok {
+				if standY, ok := evaluator.standableY(x+dx, y, z+dz); ok {
 					return nodeKey{x: x + dx, y: standY, z: z + dz}, true
 				}
 			}
@@ -131,11 +166,11 @@ func nearestStandable(world *coreworld.World, x, y, z int) (nodeKey, bool) {
 	return nodeKey{}, false
 }
 
-func neighbours(world *coreworld.World, current nodeKey) []nodeKey {
+func neighbours(evaluator *walkEvaluator, current nodeKey) []nodeKey {
 	cardinal := make(map[[2]int]nodeKey, 4)
 	result := make([]nodeKey, 0, 8)
 	for _, offset := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-		if y, ok := standableY(world, current.x+offset[0], current.y, current.z+offset[1]); ok {
+		if y, ok := evaluator.standableY(current.x+offset[0], current.y, current.z+offset[1]); ok {
 			next := nodeKey{x: current.x + offset[0], y: y, z: current.z + offset[1]}
 			cardinal[offset] = next
 			result = append(result, next)
@@ -147,7 +182,7 @@ func neighbours(world *coreworld.World, current nodeKey) []nodeKey {
 		if !firstOK || !secondOK || abs(first.y-current.y) > maximumStepUp || abs(second.y-current.y) > maximumStepUp {
 			continue
 		}
-		y, ok := standableY(world, current.x+offset[0], current.y, current.z+offset[1])
+		y, ok := evaluator.standableY(current.x+offset[0], current.y, current.z+offset[1])
 		if ok {
 			result = append(result, nodeKey{x: current.x + offset[0], y: y, z: current.z + offset[1]})
 		}
@@ -155,28 +190,40 @@ func neighbours(world *coreworld.World, current nodeKey) []nodeKey {
 	return result
 }
 
-func standableY(world *coreworld.World, x, referenceY, z int) (int, bool) {
+func findStandableY(evaluator *walkEvaluator, x, referenceY, z int) (int, bool) {
 	candidates := [maximumStepUp + maximumFall + 1]int{referenceY, referenceY + 1, referenceY - 1, referenceY - 2, referenceY - 3}
 	for _, y := range candidates {
 		if y < coreworld.WorldMinY+1 || y > coreworld.WorldMaxY-1 {
 			continue
 		}
-		cx, cz := coreworld.ChunkCoordsFor(x, z)
-		if !world.IsChunkLoaded(cx, cz) {
+		support, loaded := evaluator.world.BlockIfLoaded(x, y-1, z)
+		if !loaded {
 			return 0, false
 		}
-		support := world.GetBlock(x, y-1, z)
 		if !coreworld.IsEntitySupportBlock(support.ResourceLocation()) {
 			continue
 		}
-		if ok, loaded := world.CanEntityOccupyIfLoaded(float64(x)+0.5, float64(y), float64(z)+0.5); loaded && ok {
+		// Walk nodes are block-centred: all four corners of the 0.6-wide
+		// collision box occupy this same column. Read feet and head once.
+		feet, feetLoaded := evaluator.world.BlockIfLoaded(x, y, z)
+		head, headLoaded := evaluator.world.BlockIfLoaded(x, y+1, z)
+		if feetLoaded && headLoaded && evaluator.passable(feet) && evaluator.passable(head) {
 			return y, true
 		}
 	}
 	return 0, false
 }
 
-func reconstruct(end *searchNode) []spatial.Vec3 {
+func (evaluator *walkEvaluator) passable(block coreworld.Block) bool {
+	if !coreworld.IsEntityCollisionBlock(block) {
+		return true
+	}
+	name := block.ResourceLocation()
+	return evaluator.canOpenDoors && strings.HasSuffix(name, "_door") &&
+		!strings.HasSuffix(name, "_trapdoor") && name != "minecraft:iron_door"
+}
+
+func reconstruct(end *searchNode, preserveDoorNodes bool) []spatial.Vec3 {
 	reversed := make([]spatial.Vec3, 0, 16)
 	for node := end; node != nil && node.parent != nil; node = node.parent {
 		reversed = append(reversed, spatial.Vec3{X: float64(node.key.x) + 0.5, Y: float64(node.key.y), Z: float64(node.key.z) + 0.5})
@@ -184,6 +231,9 @@ func reconstruct(end *searchNode) []spatial.Vec3 {
 	path := make([]spatial.Vec3, len(reversed))
 	for i := range reversed {
 		path[i] = reversed[len(reversed)-1-i]
+	}
+	if preserveDoorNodes {
+		return path
 	}
 	return simplify(path)
 }

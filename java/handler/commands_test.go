@@ -35,6 +35,25 @@ func TestBuiltinsRegisterNavigationVersionAndSummonCommands(t *testing.T) {
 	}
 }
 
+func TestPotionEffectCommandStoresAuthoritativeState(t *testing.T) {
+	p := player.New([16]byte{}, "affected", player.ClientEditionBedrock)
+	var synced player.StatusEffect
+	err := cmdPotionEffect(CommandContext{
+		Player: p,
+		Args:   []string{"@s", "poison", "5"},
+		SyncStatusEffect: func(_ *player.Player, effect player.StatusEffect) {
+			synced = effect
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, ok := p.StatusEffect("minecraft:poison")
+	if !ok || effect.Duration != 100 || synced != effect {
+		t.Fatalf("stored effect = %+v, synced = %+v", effect, synced)
+	}
+}
+
 func TestWorldCommandReportsAndChangesDimension(t *testing.T) {
 	p := player.New([16]byte{}, "traveler", player.ClientEditionJava)
 	p.Operator = true

@@ -105,6 +105,14 @@ func decodeBlockEntities(list Tag) []coreworld.BlockEntity {
 		entityType := data["id"].Str()
 		x, y, z := int(data["x"].Int()), int(data["y"].Int()), int(data["z"].Int())
 		items := decodeContainerItems(data["Items"])
+		lecternPage, lecternPageCount := 0, 0
+		if entityType == "minecraft:lectern" || entityType == "lectern" {
+			lecternPage = numericTagValue(data["Page"])
+			lecternPageCount = numericTagValue(data["GoCraftPageCount"])
+			if lecternPageCount < 1 {
+				lecternPageCount = coreworld.LecternPageCount(items)
+			}
+		}
 		potDecorations := decodePotDecorations(data["sherds"])
 		delete(data, "Items")
 		delete(data, "id")
@@ -116,6 +124,7 @@ func decodeBlockEntities(list Tag) []coreworld.BlockEntity {
 		writeCompoundPayload(&payload, data)
 		entities = append(entities, coreworld.BlockEntity{
 			X: x, Y: y, Z: z, Type: entityType, Data: payload.Bytes(), Items: items, PotDecorations: potDecorations,
+			LecternPage: lecternPage, LecternPageCount: lecternPageCount,
 		})
 	}
 	return entities
@@ -145,15 +154,19 @@ func decodeContainerItems(list Tag) []coreworld.ContainerItem {
 		if slot < 0 || itemID == "" || count <= 0 {
 			continue
 		}
-		damage, enchantments := 0, ""
+		damage, enchantments, itemComponents := 0, "", ""
 		var potDecorations [4]string
 		if components := entry.compound["components"]; components.typ == tagCompound {
 			damage = numericTagValue(components.compound["minecraft:damage"])
 			enchantments = decodeItemEnchantments(components.compound["minecraft:enchantments"])
 			potDecorations = decodePotDecorations(components.compound["minecraft:pot_decorations"])
+			if customData := components.compound["minecraft:custom_data"]; customData.typ == tagCompound {
+				itemComponents = customData.compound["GoCraftComponents"].Str()
+			}
 		}
 		items = append(items, coreworld.ContainerItem{
-			Slot: slot, ItemID: itemID, Count: count, Damage: damage, Enchantments: enchantments, PotDecorations: potDecorations,
+			Slot: slot, ItemID: itemID, Count: count, Damage: damage, Enchantments: enchantments,
+			PotDecorations: potDecorations, Components: itemComponents,
 		})
 	}
 	return items

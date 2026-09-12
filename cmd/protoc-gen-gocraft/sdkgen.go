@@ -53,6 +53,8 @@ func generateSDK(plugin *protogen.Plugin, events []event) error {
 			return err
 		}
 	}
+	nativeCancellation(file, events)
+	sdkMutations(file, events)
 	return sdkDispatch(file, events)
 }
 
@@ -75,6 +77,11 @@ func sdkEvent(file *protogen.GeneratedFile, declared event) error {
 		if binding.SDKType == "" {
 			return fmt.Errorf("%s.%s: no plugin-side Go type for %q; add one to "+
 				"cmd/protoc-gen-gocraft/vocabulary.go", declared.Type, f.Name, f.Kind)
+		}
+		if f.Mutable {
+			file.P("\t// Mutable: changes are returned to the host after dispatch.")
+		} else {
+			file.P("\t// Snapshot: changing this field does not change the server.")
 		}
 		file.P(fmt.Sprintf("\t%s %s", f.GoName(), binding.SDKType))
 	}
@@ -110,16 +117,20 @@ func sdkEvent(file *protogen.GeneratedFile, declared event) error {
 	file.P("// Typed, so there is no event name to misspell: the parameter is the")
 	file.P("// subscription. On accepts a name for anything this build does not know.")
 	file.P("//")
-	file.P("// The control is what a handler refuses with, and where it reaches a")
-	file.P("// player the event did not hand it. A handler that only watches may")
-	file.P("// ignore it; it is a parameter rather than a method on the event because")
-	file.P("// a plugin-defined event is a struct its author wrote, and one shape for")
-	file.P("// both beats two that differ by who wrote the event.")
-	file.P(fmt.Sprintf("func (e *Events) %s(handler func(*%s, EventControl)) error {",
-		declared.SDKRegister(), class))
+	if declared.Cancellable {
+		file.P("// EventControl carries cancellation, just as it does for custom events.")
+	} else {
+		file.P("// Observational listeners receive only the payload, with no cancellation.")
+	}
+	controlType, controlArg := "", ""
+	if declared.Cancellable {
+		controlType, controlArg = ", EventControl", ", control"
+	}
+	file.P(fmt.Sprintf("func (e *Events) %s(handler func(*%s%s)) error {", declared.SDKRegister(), class, controlType))
+	file.P("\tif handler == nil { return fmt.Errorf(\"gocraft: event handler is required\") }")
 	file.P(fmt.Sprintf("\treturn e.On(%s, func(event Event, control EventControl) {", declared.ConstName()))
 	file.P(fmt.Sprintf("\t\tif typed, ok := event.(*%s); ok {", class))
-	file.P("\t\t\thandler(typed, control)")
+	file.P("\t\t\thandler(typed" + controlArg + ")")
 	file.P("\t\t}")
 	file.P("\t})")
 	file.P("}")
