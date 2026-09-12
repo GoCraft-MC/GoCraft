@@ -1,0 +1,144 @@
+---
+name: Validate PR
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+      - ready_for_review
+permissions:
+  contents: read
+  pull-requests: read
+env:
+  GO_VERSION: ${{ vars.GO_VERSION || '1.26' }}
+jobs:
+  lint-title:
+    name: Lint PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR Title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # TODO:
+  # remove this when people stop pushing to main with non-conventional commits
+  # like merge commits from the GitHub web app
+  # lint-commits:
+  #   name: Lint commit messages
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Calculate Fetch Depth
+  #       id: depth_calc
+  #       run: |
+  #         COMMITS=${{ github.event.pull_request.commits }}
+  #         DEPTH=$((COMMITS + 1))
+  #         echo "DEPTH=$DEPTH" >> $GITHUB_OUTPUT
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         repository: ${{ github.event.pull_request.head.repo.full_name }}
+  #         ref: ${{ github.event.pull_request.head.ref }}
+  #         fetch-depth: ${{ steps.depth_calc.outputs.DEPTH }}
+  #     - name: Conventional commit check
+  #       uses: cocogitto/cocogitto-action@v4
+  #       with:
+  #         command: check
+  #         args: --ignore-merge-commits
+
+  lint-yaml:
+    name: Lint YAML files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get changed YAML files
+        id: changed
+        uses: tj-actions/changed-files@48d8f15b2aaa3d255ca5af3eba4870f807ce6b3c
+        with:
+          files: |
+            **/*.yaml
+            **/*.yml
+      - name: Lint YAML files
+        if: ${{ steps.changed.outputs.any_changed == 'true' }}
+        run: |
+          yamllint ${{ steps.changed.outputs.all_changed_files }}
+
+  lint-dockerfiles:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dockerfile:
+          - "./docker/gocraft/Dockerfile"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.dockerfile }}
+
+  lint-markdown:
+    name: Lint Markdown files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get changed Markdown files
+        id: changed
+        uses: tj-actions/changed-files@48d8f15b2aaa3d255ca5af3eba4870f807ce6b3c
+        with:
+          files: |
+            **/*.md
+      - name: Lint markdown files
+        if: ${{ steps.changed.outputs.any_changed == 'true' }}
+        uses: rvben/rumdl@v0
+        with:
+          path: ${{ steps.changed.outputs.all_changed_files }}
+
+  lint-and-test-go:
+    name: Lint and test Go sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get changed go files
+        id: changed
+        uses: tj-actions/changed-files@48d8f15b2aaa3d255ca5af3eba4870f807ce6b3c
+        with:
+          files: |
+            **/*.go
+            **/go.mod
+            **/go.sum
+            internal/gamedata/**/*.json
+            internal/gamedata/**/*.bin
+      - uses: actions/setup-go@v7
+        if: ${{ steps.changed.outputs.any_changed == 'true' }}
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          go-version-file: 'go.mod'
+          token: ${{ github.token }}
+          cache: true
+          cache-dependency-path: 'go.sum'
+      # TODO:
+      # add this back when errors are resolved:
+      # - name: golangci-lint
+      #   if: ${{ steps.changed.outputs.any_changed == 'true' }}
+      #   uses: golangci/golangci-lint-action@v7
+      #   with:
+      #     version: v2.13.2
+      - name: go test
+        if: ${{ steps.changed.outputs.any_changed == 'true' }}
+        run: |
+          go test \
+            ./...
+
+            # TODO: add this back
+            # -v \
+            # -race \
+            # -covermode=atomic \
