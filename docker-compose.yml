@@ -1,0 +1,20 @@
+services:
+  gocraft:
+    image: ghcr.io/oreostudios/gocraft:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gocraft
+    ports:
+      - "25565:25565/tcp"
+      - "19106:19106/udp"
+    volumes:
+      - ./data:/data
+    environment:
+      GOCRAFT_MOTD: "Mon serveur"
+      GOCRAFT_MAX_PLAYERS: "100"
+      GOCRAFT_ONLINE_MODE: "false"
+      GOCRAFT_DIFFICULTY: "hard"
+      # GOCRAFT_BEDROCK_ENABLED: "true"
+    restart: unless-stopped
+    stop_grace_period: 30s
