@@ -648,6 +648,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// Registered here rather than beside the registry, because a runtime that
 	// can come back from a crash needs to tell the server it did — and only the
 	// server knows who is online to replay it to.
+	s.bedrockListener.RegisterMetrics(metrics.registry)
 	if err := s.registerPluginRuntimes(cfg); err != nil {
 		return nil, err
 	}
