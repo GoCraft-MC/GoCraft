@@ -68,3 +68,16 @@ func TestBedrockAddressAlias(t *testing.T) {
 		t.Fatalf("bedrock.address = %q, want alias override", cfg.Bedrock.Address)
 	}
 }
+
+func TestBedrockAddressAliasPrecedence(t *testing.T) {
+	t.Setenv("GOCRAFT_BEDROCK_ADDRESS", "0.0.0.0:19132")
+	t.Setenv("GOCRAFT_BEDROCK_ADDR", "0.0.0.0:19133")
+	cfg := defaults()
+	cfg.Bedrock.Enabled = true
+	if err := cfg.ApplyEnvOverrides(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Bedrock.Address != "0.0.0.0:19133" {
+		t.Fatalf("bedrock.address = %q, want the GOCRAFT_BEDROCK_ADDR spelling to win", cfg.Bedrock.Address)
+	}
+}

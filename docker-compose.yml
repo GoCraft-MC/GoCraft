@@ -1,6 +1,6 @@
 services:
   gocraft:
-    image: ghcr.io/oreostudios/gocraft:latest
+    image: ghcr.io/gocraft-mc/gocraft:latest
     build:
       context: .
       dockerfile: Dockerfile

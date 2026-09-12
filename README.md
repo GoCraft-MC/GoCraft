@@ -52,7 +52,7 @@ Connect a Java 1.21.4 client to `localhost:25565`.
 A prebuilt image is published for every release:
 
 ```bash
-docker pull ghcr.io/oreostudios/gocraft:latest
+docker pull ghcr.io/gocraft-mc/gocraft:latest
 ```
 
 Run a persistent cross-play server in one command — everything GoCraft writes (config, worlds, logs, plugins) lives under the `/data` volume, and `docker stop` triggers a clean world flush:
@@ -67,7 +67,7 @@ docker run -d \
   -v ./data:/data \
   -p 25565:25565/tcp \
   -p 19106:19106/udp \
-  ghcr.io/oreostudios/gocraft:latest
+  ghcr.io/gocraft-mc/gocraft:latest
 ```
 
 On first start, if `/data/server.yml` does not exist, GoCraft writes a default configuration there. An existing `server.yml` is **never** overwritten — edit it directly, or override individual fields with `GOCRAFT_*` environment variables (they win over the YAML):

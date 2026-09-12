@@ -694,10 +694,10 @@ func (c *Config) ApplyEnvOverrides() error {
 		}
 		c.Bedrock.Enabled = b
 	}
-	if v := os.Getenv("GOCRAFT_BEDROCK_ADDR"); v != "" {
+	if v := os.Getenv("GOCRAFT_BEDROCK_ADDRESS"); v != "" {
 		c.Bedrock.Address = v
 	}
-	if v := os.Getenv("GOCRAFT_BEDROCK_ADDRESS"); v != "" {
+	if v := os.Getenv("GOCRAFT_BEDROCK_ADDR"); v != "" {
 		c.Bedrock.Address = v
 	}
 	if v := os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE"); v != "" {
