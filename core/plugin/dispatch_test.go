@@ -10,6 +10,8 @@ import (
 	abi "github.com/GoCraft-MC/gocraft-abi/abi/v1"
 
 	"github.com/GoCraft-MC/gocraft-abi/gcpkg"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestEmitCancellableUsesPriorityOrder(t *testing.T) {
@@ -66,6 +68,7 @@ func TestEmitCancellableAppliesFailurePolicy(t *testing.T) {
 
 func TestEventDeadlineStopsRemainingSubscribers(t *testing.T) {
 	bus := NewBus(context.Background(), 5*time.Millisecond)
+	bus.RegisterMetrics(prometheus.NewPedanticRegistry())
 	lateCalled := false
 	slow := &fakeInstance{
 		manifest: gcpkg.Manifest{ID: "slow", Subscriptions: []gcpkg.Subscription{{Event: "block.break", Priority: gcpkg.PriorityHigh}}},
@@ -99,6 +102,12 @@ func TestEventDeadlineStopsRemainingSubscribers(t *testing.T) {
 	lateHealth, _ := bus.Health("late")
 	if lateHealth.Failures != 0 || lateHealth.Starved["block.break"] != 1 {
 		t.Fatalf("late plugin health = %+v", lateHealth)
+	}
+	if got := testutil.ToFloat64(bus.metrics.failures.WithLabelValues("slow", "block.break")); got != 1 {
+		t.Fatalf("failed dispatch counter = %v", got)
+	}
+	if got := testutil.ToFloat64(bus.metrics.starved.WithLabelValues("late", "block.break")); got != 1 {
+		t.Fatalf("starved dispatch counter = %v", got)
 	}
 }
 
