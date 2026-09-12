@@ -62,14 +62,15 @@ func (b *Bus) dispatchObservational(event *abi.Event, subscribers []*subscriber)
 			continue
 		}
 		started := time.Now()
+		cold := sub.cold.cold(event.Type)
 		verdict, err := sub.instance.Dispatch(b.ctx, cloneEvent(event))
 		took := time.Since(started)
+		sub.cold.ran(event.Type)
+		b.recordDispatch(sub, event.Type, took, err != nil, cold)
 		if err != nil {
-			sub.health.record(time.Now(), true, took)
 			slog.Warn("plugin observational event failed", "plugin", sub.id, "event", event.Type, "err", err)
 			continue
 		}
-		sub.health.record(time.Now(), false, took)
 		b.enqueueEffects(sub, event.Type, verdict.Effects)
 	}
 }

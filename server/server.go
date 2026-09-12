@@ -158,6 +158,7 @@ type Server struct {
 
 	// timings collects per-subsystem tick durations for /timings and /tps.
 	timings         *tickTimings
+	metrics         *serverMetrics
 	autosaveEnabled atomic.Bool
 	difficulty      atomic.Int32
 	defaultGameMode atomic.Uint32
@@ -226,6 +227,7 @@ type bedrockRecentBlockUse struct {
 // loadPlugins creates the configured one through ScanBundles, and only when the
 // subsystem is enabled.
 func New(cfg *config.Config) (*Server, error) {
+	metrics := newServerMetrics()
 	handler.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
@@ -390,12 +392,14 @@ func New(cfg *config.Config) (*Server, error) {
 	// The queue is built here rather than left to the registry, because the
 	// tick has to drain it and only something holding it can.
 	pluginEffects := coreplugin.NewMutationQueue()
+	pluginEffects.RegisterMetrics(metrics.registry)
 	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, pluginEffects, nil)
 	// What a subscriber's very first dispatch of a type is allowed on top of the
 	// shared budget. See core/plugin/coldstart.go for what it pays for.
 	pluginRegistry.Bus().SetColdGrace(
 		time.Duration(cfg.Plugins.ColdEventGraceMillis) * time.Millisecond)
 	plugins := pluginRegistry.Bus()
+	plugins.RegisterMetrics(metrics.registry)
 	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
 		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
 	})
@@ -420,6 +424,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	s := &Server{
 		cfg:                     cfg,
+		metrics:                 metrics,
 		game:                    gameCore,
 		privKey:                 privKey,
 		pubKeyDER:               pubKeyDER,
@@ -451,6 +456,7 @@ func New(cfg *config.Config) (*Server, error) {
 		playerStore:             playerStore,
 		bedrockBlockUse:         make(map[[16]byte]bedrockRecentBlockUse),
 	}
+	s.registerMetrics()
 	s.autosaveEnabled.Store(true)
 	s.difficulty.Store(difficultyID(cfg.Difficulty) + 1)
 	s.defaultGameMode.Store(uint32(configuredGameMode(cfg.DefaultGameMode)))
@@ -644,6 +650,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// Registered here rather than beside the registry, because a runtime that
 	// can come back from a crash needs to tell the server it did — and only the
 	// server knows who is online to replay it to.
+	s.bedrockListener.RegisterMetrics(metrics.registry)
 	if err := s.registerPluginRuntimes(cfg); err != nil {
 		return nil, err
 	}
@@ -699,6 +706,14 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.runConsole(ctx)
 	if err := s.loadPlugins(ctx); err != nil {
 		slog.Error("plugins: startup aborted", "err", err)
+		cancel()
+		s.shutdown()
+		return err
+	}
+	metricsServer, err := s.startMetricsServer()
+	if err != nil {
+		cancel()
+		s.shutdown()
 		return err
 	}
 	if s.cfg.JavaEnabled {
@@ -779,10 +794,15 @@ func (s *Server) Run(ctx context.Context) error {
 		<-ctx.Done()
 	}
 	cancel()
+	stopMetricsServer(metricsServer)
 
 	// ctx is now done: wait for entity tick and Bedrock listener to finish.
 	wg.Wait()
+	s.shutdown()
+	return listenErr
+}
 
+func (s *Server) shutdown() {
 	// Unload plugins while world storage is still open, so a runtime that
 	// persists on shutdown can still write.
 	s.unloadPlugins()
@@ -795,7 +815,6 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}
 	s.saveWorldAge()
-	return listenErr
 }
 
 // runConsole executes commands written to stdin by Pterodactyl or a local
@@ -965,6 +984,9 @@ func (s *Server) safeTick() {
 			return
 		}
 		elapsed := time.Since(start)
+		if s.metrics != nil {
+			s.metrics.observeTick(elapsed, s.timings.cur)
+		}
 		s.timings.commit(elapsed)
 		if elapsed > 50*time.Millisecond && debuglog.Enabled(debuglog.EntityTickOverruns) {
 			tps, avgMs := s.timings.TPS()

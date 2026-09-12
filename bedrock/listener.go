@@ -61,17 +61,18 @@ const bedrockChunkRadius int32 = 4
 // Listener wraps a gophertunnel minecraft.Listener and manages Bedrock client
 // connections.
 type Listener struct {
-	cfg       config.BedrockConfig
-	bus       *intent.Bus
-	world     *coreworld.World
-	worlds    map[int32]*coreworld.World
-	game      *game.Game
-	encoder   *bedrockworld.Encoder
-	worldSeed int64
-	spawnX    int
-	spawnY    int
-	spawnZ    int
-	spawnMu   sync.RWMutex
+	activeConnections atomic.Int64
+	cfg               config.BedrockConfig
+	bus               *intent.Bus
+	world             *coreworld.World
+	worlds            map[int32]*coreworld.World
+	game              *game.Game
+	encoder           *bedrockworld.Encoder
+	worldSeed         int64
+	spawnX            int
+	spawnY            int
+	spawnZ            int
+	spawnMu           sync.RWMutex
 
 	// commandTree reports what one player may use, built-ins and plugins in one
 	// tree. Nil until the server installs it, which is what keeps a listener
@@ -361,7 +362,11 @@ func (l *Listener) Listen(ctx context.Context) error {
 			slog.Error("bedrock: Accept error", "err", err)
 			return fmt.Errorf("bedrock: Accept: %w", err)
 		}
-		go l.handleConn(ctx, gt, conn.(*minecraft.Conn))
+		l.activeConnections.Add(1)
+		go func() {
+			defer l.activeConnections.Add(-1)
+			l.handleConn(ctx, gt, conn.(*minecraft.Conn))
+		}()
 	}
 }
 

@@ -96,6 +96,10 @@ bedrock:
   address: 0.0.0.0:19106
   online_mode: true
 
+metrics:
+  enabled: false
+  address: 127.0.0.1:9225
+
 debug:
   startup_registry: false
   environment_overrides: false
@@ -140,7 +144,73 @@ debug:
 | `custom_items.*` | See [Custom Items](custom-items.md) |
 | `permission_editor.*` | See [Permissions](permissions.md) |
 | `bedrock.*` | Enables the RakNet/UDP listener and Xbox auth |
+| `metrics.enabled` | Enables the Prometheus HTTP endpoint at `/metrics` (default `false`) |
+| `metrics.address` | Metrics HTTP bind address with a numeric port `1`–`65535` (default `127.0.0.1:9225`) |
 | `debug.*` | Verbose per-category logging; disable for production |
+
+## Prometheus metrics
+
+Enable the separate metrics listener in `server.yml`:
+
+```yaml
+metrics:
+  enabled: true
+  address: 127.0.0.1:9225
+```
+
+The endpoint is available at `http://127.0.0.1:9225/metrics`. Add this job to a Prometheus instance running on the same host:
+
+```yaml
+scrape_configs:
+  - job_name: gocraft
+    static_configs:
+      - targets: ['127.0.0.1:9225']
+```
+
+The listener binds to localhost by default. For a remote scraper, bind to an interface it can reach, such as `0.0.0.0:9225`, and use the GoCraft host's address in `targets`.
+
+### Metrics
+
+| Metric | Description |
+| --- | --- |
+| `gocraft_players_online{edition}` | Online players by `java` or `bedrock` edition; `sum(gocraft_players_online)` gives the total |
+| `gocraft_players_max` | Configured player limit |
+| `gocraft_java_connections` | Active Java connections, including login and status requests |
+| `gocraft_bedrock_connections` | Accepted Bedrock connections after the RakNet and login handshake; zero when Bedrock is disabled |
+| `gocraft_tick_duration_seconds` | Tick processing duration histogram, with `_bucket`, `_sum`, and `_count` series |
+| `gocraft_tick_section_seconds{section}` | Per-tick subsystem processing duration histogram |
+| `gocraft_chunks_loaded{dimension}` | Loaded chunks by dimension |
+| `gocraft_entities{dimension}` | Non-player entities by dimension |
+| `gocraft_plugin_disabled{plugin}` | `1` when a loaded plugin has been disabled by its failure ratio, otherwise `0` |
+| `gocraft_plugin_event_dispatch_seconds{plugin,event}` | Dispatch duration histogram for cancellable, custom, and observational events, including failures |
+| `gocraft_plugin_event_failures_total{plugin,event}` | Cumulative failed dispatches, independent of the rolling health window |
+| `gocraft_plugin_event_starved_total{plugin,event}` | Dispatches skipped because a preceding subscriber exhausted the shared budget |
+| `gocraft_plugin_cold_start_seconds{plugin,event}` | First completed dispatch duration per event subscription, including failures |
+| `gocraft_plugin_runtime_respawns_total{runtime}` | Successful runtime respawns; currently emitted by the JVM recovery hook |
+| `gocraft_plugin_effect_queue_depth` | Host calls waiting for the simulation tick |
+| `gocraft_plugin_effect_rejected_total{reason}` | Refused host calls, labelled `invalid`, `full`, or `closed` |
+
+Dimension labels are `overworld`, `nether`, and `end`. Standard Go runtime (`go_*`) and process (`process_*`) metrics are also exposed; availability depends on the platform.
+
+Section labels are `damage`, `mob-ai`, `physics`, `broadcast`, `time/crops`, `spawn-natural`, and `block-physics`. The total tick histogram measures the entire tick, including intents and autosaves. Sections cover the named subsystems and do not sum to the total.
+
+Collectors are created even when `metrics.enabled` is false; the flag only controls HTTP exposure. Subsystems register their own collectors with the server's registry. Plugin counters and histograms accumulate for the lifetime of the server, while the disabled gauge disappears when a plugin is unloaded. Plugin metrics describe host-observed activity; plugins cannot declare or publish their own metrics through this endpoint.
+
+An alert on `gocraft_plugin_disabled == 1` detects plugins that have stopped receiving events after crossing their failure threshold.
+
+Actual ticks per second, including scheduling delays and pauses:
+
+```promql
+rate(gocraft_tick_duration_seconds_count[1m])
+```
+
+Mean tick processing time over a window chosen by the scraper:
+
+```promql
+rate(gocraft_tick_duration_seconds_sum[5m]) / rate(gocraft_tick_duration_seconds_count[5m])
+```
+
+Scrapes are limited to one request in flight with a five-second timeout. Overlapping or timed-out scrapes return HTTP 503.
 
 ## World storage
 
@@ -190,6 +260,8 @@ All critical fields can be overridden at runtime via environment variables. Usef
 | `GOCRAFT_BEDROCK_ADDR` | `bedrock.address` |
 | `GOCRAFT_BEDROCK_ADDRESS` | `bedrock.address` (alias of `GOCRAFT_BEDROCK_ADDR`) |
 | `GOCRAFT_BEDROCK_ONLINE_MODE` | `bedrock.online_mode` |
+| `GOCRAFT_METRICS_ENABLED` | `metrics.enabled` |
+| `GOCRAFT_METRICS_ADDR` | `metrics.address` |
 | `GOCRAFT_PERMISSION_EDITOR_ENABLED` | `permission_editor.enabled` |
 | `GOCRAFT_PERMISSION_EDITOR_URL` | `permission_editor.editor_url` |
 | `GOCRAFT_PERMISSION_EDITOR_BYTEBIN` | `permission_editor.bytebin_url` |

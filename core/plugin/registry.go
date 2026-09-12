@@ -23,10 +23,14 @@ type subscriber struct {
 	// cold remembers which event types this subscriber has answered, so the
 	// first of each gets the grace its process genuinely needs.
 	cold *coldStarts
+	// Observational dispatches can overlap while the same subscription is cold.
+	metricsCold sync.Once
 }
 
 // Bus routes events to subscriptions declared before plugin code starts.
 type Bus struct {
+	metrics *busMetrics
+
 	ctx    context.Context
 	budget time.Duration
 	// coldGrace is added to an event's budget the first time a subscriber sees
@@ -95,6 +99,12 @@ func (b *Bus) Attach(instance Instance) error {
 			id: manifest.ID, priority: declared.Priority, instance: instance, health: tracker,
 			permissions: append([]string(nil), declared.Permissions...),
 			cold:        newColdStarts(),
+		}
+		if b.metrics != nil {
+			b.metrics.dispatch.WithLabelValues(sub.id, declared.Event)
+			b.metrics.cold.WithLabelValues(sub.id, declared.Event)
+			b.metrics.failures.WithLabelValues(sub.id, declared.Event)
+			b.metrics.starved.WithLabelValues(sub.id, declared.Event)
 		}
 		b.subs[declared.Event] = append(b.subs[declared.Event], sub)
 		sort.Slice(b.subs[declared.Event], func(i, j int) bool {

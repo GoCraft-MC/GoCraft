@@ -138,6 +138,7 @@ docker compose up -d
 - **Resource packs** — push `.mcpack`, `.zip`, and `.mcaddon` files to Bedrock clients; serve Java packs automatically
 - **Native Go plugins** — isolated processes with owned events, commands, scheduling, and configuration
 - **Persistent world** — Anvil region files, autosaves, atomic writes, memory-mode option
+- **Prometheus metrics** — optional [`/metrics` endpoint](docs/configuration.md#prometheus-metrics) for game, Go runtime, and process metrics
 - **Data-driven** — block states, item IDs, entity types, biomes, and packet IDs loaded from versioned JSON at startup; no hardcoded maps
 
 ## Development status
