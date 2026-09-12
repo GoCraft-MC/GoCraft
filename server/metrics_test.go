@@ -79,3 +79,16 @@ func TestMetricsScrapeReflectsSubsystemState(t *testing.T) {
 		t.Fatal("departed Bedrock player is still counted")
 	}
 }
+
+func TestMetricsRecordOneWholeTickDespiteStageFailures(t *testing.T) {
+	// Missing subsystems deliberately trigger safeTick's recovery paths.
+	s := &Server{metrics: newServerMetrics(), timings: newTickTimings()}
+	s.safeTick()
+	body := scrapeMetrics(t, s.metrics)
+	if !strings.Contains(body, "gocraft_tick_duration_seconds_count 1\n") {
+		t.Fatal("a completed tick was skipped or counted more than once")
+	}
+	if !strings.Contains(body, "gocraft_tick_section_seconds_count{section=\"damage\"} 1\n") {
+		t.Fatal("tick sections did not share the completed tick boundary")
+	}
+}

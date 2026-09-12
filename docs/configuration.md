@@ -173,14 +173,30 @@ The listener binds to localhost by default. For a remote scraper, bind to an int
 
 | Metric | Description |
 | --- | --- |
-| `gocraft_players_online` | Connected Java and Bedrock players combined |
+| `gocraft_players_online{edition}` | Online players by `java` or `bedrock` edition; `sum(gocraft_players_online)` gives the total |
 | `gocraft_players_max` | Configured player limit |
 | `gocraft_java_connections` | Active Java connections, including login and status requests |
+| `gocraft_bedrock_connections` | Accepted Bedrock connections after the RakNet and login handshake; zero when Bedrock is disabled |
 | `gocraft_tick_duration_seconds` | Tick processing duration histogram, with `_bucket`, `_sum`, and `_count` series |
+| `gocraft_tick_section_seconds{section}` | Per-tick subsystem processing duration histogram |
 | `gocraft_chunks_loaded{dimension}` | Loaded chunks by dimension |
 | `gocraft_entities{dimension}` | Non-player entities by dimension |
+| `gocraft_plugin_disabled{plugin}` | `1` when a loaded plugin has been disabled by its failure ratio, otherwise `0` |
+| `gocraft_plugin_event_dispatch_seconds{plugin,event}` | Dispatch duration histogram for cancellable, custom, and observational events, including failures |
+| `gocraft_plugin_event_failures_total{plugin,event}` | Cumulative failed dispatches, independent of the rolling health window |
+| `gocraft_plugin_event_starved_total{plugin,event}` | Dispatches skipped because a preceding subscriber exhausted the shared budget |
+| `gocraft_plugin_cold_start_seconds{plugin,event}` | First completed dispatch duration per event subscription, including failures |
+| `gocraft_plugin_runtime_respawns_total{runtime}` | Successful runtime respawns; currently emitted by the JVM recovery hook |
+| `gocraft_plugin_effect_queue_depth` | Host calls waiting for the simulation tick |
+| `gocraft_plugin_effect_rejected_total{reason}` | Refused host calls, labelled `invalid`, `full`, or `closed` |
 
 Dimension labels are `overworld`, `nether`, and `end`. Standard Go runtime (`go_*`) and process (`process_*`) metrics are also exposed; availability depends on the platform.
+
+Section labels are `damage`, `mob-ai`, `physics`, `broadcast`, `time/crops`, `spawn-natural`, and `block-physics`. The total tick histogram measures the entire tick, including intents and autosaves. Sections cover the named subsystems and do not sum to the total.
+
+Collectors are created even when `metrics.enabled` is false; the flag only controls HTTP exposure. Subsystems register their own collectors with the server's registry. Plugin counters and histograms accumulate for the lifetime of the server, while the disabled gauge disappears when a plugin is unloaded. Plugin metrics describe host-observed activity; plugins cannot declare or publish their own metrics through this endpoint.
+
+An alert on `gocraft_plugin_disabled == 1` detects plugins that have stopped receiving events after crossing their failure threshold.
 
 Actual ticks per second, including scheduling delays and pauses:
 
