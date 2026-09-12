@@ -27,6 +27,8 @@ type subscriber struct {
 
 // Bus routes events to subscriptions declared before plugin code starts.
 type Bus struct {
+	metrics *busMetrics
+
 	ctx    context.Context
 	budget time.Duration
 	// coldGrace is added to an event's budget the first time a subscriber sees
