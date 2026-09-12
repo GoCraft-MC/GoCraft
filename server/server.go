@@ -227,6 +227,7 @@ type bedrockRecentBlockUse struct {
 // loadPlugins creates the configured one through ScanBundles, and only when the
 // subsystem is enabled.
 func New(cfg *config.Config) (*Server, error) {
+	metrics := newServerMetrics()
 	handler.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
@@ -421,6 +422,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	s := &Server{
 		cfg:                     cfg,
+		metrics:                 metrics,
 		game:                    gameCore,
 		privKey:                 privKey,
 		pubKeyDER:               pubKeyDER,
@@ -452,6 +454,7 @@ func New(cfg *config.Config) (*Server, error) {
 		playerStore:             playerStore,
 		bedrockBlockUse:         make(map[[16]byte]bedrockRecentBlockUse),
 	}
+	s.registerMetrics()
 	s.autosaveEnabled.Store(true)
 	s.difficulty.Store(difficultyID(cfg.Difficulty) + 1)
 	s.defaultGameMode.Store(uint32(configuredGameMode(cfg.DefaultGameMode)))
@@ -647,9 +650,6 @@ func New(cfg *config.Config) (*Server, error) {
 	// server knows who is online to replay it to.
 	if err := s.registerPluginRuntimes(cfg); err != nil {
 		return nil, err
-	}
-	if cfg.Metrics.Enabled {
-		s.metrics = newServerMetrics(s)
 	}
 	return s, nil
 }

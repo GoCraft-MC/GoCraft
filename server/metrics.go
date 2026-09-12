@@ -17,15 +17,34 @@ import (
 )
 
 type serverMetrics struct {
+	registry     *prometheus.Registry
 	handler      http.Handler
 	tickDuration prometheus.Histogram
 }
 
-func newServerMetrics(s *Server) *serverMetrics {
+func newServerMetrics() *serverMetrics {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+	tickDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "gocraft_tick_duration_seconds",
+		Help:    "Processing duration of completed game ticks in seconds.",
+		Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+	})
+	registry.MustRegister(tickDuration)
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+		MaxRequestsInFlight: 1,
+		Timeout:             5 * time.Second,
+	}))
+	return &serverMetrics{registry: registry, handler: mux, tickDuration: tickDuration}
+}
+
+func (s *Server) registerMetrics() {
+	registry := s.metrics.registry
+	registry.MustRegister(
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "gocraft_players_max",
 			Help: "Configured maximum number of players.",
@@ -43,19 +62,6 @@ func newServerMetrics(s *Server) *serverMetrics {
 	} {
 		world.RegisterMetrics(prometheus.WrapRegistererWith(prometheus.Labels{"dimension": dimension}, registry))
 	}
-
-	tickDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "gocraft_tick_duration_seconds",
-		Help:    "Processing duration of completed game ticks in seconds.",
-		Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
-	})
-	registry.MustRegister(tickDuration)
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
-		MaxRequestsInFlight: 1,
-		Timeout:             5 * time.Second,
-	}))
-	return &serverMetrics{handler: mux, tickDuration: tickDuration}
 }
 
 func (s *Server) startMetricsServer() (*http.Server, error) {
