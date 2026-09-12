@@ -23,6 +23,8 @@ type subscriber struct {
 	// cold remembers which event types this subscriber has answered, so the
 	// first of each gets the grace its process genuinely needs.
 	cold *coldStarts
+	// Observational dispatches can overlap while the same subscription is cold.
+	metricsCold sync.Once
 }
 
 // Bus routes events to subscriptions declared before plugin code starts.
