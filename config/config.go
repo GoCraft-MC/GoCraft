@@ -527,13 +527,19 @@ func (c *Config) validate() error {
 //
 // Environment variables (all optional; empty = no override):
 //
-//	GOCRAFT_JAVA_HOST         Java TCP bind host          (default: 0.0.0.0)
-//	GOCRAFT_JAVA_PORT         Java TCP port number        (default: 25565)
+//	GOCRAFT_HOST               Java TCP bind host          (default: 0.0.0.0)
+//	GOCRAFT_PORT               Java TCP port number        (default: 25565)
+//	GOCRAFT_JAVA_HOST          Same as GOCRAFT_HOST, wins when both are set
+//	GOCRAFT_JAVA_PORT          Same as GOCRAFT_PORT, wins when both are set
 //	GOCRAFT_JAVA_ENABLED      "true"/"false"              (default: true)
 //	GOCRAFT_ONLINE_MODE       Java auth required          (default: false)
 //	GOCRAFT_MOTD              Server MOTD string
 //	GOCRAFT_SERVER_ICON       Java server-list icon path
 //	GOCRAFT_MAX_PLAYERS       Max concurrent players
+//	GOCRAFT_VERSION_NAME      Version string shown to Java clients
+//	GOCRAFT_PROTOCOL_VERSION  Java protocol number        (default: 769)
+//	GOCRAFT_VILLAGERS         Villager spawning           (default: true)
+//	GOCRAFT_DEFAULT_GAMEMODE  survival/creative/adventure/spectator
 //	GOCRAFT_WORLD_STORAGE     disk or memory              (default: disk)
 //	GOCRAFT_WORLD_DIR         Anvil world directory path
 //	GOCRAFT_WORLD_SEED        Signed 64-bit terrain seed
@@ -549,6 +555,16 @@ func (c *Config) validate() error {
 //	GOCRAFT_PERMISSION_EDITOR_URL      Editor GitHub Pages URL
 //	GOCRAFT_PERMISSION_EDITOR_BYTEBIN  Bytebin base URL
 func (c *Config) ApplyEnvOverrides() error {
+	if v := os.Getenv("GOCRAFT_HOST"); v != "" {
+		c.Host = v
+	}
+	if v := os.Getenv("GOCRAFT_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_PORT %q: %w", v, err)
+		}
+		c.Port = n
+	}
 	if v := os.Getenv("GOCRAFT_JAVA_HOST"); v != "" {
 		c.Host = v
 	}
@@ -585,6 +601,26 @@ func (c *Config) ApplyEnvOverrides() error {
 			return fmt.Errorf("GOCRAFT_MAX_PLAYERS %q: %w", v, err)
 		}
 		c.MaxPlayers = n
+	}
+	if v := os.Getenv("GOCRAFT_VERSION_NAME"); v != "" {
+		c.VersionName = v
+	}
+	if v := os.Getenv("GOCRAFT_PROTOCOL_VERSION"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_PROTOCOL_VERSION %q: %w", v, err)
+		}
+		c.ProtocolVersion = n
+	}
+	if v := os.Getenv("GOCRAFT_VILLAGERS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GOCRAFT_VILLAGERS %q: %w", v, err)
+		}
+		c.Villagers = b
+	}
+	if v := os.Getenv("GOCRAFT_DEFAULT_GAMEMODE"); v != "" {
+		c.DefaultGameMode = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v := os.Getenv("GOCRAFT_WORLD_STORAGE"); v != "" {
 		c.WorldStorage = strings.ToLower(strings.TrimSpace(v))
@@ -661,6 +697,9 @@ func (c *Config) ApplyEnvOverrides() error {
 	if v := os.Getenv("GOCRAFT_BEDROCK_ADDR"); v != "" {
 		c.Bedrock.Address = v
 	}
+	if v := os.Getenv("GOCRAFT_BEDROCK_ADDRESS"); v != "" {
+		c.Bedrock.Address = v
+	}
 	if v := os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -693,6 +732,8 @@ func (c *Config) ApplyEnvOverrides() error {
 // logEnvOverrides logs which values were overridden by environment variables.
 func logEnvOverrides() {
 	vars := []struct{ key, val string }{
+		{"GOCRAFT_HOST", os.Getenv("GOCRAFT_HOST")},
+		{"GOCRAFT_PORT", os.Getenv("GOCRAFT_PORT")},
 		{"GOCRAFT_JAVA_HOST", os.Getenv("GOCRAFT_JAVA_HOST")},
 		{"GOCRAFT_JAVA_PORT", os.Getenv("GOCRAFT_JAVA_PORT")},
 		{"GOCRAFT_JAVA_ENABLED", os.Getenv("GOCRAFT_JAVA_ENABLED")},
@@ -700,6 +741,10 @@ func logEnvOverrides() {
 		{"GOCRAFT_MOTD", os.Getenv("GOCRAFT_MOTD")},
 		{"GOCRAFT_SERVER_ICON", os.Getenv("GOCRAFT_SERVER_ICON")},
 		{"GOCRAFT_MAX_PLAYERS", os.Getenv("GOCRAFT_MAX_PLAYERS")},
+		{"GOCRAFT_VERSION_NAME", os.Getenv("GOCRAFT_VERSION_NAME")},
+		{"GOCRAFT_PROTOCOL_VERSION", os.Getenv("GOCRAFT_PROTOCOL_VERSION")},
+		{"GOCRAFT_VILLAGERS", os.Getenv("GOCRAFT_VILLAGERS")},
+		{"GOCRAFT_DEFAULT_GAMEMODE", os.Getenv("GOCRAFT_DEFAULT_GAMEMODE")},
 		{"GOCRAFT_WORLD_STORAGE", os.Getenv("GOCRAFT_WORLD_STORAGE")},
 		{"GOCRAFT_WORLD_DIR", os.Getenv("GOCRAFT_WORLD_DIR")},
 		{"GOCRAFT_WORLD_SEED", os.Getenv("GOCRAFT_WORLD_SEED")},
@@ -713,6 +758,7 @@ func logEnvOverrides() {
 		{"GOCRAFT_KNOCKBACK_VERTICAL", os.Getenv("GOCRAFT_KNOCKBACK_VERTICAL")},
 		{"GOCRAFT_BEDROCK_ENABLED", os.Getenv("GOCRAFT_BEDROCK_ENABLED")},
 		{"GOCRAFT_BEDROCK_ADDR", os.Getenv("GOCRAFT_BEDROCK_ADDR")},
+		{"GOCRAFT_BEDROCK_ADDRESS", os.Getenv("GOCRAFT_BEDROCK_ADDRESS")},
 		{"GOCRAFT_BEDROCK_ONLINE_MODE", os.Getenv("GOCRAFT_BEDROCK_ONLINE_MODE")},
 		{"GOCRAFT_PERMISSION_EDITOR_ENABLED", os.Getenv("GOCRAFT_PERMISSION_EDITOR_ENABLED")},
 		{"GOCRAFT_PERMISSION_EDITOR_URL", os.Getenv("GOCRAFT_PERMISSION_EDITOR_URL")},
