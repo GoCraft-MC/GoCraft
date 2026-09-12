@@ -1,0 +1,44 @@
+[global]
+include = [
+  "docs/**/*.md",
+  "README.md"
+]
+exclude = [ ]
+respect-gitignore = true
+
+[MD013]
+line-length = 200
+code-blocks = true
+tables = false
+headings = true
+reflow = true
+
+[MD029]
+style = "ordered"
+
+[MD046]
+# Code block style
+style = "fenced"
+
+[MD048]
+# Code fence style
+style = "backtick"
+
+[MD049]
+# Emphasis style (* or _)
+style = "asterisk"
+
+[MD050]
+# Strong emphasis style (** or __)
+style = "asterisk"
+
+[MD051]
+anchor-style = "github"
+
+[MD055]
+# Table pipe style (leading_and_trailing or no_leading_or_trailing)
+style = "leading_and_trailing"
+
+[MD060]
+enabled = true
+style = "aligned"
