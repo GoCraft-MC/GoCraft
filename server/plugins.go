@@ -38,8 +38,11 @@ func (s *Server) registerPluginRuntimes(cfg *config.Config) error {
 		JarPath:      java.JarPath,
 		TickRate:     pluginTickRate,
 		EventBudget:  time.Duration(cfg.Plugins.EventBudgetMillis) * time.Millisecond,
-		OnRespawn:    s.replayJoins,
-		OnEmit:       s.pluginRegistry.EmitFrom,
+		OnRespawn: func(restored []string) {
+			s.pluginRegistry.Bus().RecordRuntimeRespawn(jvm.RuntimeName)
+			s.replayJoins(restored)
+		},
+		OnEmit: s.pluginRegistry.EmitFrom,
 	})); err != nil {
 		return err
 	}

@@ -34,22 +34,20 @@ func (b *Bus) EmitCancellable(event *abi.Event) bool {
 		verdict, err := sub.instance.Dispatch(ctx, event)
 		took := time.Since(started)
 		sub.cold.ran(event.Type)
+		b.recordDispatch(sub, event.Type, took, err != nil, firstOfItsKind)
 		if budgetEnded(err) {
-			sub.health.record(time.Now(), true, took)
 			b.recordStarved(subscribers[index+1:], event.Type)
 			slog.Warn("plugin event deadline exceeded", "plugin", sub.id,
 				"event", event.Type, "took", took, "budget", budget)
 			return failureAllows(event)
 		}
 		if err != nil {
-			sub.health.record(time.Now(), true, took)
 			slog.Warn("plugin event dispatch failed", "plugin", sub.id, "event", event.Type, "err", err)
 			if !failureAllows(event) {
 				return false
 			}
 			continue
 		}
-		sub.health.record(time.Now(), false, took)
 		b.reportColdStart(firstOfItsKind, sub, event.Type, took)
 		b.reportLateVerdict(ctx, sub, event.Type, took)
 		b.enqueueEffects(sub, event.Type, verdict.Effects)
@@ -118,6 +116,9 @@ func (b *Bus) recordStarved(subscribers []*subscriber, event string) {
 	for _, sub := range subscribers {
 		if !sub.health.isDisabled() {
 			sub.health.recordStarved(event)
+			if b.metrics != nil {
+				b.metrics.starved.WithLabelValues(sub.id, event).Inc()
+			}
 		}
 	}
 }

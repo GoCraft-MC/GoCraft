@@ -398,6 +398,7 @@ func New(cfg *config.Config) (*Server, error) {
 	pluginRegistry.Bus().SetColdGrace(
 		time.Duration(cfg.Plugins.ColdEventGraceMillis) * time.Millisecond)
 	plugins := pluginRegistry.Bus()
+	plugins.RegisterMetrics(metrics.registry)
 	plugins.SetPermissionResolver(func(p *player.Player, node string) bool {
 		return p != nil && permissionManager.Allowed(p.Username, node, p.Operator, false)
 	})

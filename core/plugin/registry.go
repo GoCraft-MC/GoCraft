@@ -98,6 +98,12 @@ func (b *Bus) Attach(instance Instance) error {
 			permissions: append([]string(nil), declared.Permissions...),
 			cold:        newColdStarts(),
 		}
+		if b.metrics != nil {
+			b.metrics.dispatch.WithLabelValues(sub.id, declared.Event)
+			b.metrics.cold.WithLabelValues(sub.id, declared.Event)
+			b.metrics.failures.WithLabelValues(sub.id, declared.Event)
+			b.metrics.starved.WithLabelValues(sub.id, declared.Event)
+		}
 		b.subs[declared.Event] = append(b.subs[declared.Event], sub)
 		sort.Slice(b.subs[declared.Event], func(i, j int) bool {
 			left, right := b.subs[declared.Event][i], b.subs[declared.Event][j]

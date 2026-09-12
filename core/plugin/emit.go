@@ -53,8 +53,8 @@ func (b *Bus) EmitCustom(definition gcpkg.EventDefinition, emission abi.Emission
 		verdict, err := sub.instance.Dispatch(ctx, event)
 		took := time.Since(started)
 		sub.cold.ran(definition.Type)
+		b.recordDispatch(sub, definition.Type, took, err != nil, firstOfItsKind)
 		if budgetEnded(err) {
-			sub.health.record(time.Now(), true, took)
 			b.recordStarved(subscribers[index+1:], definition.Type)
 			// How long it actually took, and what it was allowed. "Exceeded"
 			// alone cannot tell a handler that is slightly too slow from one
@@ -65,14 +65,12 @@ func (b *Bus) EmitCustom(definition gcpkg.EventDefinition, emission abi.Emission
 			return b.starvedResult(definition, applied)
 		}
 		if err != nil {
-			sub.health.record(time.Now(), true, took)
 			slog.Warn("plugin event dispatch failed", "plugin", sub.id, "event", definition.Type, "err", err)
 			if definition.FailClosed {
 				return abi.EmissionResult{Cancelled: true, Mutations: applied}
 			}
 			continue
 		}
-		sub.health.record(time.Now(), false, took)
 		b.reportColdStart(firstOfItsKind, sub, definition.Type, took)
 		b.reportLateVerdict(ctx, sub, definition.Type, took)
 		b.enqueueEffects(sub, definition.Type, verdict.Effects)
