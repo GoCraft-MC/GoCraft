@@ -162,6 +162,8 @@ All critical fields can be overridden at runtime via environment variables. Usef
 
 | Variable | Field |
 | --- | --- |
+| `GOCRAFT_HOST` | `host` (alias of `GOCRAFT_JAVA_HOST`) |
+| `GOCRAFT_PORT` | `port` (alias of `GOCRAFT_JAVA_PORT`) |
 | `GOCRAFT_JAVA_HOST` | `host` |
 | `GOCRAFT_JAVA_PORT` | `port` |
 | `GOCRAFT_JAVA_ENABLED` | `java_enabled` |
@@ -169,6 +171,10 @@ All critical fields can be overridden at runtime via environment variables. Usef
 | `GOCRAFT_MOTD` | `motd` |
 | `GOCRAFT_SERVER_ICON` | `server_icon` |
 | `GOCRAFT_MAX_PLAYERS` | `max_players` |
+| `GOCRAFT_VERSION_NAME` | `version_name` |
+| `GOCRAFT_PROTOCOL_VERSION` | `protocol_version` |
+| `GOCRAFT_VILLAGERS` | `villagers` |
+| `GOCRAFT_DEFAULT_GAMEMODE` | `default_gamemode` |
 | `GOCRAFT_WORLD_STORAGE` | `world_storage` |
 | `GOCRAFT_WORLD_DIR` | `world_dir` |
 | `GOCRAFT_WORLD_SEED` | `world_seed` |
@@ -177,8 +183,12 @@ All critical fields can be overridden at runtime via environment variables. Usef
 | `GOCRAFT_MAX_CACHED_CHUNKS` | `max_cached_chunks` |
 | `GOCRAFT_DIFFICULTY` | `difficulty` |
 | `GOCRAFT_WHITELIST_ENABLED` | `whitelist.enabled` |
+| `GOCRAFT_ATTACK_COOLDOWN` | `combat.attack_cooldown` |
+| `GOCRAFT_KNOCKBACK_HORIZONTAL` | `combat.knockback_horizontal` |
+| `GOCRAFT_KNOCKBACK_VERTICAL` | `combat.knockback_vertical` |
 | `GOCRAFT_BEDROCK_ENABLED` | `bedrock.enabled` |
 | `GOCRAFT_BEDROCK_ADDR` | `bedrock.address` |
+| `GOCRAFT_BEDROCK_ADDRESS` | `bedrock.address` (alias of `GOCRAFT_BEDROCK_ADDR`) |
 | `GOCRAFT_BEDROCK_ONLINE_MODE` | `bedrock.online_mode` |
 | `GOCRAFT_PERMISSION_EDITOR_ENABLED` | `permission_editor.enabled` |
 | `GOCRAFT_PERMISSION_EDITOR_URL` | `permission_editor.editor_url` |
