@@ -703,6 +703,8 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.runConsole(ctx)
 	if err := s.loadPlugins(ctx); err != nil {
 		slog.Error("plugins: startup aborted", "err", err)
+		cancel()
+		s.shutdown()
 		return err
 	}
 	metricsServer, err := s.startMetricsServer()

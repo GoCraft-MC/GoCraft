@@ -168,18 +168,33 @@ scrape_configs:
 ```
 
 The listener binds to localhost by default. For a remote scraper, bind to an interface it can reach, such as `0.0.0.0:9225`, and use the GoCraft host's address in `targets`.
+
+### Metrics
+
 | Metric | Description |
 | --- | --- |
 | `gocraft_players_online` | Connected Java and Bedrock players combined |
 | `gocraft_players_max` | Configured player limit |
 | `gocraft_java_connections` | Active Java connections, including login and status requests |
-| `gocraft_tps` | TPS estimate from the last 1200 tick processing durations, capped at 20 |
-| `gocraft_tick_duration_average_seconds` | Average tick processing time over the same rolling window |
 | `gocraft_tick_duration_seconds` | Tick processing duration histogram, with `_bucket`, `_sum`, and `_count` series |
 | `gocraft_chunks_loaded{dimension}` | Loaded chunks by dimension |
 | `gocraft_entities{dimension}` | Non-player entities by dimension |
 
 Dimension labels are `overworld`, `nether`, and `end`. Standard Go runtime (`go_*`) and process (`process_*`) metrics are also exposed; availability depends on the platform.
+
+Actual ticks per second, including scheduling delays and pauses:
+
+```promql
+rate(gocraft_tick_duration_seconds_count[1m])
+```
+
+Mean tick processing time over a window chosen by the scraper:
+
+```promql
+rate(gocraft_tick_duration_seconds_sum[5m]) / rate(gocraft_tick_duration_seconds_count[5m])
+```
+
+Scrapes are limited to one request in flight with a five-second timeout. Overlapping or timed-out scrapes return HTTP 503.
 
 ## World storage
 

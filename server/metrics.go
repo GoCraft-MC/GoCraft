@@ -38,20 +38,6 @@ func newServerMetrics(s *Server) *serverMetrics {
 			Name: "gocraft_java_connections",
 			Help: "Number of active Java TCP connections, including login and status requests.",
 		}, func() float64 { return float64(s.connCount.Load()) }),
-		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "gocraft_tps",
-			Help: "Estimated ticks per second from the last 1200 tick processing durations, capped at 20.",
-		}, func() float64 {
-			tps, _ := s.timings.TPS()
-			return tps
-		}),
-		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "gocraft_tick_duration_average_seconds",
-			Help: "Average processing duration of the last 1200 ticks in seconds.",
-		}, func() float64 {
-			_, milliseconds := s.timings.TPS()
-			return milliseconds / 1000
-		}),
 	)
 	for dimension, world := range map[string]*coreworld.World{
 		"overworld": s.world,
@@ -79,7 +65,10 @@ func newServerMetrics(s *Server) *serverMetrics {
 	})
 	registry.MustRegister(tickDuration)
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+		MaxRequestsInFlight: 1,
+		Timeout:             5 * time.Second,
+	}))
 	return &serverMetrics{handler: mux, tickDuration: tickDuration}
 }
 

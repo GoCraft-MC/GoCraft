@@ -33,8 +33,7 @@ type BedrockConfig struct {
 
 // MetricsConfig holds configuration for the GoCraft metrics listener.
 type MetricsConfig struct {
-
-	// Enabled indicates whether the metrics listener is active. Set to true to enable metrics collection.
+	// Enabled controls the HTTP listener; collectors are available regardless.
 	Enabled bool `yaml:"enabled"`
 	// Address is the TCP listen address for metrics collection.
 	Address string `yaml:"address"`
