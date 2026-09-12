@@ -24,6 +24,8 @@ const maximumQueuedCalls = 8192
 
 // MutationQueue buffers plugin host calls until the simulation tick drains it.
 type MutationQueue struct {
+	metrics *queueMetrics
+
 	mu     sync.Mutex
 	calls  []abi.HostCall
 	closed bool
@@ -36,15 +38,18 @@ func NewMutationQueue() *MutationQueue {
 // Enqueue satisfies Host. It never applies the call on the runtime goroutine.
 func (q *MutationQueue) Enqueue(call abi.HostCall) error {
 	if call.Type == "" {
+		q.recordRejected("invalid")
 		return fmt.Errorf("plugin host call: empty type")
 	}
 	call = cloneHostCall(call)
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed {
+		q.recordRejected("closed")
 		return ErrMutationQueueClosed
 	}
 	if len(q.calls) >= maximumQueuedCalls {
+		q.recordRejected("full")
 		return ErrMutationQueueFull
 	}
 	q.calls = append(q.calls, call)

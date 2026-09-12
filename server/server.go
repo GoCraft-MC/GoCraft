@@ -392,6 +392,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// The queue is built here rather than left to the registry, because the
 	// tick has to drain it and only something holding it can.
 	pluginEffects := coreplugin.NewMutationQueue()
+	pluginEffects.RegisterMetrics(metrics.registry)
 	pluginRegistry := coreplugin.NewRegistry(context.Background(), eventBudget, pluginEffects, nil)
 	// What a subscriber's very first dispatch of a type is allowed on top of the
 	// shared budget. See core/plugin/coldstart.go for what it pays for.
