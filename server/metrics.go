@@ -27,10 +27,6 @@ func newServerMetrics(s *Server) *serverMetrics {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "gocraft_players_online",
-			Help: "Number of online players across Java and Bedrock editions.",
-		}, func() float64 { return float64(s.game.OnlineCount()) }),
-		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "gocraft_players_max",
 			Help: "Configured maximum number of players.",
 		}, func() float64 { return float64(s.cfg.MaxPlayers) }),
@@ -39,23 +35,13 @@ func newServerMetrics(s *Server) *serverMetrics {
 			Help: "Number of active Java TCP connections, including login and status requests.",
 		}, func() float64 { return float64(s.connCount.Load()) }),
 	)
+	s.game.RegisterMetrics(registry)
 	for dimension, world := range map[string]*coreworld.World{
 		"overworld": s.world,
 		"nether":    s.netherWorld,
 		"end":       s.endWorld,
 	} {
-		registry.MustRegister(
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Name:        "gocraft_chunks_loaded",
-				Help:        "Number of chunks currently held in memory by dimension.",
-				ConstLabels: prometheus.Labels{"dimension": dimension},
-			}, func() float64 { return float64(world.LoadedCount()) }),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Name:        "gocraft_entities",
-				Help:        "Number of non-player entities by dimension.",
-				ConstLabels: prometheus.Labels{"dimension": dimension},
-			}, func() float64 { return float64(world.Entities.Count()) }),
-		)
+		world.RegisterMetrics(prometheus.WrapRegistererWith(prometheus.Labels{"dimension": dimension}, registry))
 	}
 
 	tickDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
