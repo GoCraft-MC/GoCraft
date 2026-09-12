@@ -5,6 +5,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 )
@@ -59,18 +60,21 @@ func sendFurnaceContainerContent(conn *network.ClientConn, p *player.Player) err
 		VarInt(39)
 	for slot := 0; slot < 3; slot++ {
 		if slot < len(p.ContainerSlots) {
-			encodeSlot(b, p.ContainerSlots[slot])
+			nbt.EncodeSlot(b, p.ContainerSlots[slot])
 		} else {
-			encodeSlot(b, player.ItemStack{})
+			nbt.EncodeSlot(b, player.ItemStack{})
 		}
 	}
+
 	for slot := 9; slot < player.HotbarStart; slot++ {
-		encodeSlot(b, p.Inventory[slot])
+		nbt.EncodeSlot(b, p.Inventory[slot])
 	}
+
 	for slot := player.HotbarStart; slot < player.HotbarStart+9; slot++ {
-		encodeSlot(b, p.Inventory[slot])
+		nbt.EncodeSlot(b, p.Inventory[slot])
 	}
-	encodeSlot(b, p.CarriedItem)
+
+	nbt.EncodeSlot(b, p.CarriedItem)
 	return conn.WritePacket(b.Build())
 }
 

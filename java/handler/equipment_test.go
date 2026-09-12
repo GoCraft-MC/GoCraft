@@ -6,6 +6,7 @@ import (
 
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
+	"GoCraft/java/nbt"
 	"GoCraft/java/protocol"
 )
 
@@ -25,7 +26,7 @@ func TestExternalEquipmentUsesProtocol769ContinuationSlots(t *testing.T) {
 			slot |= 0x80
 		}
 		b.Byte(slot)
-		encodeSlot(b, entry.item)
+		nbt.EncodeSlot(b, entry.item)
 	}
 	pkt := b.Build()
 	r := bytes.NewReader(pkt.Data)

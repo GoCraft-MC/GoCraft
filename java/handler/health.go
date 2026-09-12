@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"GoCraft/core/player"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -38,7 +39,9 @@ func SyncPlayerHealth(conn *network.ClientConn, p *player.Player) error {
 func buildDeathCombatEvent(p *player.Player, message string) *protocol.Packet {
 	return protocol.NewBuilder(packetIDDeathCombatEvent).
 		VarInt(p.EntityID).
-		Bytes(nbtTextComponent(message)).
+		Write(nbt.TextComponent{
+			Text: message,
+		}).
 		Build()
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/java/nbt"
 	"GoCraft/java/protocol"
 )
 
@@ -20,7 +21,7 @@ func TestDroppedItemMetadataCarriesStack(t *testing.T) {
 	entityID, _ := protocol.ReadVarInt(r)
 	index, _ := protocol.ReadByte(r)
 	serializer, _ := protocol.ReadVarInt(r)
-	stack, err := readPlainSlot(r)
+	stack, err := nbt.ReadPlainSlot(r)
 	if err != nil {
 		t.Fatalf("decode dropped stack: %v", err)
 	}

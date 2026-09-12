@@ -22,6 +22,7 @@ import (
 	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -289,7 +290,9 @@ func sendOpenScreen(conn *network.ClientConn, windowID, windowType int32, title 
 	pkt := protocol.NewBuilder(packetIDOpenScreen).
 		VarInt(windowID).
 		VarInt(windowType).
-		Bytes(nbtTextComponent(title)).
+		Write(nbt.TextComponent{
+			Text: title,
+		}).
 		Build()
 	return conn.WritePacket(pkt)
 }

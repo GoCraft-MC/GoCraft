@@ -17,6 +17,7 @@ import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -981,6 +982,6 @@ func cmdKill(ctx CommandContext) error {
 // System Chat Message since 1.20.3).
 func buildDisconnectPlay(reason string) *protocol.Packet {
 	return protocol.NewBuilder(packetIDDisconnectPlay).
-		Bytes(nbtTextComponent(reason)).
+		Bytes(nbt.TextComponent{Text: reason}.Bytes()).
 		Build()
 }

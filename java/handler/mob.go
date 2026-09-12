@@ -16,6 +16,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -95,7 +96,7 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			VarInt(e.EntityID).
 			Byte(8).  // ItemEntity DATA_ITEM metadata index
 			VarInt(7) // ItemStack metadata serializer
-		encodeSlot(b, e.DroppedItem())
+		nbt.EncodeSlot(b, e.DroppedItem())
 		return b.Byte(0xff).Build()
 	}
 	if e.Type == corentity.TypeFireworkRocket {
@@ -103,7 +104,7 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			VarInt(e.EntityID).
 			Byte(8).
 			VarInt(7)
-		encodeSlot(b, player.ItemStack{
+		nbt.EncodeSlot(b, player.ItemStack{
 			ItemID: "minecraft:firework_rocket", Count: 1, HasFireworks: true, Fireworks: e.FireworkData,
 		})
 		return b.Byte(0xff).Build()
@@ -113,7 +114,7 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			VarInt(e.EntityID).
 			Byte(8).
 			VarInt(7)
-		encodeSlot(b, e.ProjectileItem)
+		nbt.EncodeSlot(b, e.ProjectileItem)
 		return b.Byte(0xff).Build()
 	}
 	if e.Type == corentity.TypeAreaEffectCloud {
@@ -265,7 +266,7 @@ func buildMobEquipment(e *corentity.Entity) *protocol.Packet {
 	b := protocol.NewBuilder(packetIDSetEquipment).
 		VarInt(e.EntityID).
 		Byte(0) // Main hand, final equipment entry.
-	encodeSlot(b, player.ItemStack{ItemID: e.MainHandItemID, Count: 1})
+	nbt.EncodeSlot(b, player.ItemStack{ItemID: e.MainHandItemID, Count: 1})
 	return b.Build()
 }
 

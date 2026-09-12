@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"GoCraft/core/player"
+	"GoCraft/java/nbt"
 	"GoCraft/java/protocol"
 )
 
@@ -165,7 +166,7 @@ func skipSlotDisplay(t *testing.T, reader *bytes.Reader) {
 			case 8:
 				lines := mustReadRecipeVarInt(t, reader)
 				for line := int32(0); line < lines; line++ {
-					if err := skipNetworkNBT(reader); err != nil {
+					if err := nbt.SkipNetworkNBT(reader); err != nil {
 						t.Fatalf("skip lore component: %v", err)
 					}
 				}

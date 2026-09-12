@@ -8,6 +8,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
 )
@@ -21,8 +22,8 @@ func TestJavaFireworkComponentRoundTrip(t *testing.T) {
 		FadeColorCount: 1, FadeColors: [player.MaxFireworkColors]int32{0xfed83d}, Trail: true, Twinkle: true,
 	}
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, stack)
-	decoded, err := readPlainSlot(bytes.NewReader(b.Build().Data))
+	nbt.EncodeSlot(b, stack)
+	decoded, err := nbt.ReadPlainSlot(bytes.NewReader(b.Build().Data))
 	if err != nil {
 		t.Fatal(err)
 	}

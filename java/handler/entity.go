@@ -13,6 +13,7 @@ package handler
 import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -255,7 +256,7 @@ func SendExternalPlayerEquipment(conn *network.ClientConn, p *player.Player) {
 			slot |= 0x80
 		}
 		b.Byte(slot)
-		encodeSlot(b, entry.item)
+		nbt.EncodeSlot(b, entry.item)
 	}
 	_ = conn.WritePacket(b.Build())
 }

@@ -32,24 +32,28 @@ const (
 	MaxFireworkColors     = 8
 )
 
+type FireworksColors [MaxFireworkColors]int32
+
 // FireworkExplosion is a bounded, comparable representation of one vanilla
 // firework explosion component. Shape uses the vanilla 0-4 shape IDs.
 type FireworkExplosion struct {
 	Shape          uint8
-	Colors         [MaxFireworkColors]int32
+	Colors         FireworksColors
 	ColorCount     uint8
-	FadeColors     [MaxFireworkColors]int32
+	FadeColors     FireworksColors
 	FadeColorCount uint8
 	Trail          bool
 	Twinkle        bool
 }
+
+type FireworkExplosions [MaxFireworkExplosions]FireworkExplosion
 
 // FireworkData is the canonical minecraft:fireworks component shared by both
 // protocol adapters and the server-side rocket entity.
 type FireworkData struct {
 	Flight         uint8
 	ExplosionCount uint8
-	Explosions     [MaxFireworkExplosions]FireworkExplosion
+	Explosions     FireworkExplosions
 }
 
 // ItemStack is a quantity of one item type occupying a single inventory slot.

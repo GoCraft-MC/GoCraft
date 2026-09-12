@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"GoCraft/config"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/registry"
@@ -237,7 +238,9 @@ func sendResourcePackPush(conn *network.ClientConn, rp config.JavaResourcePackCo
 	b.Bool(rp.Forced)
 	if rp.Prompt != "" {
 		b.Bool(true)
-		b.Bytes(nbtTextComponent(ParseMiniMessage(rp.Prompt)))
+		b.Write(nbt.TextComponent{
+			Text: ParseMiniMessage(rp.Prompt),
+		})
 	} else {
 		b.Bool(false)
 	}
