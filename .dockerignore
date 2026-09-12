@@ -1,21 +1,26 @@
-.git
-.gitignore
-.github
-.idea
-.claude
+.git/
+.gitignore/
+.github/
+.idea/
+.claude/
 
-docs
+*.md
+.editorconfig
+.release-please-manifest.json
+.yamlfmt
+.yamllint
+
+docs/
 LICENSE
-README.md
-AGENTS.md
 gocraftpng.png
 egg-gocraft.json
+release-please-config.json
 
-world
-world_nether
-world_end
-logs
-data
+world/
+world_nether/
+world_end/
+logs/
+data/
 *.log
 *.log.gz
 
@@ -26,18 +31,18 @@ banned-players.json
 banned-ips.json
 im.png
 
-gocraft
-gocraft-*
-*.exe
-protoc-gen-gocraft
+/gocraft
+/gocraft-*
+/*.exe
+/protoc-gen-gocraft
 miniserv/miniserv
 
-plugins
-packs
+plugins/
+packs/
 
-Dockerfile
+docker/
 docker-compose.yml
 .dockerignore
 
-.DS_Store
+.DS_Store/
 Thumbs.db

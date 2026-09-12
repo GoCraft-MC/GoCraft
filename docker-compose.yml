@@ -1,9 +1,10 @@
+---
 services:
   gocraft:
     image: ghcr.io/gocraft-mc/gocraft:latest
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/gocraft/Dockerfile
     container_name: gocraft
     ports:
       - "25565:25565/tcp"
