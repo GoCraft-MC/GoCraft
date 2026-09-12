@@ -20,6 +20,7 @@ type serverMetrics struct {
 	registry     *prometheus.Registry
 	handler      http.Handler
 	tickDuration prometheus.Histogram
+	tickSections [sectionCount]prometheus.Observer
 }
 
 func newServerMetrics() *serverMetrics {
@@ -34,12 +35,29 @@ func newServerMetrics() *serverMetrics {
 		Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
 	})
 	registry.MustRegister(tickDuration)
+	sections := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "gocraft_tick_section_seconds",
+		Help:    "Processing duration of each subsystem per completed game tick in seconds.",
+		Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5},
+	}, []string{"section"})
+	registry.MustRegister(sections)
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
 		MaxRequestsInFlight: 1,
 		Timeout:             5 * time.Second,
 	}))
-	return &serverMetrics{registry: registry, handler: mux, tickDuration: tickDuration}
+	metrics := &serverMetrics{registry: registry, handler: mux, tickDuration: tickDuration}
+	for section, name := range sectionNames {
+		metrics.tickSections[section] = sections.WithLabelValues(name)
+	}
+	return metrics
+}
+
+func (m *serverMetrics) observeTick(elapsed time.Duration, sections [sectionCount]int64) {
+	m.tickDuration.Observe(elapsed.Seconds())
+	for section, nanoseconds := range sections {
+		m.tickSections[section].Observe(time.Duration(nanoseconds).Seconds())
+	}
 }
 
 func (s *Server) registerMetrics() {

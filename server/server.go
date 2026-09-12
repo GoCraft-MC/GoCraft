@@ -982,10 +982,10 @@ func (s *Server) safeTick() {
 			return
 		}
 		elapsed := time.Since(start)
-		s.timings.commit(elapsed)
 		if s.metrics != nil {
-			s.metrics.tickDuration.Observe(elapsed.Seconds())
+			s.metrics.observeTick(elapsed, s.timings.cur)
 		}
+		s.timings.commit(elapsed)
 		if elapsed > 50*time.Millisecond && debuglog.Enabled(debuglog.EntityTickOverruns) {
 			tps, avgMs := s.timings.TPS()
 			slog.Warn("server tick overrun", "elapsed", elapsed.Round(time.Millisecond),
