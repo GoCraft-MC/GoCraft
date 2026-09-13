@@ -1,5 +1,4 @@
 # syntax=docker/dockerfile:1
-
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 
@@ -18,6 +17,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 RUN mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
+ENV GOCRAFT_HEALTHCHECK_PORT=8081
 
 COPY --from=build /out/gocraft /usr/local/bin/gocraft
 COPY --from=build --chown=nonroot:nonroot /out/data /data
@@ -29,4 +29,5 @@ EXPOSE 19106/udp
 
 USER nonroot
 
-ENTRYPOINT ["/usr/local/bin/gocraft"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=5 CMD [ "/usr/local/bin/gocraft", "--check-health" ]
+ENTRYPOINT [ "/usr/local/bin/gocraft" ]

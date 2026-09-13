@@ -51,6 +51,7 @@ import (
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
 	"GoCraft/customitems"
+	"GoCraft/healthcheck"
 	"GoCraft/internal/debuglog"
 	"GoCraft/java/auth"
 	"GoCraft/java/handler"
@@ -167,6 +168,8 @@ type Server struct {
 	idleTimeout     atomic.Int64
 	stopOnce        sync.Once
 	stopRequested   chan struct{}
+
+	health healthcheck.HealthState
 }
 
 // mobAI holds the wander state for a passive mob.
@@ -688,6 +691,8 @@ func (s *Server) teleportPlayer(target *player.Player, x, y, z float64) error {
 // All background goroutines are tracked with a WaitGroup and are joined before
 // the world is flushed to disk, ensuring clean shutdown of both listeners.
 func (s *Server) Run(ctx context.Context) error {
+	s.SetLive(true)
+	s.SetHealthy(true)
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
@@ -701,8 +706,12 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.runConsole(ctx)
 	if err := s.loadPlugins(ctx); err != nil {
 		slog.Error("plugins: startup aborted", "err", err)
+		s.SetHealthy(false)
+		s.SetLive(false)
+		s.SetReady(false)
 		return err
 	}
+
 	if s.cfg.JavaEnabled {
 		slog.Info("java listener enabled",
 			"addr", s.cfg.Addr(),
@@ -711,6 +720,7 @@ func (s *Server) Run(ctx context.Context) error {
 			"onlineMode", s.cfg.OnlineMode,
 		)
 	}
+
 	if s.cfg.Bedrock.Enabled {
 		slog.Info("bedrock listener enabled",
 			"addr", s.cfg.Bedrock.Address,
@@ -773,6 +783,8 @@ func (s *Server) Run(ctx context.Context) error {
 		}()
 	}
 
+	s.SetReady(true)
+
 	// Java TCP listener on the main goroutine, or block on ctx if disabled.
 	var listenErr error
 	if s.cfg.JavaEnabled {
@@ -784,6 +796,8 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// ctx is now done: wait for entity tick and Bedrock listener to finish.
 	wg.Wait()
+	s.SetLive(false)
+	s.SetReady(false)
 
 	// Unload plugins while world storage is still open, so a runtime that
 	// persists on shutdown can still write.
@@ -6358,4 +6372,32 @@ func (s *Server) Shutdown() error {
 		return fmt.Errorf("server: closing listener: %w", err)
 	}
 	return nil
+}
+
+func (s *Server) GetHealthState() *healthcheck.HealthState {
+	return &s.health
+}
+
+func (s *Server) SetReady(v bool) {
+	s.health.SetReady(v)
+}
+
+func (s *Server) IsReady() bool {
+	return s.health.IsReady()
+}
+
+func (s *Server) SetLive(v bool) {
+	s.health.SetLive(v)
+}
+
+func (s *Server) IsHealthy() bool {
+	return s.health.IsHealthy()
+}
+
+func (s *Server) SetHealthy(v bool) {
+	s.health.SetHealthy(v)
+}
+
+func (s *Server) IsLive() bool {
+	return s.health.IsLive()
 }

@@ -17,5 +17,11 @@ services:
       GOCRAFT_ONLINE_MODE: "false"
       GOCRAFT_DIFFICULTY: "hard"
       # GOCRAFT_BEDROCK_ENABLED: "true"
+      # GOCRAFT_HEALTHCHECK_PORT: "8080"
     restart: unless-stopped
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/gocraft", "--check-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
