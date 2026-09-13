@@ -30,9 +30,8 @@ const (
 )
 
 // tickVillagerDoor mirrors the wooden-door capability used by Pumpkin's walk
-// node evaluator. It also runs the lightweight villager brain prelude that
-// keeps HOME state, scheduled POI routing and sleeping placement in sync before
-// the shared passive-mob navigation stack executes.
+// node evaluator. It also runs the villager Brain serial phase before passive
+// AI workers consume WALK_TARGET/LOOK_TARGET state.
 func (s *Server) tickVillagerDoor(villager *corentity.Entity, ai *mobAI) {
 	if villager == nil || ai == nil {
 		return
@@ -50,7 +49,7 @@ func (s *Server) tickVillagerDoor(villager *corentity.Entity, ai *mobAI) {
 	if villager.Sleeping {
 		s.positionVillagerInBed(villager, ai)
 	} else {
-		s.applyVillagerScheduledWalkTarget(villager, ai)
+		s.tickVillagerBrain(villager, ai)
 	}
 
 	if ai.doorCloseTick > 0 {
@@ -99,65 +98,13 @@ func (s *Server) syncVillagerHomeAI(villager *corentity.Entity, ai *mobAI) {
 	ai.roaming = true
 }
 
-// applyVillagerScheduledWalkTarget supplies the POI-driven parts of the
-// vanilla adult villager schedule to GoCraft's shared navigator:
-//
-//   2000..8999  WORK  -> job site
-//   9000..10999 MEET  -> village meeting point
-//   11000..11999 IDLE -> no forced POI target
-//   12000..      REST -> handled by tickPassiveMobAI / SleepInBed
-//
-// Panic, breeding and sleeping are evaluated earlier by tickPassiveMobAI and
-// therefore still pre-empt these scheduled walk targets, matching Brain
-// activity priority rather than turning the schedule into an unconditional
-// teleport or movement override.
+// applyVillagerScheduledWalkTarget is retained for compatibility with older
+// tests/helpers. The complete schedule now lives in tickVillagerBrain.
 func (s *Server) applyVillagerScheduledWalkTarget(villager *corentity.Entity, ai *mobAI) {
-	if s == nil || s.world == nil || villager == nil || ai == nil || villager.IsBaby || villager.Sleeping {
+	if s == nil || villager == nil || ai == nil || villager.Sleeping {
 		return
 	}
-	dayTime := s.worldAge % 24000
-	if dayTime < 0 {
-		dayTime += 24000
-	}
-
-	var target spatial.Vec3
-	hasTarget := false
-	switch {
-	case dayTime >= villagerWorkStart && dayTime < villagerMeetStart && villager.HasVillageWorkstation:
-		job := villager.VillageWorkstation
-		block, loaded := s.world.BlockIfLoaded(int(job.X), int(job.Y), int(job.Z))
-		if loaded && !block.IsAir() {
-			target = spatial.Vec3{X: float64(job.X) + 0.5, Y: float64(job.Y), Z: float64(job.Z) + 0.5}
-			hasTarget = true
-		}
-	case dayTime >= villagerMeetStart && dayTime < villagerIdleStart && villager.VillageCenter != (spatial.BlockPos{}):
-		// Vanilla MEET uses the meeting POI with stroll/social behaviours around
-		// it rather than stacking every villager on one exact point. Give each
-		// villager a stable small offset around its village centre.
-		center := villager.VillageCenter
-		angle := float64(uint32(villager.EntityID)%16) * (2 * math.Pi / 16)
-		radius := 2.0 + float64(uint32(villager.EntityID)%3)*0.5
-		target = spatial.Vec3{
-			X: float64(center.X) + 0.5 + math.Cos(angle)*radius,
-			Y: float64(center.Y),
-			Z: float64(center.Z) + 0.5 + math.Sin(angle)*radius,
-		}
-		hasTarget = true
-	case dayTime >= villagerIdleStart && dayTime < villagerRestStart:
-		return
-	default:
-		return
-	}
-	if !hasTarget {
-		return
-	}
-
-	goal := spatial.BlockPos{X: int32(math.Floor(target.X)), Y: int32(math.Floor(target.Y)), Z: int32(math.Floor(target.Z))}
-	if ai.hasPathGoal && ai.pathGoal != goal {
-		clearMobNavigation(villager, ai)
-	}
-	ai.wanderTarget = target
-	ai.hasWanderGoal = true
+	s.tickVillagerBrain(villager, ai)
 }
 
 // positionVillagerInBed is the server-side equivalent of vanilla
