@@ -15,36 +15,63 @@ const daylightBurnDurationTicks = 8 * 20
 
 func burnsInDaylight(entityType corentity.EntityType) bool {
 	switch entityType {
-	case corentity.TypeZombie, corentity.TypeZombieVillager, corentity.TypeZombieHorse,
-		corentity.TypeDrowned, corentity.TypeSkeleton, corentity.TypeStray,
-		corentity.TypeBogged, corentity.TypeWitherSkeleton, corentity.TypePhantom:
+	case corentity.TypeZombie, corentity.TypeZombieVillager, corentity.TypeDrowned,
+		corentity.TypeSkeleton, corentity.TypeStray, corentity.TypeBogged,
+		corentity.TypePhantom:
 		return true
 	default:
 		return false
 	}
 }
 
-// tickEndermanWater applies 1 damage per tick when an enderman touches water
-// or rain, matching PumpkinMC enderman.rs mob_tick water/rain check.
+// tickEndermanWater applies water/rain damage and gives the Enderman a chance
+// to teleport away. Rain only counts when the mob is actually exposed to sky.
 func (s *Server) tickEndermanWater(entity *corentity.Entity, hurtEntities *[]*corentity.Entity) {
 	if entity == nil || entity.Type != corentity.TypeEnderman || s.world == nil {
 		return
 	}
-	if s.entityInWater(entity) {
-		if !s.damageEnvironmentalEntity(entity, 1, "water") {
-			return
+	raining, _ := s.currentWeather()
+	wet := s.entityInWater(entity) || (raining && s.mobExposedToSky(entity))
+	if !wet {
+		return
+	}
+	if !s.damageEnvironmentalEntity(entity, 1, "water") {
+		return
+	}
+	*hurtEntities = append(*hurtEntities, entity)
+	roll := uint64(entity.EntityID)*0x9e3779b97f4a7c15 ^ uint64(s.worldAge)*0xbf58476d1ce4e5b9
+	if roll%10 != 0 {
+		oldPosition := entity.Position
+		if s.tryEndermanTeleport(entity) {
+			handler.BroadcastEntityPosition(entity, s.sessions)
+			handler.BroadcastSoundAt(s.sessions, "minecraft:entity.enderman.teleport", handler.SoundCategoryHostile,
+				oldPosition.X, oldPosition.Y, oldPosition.Z, 1, 1)
+			handler.BroadcastSoundAt(s.sessions, "minecraft:entity.enderman.teleport", handler.SoundCategoryHostile,
+				entity.Position.X, entity.Position.Y, entity.Position.Z, 1, 1)
 		}
-		*hurtEntities = append(*hurtEntities, entity)
-		roll := uint64(entity.EntityID)*0x9e3779b97f4a7c15 ^ uint64(s.worldAge)*0xbf58476d1ce4e5b9
-		if roll%10 != 0 {
-			oldPosition := entity.Position
-			if s.tryEndermanTeleport(entity) {
-				handler.BroadcastEntityPosition(entity, s.sessions)
-				handler.BroadcastSoundAt(s.sessions, "minecraft:entity.enderman.teleport", handler.SoundCategoryHostile,
-					oldPosition.X, oldPosition.Y, oldPosition.Z, 1, 1)
-				handler.BroadcastSoundAt(s.sessions, "minecraft:entity.enderman.teleport", handler.SoundCategoryHostile,
-					entity.Position.X, entity.Position.Y, entity.Position.Z, 1, 1)
-			}
+	}
+}
+
+// tickWaterSensitiveMob covers vanilla mobs whose environment damage is not
+// ordinary fire/sunlight damage.
+func (s *Server) tickWaterSensitiveMob(entity *corentity.Entity, hurtEntities *[]*corentity.Entity) {
+	if entity == nil || s.world == nil {
+		return
+	}
+	raining, _ := s.currentWeather()
+	inWater := s.entityInWater(entity)
+	inRain := raining && s.mobExposedToSky(entity)
+
+	switch entity.Type {
+	case corentity.TypeBlaze:
+		// Blazes take damage from water and rain. Rate-limit to vanilla-like
+		// periodic environmental hurt instead of applying a full hit every tick.
+		if (inWater || inRain) && s.worldAge%10 == 0 && s.damageEnvironmentalEntity(entity, 1, "water") {
+			*hurtEntities = append(*hurtEntities, entity)
+		}
+	case corentity.TypeSnowGolem:
+		if (inWater || inRain) && s.worldAge%20 == 0 && s.damageEnvironmentalEntity(entity, 1, "water") {
+			*hurtEntities = append(*hurtEntities, entity)
 		}
 	}
 }
@@ -54,6 +81,7 @@ func (s *Server) tickMobSunlight(entity *corentity.Entity, hurtEntities *[]*core
 		return
 	}
 	s.tickEndermanWater(entity, hurtEntities)
+	s.tickWaterSensitiveMob(entity, hurtEntities)
 	// Water cauldron extinguishes fire for any burning entity.
 	if entity.FireTicks > 0 {
 		s.tryExtinguishInCauldron(entity)
@@ -106,12 +134,8 @@ func (s *Server) tryExtinguishInCauldron(entity *corentity.Entity) {
 	s.world.SetBlock(x, y, z, replacement)
 }
 
-func (s *Server) mobInDirectDaylight(entity *corentity.Entity) bool {
-	timeOfDay := s.worldAge % 24000
-	if timeOfDay < 0 {
-		timeOfDay += 24000
-	}
-	if timeOfDay >= 12542 && timeOfDay <= 23460 {
+func (s *Server) mobExposedToSky(entity *corentity.Entity) bool {
+	if entity == nil || s.world == nil {
 		return false
 	}
 	x := int(math.Floor(entity.Position.X))
@@ -121,11 +145,25 @@ func (s *Server) mobInDirectDaylight(entity *corentity.Entity) bool {
 	return loaded && surfaceY <= headY
 }
 
-// mobHasLineOfSight samples the segment between eye positions. It is used at
-// the moment damage or a ranged attack is produced, preventing entities on
-// opposite sides of a solid wall from hitting one another.
+func (s *Server) mobInDirectDaylight(entity *corentity.Entity) bool {
+	timeOfDay := s.worldAge % 24000
+	if timeOfDay < 0 {
+		timeOfDay += 24000
+	}
+	if timeOfDay >= 12542 && timeOfDay <= 23460 {
+		return false
+	}
+	return s.mobExposedToSky(entity)
+}
+
+// mobHasLineOfSight samples the segment between eye positions. The target
+// predicate is checked first so neutral mobs cannot damage a player merely
+// because the legacy common hostile controller selected the nearest player.
 func (s *Server) mobHasLineOfSight(attacker *corentity.Entity, target spatial.Vec3, targetEyeHeight float64) bool {
 	if attacker == nil || s.world == nil {
+		return false
+	}
+	if targetPlayer := s.closestPlayerToPosition(target, 0.8); targetPlayer != nil && !s.parityMobHostileToPlayer(attacker, targetPlayer) {
 		return false
 	}
 	start := spatial.Vec3{X: attacker.Position.X, Y: attacker.Position.Y + 1.4, Z: attacker.Position.Z}
@@ -151,14 +189,12 @@ func (s *Server) mobHasLineOfSight(attacker *corentity.Entity, target spatial.Ve
 }
 
 // isPlayerStaringAtEnderman returns true if the player is looking directly at
-// the enderman's eye region. Matches PumpkinMC enderman.rs:is_player_staring.
-// The angular threshold is dot > 1 - 0.025/distance (vanilla cone test).
+// the enderman's eye region. The angular threshold is dot > 1 - 0.025/distance.
 func isPlayerStaringAtEnderman(p *player.Player, e *corentity.Entity) bool {
 	if p == nil || e == nil {
 		return false
 	}
 	// Carved pumpkin helmet grants immunity to provoking endermen.
-	// Slot 5 = helmet in the Java inventory layout (slots 5-8 = armor).
 	if p.Inventory[5].ItemID == "minecraft:carved_pumpkin" {
 		return false
 	}
@@ -168,7 +204,6 @@ func isPlayerStaringAtEnderman(p *player.Player, e *corentity.Entity) bool {
 	endermanEyeY := e.Position.Y + endermanEyeHeight
 	playerEyeY := p.Position.Y + playerEyeHeight
 
-	// Player look direction from yaw/pitch (same convention as velocity formula).
 	yawRad := -float64(p.Rotation.Yaw) * math.Pi / 180
 	pitchRad := float64(p.Rotation.Pitch) * math.Pi / 180
 	cosPitch := math.Cos(pitchRad)
