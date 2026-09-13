@@ -522,3 +522,66 @@ func distanceSquaredVec(a, b spatial.Vec3) float64 {
 	dx, dy, dz := a.X-b.X, a.Y-b.Y, a.Z-b.Z
 	return dx*dx + dy*dy + dz*dz
 }
+
+// isIronGolemTarget mirrors the vanilla iron golem NearestAttackableTargetGoal:
+// any Enemy (hostile) mob except the creeper.
+func isIronGolemTarget(t corentity.EntityType) bool {
+	return isHostileMob(t) && t != corentity.TypeCreeper
+}
+
+func (s *Server) closestHostileMob(source *corentity.Entity, radius float64) *corentity.Entity {
+	return s.closestEntityMatching(source, radius, func(candidate *corentity.Entity) bool {
+		return isHostileMob(candidate.Type)
+	})
+}
+
+// tickSnowGolemAI mirrors vanilla RangedAttackGoal(1.25, 20, 10): the snow golem
+// targets the nearest hostile mob within range and throws a snowball every 20
+// ticks, closing the distance when the target is beyond throwing range. Damage
+// and knockback are resolved by the shared projectile-vs-entity path (snowballs
+// deal 0 except 3 to blazes, and always apply knockback).
+func (s *Server) tickSnowGolemAI(e *corentity.Entity, ai *mobAI) {
+	if ai.attackCooldown > 0 {
+		ai.attackCooldown--
+	}
+	target := s.closestHostileMob(e, 10)
+	if target == nil {
+		_ = s.tickPassiveMobAI(e)
+		return
+	}
+	ai.hasWanderGoal = false
+	dx, dz := target.Position.X-e.Position.X, target.Position.Z-e.Position.Z
+	e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	if math.Hypot(dx, dz) > 10 {
+		s.navigateMob(e, ai, target.Position, pumpkinMovementSpeed(e.Type, 1.25))
+		return
+	}
+	e.VX, e.VZ = 0, 0
+	if ai.attackCooldown == 0 && s.mobHasLineOfSight(e, target.Position, 1.0) {
+		s.shootSnowball(e, target)
+		ai.attackCooldown = 20
+	}
+}
+
+func (s *Server) shootSnowball(shooter, target *corentity.Entity) {
+	if shooter == nil || target == nil || s.game == nil || s.world == nil {
+		return
+	}
+	start := spatial.Vec3{X: shooter.Position.X, Y: shooter.Position.Y + 1.45, Z: shooter.Position.Z}
+	dx := target.Position.X - start.X
+	dz := target.Position.Z - start.Z
+	horizontal := math.Hypot(dx, dz)
+	dy := target.Position.Y + 0.5 - start.Y + horizontal*0.2
+	distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	if distance < 0.001 {
+		return
+	}
+	const speed = 1.6
+	ball := corentity.New(s.game.NextEntityID(), newRandomUUID(), corentity.TypeSnowball, start.X, start.Y, start.Z)
+	ball.OwnerEntityID = shooter.EntityID
+	ball.VX, ball.VY, ball.VZ = dx/distance*speed, dy/distance*speed, dz/distance*speed
+	s.world.Entities.Add(ball)
+	handler.BroadcastSpawnMob(ball, s.sessions)
+	handler.BroadcastSoundAt(s.sessions, "minecraft:entity.snow_golem.shoot", handler.SoundCategoryHostile,
+		shooter.Position.X, shooter.Position.Y+1, shooter.Position.Z, 1, 1)
+}

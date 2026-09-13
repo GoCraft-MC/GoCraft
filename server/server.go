@@ -4464,10 +4464,15 @@ func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {
 func (s *Server) tickGolemAI(e *corentity.Entity) {
 	ai := s.mobAIFor(e)
 
+	if e.Type == corentity.TypeSnowGolem {
+		s.tickSnowGolemAI(e, ai)
+		return
+	}
+
 	if !ai.hasTarget && e.Type == corentity.TypeIronGolem {
 		nearest := 24.0
 		for _, candidate := range s.world.Entities.Snapshot() {
-			if candidate.Dead || candidate.Type != corentity.TypeZombie {
+			if candidate.Dead || !isIronGolemTarget(candidate.Type) {
 				continue
 			}
 			distance := math.Hypot(candidate.Position.X-e.Position.X, candidate.Position.Z-e.Position.Z)
@@ -4488,7 +4493,7 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 
 	nearestDist := 24.0
 	if ai.targetEntityID != 0 {
-		if target, ok := s.world.Entities.Get(ai.targetEntityID); ok && !target.Dead && target.Type == corentity.TypeZombie {
+		if target, ok := s.world.Entities.Get(ai.targetEntityID); ok && !target.Dead && isIronGolemTarget(target.Type) {
 			ai.targetX, ai.targetZ = target.Position.X, target.Position.Z
 			nearestDist = math.Hypot(target.Position.X-e.Position.X, target.Position.Z-e.Position.Z)
 		} else {
