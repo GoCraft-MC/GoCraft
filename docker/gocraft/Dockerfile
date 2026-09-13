@@ -12,7 +12,12 @@ ARG TARGETARCH
 ARG VERSION=dev
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/gocraft .
+    go build \
+      -tags release \
+      -trimpath \
+      -ldflags="-s -w -X GoCraft/server.Version=${VERSION}" \
+      -o /out/gocraft \
+      .
 
 RUN mkdir -p /out/data
 
@@ -29,5 +34,5 @@ EXPOSE 19106/udp
 
 USER nonroot
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=5 CMD [ "/usr/local/bin/gocraft", "--check-health" ]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=5 CMD [ "/usr/local/bin/gocraft", "check", "health" ]
 ENTRYPOINT [ "/usr/local/bin/gocraft" ]
