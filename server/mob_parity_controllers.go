@@ -11,10 +11,9 @@ import (
 	"GoCraft/java/session"
 )
 
-// mobParityState contains state used by mob-specific controllers that does not
-// belong in the generic mobAI pathfinder state. The canonical entity remains
-// the source of truth for persistent state; these values mirror vanilla's
-// transient Goal/Brain cooldowns and activity timers.
+// mobParityState contains transient Goal/Brain state that is deliberately not
+// persisted in entity NBT: attack cooldowns, jump cadence, anger timers and
+// flight anchors. Canonical persistent state stays on core/entity.Entity.
 type mobParityState struct {
 	primaryCooldown   int
 	secondaryCooldown int
@@ -118,46 +117,34 @@ func parityFlightSpeed(t corentity.EntityType, requested float64) float64 {
 	return minimum
 }
 
-// navigateMobByParity handles navigation models that cannot use the generic
-// ground A* navigator. It returns handled=true when the mob owns MOVE for this
-// tick. The caller must not run ground A* after a handled result.
+// navigateMobByParity owns MOVE for navigation models that are not ground A*.
 func (s *Server) navigateMobByParity(e *corentity.Entity, ai *mobAI, destination spatial.Vec3, speed float64) (handled, moving bool) {
 	if e == nil || ai == nil {
 		return false, false
 	}
-
 	if e.Type == corentity.TypeShulker {
 		clearMobNavigation(e, ai)
 		e.VY = 0
 		return true, false
 	}
-
 	if e.Type == corentity.TypeStrider {
 		return true, s.navigateStrider(e, destination, speed)
 	}
-
 	if isParityFlyingMob(e.Type) {
 		return true, s.navigateFlyingMob(e, destination, parityFlightSpeed(e.Type, speed))
 	}
-
 	if isParityAmphibiousMob(e.Type) && s.entityInWater(e) {
 		return true, s.navigateSwimmingMob(e, destination, speed)
 	}
-
 	if isParityHoppingMob(e.Type) {
 		return true, s.navigateHoppingMob(e, destination, speed)
 	}
-
 	return false, false
 }
 
 func (s *Server) navigateFlyingMob(e *corentity.Entity, destination spatial.Vec3, speed float64) bool {
-	dx := destination.X - e.Position.X
-	dy := destination.Y - e.Position.Y
-	dz := destination.Z - e.Position.Z
+	dx, dy, dz := destination.X-e.Position.X, destination.Y-e.Position.Y, destination.Z-e.Position.Z
 	if e.Type == corentity.TypePhantom {
-		// Phantoms approach the target's upper body instead of scraping along the
-		// floor like a ground mob.
 		dy += 1.5
 	}
 	distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
@@ -165,17 +152,13 @@ func (s *Server) navigateFlyingMob(e *corentity.Entity, destination spatial.Vec3
 		e.VX, e.VY, e.VZ = 0, 0, 0
 		return false
 	}
-	e.VX = dx / distance * speed
-	e.VY = dy / distance * speed
-	e.VZ = dz / distance * speed
+	e.VX, e.VY, e.VZ = dx/distance*speed, dy/distance*speed, dz/distance*speed
 	e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
 	return true
 }
 
 func (s *Server) navigateSwimmingMob(e *corentity.Entity, destination spatial.Vec3, speed float64) bool {
-	dx := destination.X - e.Position.X
-	dy := destination.Y - e.Position.Y
-	dz := destination.Z - e.Position.Z
+	dx, dy, dz := destination.X-e.Position.X, destination.Y-e.Position.Y, destination.Z-e.Position.Z
 	distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
 	if distance < 0.35 {
 		e.VX, e.VY, e.VZ = 0, 0, 0
@@ -184,18 +167,17 @@ func (s *Server) navigateSwimmingMob(e *corentity.Entity, destination spatial.Ve
 	if speed < 0.06 {
 		speed = 0.06
 	}
-	e.VX = dx / distance * speed
-	e.VY = dy / distance * speed
-	e.VZ = dz / distance * speed
+	e.VX, e.VY, e.VZ = dx/distance*speed, dy/distance*speed, dz/distance*speed
 	e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
 	return true
 }
 
 func (s *Server) navigateHoppingMob(e *corentity.Entity, destination spatial.Vec3, speed float64) bool {
 	state := parityState(e)
-	tickParityCooldowns(state)
-	dx := destination.X - e.Position.X
-	dz := destination.Z - e.Position.Z
+	if state.jumpCooldown > 0 {
+		state.jumpCooldown--
+	}
+	dx, dz := destination.X-e.Position.X, destination.Z-e.Position.Z
 	distance := math.Hypot(dx, dz)
 	if distance < 0.35 {
 		e.VX, e.VZ = 0, 0
@@ -209,17 +191,13 @@ func (s *Server) navigateHoppingMob(e *corentity.Entity, destination spatial.Vec
 	if e.OnGround && state.jumpCooldown <= 0 {
 		switch e.Type {
 		case corentity.TypeRabbit:
-			e.VY = 0.42
-			state.jumpCooldown = 10
+			e.VY, state.jumpCooldown = 0.42, 10
 		case corentity.TypeSlime:
-			e.VY = 0.42
-			state.jumpCooldown = 10 + int(uint32(e.EntityID)%10)
+			e.VY, state.jumpCooldown = 0.42, 10+int(uint32(e.EntityID)%10)
 		case corentity.TypeMagmaCube:
-			e.VY = 0.42
-			state.jumpCooldown = 20 + int(uint32(e.EntityID)%20)
+			e.VY, state.jumpCooldown = 0.42, 20+int(uint32(e.EntityID)%20)
 		case corentity.TypeBreeze:
-			e.VY = 0.62
-			state.jumpCooldown = 18
+			e.VY, state.jumpCooldown = 0.62, 18
 		}
 	}
 	return true
@@ -234,7 +212,6 @@ func (s *Server) navigateStrider(e *corentity.Entity, destination spatial.Vec3, 
 	below := s.world.GetBlock(x, y-1, z).ResourceLocation()
 	inLava := feet == "minecraft:lava" || below == "minecraft:lava"
 	if !inLava && s.entityInWater(e) {
-		// Striders shiver and are intentionally sluggish away from lava.
 		speed *= 0.45
 	}
 	if speed < 0.04 {
@@ -254,254 +231,63 @@ func (s *Server) navigateStrider(e *corentity.Entity, destination spatial.Vec3, 
 	return true
 }
 
-// tickParityPassiveIdle owns the idle goal stack for mobs whose vanilla
-// behaviour is materially different from random ground wandering. It is called
-// after panic, breeding and riding have had their higher-priority chance to run.
-func (s *Server) tickParityPassiveIdle(e *corentity.Entity, ai *mobAI) bool {
+// tickParityHostileIdle replaces random ground wandering for flying, aquatic,
+// hopping and anchored hostiles when they currently have no attack target.
+func (s *Server) tickParityHostileIdle(e *corentity.Entity, ai *mobAI) bool {
 	if e == nil || ai == nil {
 		return false
 	}
 	state := parityState(e)
-	tickParityCooldowns(state)
-
-	switch e.Type {
-	case corentity.TypeBat:
-		return s.tickBatParity(e, ai, state)
-	case corentity.TypeAllay, corentity.TypeBee, corentity.TypeParrot:
-		return s.tickPassiveFlightParity(e, ai, state)
-	case corentity.TypeCod, corentity.TypeSalmon, corentity.TypeTropicalFish:
-		return s.tickSchoolingFishParity(e, ai)
-	case corentity.TypeDolphin:
-		return s.tickDolphinParity(e, ai)
-	case corentity.TypeAxolotl:
-		return s.tickAxolotlParity(e, ai, state)
-	case corentity.TypeFrog:
-		return s.tickFrogParity(e, ai, state)
-	case corentity.TypeFox:
-		return s.tickFoxParity(e, ai, state)
-	case corentity.TypeCat, corentity.TypeWolf, corentity.TypeParrot:
-		return s.tickTameableFollowParity(e, ai)
-	case corentity.TypePolarBear:
-		return s.tickPolarBearParity(e, ai, state)
-	case corentity.TypeGoat:
-		return s.tickGoatParity(e, ai, state)
-	case corentity.TypeRabbit:
-		return s.tickRabbitParity(e, ai)
-	case corentity.TypeStrider:
-		return s.tickStriderIdleParity(e, ai)
-	case corentity.TypeSquid, corentity.TypeGlowSquid, corentity.TypePufferfish, corentity.TypeTadpole:
-		// Their canonical controller is fully aquatic; avoid falling back to a
-		// land wander goal when they are in water.
-		if s.entityInWater(e) {
-			s.tickAquaticMobAI(e, ai)
-			return true
-		}
+	if state.phaseTicks > 0 {
+		state.phaseTicks--
 	}
-	return false
-}
-
-func (s *Server) tickPassiveFlightParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
-	if e.Tamed && e.HasTameOwner {
-		if s.tickTameableFollowParity(e, ai) {
-			return true
-		}
-	}
-	if !state.hasAnchor || state.phaseTicks <= 0 || distanceSquaredVec(e.Position, state.anchor) < 1 {
-		state.anchor = spatial.Vec3{
-			X: e.Position.X + ai.rng.Float64()*16 - 8,
-			Y: e.Position.Y + ai.rng.Float64()*8 - 4,
-			Z: e.Position.Z + ai.rng.Float64()*16 - 8,
-		}
-		state.hasAnchor = true
-		state.phaseTicks = 30 + ai.rng.Intn(50)
-	}
-	s.navigateFlyingMob(e, state.anchor, parityFlightSpeed(e.Type, pumpkinMovementSpeed(e.Type, 1.0)))
-	return true
-}
-
-func (s *Server) tickBatParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
-	if s.world == nil {
-		return false
-	}
-	x := int(math.Floor(e.Position.X))
-	y := int(math.Floor(e.Position.Y))
-	z := int(math.Floor(e.Position.Z))
-	above := s.world.GetBlock(x, y+1, z).ResourceLocation()
-	day := ((s.worldAge%24000)+24000)%24000 < 12000
-	if day && above != "minecraft:air" && above != "minecraft:water" && above != "minecraft:lava" {
+	switch {
+	case e.Type == corentity.TypeShulker:
 		e.VX, e.VY, e.VZ = 0, 0, 0
-		state.hasAnchor = false
 		return true
-	}
-	return s.tickPassiveFlightParity(e, ai, state)
-}
-
-func (s *Server) tickSchoolingFishParity(e *corentity.Entity, ai *mobAI) bool {
-	if !s.entityInWater(e) || s.world == nil {
-		return false
-	}
-	leader := s.closestEntityOfTypes(e, 12, e.Type)
-	if leader != nil {
-		s.navigateSwimmingMob(e, leader.Position, pumpkinMovementSpeed(e.Type, 1.0))
-		return true
-	}
-	s.tickAquaticMobAI(e, ai)
-	return true
-}
-
-func (s *Server) tickDolphinParity(e *corentity.Entity, ai *mobAI) bool {
-	if !s.entityInWater(e) {
-		return false
-	}
-	if target := s.closestVisiblePlayer(e, 10); target != nil {
-		s.navigateSwimmingMob(e, spatial.Vec3{X: target.Position.X, Y: target.Position.Y+0.5, Z: target.Position.Z}, pumpkinMovementSpeed(e.Type, 1.2))
-		return true
-	}
-	s.tickAquaticMobAI(e, ai)
-	return true
-}
-
-func (s *Server) tickAxolotlParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
-	if !s.entityInWater(e) {
-		return false
-	}
-	if prey := s.closestEntityOfTypes(e, 8,
-		corentity.TypeCod, corentity.TypeSalmon, corentity.TypeTropicalFish,
-		corentity.TypeSquid, corentity.TypeGlowSquid, corentity.TypeTadpole); prey != nil {
-		return s.tickEntityHunter(e, ai, state, prey, 2, 20, 1.5, pumpkinMovementSpeed(e.Type, 1.2))
-	}
-	s.tickAquaticMobAI(e, ai)
-	return true
-}
-
-func (s *Server) tickFrogParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
-	if prey := s.closestEntityOfTypes(e, 10, corentity.TypeSlime, corentity.TypeMagmaCube); prey != nil {
-		return s.tickEntityHunter(e, ai, state, prey, 2, 20, 1.6, pumpkinMovementSpeed(e.Type, 1.2))
-	}
-	if s.entityInWater(e) {
+	case isAquaticMob(e.Type) && s.entityInWater(e):
 		s.tickAquaticMobAI(e, ai)
 		return true
-	}
-	return false
-}
-
-func (s *Server) tickFoxParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
-	if !e.Trusting {
-		if target := s.closestVisiblePlayer(e, 16); target != nil {
-			dx, dz := e.Position.X-target.Position.X, e.Position.Z-target.Position.Z
-			distance := math.Hypot(dx, dz)
-			if distance > 0.001 {
-				destination := spatial.Vec3{X: e.Position.X + dx/distance*12, Y: e.Position.Y, Z: e.Position.Z + dz/distance*12}
-				s.navigateMob(e, ai, destination, pumpkinMovementSpeed(e.Type, 1.6))
-				return true
-			}
+	case isParityFlyingMob(e.Type):
+		if !state.hasAnchor || state.phaseTicks <= 0 || distanceSquaredVec(e.Position, state.anchor) < 1 {
+			state.anchor = spatial.Vec3{X: e.Position.X + ai.rng.Float64()*20 - 10, Y: e.Position.Y + ai.rng.Float64()*10 - 5, Z: e.Position.Z + ai.rng.Float64()*20 - 10}
+			state.hasAnchor = true
+			state.phaseTicks = 30 + ai.rng.Intn(60)
 		}
-	}
-	if prey := s.closestEntityOfTypes(e, 12, corentity.TypeChicken, corentity.TypeRabbit, corentity.TypeCod, corentity.TypeSalmon); prey != nil {
-		return s.tickEntityHunter(e, ai, state, prey, 2, 20, 1.6, pumpkinMovementSpeed(e.Type, 1.3))
-	}
-	return false
-}
-
-func (s *Server) tickTameableFollowParity(e *corentity.Entity, ai *mobAI) bool {
-	if !e.Tamed || !e.HasTameOwner || e.Sitting || s.game == nil {
-		return false
-	}
-	var owner *player.Player
-	s.game.OnlinePlayers(func(candidate *player.Player) {
-		if owner == nil && candidate.UUID == e.TameOwnerUUID && candidate.Dimension == s.simulationDimension && !candidate.Dead {
-			owner = candidate
-		}
-	})
-	if owner == nil {
-		return false
-	}
-	dx, dz := owner.Position.X-e.Position.X, owner.Position.Z-e.Position.Z
-	distanceSquared := dx*dx + dz*dz
-	if distanceSquared > 12*12 {
-		// Vanilla tameables teleport to their owner when pathing falls far behind.
-		e.Position = spatial.Vec3{X: owner.Position.X + 1, Y: owner.Position.Y, Z: owner.Position.Z + 1}
-		e.VX, e.VY, e.VZ = 0, 0, 0
-		clearMobNavigation(e, ai)
+		s.navigateFlyingMob(e, state.anchor, parityFlightSpeed(e.Type, pumpkinMovementSpeed(e.Type, 0.8)))
 		return true
-	}
-	if distanceSquared > 4*4 {
-		s.navigateMob(e, ai, owner.Position, pumpkinMovementSpeed(e.Type, 1.2))
+	case isParityHoppingMob(e.Type):
+		if !ai.hasWanderGoal || state.phaseTicks <= 0 {
+			ai.wanderTarget = spatial.Vec3{X: e.Position.X + ai.rng.Float64()*12 - 6, Y: e.Position.Y, Z: e.Position.Z + ai.rng.Float64()*12 - 6}
+			ai.hasWanderGoal = true
+			state.phaseTicks = 30 + ai.rng.Intn(50)
+		}
+		s.navigateHoppingMob(e, ai.wanderTarget, pumpkinMovementSpeed(e.Type, 0.8))
 		return true
 	}
 	return false
 }
 
-func (s *Server) tickPolarBearParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
-	if e.IsBaby || s.game == nil {
-		return false
-	}
-	cubNearby := s.closestEntityMatching(e, 12, func(candidate *corentity.Entity) bool {
-		return candidate.Type == corentity.TypePolarBear && candidate.IsBaby
-	}) != nil
-	if !cubNearby {
-		return false
-	}
-	target := s.closestVisiblePlayer(e, 16)
-	if target == nil {
-		return false
-	}
-	return s.tickPlayerHunter(e, ai, state, target, 6, 25, 2.0, pumpkinMovementSpeed(e.Type, 1.25))
-}
-
-func (s *Server) tickGoatParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
-	if e.IsBaby || state.primaryCooldown > 0 {
-		return false
-	}
-	target := s.closestVisiblePlayer(e, 10)
-	if target == nil {
-		return false
-	}
-	dx, dz := target.Position.X-e.Position.X, target.Position.Z-e.Position.Z
-	distance := math.Hypot(dx, dz)
-	if distance < 0.001 {
-		return false
-	}
-	// Goats periodically choose a straight ram line. The cooldown is intentionally
-	// long so this remains a distinct goal rather than ordinary melee pursuit.
-	if distance <= 2.0 {
-		if s.mobHasLineOfSight(e, target.Position, 1.62) {
-			s.damagePlayerFromParityMob(target, 2, "was rammed by a goat")
-			target.Position.X += dx / distance * 1.5
-			target.Position.Z += dz / distance * 1.5
-		}
-		state.primaryCooldown = 600
-		e.VX, e.VZ = 0, 0
-		return true
-	}
-	s.navigateMob(e, ai, target.Position, pumpkinMovementSpeed(e.Type, 1.8))
-	return true
-}
-
-func (s *Server) tickRabbitParity(e *corentity.Entity, ai *mobAI) bool {
-	if ai.hasWanderGoal {
-		return s.navigateMob(e, ai, ai.wanderTarget, pumpkinMovementSpeed(e.Type, 1.0))
-	}
-	return false
-}
-
-func (s *Server) tickStriderIdleParity(e *corentity.Entity, ai *mobAI) bool {
-	if ai.hasWanderGoal {
-		return s.navigateStrider(e, ai.wanderTarget, pumpkinMovementSpeed(e.Type, 1.0))
-	}
-	return false
-}
-
-// tickParityHostileNavigationSpecials runs special attacks whose vanilla goal
-// owns MOVE/LOOK at range. It is deliberately called from navigateMob because
-// the legacy common hostile controller only delegates here after its generic
-// melee/ranged goals decline to act.
+// tickParityHostileNavigationSpecials handles ranged/special goals that the
+// old common hostile controller does not understand. Returning true means the
+// special goal owns MOVE/LOOK for this tick.
 func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mobAI, destination spatial.Vec3) bool {
 	if e == nil {
 		return false
 	}
+	switch e.Type {
+	case corentity.TypeGuardian, corentity.TypeElderGuardian, corentity.TypeWarden, corentity.TypeShulker, corentity.TypeEvoker:
+	default:
+		return false
+	}
+
 	state := parityState(e)
-	tickParityCooldowns(state)
+	if state.primaryCooldown > 0 {
+		state.primaryCooldown--
+	}
+	if state.phaseTicks > 0 {
+		state.phaseTicks--
+	}
 	target := s.closestPlayerToPosition(destination, 2.5)
 
 	switch e.Type {
@@ -509,8 +295,7 @@ func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mo
 		if target == nil {
 			return false
 		}
-		distance := distance2D(e.Position, target.Position)
-		if distance <= 15 && s.mobHasLineOfSight(e, target.Position, 1.62) {
+		if distance2D(e.Position, target.Position) <= 15 && s.mobHasLineOfSight(e, target.Position, 1.62) {
 			if state.phaseTicks <= 0 && state.primaryCooldown <= 0 {
 				state.phaseTicks = 40
 				state.primaryCooldown = 60
@@ -540,9 +325,6 @@ func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mo
 		}
 	case corentity.TypeShulker:
 		if target != nil && state.primaryCooldown <= 0 && distance2D(e.Position, target.Position) <= 16 && s.mobHasLineOfSight(e, target.Position, 1.62) {
-			// Shulker bullets need their own projectile entity/metadata path. Until
-			// that adapter exists, keep the attack timing and levitation-producing
-			// hit server-authoritative rather than incorrectly using ground melee.
 			s.damagePlayerFromParityMob(target, 4, "was shot by a shulker")
 			state.primaryCooldown = 20 + int(uint32(e.EntityID)%20)
 		}
@@ -550,9 +332,6 @@ func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mo
 		return true
 	case corentity.TypeEvoker:
 		if target != nil && state.primaryCooldown <= 0 && distance2D(e.Position, target.Position) <= 12 {
-			// Fang spell approximation is server-authoritative damage at the target
-			// position. The dedicated evoker-fang entity/animation is tracked as a
-			// separate adapter parity item.
 			s.damagePlayerFromParityMob(target, 6, "was bitten by evocation fangs")
 			state.primaryCooldown = 100
 			return true
@@ -561,36 +340,38 @@ func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mo
 	return false
 }
 
-// tickOutOfBandParityMob handles mobs that were missing from the legacy
-// isPassiveMob/isHostileMob classifiers entirely. It is invoked serially from
-// the pre-pass so bosses are not silently motionless.
+// tickOutOfBandParityMob covers mobs absent from the legacy passive/hostile
+// classifiers. The pre-pass calls this serially before worker AI begins.
 func (s *Server) tickOutOfBandParityMob(e *corentity.Entity) bool {
 	if e == nil || e.Dead {
 		return false
 	}
 	ai := s.mobAIFor(e)
 	state := parityState(e)
-	tickParityCooldowns(state)
+	if state.primaryCooldown > 0 {
+		state.primaryCooldown--
+	}
+	if state.angerTicks > 0 {
+		state.angerTicks--
+	}
+	if state.phaseTicks > 0 {
+		state.phaseTicks--
+	}
 
 	switch e.Type {
 	case corentity.TypeGiant:
-		target := s.closestVisiblePlayer(e, 32)
-		if target == nil {
-			s.tickHostileIdleGoals(e, ai)
-			return true
-		}
-		return s.tickPlayerHunter(e, ai, state, target, 50, 20, 3.5, 0.25)
-	case corentity.TypeZombifiedPiglin:
-		// Neutral by default. Damage/anger integration promotes this state when
-		// an attacker is known; until then it wanders instead of attacking every
-		// player as a generic hostile would.
-		if state.angerTicks <= 0 {
-			s.tickHostileIdleGoals(e, ai)
-			return true
-		}
 		if target := s.closestVisiblePlayer(e, 32); target != nil {
-			return s.tickPlayerHunter(e, ai, state, target, 5, 20, 1.8, 0.23)
+			return s.tickPlayerHunter(e, ai, state, target, 50, 20, 3.5, 0.25)
 		}
+		s.tickHostileIdleGoals(e, ai)
+		return true
+	case corentity.TypeZombifiedPiglin:
+		if state.angerTicks > 0 {
+			if target := s.closestVisiblePlayer(e, 32); target != nil {
+				return s.tickPlayerHunter(e, ai, state, target, 5, 20, 1.8, 0.23)
+			}
+		}
+		s.tickHostileIdleGoals(e, ai)
 		return true
 	case corentity.TypeEnderDragon:
 		if !state.hasAnchor || state.phaseTicks <= 0 || distanceSquaredVec(e.Position, state.anchor) < 16 {
@@ -612,6 +393,9 @@ func (s *Server) tickEntityHunter(attacker *corentity.Entity, ai *mobAI, state *
 	if attacker == nil || target == nil || target.Dead {
 		return false
 	}
+	if state.primaryCooldown > 0 {
+		state.primaryCooldown--
+	}
 	dx, dz := target.Position.X-attacker.Position.X, target.Position.Z-attacker.Position.Z
 	distance := math.Hypot(dx, dz)
 	if distance <= reach {
@@ -629,6 +413,9 @@ func (s *Server) tickEntityHunter(attacker *corentity.Entity, ai *mobAI, state *
 func (s *Server) tickPlayerHunter(attacker *corentity.Entity, ai *mobAI, state *mobParityState, target *player.Player, damage float32, cooldown int, reach, speed float64) bool {
 	if attacker == nil || target == nil || target.Dead {
 		return false
+	}
+	if state.primaryCooldown > 0 {
+		state.primaryCooldown--
 	}
 	dx, dz := target.Position.X-attacker.Position.X, target.Position.Z-attacker.Position.Z
 	distance := math.Hypot(dx, dz)
