@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Read the wiki
+    url: https://github.com/GoCraft-MC/GoCraft/wiki
+    about: Read the wiki before reporting errors
