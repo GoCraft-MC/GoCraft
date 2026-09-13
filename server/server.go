@@ -191,6 +191,8 @@ type mobAI struct {
 	bowDrawTicks   int  // ticks remaining before a skeleton releases its arrow
 	fuseTick       int  // creeper fuse progress (30 ticks to detonation)
 	angered        bool // enderman: true once provoked (by staring), stays true until target lost
+	doorBreakTick  int              // zombie: ticks spent bashing the current wooden door (240 = break)
+	doorBreakPos   spatial.BlockPos // zombie: the door currently being broken
 	path           []spatial.Vec3
 	pathIndex      int
 	pathGoal       spatial.BlockPos
@@ -4659,6 +4661,12 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	visible := s.mobHasLineOfSight(e, target.Player.Position, 1.62)
 	if distance > 0.001 {
 		e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	}
+
+	// Hard-difficulty zombies bash through a wooden door blocking the way to
+	// their target. While actively breaking, the goal owns the tick.
+	if s.tickZombieDoorBreak(e, ai) {
+		return
 	}
 
 	// Anchored attackers own the tick, including when generic navigation
