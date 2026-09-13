@@ -58,12 +58,12 @@ func dimensionCommandTarget(p *player.Player, w *coreworld.World, dimension int3
 	}
 	if dimension == 2 {
 		x, z := 100, 0
-		w.QueuePregeneration(coreworld.ChunkCoordsForX(x), coreworld.ChunkCoordsForZ(z), 1)
+		w.QueuePregeneration(posToChunk(float64(x)), posToChunk(float64(z)), 1)
 		return spatial.Vec3{X: float64(x) + 0.5, Y: float64(w.SurfaceY(x, z) + 1), Z: float64(z) + 0.5}
 	}
 	x := int(math.Floor(p.Position.X / 8))
 	z := int(math.Floor(p.Position.Z / 8))
-	w.QueuePregeneration(coreworld.ChunkCoordsForX(x), coreworld.ChunkCoordsForZ(z), 1)
+	w.QueuePregeneration(posToChunk(float64(x)), posToChunk(float64(z)), 1)
 	for y := 32; y <= 118; y++ {
 		if safeRespawnSpace(w, x, y, z) {
 			return spatial.Vec3{X: float64(x) + 0.5, Y: float64(y), Z: float64(z) + 0.5}
