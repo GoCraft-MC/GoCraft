@@ -11,12 +11,48 @@ import (
 	"GoCraft/java/handler"
 )
 
-const villagerDoorCloseTicks = 60
+const (
+	villagerDoorCloseTicks = 60
+	// LivingEntity.startSleeping(BlockPos) moves the entity onto the bed at
+	// block centre with the vanilla bed-height offset. Keeping the canonical
+	// server position there is important for both Java and Bedrock: the tracked
+	// sleeping position controls pose/orientation, while movement packets still
+	// use the entity's real position.
+	villagerBedSleepYOffset = 0.6875
+
+	// Vanilla adult villager schedule boundaries. REST is handled by the sleep
+	// branch in tickPassiveMobAI; these phases feed the same navigation stack
+	// with the appropriate POI target before generic idle wandering runs.
+	villagerWorkStart = int64(2000)
+	villagerMeetStart = int64(9000)
+	villagerIdleStart = int64(11000)
+	villagerRestStart = int64(12000)
+)
 
 // tickVillagerDoor mirrors the wooden-door capability used by Pumpkin's walk
-// node evaluator. It runs on the serial tick phase because villagers may share
-// an entrance while their ordinary AI is evaluated in parallel.
+// node evaluator. It also runs the lightweight villager brain prelude that
+// keeps HOME state, scheduled POI routing and sleeping placement in sync before
+// the shared passive-mob navigation stack executes.
 func (s *Server) tickVillagerDoor(villager *corentity.Entity, ai *mobAI) {
+	if villager == nil || ai == nil {
+		return
+	}
+
+	// A villager may acquire or lose HOME after mobAIFor created its state.
+	// Keep the cached homing fields synchronized instead of leaving a newly
+	// housed villager permanently in the roaming-animal mode.
+	s.syncVillagerHomeAI(villager, ai)
+
+	// Vanilla SleepInBed ultimately calls LivingEntity.startSleeping, which
+	// records the sleeping BlockPos and repositions the entity onto the bed.
+	// GoCraft already tracked the bed position/pose but previously skipped the
+	// reposition, so villagers could visibly sleep on the floor next to a bed.
+	if villager.Sleeping {
+		s.positionVillagerInBed(villager, ai)
+	} else {
+		s.applyVillagerScheduledWalkTarget(villager, ai)
+	}
+
 	if ai.doorCloseTick > 0 {
 		ai.doorCloseTick--
 		if ai.doorCloseTick == 0 {
@@ -28,7 +64,7 @@ func (s *Server) tickVillagerDoor(villager *corentity.Entity, ai *mobAI) {
 			}
 		}
 	}
-	if ai.pathIndex >= len(ai.path) {
+	if villager.Sleeping || ai.pathIndex >= len(ai.path) {
 		return
 	}
 	waypoint := ai.path[ai.pathIndex]
@@ -43,6 +79,148 @@ func (s *Server) tickVillagerDoor(villager *corentity.Entity, ai *mobAI) {
 	if s.setVillagerDoorOpen(position, true) {
 		ai.openedDoor = position
 		ai.doorCloseTick = villagerDoorCloseTicks
+	}
+}
+
+// syncVillagerHomeAI mirrors the Brain HOME-memory effect on navigation. The
+// entity owns the canonical POI state; mobAI only caches a movement anchor, so
+// the cache must follow claims made after the AI object was first allocated.
+func (s *Server) syncVillagerHomeAI(villager *corentity.Entity, ai *mobAI) {
+	if villager.HasVillageHome {
+		ai.roaming = false
+		center := villager.VillageCenter
+		if center == (spatial.BlockPos{}) {
+			center = villager.VillageBed
+		}
+		ai.homeX = float64(center.X) + 0.5
+		ai.homeZ = float64(center.Z) + 0.5
+		return
+	}
+	ai.roaming = true
+}
+
+// applyVillagerScheduledWalkTarget supplies the POI-driven parts of the
+// vanilla adult villager schedule to GoCraft's shared navigator:
+//
+//   2000..8999  WORK  -> job site
+//   9000..10999 MEET  -> village meeting point
+//   11000..11999 IDLE -> no forced POI target
+//   12000..      REST -> handled by tickPassiveMobAI / SleepInBed
+//
+// Panic, breeding and sleeping are evaluated earlier by tickPassiveMobAI and
+// therefore still pre-empt these scheduled walk targets, matching Brain
+// activity priority rather than turning the schedule into an unconditional
+// teleport or movement override.
+func (s *Server) applyVillagerScheduledWalkTarget(villager *corentity.Entity, ai *mobAI) {
+	if s == nil || s.world == nil || villager == nil || ai == nil || villager.IsBaby || villager.Sleeping {
+		return
+	}
+	dayTime := s.worldAge % 24000
+	if dayTime < 0 {
+		dayTime += 24000
+	}
+
+	var target spatial.Vec3
+	hasTarget := false
+	switch {
+	case dayTime >= villagerWorkStart && dayTime < villagerMeetStart && villager.HasVillageWorkstation:
+		job := villager.VillageWorkstation
+		block, loaded := s.world.BlockIfLoaded(int(job.X), int(job.Y), int(job.Z))
+		if loaded && !block.IsAir() {
+			target = spatial.Vec3{X: float64(job.X) + 0.5, Y: float64(job.Y), Z: float64(job.Z) + 0.5}
+			hasTarget = true
+		}
+	case dayTime >= villagerMeetStart && dayTime < villagerIdleStart && villager.VillageCenter != (spatial.BlockPos{}):
+		// Vanilla MEET uses the meeting POI with stroll/social behaviours around
+		// it rather than stacking every villager on one exact point. Give each
+		// villager a stable small offset around its village centre.
+		center := villager.VillageCenter
+		angle := float64(uint32(villager.EntityID)%16) * (2 * math.Pi / 16)
+		radius := 2.0 + float64(uint32(villager.EntityID)%3)*0.5
+		target = spatial.Vec3{
+			X: float64(center.X) + 0.5 + math.Cos(angle)*radius,
+			Y: float64(center.Y),
+			Z: float64(center.Z) + 0.5 + math.Sin(angle)*radius,
+		}
+		hasTarget = true
+	case dayTime >= villagerIdleStart && dayTime < villagerRestStart:
+		return
+	default:
+		return
+	}
+	if !hasTarget {
+		return
+	}
+
+	goal := spatial.BlockPos{X: int32(math.Floor(target.X)), Y: int32(math.Floor(target.Y)), Z: int32(math.Floor(target.Z))}
+	if ai.hasPathGoal && ai.pathGoal != goal {
+		clearMobNavigation(villager, ai)
+	}
+	ai.wanderTarget = target
+	ai.hasWanderGoal = true
+}
+
+// positionVillagerInBed is the server-side equivalent of vanilla
+// LivingEntity.startSleeping/setPosToBed for villagers. HOME/bed POIs are
+// expected to refer to the head half. Older generated/persisted GoCraft worlds
+// may still point at a foot half, so normalise that first and keep VillageBed
+// canonical for Java sleeping-position metadata and Bedrock BedPosition data.
+func (s *Server) positionVillagerInBed(villager *corentity.Entity, ai *mobAI) bool {
+	if s == nil || s.world == nil || villager == nil || villager.Type != corentity.TypeVillager || !villager.HasVillageHome {
+		return false
+	}
+
+	bedPos, _, ok := s.villagerBedHead(villager.VillageBed)
+	if !ok {
+		return false
+	}
+	villager.VillageBed = bedPos
+	villager.Position.X = float64(bedPos.X) + 0.5
+	villager.Position.Y = float64(bedPos.Y) + villagerBedSleepYOffset
+	villager.Position.Z = float64(bedPos.Z) + 0.5
+	villager.VX, villager.VY, villager.VZ = 0, 0, 0
+	villager.OnGround = true
+	clearMobNavigation(villager, ai)
+	return true
+}
+
+// villagerBedHead resolves either half of a bed to its head block. Vanilla
+// HOME POIs are represented by the bed head; normalising here also prevents a
+// persisted foot-half claim from producing the wrong sleeping anchor.
+func (s *Server) villagerBedHead(position spatial.BlockPos) (spatial.BlockPos, coreworld.Block, bool) {
+	if s == nil || s.world == nil {
+		return spatial.BlockPos{}, coreworld.Block{}, false
+	}
+	x, y, z := int(position.X), int(position.Y), int(position.Z)
+	bed := s.world.GetBlock(x, y, z)
+	if !strings.HasSuffix(bed.ResourceLocation(), "_bed") {
+		return spatial.BlockPos{}, coreworld.Block{}, false
+	}
+	if bed.Properties["part"] != "foot" {
+		return position, bed, true
+	}
+
+	dx, dz := villagerBedFacingOffset(bed.Properties["facing"])
+	headPos := spatial.BlockPos{X: position.X + int32(dx), Y: position.Y, Z: position.Z + int32(dz)}
+	head := s.world.GetBlock(int(headPos.X), int(headPos.Y), int(headPos.Z))
+	if head.ResourceLocation() != bed.ResourceLocation() || head.Properties["part"] != "head" {
+		return spatial.BlockPos{}, coreworld.Block{}, false
+	}
+	return headPos, head, true
+}
+
+func villagerBedFacingOffset(facing string) (dx, dz int) {
+	switch facing {
+	case "north":
+		return 0, -1
+	case "south":
+		return 0, 1
+	case "west":
+		return -1, 0
+	case "east":
+		return 1, 0
+	default:
+		return 0, 0
 	}
 }
 
