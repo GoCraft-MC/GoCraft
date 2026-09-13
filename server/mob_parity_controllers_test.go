@@ -4,11 +4,13 @@ import (
 	"math"
 	"testing"
 
+	"GoCraft/config"
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/game"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/session"
 )
 
 func newMobParityTestServer(t *testing.T) *Server {
@@ -70,6 +72,7 @@ func TestParityPiglinRespectsGoldArmourUnlessProvoked(t *testing.T) {
 	s := newMobParityTestServer(t)
 	piglin := corentity.New(4, [16]byte{}, corentity.TypePiglin, 1.5, 64, 1.5)
 	p := player.New([16]byte{9}, "gold", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
 	p.Inventory[5] = player.ItemStack{ItemID: "minecraft:golden_helmet", Count: 1}
 	if s.parityMobHostileToPlayer(piglin, p) {
 		t.Fatal("unprovoked piglin targeted a gold-armoured player")
@@ -85,6 +88,7 @@ func TestParitySpiderNeutralInDirectDaylightButRetaliates(t *testing.T) {
 	s.worldAge = 1000
 	spider := corentity.New(5, [16]byte{}, corentity.TypeSpider, 1.5, 64, 1.5)
 	p := player.New([16]byte{10}, "daylight", player.ClientEditionJava)
+	p.GameMode = player.GameModeSurvival
 	if s.parityMobHostileToPlayer(spider, p) {
 		t.Fatal("unprovoked spider targeted a player in direct daylight")
 	}
@@ -139,5 +143,63 @@ func TestOutOfBandEnderDragonReceivesFlightAI(t *testing.T) {
 	}
 	if math.Abs(dragon.VX)+math.Abs(dragon.VY)+math.Abs(dragon.VZ) == 0 {
 		t.Fatal("ender dragon remained motionless after AI tick")
+	}
+}
+
+func TestParityNeutralControllersRetaliate(t *testing.T) {
+	for _, mobType := range []corentity.EntityType{corentity.TypePiglin, corentity.TypeSpider} {
+		t.Run(string(mobType), func(t *testing.T) {
+			s := newMobParityTestServer(t)
+			s.cfg = &config.Config{Difficulty: "normal"}
+			s.sessions = session.NewManager()
+			s.worldAge = 1000
+			p := player.New([16]byte{21}, "target", player.ClientEditionBedrock)
+			p.GameMode = player.GameModeSurvival
+			p.Position = spatial.Vec3{X: 8.5, Y: 64, Z: 1.5}
+			p.Inventory[5] = player.ItemStack{ItemID: "minecraft:golden_helmet", Count: 1}
+			if err := s.game.AddPlayer(p); err != nil {
+				t.Fatal(err)
+			}
+			mob := corentity.New(100, [16]byte{}, mobType, 1.5, 64, 1.5)
+			mob.OnGround = true
+			ai := s.mobAIFor(mob)
+			ai.lookTick = 2 // Keep idle wandering from obscuring target acquisition.
+			s.tickHostileMobAI(mob)
+			if ai.hasPathGoal || mob.VX != 0 || mob.VZ != 0 {
+				t.Fatal("neutral mob pursued player")
+			}
+			p.LastAttackedEntityID = mob.EntityID
+			s.tickHostileMobAI(mob)
+			if !ai.hasPathGoal || mob.VX <= 0 || parityState(mob).angerTicks <= 0 {
+				t.Fatal("provoked mob did not acquire and pursue attacker")
+			}
+			for _, mode := range []player.GameMode{player.GameModeCreative, player.GameModeSpectator} {
+				p.GameMode = mode
+				if s.parityMobHostileToPlayer(mob, p) {
+					t.Fatalf("angry mob targeted player in mode %d", mode)
+				}
+			}
+		})
+	}
+}
+
+func TestParityShulkerControllerClearsGroundNavigation(t *testing.T) {
+	s := newMobParityTestServer(t)
+	s.cfg = &config.Config{Difficulty: "normal"}
+	s.sessions = session.NewManager()
+	p := player.New([16]byte{22}, "target", player.ClientEditionBedrock)
+	p.GameMode = player.GameModeSurvival
+	p.Position = spatial.Vec3{X: 8.5, Y: 64, Z: 1.5}
+	if err := s.game.AddPlayer(p); err != nil {
+		t.Fatal(err)
+	}
+	mob := corentity.New(101, [16]byte{}, corentity.TypeShulker, 1.5, 64, 1.5)
+	ai := s.mobAIFor(mob)
+	ai.hasPathGoal = true
+	ai.path = []spatial.Vec3{p.Position}
+	mob.VX, mob.VY, mob.VZ = 0.1, 0.2, 0.3
+	s.tickHostileMobAI(mob)
+	if mob.VX != 0 || mob.VY != 0 || mob.VZ != 0 || ai.hasPathGoal || len(ai.path) != 0 {
+		t.Fatal("shulker retained ground navigation or received fallback movement")
 	}
 }
