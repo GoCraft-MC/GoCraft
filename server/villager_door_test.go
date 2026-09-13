@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"testing"
 
 	corentity "GoCraft/core/entity"
@@ -62,10 +63,60 @@ func TestVillagerOpensDoorToReachBedAndSleep(t *testing.T) {
 	if !villager.Sleeping {
 		t.Fatalf("villager stopped at %+v instead of reaching bed %+v", villager.Position, bedPosition)
 	}
+
+	// The next serial villager phase mirrors LivingEntity.startSleeping and
+	// anchors the canonical entity position on the bed instead of leaving the
+	// sleeping pose at the last pathfinding position beside it.
+	server.tickVillagerDoor(villager, ai)
+	wantX, wantY, wantZ := float64(bedPosition.X)+0.5, float64(bedPosition.Y)+villagerBedSleepYOffset, float64(bedPosition.Z)+0.5
+	if math.Abs(villager.Position.X-wantX) > 1e-9 || math.Abs(villager.Position.Y-wantY) > 1e-9 || math.Abs(villager.Position.Z-wantZ) > 1e-9 {
+		t.Fatalf("sleeping villager position = %+v; want (%v,%v,%v)", villager.Position, wantX, wantY, wantZ)
+	}
+
 	for range villagerDoorCloseTicks + 1 {
 		server.tickVillagerDoor(villager, ai)
 	}
 	if got := world.GetBlock(7, 64, 8).Properties["open"]; got != "false" {
 		t.Fatalf("door remained open after villager passed: open=%q", got)
+	}
+}
+
+func TestSleepingVillagerNormalisesFootClaimToBedHead(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+
+	foot := spatial.BlockPos{X: 4, Y: 64, Z: 4}
+	head := spatial.BlockPos{X: 5, Y: 64, Z: 4}
+	world.SetBlock(int(foot.X), int(foot.Y), int(foot.Z), coreworld.Block{Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{
+		"part": "foot", "facing": "east", "occupied": "true",
+	}})
+	world.SetBlock(int(head.X), int(head.Y), int(head.Z), coreworld.Block{Namespace: "minecraft", Name: "red_bed", Properties: map[string]string{
+		"part": "head", "facing": "east", "occupied": "true",
+	}})
+
+	server := &Server{world: world, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(22, [16]byte{}, corentity.TypeVillager, 3.5, 64, 6.5)
+	villager.HasVillageHome = true
+	villager.VillageBed = foot
+	villager.Sleeping = true
+	ai := server.mobAIFor(villager)
+	ai.path = []spatial.Vec3{{X: 9, Y: 64, Z: 9}}
+	ai.pathIndex = 0
+
+	server.tickVillagerDoor(villager, ai)
+
+	if villager.VillageBed != head {
+		t.Fatalf("VillageBed = %+v; want canonical head %+v", villager.VillageBed, head)
+	}
+	want := spatial.Vec3{X: float64(head.X) + 0.5, Y: float64(head.Y) + villagerBedSleepYOffset, Z: float64(head.Z) + 0.5}
+	if villager.Position != want {
+		t.Fatalf("sleeping villager position = %+v; want %+v", villager.Position, want)
+	}
+	if villager.VX != 0 || villager.VY != 0 || villager.VZ != 0 {
+		t.Fatalf("sleeping villager retained velocity (%v,%v,%v)", villager.VX, villager.VY, villager.VZ)
+	}
+	if len(ai.path) != 0 || ai.pathIndex != 0 {
+		t.Fatalf("sleeping villager retained navigation path: len=%d index=%d", len(ai.path), ai.pathIndex)
 	}
 }
