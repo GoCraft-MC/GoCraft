@@ -193,6 +193,9 @@ type mobAI struct {
 	angered        bool // enderman: true once provoked (by staring), stays true until target lost
 	doorBreakTick  int              // zombie: ticks spent bashing the current wooden door (240 = break)
 	doorBreakPos   spatial.BlockPos // zombie: the door currently being broken
+	strafeTick      int  // skeleton: ticks since last strafe direction re-roll
+	strafeClockwise bool // skeleton: current strafe circling direction
+	strafeBackwards bool // skeleton: strafing away from (vs toward) the target
 	path           []spatial.Vec3
 	pathIndex      int
 	pathGoal       spatial.BlockPos
@@ -4597,6 +4600,10 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 // Creepers replace the melee swing with the vanilla 30-tick fuse.
 func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	ai := s.mobAIFor(e)
+	// Vanilla prioritises wolf-avoidance and sun-fleeing above the bow attack.
+	if isSkeletonArcher(e.Type) && s.tickSkeletonAvoidance(e, ai) {
+		return
+	}
 	var target *session.Session
 	nearest := 16.0
 	if settings, ok := pumpkinEntitySpawnSettingsByType[string(e.Type)]; ok && settings.followRange > 0 {
@@ -4744,9 +4751,11 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 			s.setMobUsingItem(e, true)
 		}
 		if distance <= 15 {
-			e.VX, e.VZ = 0, 0
+			// Strafe/kite around the target instead of standing still.
+			s.tickSkeletonStrafe(e, ai, target.Player.Position, distance)
 			return
 		}
+		ai.strafeTick = 0
 		if distance > 0.001 {
 			s.navigateMob(e, ai, target.Player.Position, pumpkinMovementSpeed(e.Type, 1.0))
 		}
