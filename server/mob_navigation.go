@@ -20,6 +20,13 @@ const (
 	// The pathfinder returns its best partial route when this budget is reached,
 	// allowing AI to keep moving while bounding the work done by one repath.
 	pumpkinNavigatorMaxVisited = 768
+	// Villagers need a larger budget than the shared combat cap: routing from
+	// outside a house to a claimed bed has to find the doorway, and a partial
+	// path that stops at the wall leaves the villager stuck against a closed
+	// door with no door node to open. Vanilla scales its node limit with
+	// followRange (far above 768); villager repaths are already spread across
+	// ticks by entity ID, so the wider search does not bunch into a spike.
+	villagerNavigatorMaxVisited = 4096
 )
 
 // navigateMob owns the MOVE control for one tick. Ground mobs use the bounded
@@ -56,7 +63,7 @@ func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial
 	if !ai.hasPathGoal || ai.repathTick <= 0 {
 		var path []spatial.Vec3
 		if e.Type == corentity.TypeVillager {
-			path, _ = navigation.FindPathOpeningDoors(s.world, e.Position, destination, pumpkinNavigatorMaxVisited)
+			path, _ = navigation.FindPathOpeningDoors(s.world, e.Position, destination, villagerNavigatorMaxVisited)
 		} else {
 			path, _ = navigation.FindPath(s.world, e.Position, destination, pumpkinNavigatorMaxVisited)
 		}

@@ -4246,9 +4246,16 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 				if !e.Sleeping {
 					s.setVillagerBedOccupied(e, true)
 				}
-				e.VX, e.VY, e.VZ = 0, 0, 0
 				e.Sleeping = true
-				clearMobNavigation(e, ai)
+				// Vanilla SleepInBed.start calls LivingEntity.startSleeping, which
+				// repositions the entity onto the bed in the same step. Snap here
+				// (head-normalising VillageBed for correct pose metadata) instead of
+				// leaving the villager on the ground for a tick until the door phase
+				// re-anchors it — which never happened if the bed head did not resolve.
+				if !s.positionVillagerInBed(e, ai) {
+					e.VX, e.VY, e.VZ = 0, 0, 0
+					clearMobNavigation(e, ai)
+				}
 				changed := !wasAsleep
 				ai.sleepingWas = true
 				return changed

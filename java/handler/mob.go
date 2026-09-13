@@ -492,18 +492,22 @@ func BroadcastEntityStatusInDimension(entityID int32, status byte, mgr *session.
 }
 
 // BroadcastVillagerSleepState updates the tracked pose and bed position in
-// packet order. Sleeping entities stay at their canonical navigation position;
-// the Java renderer anchors the sleeping pose to the tracked bed position.
+// packet order. Sleeping villagers are anchored onto their bed head, so the
+// canonical position and the SLEEPING-pose bed metadata agree and the Java
+// renderer draws the villager lying in the bed rather than beside it.
 func BroadcastVillagerSleepState(e *corentity.Entity, mgr *session.Manager) {
 	metadata := buildMobMetadata(e)
 	if metadata == nil {
 		return
 	}
+	// Send the absolute position on both sleep and wake. The Java client draws a
+	// sleeping entity lying at the position it last received, so entering sleep
+	// must push the on-bed position it was just snapped to — otherwise the client
+	// keeps the pre-sleep ground position and renders the villager asleep on the
+	// floor even though the server anchored it onto the bed.
+	teleport := buildTeleportMob(e)
 	for _, s := range mgr.SnapshotAll() {
-		if !e.Sleeping {
-			teleport := buildTeleportMob(e)
-			_ = s.Conn.WritePacket(teleport)
-		}
+		_ = s.Conn.WritePacket(teleport)
 		_ = s.Conn.WritePacket(metadata)
 	}
 }
