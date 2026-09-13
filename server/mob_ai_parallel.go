@@ -10,11 +10,23 @@ import (
 
 const maximumPassiveAIWorkers = 8
 
-// tickPassiveAIParallel runs only the per-entity passive AI phase. Candidate
-// selection and mobAI map creation remain on the tick goroutine; workers then
-// read the map and mutate distinct entity/AI pairs. Shared effects such as
-// metadata broadcasts are returned and applied by the tick goroutine.
+// tickPassiveAIParallel runs the passive AI phase. Mobs that were absent from
+// the legacy passive/hostile classifiers (notably Ender Dragon, Giant and
+// Zombified Piglin) are ticked serially first so they cannot silently skip AI.
+// Candidate selection and mobAI map creation remain on the tick goroutine;
+// workers then mutate distinct passive entity/AI pairs.
 func (s *Server) tickPassiveAIParallel(entities []*corentity.Entity, players []naturalSpawnPlayer) []*corentity.Entity {
+	for _, entity := range entities {
+		if entity == nil || entity.Dead || !entityWithinSimulationRange(entity, players, 128) {
+			continue
+		}
+		s.refreshParityProvocation(entity)
+		switch entity.Type {
+		case corentity.TypeEnderDragon, corentity.TypeGiant, corentity.TypeZombifiedPiglin:
+			s.tickOutOfBandParityMob(entity)
+		}
+	}
+
 	candidates := make([]*corentity.Entity, 0, len(entities))
 	for _, entity := range entities {
 		if entity.Dead || !isPassiveMob(entity.Type) || !entityWithinSimulationRange(entity, players, 128) {
