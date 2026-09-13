@@ -22,12 +22,12 @@ lifecycle), which are simplified or absent.
 
 | Mob | Attributes | Core combat | Notable gap | Worst |
 | --- | --- | --- | --- | --- |
-| Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | no door-break, no reinforcements, targets players only | 🟠 |
+| Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | ~~no door-break~~ **fixed (hard)**; no reinforcements, targets players only | 🟡 |
 | Skeleton / Stray | ✅ 0.25 | bow ✅ | no strafe-kite, no flee-sun/shade, no avoid-wolf | 🟠 |
 | Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | dead `CreeperFuse` struct; no charged (r6) | 🟡 |
 | Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | no block take/place, freeze-on-look partial | 🟠 |
 | Cow / Sheep / Pig / Mooshroom | ✅ speeds & hp | breed/panic/tempt ✅ | panic speed not per-mob; sheep eat-grass? | 🟡 |
-| Chicken | ✅ 4hp / 0.25 | ✅ | **no egg laying**, no slow-fall | 🟠 |
+| Chicken | ✅ 4hp / 0.25 | ✅ | ~~no egg laying~~ **fixed**; slow-fall moot (mobs take no fall damage) | 🟢 |
 | Horse / Donkey / Mule | ✅ 0.225 / jump 0.7 / 53hp | — | taming/rearing partial | 🟠 |
 | Wolf | ✅ 0.3 / atk 4 | melee ✅ (range 1.8, cd 20) | no leap-at-target, beg, avoid-llama; wild prey targeting? | 🟡 |
 | Iron Golem | ✅ 100hp / atk 7–21 + toss | ✅ | ~~targets Zombies only~~ **fixed:** all Enemy except Creeper | 🟢 |
@@ -42,7 +42,10 @@ hard-difficulty `BreakDoorGoal`; `MoveThroughVillageGoal`; targets Player,
 AbstractVillager, IronGolem, Turtle eggs; `SPAWN_REINFORCEMENTS_CHANCE`.
 - 🟢 Attributes and the 20-tick melee (`mob_actions.go:64`, damage from spawn
   settings) match.
-- 🟠 No `BreakDoorGoal` on hard difficulty (zombies never break wooden doors).
+- 🟢 **Fixed:** hard-difficulty zombies (and husk/drowned/zombie-villager) now
+  bash a wooden door blocking the way to their target over 240 ticks
+  (`tickZombieDoorBreak`), matching vanilla `BreakDoorGoal`. No mobGriefing
+  gamerule exists in GoCraft, so it is gated on hard difficulty only.
 - 🟠 No zombie **reinforcement** summon on damage.
 - 🟠 Targeting: no evidence zombies actively hunt villagers / iron golems / baby
   turtles — appears to target players only.
@@ -81,7 +84,9 @@ Vanilla: shared `Animal` goals — `PanicGoal`, `BreedGoal(1.0)`, `TemptGoal`,
   and tempt are implemented.
 - 🟡 Panic speed appears flat, not per-mob; verify FollowParent and Sheep
   `EatBlockGoal` (grass → regrow wool).
-- 🟠 **Chicken lays no eggs** (no egg timer) and has no slow-fall.
+- 🟢 **Fixed:** chickens lay an egg every 6000-12000 ticks (`EggLayTicks` in
+  `tickAnimalLifecycle`). Slow-fall is moot — GoCraft applies no fall damage to
+  mobs.
 
 ### Horse family (Horse, Donkey, Mule)
 Vanilla: `speed 0.225, jump 0.7, hp 53 base`; `RunAroundLikeCrazyGoal` (taming
