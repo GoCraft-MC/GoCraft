@@ -4,8 +4,17 @@ import (
 	"math"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/player"
 	"GoCraft/java/handler"
 )
+
+// nextEggLayTicks re-rolls the vanilla chicken EggLayTime (6000-12000 ticks).
+func nextEggLayTicks(ai *mobAI) int32 {
+	if ai == nil {
+		return 6000
+	}
+	return int32(6000 + ai.rng.Intn(6000))
+}
 
 // tickAnimalLifecycle ports Pumpkin's Ageable/Animal/BreedGoal timing to the
 // canonical simulation. It is called before passive AI so an assigned mate is
@@ -34,6 +43,22 @@ func (s *Server) tickAnimalLifecycle(entities []*corentity.Entity) {
 			if e.WoolRegrowTicks == 0 {
 				e.Sheared = false
 				handler.BroadcastMobMetadata(e, s.sessions)
+			}
+		}
+		// Chicken egg laying: adult, non-jockey chickens drop an egg every
+		// 6000-12000 ticks (vanilla EggLayTime), re-rolling the timer each lay.
+		if e.Type == corentity.TypeChicken && !e.IsBaby && e.RiderEntityID == 0 {
+			if e.EggLayTicks <= 0 {
+				e.EggLayTicks = nextEggLayTicks(s.mobAIFor(e))
+			}
+			e.EggLayTicks--
+			if e.EggLayTicks <= 0 {
+				if s.world != nil {
+					s.newDroppedItemInWorld(s.world, player.ItemStack{ItemID: "minecraft:egg", Count: 1}, e.Position, int(e.EntityID))
+				}
+				handler.BroadcastSoundAt(s.sessions, "minecraft:entity.chicken.egg", handler.SoundCategoryNeutral,
+					e.Position.X, e.Position.Y, e.Position.Z, 1, 1)
+				e.EggLayTicks = nextEggLayTicks(s.mobAIFor(e))
 			}
 		}
 		if !corentity.IsAgeableAnimal(e.Type) {
