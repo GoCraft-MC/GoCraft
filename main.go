@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"GoCraft/config"
+	"GoCraft/healthcheck"
 	"GoCraft/internal/debuglog"
 	"GoCraft/internal/protocoldata"
 	"GoCraft/internal/serverlog"
@@ -32,11 +33,20 @@ func run() int {
 	logDirectory := flag.String("log-dir", "logs", "directory for latest.log and compressed log archives")
 	maxLogArchives := flag.Int("max-log-files", 10, "maximum number of compressed log archives to keep")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	checkHealth := flag.Bool("check-health", false, "check the /health of the service and exit")
+	checkLivez := flag.Bool("check-live", false, "check the /livez endpoint of the service and exit")
+	checkReadyz := flag.Bool("check-ready", false, "check the /readyz endpoint of the service and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("GoCraft", version)
 		return 0
+	} else if *checkHealth {
+		return healthcheck.CheckServiceEndpointAndExit("/health")
+	} else if *checkLivez {
+		return healthcheck.CheckServiceEndpointAndExit("/livez")
+	} else if *checkReadyz {
+		return healthcheck.CheckServiceEndpointAndExit("/readyz")
 	}
 
 	// Keep stdout logging for Pterodactyl, then tee the same output to the
@@ -59,7 +69,6 @@ func run() int {
 	}
 
 	slog.Info("GoCraft starting", "version", version)
-
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Error("failed to load configuration", "path", *configPath, "err", err)
@@ -103,6 +112,9 @@ func run() int {
 	// propagates through srv.Run → listeners close → world flushes to disk.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	shutdownHealthCheckServer := healthcheck.RunHealthCheckServer(ctx, srv.GetHealthState())
+	defer shutdownHealthCheckServer()
 
 	if err := srv.Run(ctx); err != nil {
 		slog.Error("server stopped with error", "err", err)
