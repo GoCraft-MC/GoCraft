@@ -20,6 +20,7 @@ func (s *Server) tickPassiveAIParallel(entities []*corentity.Entity, players []n
 		if entity == nil || entity.Dead || !entityWithinSimulationRange(entity, players, 128) {
 			continue
 		}
+		s.refreshParityProvocation(entity)
 		switch entity.Type {
 		case corentity.TypeEnderDragon, corentity.TypeGiant, corentity.TypeZombifiedPiglin:
 			s.tickOutOfBandParityMob(entity)
