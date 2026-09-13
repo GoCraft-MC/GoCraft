@@ -1,3 +1,4 @@
+
 # Mob AI parity audit — findings
 
 Audit of the **implemented ("Partial")** mobs in `docs/mob-ai-parity-1.21.4.md`
@@ -23,7 +24,7 @@ lifecycle), which are simplified or absent.
 | Mob | Attributes | Core combat | Notable gap | Worst |
 | --- | --- | --- | --- | --- |
 | Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | ~~no door-break~~ **fixed (hard)**; no reinforcements, targets players only | 🟡 |
-| Skeleton / Stray | ✅ 0.25 | bow ✅ | no strafe-kite, no flee-sun/shade, no avoid-wolf | 🟠 |
+| Skeleton / Stray | ✅ 0.25 | bow ✅ | ~~no strafe-kite / flee-sun / avoid-wolf~~ **fixed**; arrow dmg flat 3 | 🟡 |
 | Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | dead `CreeperFuse` struct; no charged (r6) | 🟡 |
 | Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | no block take/place, freeze-on-look partial | 🟠 |
 | Cow / Sheep / Pig / Mooshroom | ✅ speeds & hp | breed/panic/tempt ✅ | panic speed not per-mob; sheep eat-grass? | 🟡 |
@@ -55,11 +56,12 @@ Vanilla: `speed 0.25`; `RangedBowAttackGoal` (strafing kite), `MeleeAttackGoal`
 fallback, `RestrictSunGoal`+`FleeSunGoal` (seek shade by day),
 `AvoidEntityGoal(Wolf, 6)`.
 - 🟢 Bow implemented (`shootMobArrow`, `bowDrawTicks`); daylight burn present.
+- 🟢 **Fixed:** strafing (`tickSkeletonStrafe`) circles the target, re-rolling
+  direction every 20 ticks and backing off when too close; `tickSkeletonAvoidance`
+  adds `FleeSunGoal` (seek shade while burning) and `AvoidEntityGoal(Wolf, 6)`,
+  both prioritised above the bow attack like vanilla.
 - 🟡 Arrow damage flat **3** (`mob_environment.go:266`); vanilla ≈2 base scaled by
   difficulty/power.
-- 🟠 No **strafing** (skeletons don't kite/back-pedal while shooting).
-- 🟠 No `FleeSunGoal` (won't path to shade to avoid burning) and no
-  `AvoidEntityGoal` for wolves.
 
 ### Creeper — 🟢 faithful
 Swell ≤3 blocks + LOS, fuse 30 ticks, explosion radius 3 — all match
