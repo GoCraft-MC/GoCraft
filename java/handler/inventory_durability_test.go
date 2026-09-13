@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"GoCraft/core/player"
+	"GoCraft/java/nbt"
 	"GoCraft/java/protocol"
 )
 
 func TestDamageableSlotCarriesVisibleDurability(t *testing.T) {
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, player.ItemStack{ItemID: "minecraft:golden_sword", Count: 1, Damage: 7})
+	nbt.EncodeSlot(b, player.ItemStack{ItemID: "minecraft:golden_sword", Count: 1, Damage: 7})
 	data := b.Build().Data
 	if !bytes.Contains(data, []byte("Durability: 25 / 32")) {
 		t.Fatalf("encoded slot does not contain visible durability lore: %x", data)
@@ -18,7 +19,7 @@ func TestDamageableSlotCarriesVisibleDurability(t *testing.T) {
 	if !bytes.Contains(data, []byte("italic")) || !bytes.Contains(data, []byte("green")) {
 		t.Fatalf("encoded durability lore is missing explicit non-italic styling: %x", data)
 	}
-	decoded, err := readPlainSlot(bytes.NewReader(data))
+	decoded, err := nbt.ReadPlainSlot(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("readPlainSlot: %v", err)
 	}
@@ -29,7 +30,7 @@ func TestDamageableSlotCarriesVisibleDurability(t *testing.T) {
 
 func TestSlotCarriesEnchantmentComponent(t *testing.T) {
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, player.ItemStack{
+	nbt.EncodeSlot(b, player.ItemStack{
 		ItemID: "minecraft:compass", Count: 1,
 		Enchantments: "minecraft:mending=1;minecraft:vanishing_curse=1",
 	})
@@ -57,18 +58,18 @@ func TestEnchantedSlotRoundTripsClientEncoding(t *testing.T) {
 		Enchantments: "minecraft:mending=1;minecraft:vanishing_curse=1",
 	}
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, want)
-	got, err := readPlainSlot(bytes.NewReader(b.Build().Data))
+	nbt.EncodeSlot(b, want)
+	got, err := nbt.ReadPlainSlot(bytes.NewReader(b.Build().Data))
 	if err != nil || got != want {
 		t.Fatalf("decoded slot = %+v, %v; want %+v", got, err, want)
 	}
 }
 
 func TestLegacyTooltipHidesVanillaAttributesAndUsesInstantLabel(t *testing.T) {
-	ConfigureItemTooltips(true, true, true, true)
-	defer ConfigureItemTooltips(true, true, true, false)
+	nbt.ConfigureItemTooltips(true, true, true, true)
+	defer nbt.ConfigureItemTooltips(true, true, true, false)
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, player.ItemStack{ItemID: "minecraft:iron_sword", Count: 1})
+	nbt.EncodeSlot(b, player.ItemStack{ItemID: "minecraft:iron_sword", Count: 1})
 	data := b.Build().Data
 	if !bytes.Contains(data, []byte("Instant Attack Speed")) {
 		t.Fatalf("legacy tooltip is missing clean instant label: %x", data)
@@ -79,16 +80,16 @@ func TestLegacyTooltipHidesVanillaAttributesAndUsesInstantLabel(t *testing.T) {
 	if bytes.Contains(data, []byte("1024")) {
 		t.Fatalf("legacy tooltip leaked internal attack-speed override: %x", data)
 	}
-	if _, err := readPlainSlot(bytes.NewReader(data)); err != nil {
+	if _, err := nbt.ReadPlainSlot(bytes.NewReader(data)); err != nil {
 		t.Fatalf("slot with hidden vanilla attributes did not decode: %v", err)
 	}
 }
 
 func TestCustomTooltipSectionsCanBeDisabled(t *testing.T) {
-	ConfigureItemTooltips(false, false, true, true)
-	defer ConfigureItemTooltips(true, true, true, false)
+	nbt.ConfigureItemTooltips(false, false, true, true)
+	defer nbt.ConfigureItemTooltips(true, true, true, false)
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, player.ItemStack{ItemID: "minecraft:iron_sword", Count: 1})
+	nbt.EncodeSlot(b, player.ItemStack{ItemID: "minecraft:iron_sword", Count: 1})
 	data := b.Build().Data
 	if bytes.Contains(data, []byte("Durability:")) || bytes.Contains(data, []byte("Attack Damage:")) {
 		t.Fatalf("disabled custom lore is still present: %x", data)
@@ -96,10 +97,10 @@ func TestCustomTooltipSectionsCanBeDisabled(t *testing.T) {
 }
 
 func TestArmorTooltipUsesVanillaStyleSlotSection(t *testing.T) {
-	ConfigureItemTooltips(true, true, true, true)
-	defer ConfigureItemTooltips(true, true, true, false)
+	nbt.ConfigureItemTooltips(true, true, true, true)
+	defer nbt.ConfigureItemTooltips(true, true, true, false)
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, player.ItemStack{ItemID: "minecraft:diamond_helmet", Count: 1})
+	nbt.EncodeSlot(b, player.ItemStack{ItemID: "minecraft:diamond_helmet", Count: 1})
 	data := b.Build().Data
 	for _, text := range []string{"When on Head:", " 3 Armor", " 2 Armor Toughness"} {
 		if !bytes.Contains(data, []byte(text)) {

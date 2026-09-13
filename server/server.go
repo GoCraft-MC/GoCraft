@@ -54,6 +54,7 @@ import (
 	"GoCraft/internal/debuglog"
 	"GoCraft/java/auth"
 	"GoCraft/java/handler"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/registry"
 	"GoCraft/java/session"
@@ -226,12 +227,13 @@ type bedrockRecentBlockUse struct {
 // loadPlugins creates the configured one through ScanBundles, and only when the
 // subsystem is enabled.
 func New(cfg *config.Config) (*Server, error) {
-	handler.ConfigureItemTooltips(
+	nbt.ConfigureItemTooltips(
 		cfg.ItemTooltips.ShowDurability,
 		cfg.ItemTooltips.ShowAttributes,
 		cfg.ItemTooltips.HideVanillaAttributes,
 		!cfg.Combat.AttackCooldown,
 	)
+
 	privKey, err := auth.GenerateKeyPair()
 	if err != nil {
 		return nil, fmt.Errorf("server: generating RSA keypair: %w", err)

@@ -10,6 +10,7 @@ import (
 
 	"GoCraft/core/player"
 	"GoCraft/internal/gamedata"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	javaworld "GoCraft/java/world"
@@ -690,7 +691,7 @@ func encodeRecipeSlotDisplay(b *protocol.Builder, slot recipeSlotDisplay) {
 	case slotDisplayItem:
 		b.VarInt(javaworld.ItemID(slot.item))
 	case slotDisplayStack:
-		encodeSlot(b, slot.stack)
+		nbt.EncodeSlot(b, slot.stack)
 	case slotDisplayTag:
 		b.String(slot.item)
 	case slotDisplaySmithingTrim, slotDisplayWithRemainder:

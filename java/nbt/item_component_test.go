@@ -1,4 +1,4 @@
-package handler
+package nbt
 
 import (
 	"bytes"
@@ -16,12 +16,14 @@ func TestJavaExtensionComponentsRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+
 	b := protocol.NewBuilder(0)
-	encodeSlot(b, want)
-	got, err := readPlainSlot(bytes.NewReader(b.Build().Data))
+	EncodeSlot(b, want)
+	got, err := ReadPlainSlot(bytes.NewReader(b.Build().Data))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got != want {
 		t.Fatalf("Java component round trip = %#v, want %#v", got, want)
 	}

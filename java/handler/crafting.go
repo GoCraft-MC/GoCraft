@@ -1,10 +1,7 @@
 package handler
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"io"
 
 	"GoCraft/core/intent"
 	"GoCraft/core/itemregistry"
@@ -12,9 +9,9 @@ import (
 	coreplugin "GoCraft/core/plugin"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
-	javaworld "GoCraft/java/world"
 )
 
 const craftingTableContainerID int32 = 1
@@ -36,17 +33,20 @@ func sendCraftingContainerContent(conn *network.ClientConn, p *player.Player) er
 		VarInt(craftingTableContainerID).
 		VarInt(p.ContainerStateID).
 		VarInt(46)
-	encodeSlot(b, p.CraftingResult)
+	nbt.EncodeSlot(b, p.CraftingResult)
 	for i := range p.CraftingGrid {
-		encodeSlot(b, p.CraftingGrid[i])
+		nbt.EncodeSlot(b, p.CraftingGrid[i])
 	}
+
 	for i := 9; i < player.HotbarStart; i++ {
-		encodeSlot(b, p.Inventory[i])
+		nbt.EncodeSlot(b, p.Inventory[i])
 	}
+
 	for i := player.HotbarStart; i < player.HotbarStart+9; i++ {
-		encodeSlot(b, p.Inventory[i])
+		nbt.EncodeSlot(b, p.Inventory[i])
 	}
-	encodeSlot(b, p.CarriedItem)
+
+	nbt.EncodeSlot(b, p.CarriedItem)
 	return conn.WritePacket(b.Build())
 }
 
@@ -242,11 +242,11 @@ func handleContainerClick(pkt *protocol.Packet, p *player.Player, conn *network.
 		if _, err := protocol.ReadShort(r); err != nil {
 			return fmt.Errorf("container click: reading changed slot: %w", err)
 		}
-		if _, err := readPlainSlot(r); err != nil {
+		if _, err := nbt.ReadPlainSlot(r); err != nil {
 			return fmt.Errorf("container click: reading changed item: %w", err)
 		}
 	}
-	if _, err := readPlainSlot(r); err != nil {
+	if _, err := nbt.ReadPlainSlot(r); err != nil {
 		return fmt.Errorf("container click: reading cursor: %w", err)
 	}
 	if r.Len() != 0 {
@@ -394,360 +394,6 @@ func handleContainerClose(pkt *protocol.Packet, p *player.Player, conn *network.
 		return sendSetContainerContent(conn, p, p.ContainerStateID)
 	}
 	return nil
-}
-
-func readPlainSlot(r *bytes.Reader) (player.ItemStack, error) {
-	count, err := protocol.ReadVarInt(r)
-	if err != nil {
-		return player.ItemStack{}, err
-	}
-	if count <= 0 {
-		return player.ItemStack{}, nil
-	}
-	itemID, err := protocol.ReadVarInt(r)
-	if err != nil {
-		return player.ItemStack{}, err
-	}
-	added, err := protocol.ReadVarInt(r)
-	if err != nil {
-		return player.ItemStack{}, err
-	}
-	removed, err := protocol.ReadVarInt(r)
-	if err != nil {
-		return player.ItemStack{}, err
-	}
-	damage := int32(0)
-	enchantments := ""
-	var potDecorations [4]string
-	var fireworks player.FireworkData
-	hasFireworks := false
-	components := ""
-	potionName := ""
-	for i := int32(0); i < added; i++ {
-		componentType, err := protocol.ReadVarInt(r)
-		if err != nil {
-			return player.ItemStack{}, err
-		}
-		switch componentType {
-		case 0: // custom_data: preserve GoCraft's canonical extension object
-			components, err = readGoCraftComponents(r)
-			if err != nil {
-				return player.ItemStack{}, fmt.Errorf("reading custom item data: %w", err)
-			}
-		case 2: // max_damage
-			if _, err := protocol.ReadVarInt(r); err != nil {
-				return player.ItemStack{}, err
-			}
-		case 3: // damage
-			damage, err = protocol.ReadVarInt(r)
-			if err != nil {
-				return player.ItemStack{}, err
-			}
-		case 8: // lore: VarInt count followed by optional anonymous NBT
-			lines, err := protocol.ReadVarInt(r)
-			if err != nil || lines < 0 || lines > 256 {
-				return player.ItemStack{}, fmt.Errorf("invalid lore line count %d: %w", lines, err)
-			}
-			for line := int32(0); line < lines; line++ {
-				if err := skipNetworkNBT(r); err != nil {
-					return player.ItemStack{}, fmt.Errorf("reading lore: %w", err)
-				}
-			}
-		case 10: // enchantments: registry ID/level pairs
-			length, readErr := protocol.ReadVarInt(r)
-			if readErr != nil || length < 0 || length > 256 {
-				return player.ItemStack{}, fmt.Errorf("invalid enchantment count %d: %w", length, readErr)
-			}
-			stack := player.ItemStack{ItemID: "minecraft:stone", Count: 1}
-			for entry := int32(0); entry < length; entry++ {
-				enchantmentID, idErr := protocol.ReadVarInt(r)
-				level, levelErr := protocol.ReadVarInt(r)
-				name := javaworld.EnchantmentName(enchantmentID)
-				if idErr != nil || levelErr != nil || name == "" || level < 1 || level > 255 {
-					return player.ItemStack{}, fmt.Errorf("invalid enchantment id=%d level=%d", enchantmentID, level)
-				}
-				stack.Enchant(name, int(level))
-			}
-			enchantments = stack.Enchantments
-		case 61: // pot_decorations: array of item registry IDs
-			length, readErr := protocol.ReadVarInt(r)
-			if readErr != nil || length < 0 || length > 64 {
-				return player.ItemStack{}, fmt.Errorf("invalid pot decoration count %d: %w", length, readErr)
-			}
-			for entry := int32(0); entry < length; entry++ {
-				decorationID, idErr := protocol.ReadVarInt(r)
-				if idErr != nil {
-					return player.ItemStack{}, idErr
-				}
-				decoration := javaworld.ItemName(decorationID)
-				if decoration == "" {
-					return player.ItemStack{}, fmt.Errorf("unknown pot decoration item ID %d", decorationID)
-				}
-				if entry < int32(len(potDecorations)) {
-					potDecorations[entry] = decoration
-				}
-			}
-		case 13: // attribute modifiers, including the final showTooltip flag
-			attributes, readErr := protocol.ReadVarInt(r)
-			if readErr != nil || attributes < 0 || attributes > 256 {
-				return player.ItemStack{}, fmt.Errorf("invalid attribute modifier count %d: %w", attributes, readErr)
-			}
-			for attribute := int32(0); attribute < attributes; attribute++ {
-				if _, readErr = protocol.ReadVarInt(r); readErr != nil {
-					return player.ItemStack{}, readErr
-				}
-				if _, readErr = protocol.ReadString(r); readErr != nil {
-					return player.ItemStack{}, readErr
-				}
-				if _, readErr = protocol.ReadDouble(r); readErr != nil {
-					return player.ItemStack{}, readErr
-				}
-				if _, readErr = protocol.ReadVarInt(r); readErr != nil {
-					return player.ItemStack{}, readErr
-				}
-				if _, readErr = protocol.ReadVarInt(r); readErr != nil {
-					return player.ItemStack{}, readErr
-				}
-			}
-			if _, readErr = protocol.ReadBool(r); readErr != nil {
-				return player.ItemStack{}, readErr
-			}
-		case 41: // potion_contents: optional potion, colour, custom effects
-			hasPotion, readErr := protocol.ReadBool(r)
-			if readErr != nil {
-				return player.ItemStack{}, readErr
-			}
-			if hasPotion {
-				potionRegistryID, idErr := protocol.ReadVarInt(r)
-				if idErr != nil || javaworld.PotionName(potionRegistryID) == "" {
-					return player.ItemStack{}, fmt.Errorf("invalid potion registry ID %d", potionRegistryID)
-				}
-				potionName = javaworld.PotionName(potionRegistryID)
-			}
-			hasColour, colourErr := protocol.ReadBool(r)
-			if colourErr != nil {
-				return player.ItemStack{}, colourErr
-			}
-			if hasColour {
-				if _, colourErr = protocol.ReadInt(r); colourErr != nil {
-					return player.ItemStack{}, colourErr
-				}
-			}
-			customEffects, effectErr := protocol.ReadVarInt(r)
-			if effectErr != nil || customEffects != 0 {
-				return player.ItemStack{}, fmt.Errorf("unsupported custom potion effect count %d", customEffects)
-			}
-		case 56: // fireworks: flight duration and bounded explosion list
-			flight, readErr := protocol.ReadVarInt(r)
-			if readErr != nil || flight < 0 || flight > 255 {
-				return player.ItemStack{}, fmt.Errorf("invalid firework flight %d: %w", flight, readErr)
-			}
-			length, readErr := protocol.ReadVarInt(r)
-			if readErr != nil || length < 0 || length > player.MaxFireworkExplosions {
-				return player.ItemStack{}, fmt.Errorf("invalid firework explosion count %d: %w", length, readErr)
-			}
-			fireworks.Flight = uint8(flight)
-			fireworks.ExplosionCount = uint8(length)
-			for explosionIndex := int32(0); explosionIndex < length; explosionIndex++ {
-				explosion, readErr := readJavaFireworkExplosion(r)
-				if readErr != nil {
-					return player.ItemStack{}, readErr
-				}
-				fireworks.Explosions[explosionIndex] = explosion
-			}
-			hasFireworks = true
-		default:
-			return player.ItemStack{}, fmt.Errorf("unsupported item component %d", componentType)
-		}
-	}
-	for i := int32(0); i < removed; i++ {
-		if _, err := protocol.ReadVarInt(r); err != nil {
-			return player.ItemStack{}, err
-		}
-	}
-	name := javaworld.ItemName(itemID)
-	if name == "" {
-		return player.ItemStack{}, fmt.Errorf("unknown item ID %d", itemID)
-	}
-	if damage < 0 {
-		damage = 0
-	}
-	stack := player.ItemStack{
-		ItemID: name, Count: int(count), Damage: int(damage), Enchantments: enchantments, PotDecorations: potDecorations,
-		HasFireworks: hasFireworks, Fireworks: fireworks,
-	}
-	if components != "" {
-		if err := stack.SetComponents(components); err != nil {
-			return player.ItemStack{}, fmt.Errorf("invalid canonical item components: %w", err)
-		}
-	}
-	if potionName != "" {
-		if existing, _ := player.PotionName(stack); existing == "" {
-			if err := stack.SetComponent("potion_contents", map[string]string{"potion": potionName}); err != nil {
-				return player.ItemStack{}, err
-			}
-		}
-	}
-	return stack, nil
-}
-
-func readJavaFireworkExplosion(r *bytes.Reader) (player.FireworkExplosion, error) {
-	var explosion player.FireworkExplosion
-	shape, err := protocol.ReadVarInt(r)
-	if err != nil || shape < 0 || shape > 4 {
-		return explosion, fmt.Errorf("invalid firework shape %d: %w", shape, err)
-	}
-	explosion.Shape = uint8(shape)
-	colors, err := protocol.ReadVarInt(r)
-	if err != nil || colors < 0 || colors > player.MaxFireworkColors {
-		return explosion, fmt.Errorf("invalid firework color count %d: %w", colors, err)
-	}
-	explosion.ColorCount = uint8(colors)
-	for index := int32(0); index < colors; index++ {
-		color, readErr := protocol.ReadInt(r)
-		if readErr != nil {
-			return explosion, readErr
-		}
-		explosion.Colors[index] = color
-	}
-	fades, err := protocol.ReadVarInt(r)
-	if err != nil || fades < 0 || fades > player.MaxFireworkColors {
-		return explosion, fmt.Errorf("invalid firework fade count %d: %w", fades, err)
-	}
-	explosion.FadeColorCount = uint8(fades)
-	for index := int32(0); index < fades; index++ {
-		color, readErr := protocol.ReadInt(r)
-		if readErr != nil {
-			return explosion, readErr
-		}
-		explosion.FadeColors[index] = color
-	}
-	explosion.Trail, err = protocol.ReadBool(r)
-	if err != nil {
-		return explosion, err
-	}
-	explosion.Twinkle, err = protocol.ReadBool(r)
-	return explosion, err
-}
-
-func skipNetworkNBT(r *bytes.Reader) error {
-	tagType, err := r.ReadByte()
-	if err != nil {
-		return err
-	}
-	if tagType == 0 {
-		return nil
-	}
-	return skipNBTPayload(r, tagType)
-}
-
-func skipNBTPayload(r *bytes.Reader, tagType byte) error {
-	switch tagType {
-	case 0:
-		return nil
-	case 1:
-		return skipReaderBytes(r, 1)
-	case 2:
-		return skipReaderBytes(r, 2)
-	case 3, 5:
-		return skipReaderBytes(r, 4)
-	case 4, 6:
-		return skipReaderBytes(r, 8)
-	case 7:
-		n, err := readNBTLength(r)
-		if err != nil {
-			return err
-		}
-		return skipReaderBytes(r, n)
-	case 8:
-		return skipNBTString(r)
-	case 9:
-		elementType, err := r.ReadByte()
-		if err != nil {
-			return err
-		}
-		n, err := readNBTLength(r)
-		if err != nil {
-			return err
-		}
-		for i := 0; i < n; i++ {
-			if err := skipNBTPayload(r, elementType); err != nil {
-				return err
-			}
-		}
-		return nil
-	case 10:
-		for {
-			childType, err := r.ReadByte()
-			if err != nil {
-				return err
-			}
-			if childType == 0 {
-				return nil
-			}
-			if err := skipNBTString(r); err != nil {
-				return err
-			}
-			if err := skipNBTPayload(r, childType); err != nil {
-				return err
-			}
-		}
-	case 11:
-		n, err := readNBTLength(r)
-		if err != nil {
-			return err
-		}
-		return skipReaderBytes(r, n*4)
-	case 12:
-		n, err := readNBTLength(r)
-		if err != nil {
-			return err
-		}
-		return skipReaderBytes(r, n*8)
-	default:
-		return fmt.Errorf("invalid NBT tag type %d", tagType)
-	}
-}
-
-func readNBTLength(r *bytes.Reader) (int, error) {
-	var raw [4]byte
-	if _, err := io.ReadFull(r, raw[:]); err != nil {
-		return 0, err
-	}
-	n := int(int32(binary.BigEndian.Uint32(raw[:])))
-	if n < 0 || n > r.Len() {
-		return 0, fmt.Errorf("invalid NBT length %d", n)
-	}
-	return n, nil
-}
-
-func skipNBTString(r *bytes.Reader) error {
-	_, err := readNBTStringValue(r)
-	return err
-}
-
-func readNBTStringValue(r *bytes.Reader) (string, error) {
-	var raw [2]byte
-	if _, err := io.ReadFull(r, raw[:]); err != nil {
-		return "", err
-	}
-	length := int(binary.BigEndian.Uint16(raw[:]))
-	if length > r.Len() {
-		return "", io.ErrUnexpectedEOF
-	}
-	value := make([]byte, length)
-	if _, err := io.ReadFull(r, value); err != nil {
-		return "", err
-	}
-	return string(value), nil
-}
-
-func skipReaderBytes(r *bytes.Reader, n int) error {
-	if n < 0 || n > r.Len() {
-		return io.ErrUnexpectedEOF
-	}
-	_, err := r.Seek(int64(n), io.SeekCurrent)
-	return err
 }
 
 func clickPlayerInventorySlot(p *player.Player, slot int, button byte) {

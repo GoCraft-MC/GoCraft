@@ -4,6 +4,7 @@ import (
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -404,18 +405,18 @@ func sendChestContainerContent(conn *network.ClientConn, p *player.Player) error
 		VarInt(int32(slotCount + 36))
 	for i := 0; i < slotCount; i++ {
 		if i < len(p.ContainerSlots) {
-			encodeSlot(b, p.ContainerSlots[i])
+			nbt.EncodeSlot(b, p.ContainerSlots[i])
 		} else {
-			encodeSlot(b, player.ItemStack{})
+			nbt.EncodeSlot(b, player.ItemStack{})
 		}
 	}
 	for i := 9; i < player.HotbarStart; i++ {
-		encodeSlot(b, p.Inventory[i])
+		nbt.EncodeSlot(b, p.Inventory[i])
 	}
 	for i := player.HotbarStart; i < player.HotbarStart+9; i++ {
-		encodeSlot(b, p.Inventory[i])
+		nbt.EncodeSlot(b, p.Inventory[i])
 	}
-	encodeSlot(b, p.CarriedItem)
+	nbt.EncodeSlot(b, p.CarriedItem)
 	return conn.WritePacket(b.Build())
 }
 

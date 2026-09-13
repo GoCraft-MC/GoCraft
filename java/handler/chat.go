@@ -11,14 +11,13 @@ package handler
 // packet capture if the client never shows chat or commands don't fire.
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"GoCraft/core/player"
 	coreworld "GoCraft/core/world"
+	"GoCraft/java/nbt"
 	"GoCraft/java/network"
 	"GoCraft/java/protocol"
 	"GoCraft/java/session"
@@ -39,9 +38,11 @@ func handleChatPacket(pkt *protocol.Packet, p *player.Player, mgr *session.Manag
 	switch pkt.ID {
 	case packetIDChatMessage:
 		return handleChatMessage(pkt, p, mgr, cmds, w, conn, teleportTo, changeWorld)
+
 	case packetIDChatCommand:
 		return handleChatCommand(pkt, p, mgr, cmds, w, conn, teleportTo, changeWorld)
 	}
+
 	return nil
 }
 
@@ -63,10 +64,12 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 	if err != nil {
 		return fmt.Errorf("reading chat message string: %w", err)
 	}
+
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return nil
 	}
+
 	if len([]rune(msg)) > maxChatLength {
 		_ = sendSystemMessage(conn,
 			fmt.Sprintf("Message too long (max %d characters)", maxChatLength))
@@ -84,6 +87,7 @@ func handleChatMessage(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 	if !cmds.FilterPlayerChat(p, &msg) {
 		return nil
 	}
+
 	text := cmds.FormatChat(p.Username, msg)
 	slog.Info("chat", "player", p.Username, "message", msg)
 	broadcastSystemMessage(mgr, text)
@@ -107,6 +111,7 @@ func handleChatCommand(pkt *protocol.Packet, p *player.Player, mgr *session.Mana
 	if err != nil {
 		return fmt.Errorf("reading chat command string: %w", err)
 	}
+
 	slog.Info("command", "player", p.Username, "command", cmd)
 	cmds.Dispatch(cmd, CommandContext{Player: p, World: w, Manager: mgr, TeleportTo: teleportTo, ChangeWorld: changeWorld})
 	return nil
@@ -162,8 +167,11 @@ func SendLinkMessage(conn *network.ClientConn, text, link string) error {
 	if conn == nil {
 		return nil
 	}
+
 	packet := protocol.NewBuilder(packetIDSystemChatMessage).
-		Bytes(nbtLinkComponent(text, link)).Bool(false).Build()
+		Write(nbt.DefaultTextLinkComponent(text, link)).
+		Bool(false).
+		Build()
 	return conn.WritePacket(packet)
 }
 
@@ -175,73 +183,9 @@ func SendLinkMessage(conn *network.ClientConn, text, link string) error {
 //	Boolean               overlay  (false = chat box, true = action bar)
 func buildSystemChatMessage(text string, overlay bool) *protocol.Packet {
 	return protocol.NewBuilder(packetIDSystemChatMessage).
-		Bytes(nbtTextComponent(text)).
+		Write(nbt.TextComponent{
+			Text: text,
+		}).
 		Bool(overlay).
 		Build()
-}
-
-// ── Text component NBT encoder ────────────────────────────────────────────────
-
-// nbtTextComponent encodes a plain text string as a minimal Network NBT text
-// component, as required by System Chat Message and other packets in 1.20.3+.
-//
-// Encoding: a root TAG_Compound (no name — network NBT format) containing a
-// single TAG_String field named "text", followed by TAG_End.
-//
-//	0x0A              TAG_Compound root (no name)
-//	0x08 "text" …    TAG_String: name="text", value=text
-//	0x00              TAG_End
-func nbtTextComponent(text string) []byte {
-	var buf bytes.Buffer
-
-	buf.WriteByte(0x0A) // TAG_Compound root
-	writeNBTStringEntry(&buf, "text", text)
-	buf.WriteByte(0x00) // TAG_End
-	return buf.Bytes()
-}
-
-func nbtLinkComponent(text, link string) []byte {
-	var buf bytes.Buffer
-	buf.WriteByte(0x0A)
-	writeNBTStringEntry(&buf, "text", text)
-	writeNBTStringEntry(&buf, "color", "aqua")
-	buf.WriteByte(0x01)
-	writeNBTString(&buf, "underlined")
-	buf.WriteByte(1)
-	buf.WriteByte(0x0A)
-	writeNBTString(&buf, "clickEvent")
-	writeNBTStringEntry(&buf, "action", "open_url")
-	writeNBTStringEntry(&buf, "value", link)
-	buf.WriteByte(0x00)
-	buf.WriteByte(0x00)
-	return buf.Bytes()
-}
-
-// nbtLoreTextComponent encodes an explicitly styled lore line. Item lore is
-// dark-purple and italic by default, so both fields must be present to produce
-// the compact vanilla-like tooltip used by GoCraft.
-func nbtLoreTextComponent(text, color string) []byte {
-	var buf bytes.Buffer
-	buf.WriteByte(0x0A) // TAG_Compound root
-	writeNBTStringEntry(&buf, "text", text)
-	writeNBTStringEntry(&buf, "color", color)
-	buf.WriteByte(0x01) // TAG_Byte
-	writeNBTString(&buf, "italic")
-	buf.WriteByte(0) // false
-	buf.WriteByte(0x00)
-	return buf.Bytes()
-}
-
-func writeNBTStringEntry(buf *bytes.Buffer, name, value string) {
-	buf.WriteByte(0x08) // TAG_String
-	writeNBTString(buf, name)
-	writeNBTString(buf, value)
-}
-
-func writeNBTString(buf *bytes.Buffer, value string) {
-	nameBytes := []byte(value)
-	var nameLen [2]byte
-	binary.BigEndian.PutUint16(nameLen[:], uint16(len(nameBytes)))
-	buf.Write(nameLen[:])
-	buf.Write(nameBytes)
 }

@@ -147,6 +147,14 @@ func (b *Builder) Bool(v bool) *Builder {
 	return b
 }
 
+type HasBytes interface {
+	Bytes() []byte
+}
+
+func (b *Builder) Write(data HasBytes) *Builder {
+	return b.Bytes(data.Bytes())
+}
+
 // Bytes appends raw bytes with no length prefix.
 func (b *Builder) Bytes(data []byte) *Builder {
 	b.buf.Write(data)

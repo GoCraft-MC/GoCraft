@@ -55,7 +55,7 @@ func bedrockFireworkNBT(data player.FireworkData) map[string]any {
 	}}
 }
 
-func readBedrockFireworkColours(value any, colours *[player.MaxFireworkColors]int32, count *uint8) {
+func readBedrockFireworkColours(value any, colours *player.FireworksColors, count *uint8) {
 	for _, raw := range nbtList(value) {
 		if *count >= player.MaxFireworkColors {
 			return

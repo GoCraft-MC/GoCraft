@@ -1,18 +1,24 @@
-package handler
+package nbt
 
-import "bytes"
+import (
+	"bytes"
+)
 
 const goCraftComponentsNBTKey = "GoCraftComponents"
+
+type GocraftComponents struct {
+	Value string
+}
 
 // nbtGoCraftComponents encodes the canonical extension component object inside
 // Java's minecraft:custom_data component. The value remains valid vanilla NBT
 // while GoCraft adapters gain typed codecs for individual components.
-func nbtGoCraftComponents(encoded string) []byte {
-	var buf bytes.Buffer
-	buf.WriteByte(0x0a)
-	writeNBTStringEntry(&buf, goCraftComponentsNBTKey, encoded)
-	buf.WriteByte(0)
-	return buf.Bytes()
+func (c GocraftComponents) Bytes() []byte {
+	w := NewWriterWithBuffer()
+	w.WriteByte(0x0a)
+	w.WriteStringEntry(goCraftComponentsNBTKey, c.Value)
+	w.WriteByte(0)
+	return w.Bytes()
 }
 
 func readGoCraftComponents(r *bytes.Reader) (string, error) {
