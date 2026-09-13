@@ -317,6 +317,9 @@ type Entity struct {
 	// until BabyGrowUpTicks. Love/cooldown values count down once per tick.
 	IsBaby                bool
 	BabyAgeTicks          int32
+	// EggLayTicks counts down to the next chicken egg drop (vanilla EggLayTime,
+	// re-rolled to 6000-12000 ticks after each lay). Zero means uninitialised.
+	EggLayTicks           int32
 	LoveTicks             int32
 	BreedingCooldownTicks int32
 	BreedingMateEntityID  int32
