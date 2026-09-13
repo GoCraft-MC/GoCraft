@@ -63,21 +63,28 @@ func (s *Server) tickVillagerDoor(villager *corentity.Entity, ai *mobAI) {
 			}
 		}
 	}
-	if villager.Sleeping || ai.pathIndex >= len(ai.path) {
+	if villager.Sleeping {
 		return
 	}
-	waypoint := ai.path[ai.pathIndex]
-	position, door, ok := s.villagerDoorAt(int(math.Floor(waypoint.X)), int(math.Floor(waypoint.Y)), int(math.Floor(waypoint.Z)))
-	if !ok || door.Properties["open"] == "true" {
-		return
-	}
-	dx, dz := waypoint.X-villager.Position.X, waypoint.Z-villager.Position.Z
-	if dx*dx+dz*dz > 1.75*1.75 {
-		return
-	}
-	if s.setVillagerDoorOpen(position, true) {
-		ai.openedDoor = position
-		ai.doorCloseTick = villagerDoorCloseTicks
+	// Vanilla InteractWithDoor opens the door on both the path's previous and
+	// next node, so the door is opened as the villager approaches rather than
+	// only once it is standing on the door tile. Scan the current and upcoming
+	// waypoint and open any wooden door within reach; this also survives a
+	// partial path whose exact node granularity does not land on the door.
+	for i := ai.pathIndex; i < len(ai.path) && i <= ai.pathIndex+1; i++ {
+		waypoint := ai.path[i]
+		position, door, ok := s.villagerDoorAt(int(math.Floor(waypoint.X)), int(math.Floor(waypoint.Y)), int(math.Floor(waypoint.Z)))
+		if !ok || door.Properties["open"] == "true" {
+			continue
+		}
+		dx, dz := waypoint.X-villager.Position.X, waypoint.Z-villager.Position.Z
+		if dx*dx+dz*dz > 2.0*2.0 {
+			continue
+		}
+		if s.setVillagerDoorOpen(position, true) {
+			ai.openedDoor = position
+			ai.doorCloseTick = villagerDoorCloseTicks
+		}
 	}
 }
 

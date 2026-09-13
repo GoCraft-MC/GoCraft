@@ -84,8 +84,12 @@ func TestVillagerSleepsNearBedAndWakesBesideIt(t *testing.T) {
 	if !server.tickPassiveMobAI(villager) || !villager.Sleeping {
 		t.Fatal("villager did not enter sleeping state")
 	}
-	if villager.Position.X != 2.4 || villager.Position.Y != 64 || villager.Position.Z != 0.5 {
-		t.Fatalf("sleep changed canonical navigation position: %+v", villager.Position)
+	// Vanilla LivingEntity.startSleeping snaps the entity onto the bed head at
+	// block centre + the bed-height offset the instant it falls asleep, rather
+	// than leaving it on the ground where it stopped navigating.
+	wantX, wantY, wantZ := 0.5, 64.0+villagerBedSleepYOffset, 0.5
+	if villager.Position.X != wantX || villager.Position.Y != wantY || villager.Position.Z != wantZ {
+		t.Fatalf("sleeping villager not anchored onto bed head: %+v want (%v,%v,%v)", villager.Position, wantX, wantY, wantZ)
 	}
 	if got := w.GetBlock(0, 64, 0).Properties["occupied"]; got != "true" {
 		t.Fatalf("sleeping bed occupied = %q, want true", got)
