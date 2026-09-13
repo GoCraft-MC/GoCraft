@@ -328,7 +328,8 @@ func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mo
 			s.damagePlayerFromParityMob(target, 4, "was shot by a shulker")
 			state.primaryCooldown = 20 + int(uint32(e.EntityID)%20)
 		}
-		e.VX, e.VY, e.VZ = 0, 0, 0
+		clearMobNavigation(e, ai)
+		e.VY = 0
 		return true
 	case corentity.TypeEvoker:
 		if target != nil && state.primaryCooldown <= 0 && distance2D(e.Position, target.Position) <= 12 {

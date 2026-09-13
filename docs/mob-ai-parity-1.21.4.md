@@ -24,6 +24,14 @@ pinned to the complete 83-mob Java 1.21.4 set by
 `server/mob_parity_registry_test.go`. Villager has its own dedicated Brain port
 and remains in this list so the global coverage gate cannot silently omit it.
 
+## Review regression coverage
+
+Navigation tests cover stationary shulkers (including the hostile pursuit
+fallback), Creative-player temptation with wall occlusion, and piglin/spider
+retaliation through the hostile controller. Sunlight burning deliberately excludes
+wither skeletons and zombie horses; the undead tag is not a sunlight-burn tag.
+These checks do not complete the remaining per-mob acceptance criteria below.
+
 ## Current audit
 
 | Mob | Controller target | Navigation | Status |

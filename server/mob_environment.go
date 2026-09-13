@@ -156,14 +156,21 @@ func (s *Server) mobInDirectDaylight(entity *corentity.Entity) bool {
 	return s.mobExposedToSky(entity)
 }
 
-// mobHasLineOfSight samples the segment between eye positions. The target
-// predicate is checked first so neutral mobs cannot damage a player merely
-// because the legacy common hostile controller selected the nearest player.
+// mobHasLineOfSight applies combat eligibility before checking visibility.
 func (s *Server) mobHasLineOfSight(attacker *corentity.Entity, target spatial.Vec3, targetEyeHeight float64) bool {
 	if attacker == nil || s.world == nil {
 		return false
 	}
 	if targetPlayer := s.closestPlayerToPosition(target, 0.8); targetPlayer != nil && !s.parityMobHostileToPlayer(attacker, targetPlayer) {
+		return false
+	}
+	return s.mobHasUnobstructedSight(attacker, target, targetEyeHeight)
+}
+
+// mobHasUnobstructedSight checks geometry without combat target rules, so
+// passive goals can see players that mobs must not attack (including Creative).
+func (s *Server) mobHasUnobstructedSight(attacker *corentity.Entity, target spatial.Vec3, targetEyeHeight float64) bool {
+	if attacker == nil || s.world == nil {
 		return false
 	}
 	start := spatial.Vec3{X: attacker.Position.X, Y: attacker.Position.Y + 1.4, Z: attacker.Position.Z}

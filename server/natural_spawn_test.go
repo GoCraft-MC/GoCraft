@@ -378,6 +378,11 @@ func TestPumpkinTemptGoalUsesNavigator(t *testing.T) {
 	if !ai.hasPathGoal || len(ai.path) == 0 || cow.VX <= 0 {
 		t.Fatalf("tempt navigation did not start: ai=%+v velocity=(%.3f, %.3f)", ai, cow.VX, cow.VZ)
 	}
+	world.SetBlock(4, 65, 1, coreworld.Block{Namespace: "minecraft", Name: "stone"})
+	if target := s.closestTemptingPlayer(cow, 10); target != nil {
+		t.Fatal("cow saw tempting player through a solid wall")
+	}
+
 }
 
 func TestNewerPumpkinMobsAreSkippedForJava1214Registry(t *testing.T) {

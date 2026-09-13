@@ -4580,6 +4580,9 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 			candidate.Player.GameMode == player.GameModeSpectator {
 			continue
 		}
+		if !s.parityMobHostileToPlayer(e, candidate.Player) {
+			continue
+		}
 		dx := candidate.Player.Position.X - e.Position.X
 		dz := candidate.Player.Position.Z - e.Position.Z
 		distance := math.Hypot(dx, dz)
@@ -4630,6 +4633,13 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	visible := s.mobHasLineOfSight(e, target.Player.Position, 1.62)
 	if distance > 0.001 {
 		e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	}
+
+	// Anchored attackers own the tick, including when generic navigation
+	// reports no movement. Never apply the ground pursuit fallback to them.
+	if e.Type == corentity.TypeShulker {
+		s.tickParityHostileNavigationSpecials(e, ai, target.Player.Position)
+		return
 	}
 
 	if e.Type == corentity.TypeCreeper {

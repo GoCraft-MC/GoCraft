@@ -37,18 +37,23 @@ func TestDaylightBurnsExposedUndeadButNotShelteredMob(t *testing.T) {
 	}
 }
 
-func TestDaylightBurnTagMatchesPumpkinUndeadVariants(t *testing.T) {
+func TestDaylightBurnMatchesJava1214(t *testing.T) {
 	for _, entityType := range []corentity.EntityType{
-		corentity.TypeSkeleton, corentity.TypeStray, corentity.TypeWitherSkeleton,
-		corentity.TypeBogged, corentity.TypeZombie, corentity.TypeZombieHorse,
+		corentity.TypeSkeleton, corentity.TypeStray,
+		corentity.TypeBogged, corentity.TypeZombie,
 		corentity.TypeZombieVillager, corentity.TypeDrowned, corentity.TypePhantom,
 	} {
 		if !burnsInDaylight(entityType) {
 			t.Errorf("%s missing daylight-burn behaviour", entityType)
 		}
 	}
-	if burnsInDaylight(corentity.TypeHusk) {
-		t.Fatal("husk should be immune to daylight burning")
+	for _, entityType := range []corentity.EntityType{
+		corentity.TypeHusk, corentity.TypeWitherSkeleton, corentity.TypeZombieHorse,
+		corentity.TypeSkeletonHorse, corentity.TypeZombifiedPiglin, corentity.TypeWither,
+	} {
+		if burnsInDaylight(entityType) {
+			t.Errorf("%s should be immune to daylight burning", entityType)
+		}
 	}
 }
 

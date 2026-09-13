@@ -34,7 +34,8 @@ func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial
 	// attacks own MOVE/LOOK while active. Run them before a navigation model is
 	// selected so those mobs do not incorrectly walk into generic melee range.
 	if s.tickParityHostileNavigationSpecials(e, ai, destination) {
-		return true
+		// Shulkers remain anchored even while their attack goal is active.
+		return e.Type != corentity.TypeShulker
 	}
 	if handled, moving := s.navigateMobByParity(e, ai, destination, speed); handled {
 		return moving
@@ -197,7 +198,7 @@ func (s *Server) closestTemptingPlayer(e *corentity.Entity, maximumDistance floa
 		}
 		dx, dy, dz := candidate.Position.X-e.Position.X, candidate.Position.Y-e.Position.Y, candidate.Position.Z-e.Position.Z
 		distance := dx*dx + dy*dy + dz*dz
-		if distance < closestDistance && s.mobHasLineOfSight(e, candidate.Position, 1.62) {
+		if distance < closestDistance && s.mobHasUnobstructedSight(e, candidate.Position, 1.62) {
 			closest, closestDistance = candidate, distance
 		}
 	})
