@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,6 +11,7 @@ import (
 
 	"GoCraft/config"
 	"GoCraft/healthcheck"
+	"GoCraft/internal/consolelog"
 	"GoCraft/internal/debuglog"
 	"GoCraft/internal/protocoldata"
 	"GoCraft/internal/serverlog"
@@ -23,6 +23,14 @@ import (
 //
 //	go build -ldflags="-X main.version=v1.2.3" .
 var version = "dev"
+
+func stdoutIsTerminal() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
 
 func main() {
 	os.Exit(run())
@@ -51,11 +59,11 @@ func run() int {
 
 	// Keep stdout logging for Pterodactyl, then tee the same output to the
 	// Paper-style logs/latest.log file when file logging is available.
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
 	logFile, err := serverlog.Open(*logDirectory, *maxLogArchives)
 	if err != nil {
+		slog.SetDefault(slog.New(consolelog.New(os.Stdout, consolelog.Options{
+			Color: stdoutIsTerminal(),
+		})))
 		slog.Error("file logging disabled", "directory", *logDirectory, "err", err)
 	} else {
 		defer func() {
@@ -63,8 +71,9 @@ func run() int {
 				fmt.Fprintln(os.Stderr, "failed to close latest.log:", err)
 			}
 		}()
-		slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stdout, logFile), &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+		slog.SetDefault(slog.New(consolelog.New(os.Stdout, consolelog.Options{
+			Color: stdoutIsTerminal(),
+			File:  logFile,
 		})))
 	}
 
