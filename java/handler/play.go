@@ -52,14 +52,18 @@ func dimensionName(dimension int32) string {
 
 func dimensionCommandTarget(p *player.Player, w *coreworld.World, dimension int32) spatial.Vec3 {
 	if dimension == 0 {
-		return p.WorldSpawn
+		target := p.WorldSpawn
+		w.QueuePregeneration(posToChunk(target.X), posToChunk(target.Z), 1)
+		return target
 	}
 	if dimension == 2 {
 		x, z := 100, 0
+		w.QueuePregeneration(posToChunk(float64(x)), posToChunk(float64(z)), 1)
 		return spatial.Vec3{X: float64(x) + 0.5, Y: float64(w.SurfaceY(x, z) + 1), Z: float64(z) + 0.5}
 	}
 	x := int(math.Floor(p.Position.X / 8))
 	z := int(math.Floor(p.Position.Z / 8))
+	w.QueuePregeneration(posToChunk(float64(x)), posToChunk(float64(z)), 1)
 	for y := 32; y <= 118; y++ {
 		if safeRespawnSpace(w, x, y, z) {
 			return spatial.Vec3{X: float64(x) + 0.5, Y: float64(y), Z: float64(z) + 0.5}
@@ -678,16 +682,17 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if streamRespawn {
 			streamRespawn = false
 			keys := chunkKeysAround(newCX, newCZ, viewRadius)
+			// Start the bootstrap ring on the world's generation workers before
+			// synchronously encoding it. Previously the nine chunks were generated
+			// one-by-one here, which could leave Java on Loading terrain for minutes
+			// on a cold respawn or dimension switch.
+			if preGenerateRadius > 0 {
+				w.QueuePregeneration(newCX, newCZ, 1)
+			}
 			// Finish a 3x3 batch promptly so the client can leave Loading terrain.
-			// Encoding a 5x5 batch here used to block packet reads during respawn.
 			nearCount := respawnBootstrapCount(viewRadius, len(keys))
 			if err := sendChunkKeys(conn, w, sender, sentChunks, keys[:nearCount]); err != nil {
 				return fmt.Errorf(`send nearby respawn chunks: %w`, err)
-			}
-			// Warm the same bootstrap radius. The rest remains background work so
-			// large configured view distances do not stall the respawn handshake.
-			if preGenerateRadius > 0 {
-				w.QueuePregeneration(newCX, newCZ, 1)
 			}
 			pendingRespawnChunks = append(pendingRespawnChunks, keys[nearCount:]...)
 			broadcastGeneratedEntities(w, mgr)
@@ -714,6 +719,10 @@ func playLoop(conn *network.ClientConn, p *player.Player, spawnTeleportID int32,
 		if err := closeBoatInventory(p, conn); err != nil {
 			return err
 		}
+		// Warm the target ring before safe-arrival probing. This lets the
+		// generation workers overlap the expensive cold-world work with the
+		// arrival scan instead of serialising it after the Respawn packet.
+		destinationWorld.QueuePregeneration(posToChunk(target.X), posToChunk(target.Z), 1)
 		target = destinationWorld.EnsureSafeArrival(target, dimension)
 		p.InvulnerableUntil = time.Now().Add(10 * time.Second)
 		p.Dimension = dimension

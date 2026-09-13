@@ -13,6 +13,12 @@ import (
 const (
 	pumpkinNavigatorRepathTicks       = 15
 	pumpkinNavigatorRepathSpreadTicks = 15
+	// A 4096-node A* search per mob can monopolise the 20 TPS simulation tick
+	// when several mobs repath together. Damage is drained by the same tick, so
+	// a pathfinding spike also makes mobs look invulnerable/frozen to clients.
+	// The pathfinder returns its best partial route when this budget is reached,
+	// allowing AI to keep moving while bounding the work done by one repath.
+	pumpkinNavigatorMaxVisited = 768
 )
 
 // navigateMob owns the MOVE control for one tick. It mirrors Pumpkin's
@@ -38,9 +44,9 @@ func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial
 	if !ai.hasPathGoal || ai.repathTick <= 0 {
 		var path []spatial.Vec3
 		if e.Type == corentity.TypeVillager {
-			path, _ = navigation.FindPathOpeningDoors(s.world, e.Position, destination, 4096)
+			path, _ = navigation.FindPathOpeningDoors(s.world, e.Position, destination, pumpkinNavigatorMaxVisited)
 		} else {
-			path, _ = navigation.FindPath(s.world, e.Position, destination, 4096)
+			path, _ = navigation.FindPath(s.world, e.Position, destination, pumpkinNavigatorMaxVisited)
 		}
 		ai.path = path
 		ai.pathIndex = 0
