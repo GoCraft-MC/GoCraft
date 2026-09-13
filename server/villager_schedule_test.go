@@ -64,6 +64,38 @@ func TestVillagerWorkScheduleTargetsWorkstation(t *testing.T) {
 	}
 }
 
+func TestVillagerWorkScheduleWalksToWorkstationEndToEnd(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+	job := spatial.BlockPos{X: 10, Y: 64, Z: 10}
+	world.SetBlock(int(job.X), int(job.Y), int(job.Z), coreworld.Block{Namespace: "minecraft", Name: "lectern"})
+
+	server := &Server{world: world, worldAge: 3000, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(35, [16]byte{}, corentity.TypeVillager, 2.5, 64, 2.5)
+	villager.HasVillageWorkstation = true
+	villager.VillageWorkstation = job
+	villager.OnGround = true
+	world.Entities.Add(villager)
+	ai := server.mobAIFor(villager)
+
+	target := spatial.Vec3{X: 10.5, Y: 64, Z: 10.5}
+	startDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	for tick := 0; tick < 160; tick++ {
+		server.tickVillagerDoor(villager, ai)
+		previous := villager.Position
+		server.tickPassiveMobAI(villager)
+		server.tickAuxiliaryMobPhysics(villager, previous)
+	}
+	endDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	if endDistance >= startDistance-2 {
+		t.Fatalf("WORK target did not survive passive AI: start distance=%.2f end distance=%.2f position=%+v", startDistance, endDistance, villager.Position)
+	}
+	if endDistance > 2.5 {
+		t.Fatalf("villager did not reach workstation vicinity: distance=%.2f position=%+v target=%+v", endDistance, villager.Position, target)
+	}
+}
+
 func TestVillagerMeetScheduleTargetsVillageCenter(t *testing.T) {
 	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer world.Close()
@@ -89,6 +121,36 @@ func TestVillagerMeetScheduleTargetsVillageCenter(t *testing.T) {
 	}
 }
 
+func TestVillagerMeetScheduleWalksToMeetingPointEndToEnd(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+
+	server := &Server{world: world, worldAge: 9500, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(36, [16]byte{}, corentity.TypeVillager, 1.5, 64, 1.5)
+	villager.VillageCenter = spatial.BlockPos{X: 10, Y: 64, Z: 10}
+	villager.OnGround = true
+	world.Entities.Add(villager)
+	ai := server.mobAIFor(villager)
+
+	server.tickVillagerDoor(villager, ai)
+	target := ai.wanderTarget
+	startDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	for tick := 0; tick < 180; tick++ {
+		server.tickVillagerDoor(villager, ai)
+		previous := villager.Position
+		server.tickPassiveMobAI(villager)
+		server.tickAuxiliaryMobPhysics(villager, previous)
+	}
+	endDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	if endDistance >= startDistance-2 {
+		t.Fatalf("MEET target did not survive passive AI: start distance=%.2f end distance=%.2f position=%+v", startDistance, endDistance, villager.Position)
+	}
+	if endDistance > 3.0 {
+		t.Fatalf("villager did not reach meeting-point vicinity: distance=%.2f position=%+v target=%+v", endDistance, villager.Position, target)
+	}
+}
+
 func TestVillagerIdleAndBabySchedulesDoNotForceAdultPOITargets(t *testing.T) {
 	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer world.Close()
@@ -107,10 +169,43 @@ func TestVillagerIdleAndBabySchedulesDoNotForceAdultPOITargets(t *testing.T) {
 		t.Fatalf("IDLE activity unexpectedly forced POI target %+v", ai.wanderTarget)
 	}
 
-	server.worldAge = 3000
+	server.worldAge = 6000
 	villager.IsBaby = true
 	server.tickVillagerDoor(villager, ai)
 	if ai.hasWanderGoal {
-		t.Fatalf("baby villager unexpectedly followed adult WORK target %+v", ai.wanderTarget)
+		t.Fatalf("baby IDLE activity unexpectedly forced adult POI target %+v", ai.wanderTarget)
+	}
+}
+
+func TestBabyVillagerPlayTargetsVillageCenterNotWorkstation(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+	job := spatial.BlockPos{X: 10, Y: 64, Z: 10}
+	world.SetBlock(int(job.X), int(job.Y), int(job.Z), coreworld.Block{Namespace: "minecraft", Name: "lectern"})
+
+	server := &Server{world: world, worldAge: 3000, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(37, [16]byte{}, corentity.TypeVillager, 2.5, 64, 2.5)
+	villager.IsBaby = true
+	villager.HasVillageWorkstation = true
+	villager.VillageWorkstation = job
+	villager.VillageCenter = spatial.BlockPos{X: 8, Y: 64, Z: 8}
+	ai := server.mobAIFor(villager)
+
+	server.tickVillagerDoor(villager, ai)
+	state := server.villagerBrainStateFor(villager)
+	if state.activity != villagerActivityPlay {
+		t.Fatalf("baby activity = %v; want PLAY", state.activity)
+	}
+	if !ai.hasWanderGoal {
+		t.Fatal("baby PLAY activity did not create a stroll target")
+	}
+	workTarget := spatial.Vec3{X: 10.5, Y: 64, Z: 10.5}
+	if ai.wanderTarget == workTarget {
+		t.Fatalf("baby PLAY activity incorrectly targeted adult workstation %+v", ai.wanderTarget)
+	}
+	centerDistance := math.Hypot(ai.wanderTarget.X-8.5, ai.wanderTarget.Z-8.5)
+	if centerDistance > math.Sqrt(72)+0.001 {
+		t.Fatalf("baby PLAY target %+v is %.2f blocks from village center; expected PLAY stroll around center", ai.wanderTarget, centerDistance)
 	}
 }

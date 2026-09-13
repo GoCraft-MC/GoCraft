@@ -57,4 +57,8 @@ func (s *Server) ringBell(world *coreworld.World, dimension int32, position spat
 		s.bedrockListener.BroadcastBellRing(dimension, position, direction)
 	}
 	world.EmitVibration(int(position.X), int(position.Y), int(position.Z))
+	// BellBlockEntity makes nearby villagers remember HEARD_BELL_TIME. The
+	// CORE ReactToBell behaviour consumes that memory and enters HIDE whenever
+	// there is no active raid at the villager's position.
+	s.notifyVillagersOfBell(world, position)
 }
