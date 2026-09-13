@@ -1,0 +1,54 @@
+---
+scope:core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'cmd/**/*'
+          - 'config/**/*'
+          - 'configuration/**/*'
+          - 'core/**/*'
+          - 'customitems/**/*'
+          - 'internal/**/*'
+          - 'logs/**/*'
+          - 'mockserver/**/*'
+          - 'runtime/**/*'
+          - 'server/**/*'
+          - 'world/**/*'
+          - 'world_end/**/*'
+          - 'world_nether/**/*'
+          - 'README.md'
+          - 'server.yml'
+          - 'permissions.json'
+          - '*.go'
+          - 'go.mod'
+          - 'go.sum'
+          - 'egg-gocraft.json'
+          - 'buf.gen.events.yaml'
+scope:license:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'LICENSE'
+scope:bedrock:
+  - changed-files:
+      - any-glob-to-any-file: 'bedrock/**/*'
+scope:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**/*'
+scope:java:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'java/**/*'
+scope:plugins:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'plugins/**/*'
+scope:miniserv:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'miniserv/**/*'
+scope:docker-compose:
+  - changed-files:
+      - any-glob-to-any-file: 'docker-compose.yml'
+scope:docker/gocraft:
+  - changed-files:
+      - any-glob-to-any-file: 'docker/gocraft/**/*'
