@@ -64,6 +64,38 @@ func TestVillagerWorkScheduleTargetsWorkstation(t *testing.T) {
 	}
 }
 
+func TestVillagerWorkScheduleWalksToWorkstationEndToEnd(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+	job := spatial.BlockPos{X: 10, Y: 64, Z: 10}
+	world.SetBlock(int(job.X), int(job.Y), int(job.Z), coreworld.Block{Namespace: "minecraft", Name: "lectern"})
+
+	server := &Server{world: world, worldAge: 3000, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(35, [16]byte{}, corentity.TypeVillager, 2.5, 64, 2.5)
+	villager.HasVillageWorkstation = true
+	villager.VillageWorkstation = job
+	villager.OnGround = true
+	world.Entities.Add(villager)
+	ai := server.mobAIFor(villager)
+
+	target := spatial.Vec3{X: 10.5, Y: 64, Z: 10.5}
+	startDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	for tick := 0; tick < 160; tick++ {
+		server.tickVillagerDoor(villager, ai)
+		previous := villager.Position
+		server.tickPassiveMobAI(villager)
+		server.tickAuxiliaryMobPhysics(villager, previous)
+	}
+	endDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	if endDistance >= startDistance-2 {
+		t.Fatalf("WORK target did not survive passive AI: start distance=%.2f end distance=%.2f position=%+v", startDistance, endDistance, villager.Position)
+	}
+	if endDistance > 2.5 {
+		t.Fatalf("villager did not reach workstation vicinity: distance=%.2f position=%+v target=%+v", endDistance, villager.Position, target)
+	}
+}
+
 func TestVillagerMeetScheduleTargetsVillageCenter(t *testing.T) {
 	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer world.Close()
@@ -86,6 +118,36 @@ func TestVillagerMeetScheduleTargetsVillageCenter(t *testing.T) {
 	}
 	if ai.wanderTarget.Y != 64 {
 		t.Fatalf("MEET target Y = %v; want 64", ai.wanderTarget.Y)
+	}
+}
+
+func TestVillagerMeetScheduleWalksToMeetingPointEndToEnd(t *testing.T) {
+	world := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer world.Close()
+	world.Chunk(0, 0)
+
+	server := &Server{world: world, worldAge: 9500, mobAIs: make(map[int32]*mobAI)}
+	villager := corentity.New(36, [16]byte{}, corentity.TypeVillager, 1.5, 64, 1.5)
+	villager.VillageCenter = spatial.BlockPos{X: 10, Y: 64, Z: 10}
+	villager.OnGround = true
+	world.Entities.Add(villager)
+	ai := server.mobAIFor(villager)
+
+	server.tickVillagerDoor(villager, ai)
+	target := ai.wanderTarget
+	startDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	for tick := 0; tick < 180; tick++ {
+		server.tickVillagerDoor(villager, ai)
+		previous := villager.Position
+		server.tickPassiveMobAI(villager)
+		server.tickAuxiliaryMobPhysics(villager, previous)
+	}
+	endDistance := math.Hypot(villager.Position.X-target.X, villager.Position.Z-target.Z)
+	if endDistance >= startDistance-2 {
+		t.Fatalf("MEET target did not survive passive AI: start distance=%.2f end distance=%.2f position=%+v", startDistance, endDistance, villager.Position)
+	}
+	if endDistance > 3.0 {
+		t.Fatalf("villager did not reach meeting-point vicinity: distance=%.2f position=%+v target=%+v", endDistance, villager.Position, target)
 	}
 }
 
