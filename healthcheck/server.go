@@ -66,6 +66,11 @@ func getBindAddress() string {
 }
 
 func RunHealthCheckServer(ctx context.Context, state *HealthState) func() {
+	if enabled := os.Getenv("GOCRAFT_HEALTHCHECK_ENABLED"); strings.EqualFold(enabled, "false") {
+		slog.Info("healthcheck server disabled")
+		return func() {}
+	}
+
 	addr := getBindAddress()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth(state))

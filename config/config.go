@@ -554,6 +554,8 @@ func (c *Config) validate() error {
 //	GOCRAFT_PERMISSION_EDITOR_ENABLED  "true"/"false"              (default: true)
 //	GOCRAFT_PERMISSION_EDITOR_URL      Editor GitHub Pages URL
 //	GOCRAFT_PERMISSION_EDITOR_BYTEBIN  Bytebin base URL
+//	GOCRAFT_HEALTHCHECK_ENABLED        "true"/"false"              (default: true)
+//	GOCRAFT_HEALTHCHECK_PORT           Healthcheck HTTP port       (default: 8080)
 func (c *Config) ApplyEnvOverrides() error {
 	if v := os.Getenv("GOCRAFT_HOST"); v != "" {
 		c.Host = v
