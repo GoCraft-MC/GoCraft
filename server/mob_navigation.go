@@ -8,6 +8,7 @@ import (
 	"GoCraft/core/navigation"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
+	coreworld "GoCraft/core/world"
 )
 
 const (
@@ -21,14 +22,24 @@ const (
 	pumpkinNavigatorMaxVisited = 768
 )
 
-// navigateMob owns the MOVE control for one tick. It mirrors Pumpkin's
-// NavigatorGoal lifecycle: recompute when the destination changes or the
-// cooldown expires, advance walk nodes as the mob reaches them, and stop when
-// no valid loaded-chunk path exists.
+// navigateMob owns the MOVE control for one tick. Ground mobs use the bounded
+// A* navigator while mob families with a different vanilla Navigation class
+// are dispatched to their dedicated controller first.
 func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial.Vec3, speed float64) bool {
-	if s.world == nil {
+	if s.world == nil || e == nil || ai == nil {
 		return false
 	}
+
+	// Ranged/special goals such as Guardian beam, Warden sonic boom and Shulker
+	// attacks own MOVE/LOOK while active. Run them before a navigation model is
+	// selected so those mobs do not incorrectly walk into generic melee range.
+	if s.tickParityHostileNavigationSpecials(e, ai, destination) {
+		return true
+	}
+	if handled, moving := s.navigateMobByParity(e, ai, destination, speed); handled {
+		return moving
+	}
+
 	goal := spatial.BlockPos{
 		X: int32(math.Floor(destination.X)),
 		Y: int32(math.Floor(destination.Y)),
@@ -81,6 +92,15 @@ func (s *Server) navigateMob(e *corentity.Entity, ai *mobAI, destination spatial
 	if waypoint.Y > e.Position.Y+0.6 && distance < 1 && e.OnGround {
 		e.VY = 0.42
 	}
+	// SpiderNavigation climbs when the next step is blocked by a solid wall.
+	if isParityClimbingMob(e.Type) && e.OnGround {
+		frontX := int(math.Floor(e.Position.X + dx/distance*0.7))
+		frontY := int(math.Floor(e.Position.Y + 0.5))
+		frontZ := int(math.Floor(e.Position.Z + dz/distance*0.7))
+		if coreworld.IsEntitySupportBlock(s.world.GetBlock(frontX, frontY, frontZ).ResourceLocation()) {
+			e.VY = 0.20
+		}
+	}
 	return true
 }
 
@@ -102,10 +122,13 @@ func pumpkinMovementSpeed(t corentity.EntityType, modifier float64) float64 {
 	return settings.movementSpeed * modifier * 0.5
 }
 
-// tickPassiveIdleGoals implements the common Pumpkin passive goal stack after
-// higher-priority swim, escape-danger, sleeping, and breeding goals: Tempt,
-// WanderAround, LookAtEntity, then RandomLookAround.
+// tickPassiveIdleGoals implements the common passive goal stack after
+// higher-priority swim, escape-danger, sleeping, breeding and riding goals.
+// Mob families with dedicated vanilla goals are given first ownership here.
 func (s *Server) tickPassiveIdleGoals(e *corentity.Entity, ai *mobAI) {
+	if s.tickParityPassiveIdle(e, ai) {
+		return
+	}
 	if target := s.closestTemptingPlayer(e, 10); target != nil {
 		ai.hasWanderGoal = false
 		dx, dz := target.Position.X-e.Position.X, target.Position.Z-e.Position.Z
@@ -133,8 +156,6 @@ func (s *Server) tickPassiveIdleGoals(e *corentity.Entity, ai *mobAI) {
 		return
 	}
 
-	// Pumpkin checks non-every-tick goals every second selector tick. A 1/600
-	// roll here therefore matches WanderAroundGoal's to_goal_ticks(120) chance.
 	ai.wanderTick--
 	if ai.wanderTick <= 0 {
 		ai.wanderTick = 2
@@ -218,10 +239,42 @@ func isTemptItem(entityType corentity.EntityType, item string) bool {
 	case corentity.TypeRabbit:
 		animal = "rabbit"
 	}
-	return animal != "" && itemregistry.HasTag(item, "minecraft:"+animal+"_food")
+	if animal != "" && itemregistry.HasTag(item, "minecraft:"+animal+"_food") {
+		return true
+	}
+
+	// Goal-specific temptation foods not represented by the farm-animal tags.
+	switch entityType {
+	case corentity.TypeHorse, corentity.TypeDonkey, corentity.TypeMule, corentity.TypeSkeletonHorse, corentity.TypeZombieHorse:
+		return item == "minecraft:golden_carrot" || item == "minecraft:golden_apple" || item == "minecraft:apple" || item == "minecraft:wheat"
+	case corentity.TypeLlama, corentity.TypeTraderLlama:
+		return item == "minecraft:wheat" || item == "minecraft:hay_block"
+	case corentity.TypeCamel:
+		return item == "minecraft:cactus"
+	case corentity.TypeStrider:
+		return item == "minecraft:warped_fungus"
+	case corentity.TypeTurtle:
+		return item == "minecraft:seagrass"
+	case corentity.TypeCat, corentity.TypeOcelot:
+		return item == "minecraft:cod" || item == "minecraft:salmon"
+	case corentity.TypeFox:
+		return item == "minecraft:sweet_berries" || item == "minecraft:glow_berries"
+	case corentity.TypePanda:
+		return item == "minecraft:bamboo"
+	case corentity.TypeFrog:
+		return item == "minecraft:slime_ball"
+	case corentity.TypeArmadillo:
+		return item == "minecraft:spider_eye"
+	case corentity.TypeBee:
+		return item == "minecraft:dandelion" || item == "minecraft:poppy" || item == "minecraft:blue_orchid" || item == "minecraft:allium" || item == "minecraft:azure_bluet" || item == "minecraft:oxeye_daisy" || item == "minecraft:cornflower" || item == "minecraft:lily_of_the_valley" || item == "minecraft:sunflower"
+	}
+	return false
 }
 
 func (s *Server) tickHostileIdleGoals(e *corentity.Entity, ai *mobAI) {
+	if s.tickParityHostileIdle(e, ai) {
+		return
+	}
 	if ai.hasWanderGoal {
 		modifier := 1.0
 		if e.Type == corentity.TypeCreeper {
@@ -269,7 +322,7 @@ func isAquaticMob(t corentity.EntityType) bool {
 	case corentity.TypeAxolotl, corentity.TypeCod, corentity.TypeDolphin,
 		corentity.TypeGlowSquid, corentity.TypePufferfish, corentity.TypeSalmon,
 		corentity.TypeSquid, corentity.TypeTadpole, corentity.TypeTropicalFish,
-		corentity.TypeGuardian, corentity.TypeElderGuardian:
+		corentity.TypeGuardian, corentity.TypeElderGuardian, corentity.TypeDrowned:
 		return true
 	}
 	return false
