@@ -1,0 +1,79 @@
+---
+# needs koji installed: https://github.com/cococonscious/koji
+prepare-commit-msg:
+  skip:
+    - rebase
+    - merge
+  commands:
+    koji:
+      interactive: true
+      run: koji --hook --yes
+      skip:
+        - run: "! which koji"
+# needs cocogitto installed: https://github.com/cocogitto/cocogitto
+commit-msg:
+  commands:
+    lint-conventional-commit:
+      run: cog verify --file {1}
+      skip:
+        - run: "! which cog"
+pre-commit:
+  commands:
+    # needs go to be installed
+    go-fmt:
+      glob: "*.go"
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+      skip:
+        - run: "! which go"
+    # needs go to be installed
+    go-vet:
+      glob: "*.go"
+      run: go vet ./...
+      skip:
+        - run: "! which go"
+    # needs golangci-lint to be installed: https://github.com/golangci/golangci-lint
+    go-lint:
+      glob: "*.go"
+      run: golangci-lint run --fix ./...
+      stage_fixed: true
+      skip:
+        - run: "! which golangci-lint"
+    # needs yamlfmt to be installed: https://github.com/google/yamlfmt
+    yaml-format:
+      glob: "*.{yaml,yml}"
+      run: yamlfmt {staged_files}
+      stage_fixed: true
+      skip:
+        - run: "! which yamlfmt"
+    # needs yamllint to be installed: https://github.com/adrienverge/yamllint
+    yaml-lint:
+      glob: "*.{yaml,yml}"
+      run: yamllint {staged_files}
+      skip:
+        - run: "! which yamllint"
+    # needs hadolint to be installed: https://github.com/hadolint/hadolint
+    hadolint-dockerfile:
+      glob: "*Dockerfile*"
+      run: hadolint {staged_files}
+      skip:
+        - run: "! which hadolint"
+    # needs gitleaks to be installed: https://github.com/gitleaks/gitleaks
+    gitleaks:
+      glob: "*"
+      run: gitleaks protect --staged --verbose
+      skip:
+        - run: "! which gitleaks"
+    # needs rumdl to be installed: https://github.com/rvben/rumdl
+    rumdl-fmt:
+      glob: "*.md"
+      run: rumdl fmt {staged_files}
+      stage_fixed: true
+      skip:
+        - run: "! which rumdl"
+    # needs rumdl to be installed: https://github.com/rvben/rumdl
+    rumdl-lint:
+      glob: "*.md"
+      run: rumdl check --fix {staged_files}
+      skip:
+        - run: "! which rumdl"
