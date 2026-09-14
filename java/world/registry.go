@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"GoCraft/internal/gamedata"
+	"GoCraft/internal/gamedata/block"
 )
 
 // expectedVersion is the Minecraft version string these data files must declare.
@@ -83,8 +84,60 @@ func init() {
 	loadRegistries()
 }
 
-// loadBlockRegistry parses blocks.json and populates javaStateIDs.
-func loadBlockRegistry() {
+func loadBlockRegistryFbs() (map[string]int32, int, int) {
+	data, err := gamedata.FS.ReadFile("java/1.21.4/blocks.bin")
+	if err != nil {
+		panic(fmt.Sprintf("gamedata: reading blocks.bin: %v", err))
+	}
+
+	registry := block.GetRootAsBlockRegistry(data, 0)
+	numBlocks := registry.BlocksLength()
+
+	loaded := make(map[string]int32, numBlocks*2)
+	defaults, statesCount := 0, 0
+
+	blocks := new(block.Block)
+	state := new(block.BlockState)
+	prop := new(block.StateProperty)
+
+	for i := range numBlocks {
+		if !registry.Blocks(blocks, i) {
+			continue
+		}
+
+		blockName := string(blocks.Name())
+		numStates := blocks.StatesLength()
+
+		for j := range numStates {
+			if !blocks.States(state, j) {
+				continue
+			}
+
+			statesCount++
+			stateID := state.Id()
+
+			if state.IsDefault() {
+				loaded[blockName] = stateID
+				defaults++
+			}
+
+			numProps := state.PropertiesLength()
+			if numProps > 0 {
+				propsMap := make(map[string]string, numProps)
+				for k := range numProps {
+					if state.Properties(prop, k) {
+						propsMap[string(prop.Key())] = string(prop.Value())
+					}
+				}
+				loaded[blockStateKey(blockName, propsMap)] = stateID
+			}
+		}
+	}
+
+	return loaded, defaults, statesCount
+}
+
+func loadBlockRegistryJson() (map[string]int32, int, int) {
 	data, err := gamedata.FS.ReadFile("java/1.21.4/blocks.json")
 	if err != nil {
 		panic(fmt.Sprintf("gamedata: reading blocks.json: %v", err))
@@ -122,6 +175,16 @@ func loadBlockRegistry() {
 		}
 	}
 
+	return loaded, defaults, states
+}
+
+// loadBlockRegistry parses blocks.json and populates javaStateIDs.
+func loadBlockRegistry() {
+	clear(javaStateIDs)
+	loadedBlockCount = 0
+	loadedBlockStateCount = 0
+
+	loaded, defaults, states := loadBlockRegistryJson()
 	javaStateIDs = loaded
 	loadedBlockCount = defaults
 	loadedBlockStateCount = states
