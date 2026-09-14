@@ -57,21 +57,24 @@ func getBindAddress() string {
 		port = defaultServicePort
 	}
 
+	if port == "0" {
+		return ""
+	}
+
 	addr := port
 	if !strings.HasPrefix(addr, ":") {
-		addr = ":" + addr
+		addr = ":" + port
 	}
 
 	return addr
 }
 
 func RunHealthCheckServer(ctx context.Context, state *HealthState) func() {
-	if enabled := os.Getenv("GOCRAFT_HEALTHCHECK_ENABLED"); strings.EqualFold(enabled, "false") {
+	addr := getBindAddress()
+	if addr == "" {
 		slog.Info("healthcheck server disabled")
 		return func() {}
 	}
-
-	addr := getBindAddress()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth(state))
 	mux.HandleFunc("GET /readyz", handleReady(state))
