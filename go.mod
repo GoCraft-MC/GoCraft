@@ -25,6 +25,7 @@ require (
 	github.com/df-mc/worldupgrader v1.0.21 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect

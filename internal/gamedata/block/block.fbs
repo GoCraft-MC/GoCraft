@@ -1,0 +1,42 @@
+// Represents the structural definitions unique to certain blocks
+table BlockDefinition {
+    type:string;
+    block_set_type:string;
+    ticks_to_stay_pressed:int = 0; // Uses 0 or default if not applicable
+}
+
+// Maps a property name to its allowed possible values 
+// Example: key = "facing", values = ["north", "south", "west", "east"]
+table PropertyOption {
+    key:string;
+    values:[string];
+}
+
+// Represents a concrete key-value pair assignment within a specific state
+// Example: key = "powered", value = "true"
+table StateProperty {
+    key:string;
+    value:string;
+}
+
+// Represents an individual permuted block state assignment
+table BlockState {
+    id:int32;
+    is_default:bool = false; // maps from JSON "default": true
+    properties:[StateProperty];
+}
+
+// Top-level structure representing a unique block entity
+table Block {
+    name:string; // Example: "minecraft:acacia_button"
+    definition:BlockDefinition;
+    property_options:[PropertyOption];
+    states:[BlockState];
+}
+
+// The root data store containing all defined blocks
+table BlockRegistry {
+    blocks:[Block];
+}
+
+root_type BlockRegistry;
