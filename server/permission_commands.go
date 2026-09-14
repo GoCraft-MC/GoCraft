@@ -36,7 +36,7 @@ func (s *Server) executePermissionCommand(args []string) (string, error) {
 		if s.permissionEditor == nil {
 			return "", fmt.Errorf("permission editor is disabled in server.yml")
 		}
-		link, err := s.permissionEditor.create(s.cmds.CommandPermissions())
+		link, err := s.permissionEditor.Create(s.cmds.CommandPermissions())
 		if err != nil {
 			return "", fmt.Errorf("creating permission editor: %w", err)
 		}
@@ -50,7 +50,7 @@ func (s *Server) executePermissionCommand(args []string) (string, error) {
 		if len(args) < 2 {
 			return "", fmt.Errorf("usage: /gocraft applyedits <link-or-code>")
 		}
-		if err := s.permissionEditor.apply(args[1]); err != nil {
+		if err := s.permissionEditor.Apply(args[1]); err != nil {
 			return "", fmt.Errorf("applying permission edits: %w", err)
 		}
 		s.syncCommandPermissionsToAll()

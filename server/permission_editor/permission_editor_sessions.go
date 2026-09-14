@@ -1,4 +1,4 @@
-package server
+package permission_editor
 
 import (
 	"bytes"
@@ -12,15 +12,15 @@ import (
 	"GoCraft/java/handler"
 )
 
-type permissionEditor struct {
+type PermissionEditor struct {
 	manager    *corepermission.Manager
 	editorURL  string
 	bytebinURL string
 	client     *http.Client
 }
 
-func newPermissionEditor(manager *corepermission.Manager, editorURL, bytebinURL string) *permissionEditor {
-	return &permissionEditor{
+func NewPermissionEditor(manager *corepermission.Manager, editorURL, bytebinURL string) *PermissionEditor {
+	return &PermissionEditor{
 		manager:    manager,
 		editorURL:  strings.TrimRight(editorURL, "/"),
 		bytebinURL: strings.TrimRight(bytebinURL, "/"),
@@ -34,7 +34,7 @@ type bytebinUpload struct {
 	Commands []handler.CommandPermission `json:"commands,omitempty"`
 }
 
-func (e *permissionEditor) create(commands []handler.CommandPermission) (string, error) {
+func (e *PermissionEditor) Create(commands []handler.CommandPermission) (string, error) {
 	payload := bytebinUpload{
 		Type:     "gocraft-permissions",
 		Document: e.manager.Snapshot(),

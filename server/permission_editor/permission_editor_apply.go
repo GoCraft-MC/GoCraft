@@ -1,4 +1,4 @@
-package server
+package permission_editor
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	corepermission "GoCraft/core/permission"
 )
 
-func (e *permissionEditor) apply(reference string) error {
+func (e *PermissionEditor) Apply(reference string) error {
 	key, err := extractBytebinKey(reference)
 	if err != nil {
 		return err
