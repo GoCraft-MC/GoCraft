@@ -270,6 +270,9 @@ type Entity struct {
 	// OfferFlowerTicks counts down while an iron golem holds out a poppy to a
 	// nearby villager (vanilla OfferFlowerGoal, 400 ticks). Zero means not offering.
 	OfferFlowerTicks int32
+	// SlimeSize is the size of a slime or magma cube (1, 2, or 4). Health is
+	// size squared; on death a size>1 cube splits into smaller ones.
+	SlimeSize int32
 	// EndermanCarriedBlock is the canonical resource location of the block
 	// an enderman is holding, or "" when empty. Adapters resolve their own IDs.
 	EndermanCarriedBlock string
@@ -446,6 +449,11 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 	}
 	if t == TypeTNTMinecart {
 		e.FuseTicks = -1
+	}
+	if t == TypeSlime || t == TypeMagmaCube {
+		// Default to the smallest size; natural spawn and splitting set larger.
+		e.SlimeSize = 1
+		e.Health, e.MaxHealth = 1, 1
 	}
 	switch t {
 	case TypeSkeleton, TypeStray, TypeBogged:
