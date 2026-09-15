@@ -23,6 +23,7 @@ type Handler struct {
 	console io.Writer
 	mu      *sync.Mutex
 	attrs   []slog.Attr
+	groups  string
 }
 
 // New returns a Handler writing to console and, when set, opts.File.
@@ -53,7 +54,7 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 		if sink.out == nil {
 			continue
 		}
-		if _, err := sink.out.Write(formatLine(r, h.attrs, sink.colored)); err != nil && firstErr == nil {
+		if _, err := sink.out.Write(formatLine(r, h.attrs, h.groups, sink.colored)); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -64,13 +65,26 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(attrs) == 0 {
 		return h
 	}
+	flat := make([]slog.Attr, 0, len(attrs))
+	for _, a := range attrs {
+		flat = append(flat, flattenAttr(h.groups, a)...)
+	}
 	clone := *h
-	clone.attrs = append(append([]slog.Attr{}, h.attrs...), attrs...)
+	clone.attrs = append(append([]slog.Attr{}, h.attrs...), flat...)
 	return &clone
 }
 
-func (h *Handler) WithGroup(_ string) slog.Handler {
-	return h
+func (h *Handler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
+	clone := *h
+	if clone.groups == "" {
+		clone.groups = name
+	} else {
+		clone.groups += "." + name
+	}
+	return &clone
 }
 
 const (
@@ -81,7 +95,7 @@ const (
 	ansiRed    = "\x1b[31m"
 )
 
-func formatLine(r slog.Record, preformatted []slog.Attr, colored bool) []byte {
+func formatLine(r slog.Record, preformatted []slog.Attr, groups string, colored bool) []byte {
 	line := make([]byte, 0, 128)
 
 	line = append(line, '[')
@@ -121,10 +135,38 @@ func formatLine(r slog.Record, preformatted []slog.Attr, colored bool) []byte {
 		line = appendAttr(line, a)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		line = appendAttr(line, a)
+		for _, fa := range flattenAttr(groups, a) {
+			line = appendAttr(line, fa)
+		}
 		return true
 	})
 	return append(line, '\n')
+}
+
+func flattenAttr(prefix string, a slog.Attr) []slog.Attr {
+	a.Value = a.Value.Resolve()
+	if a.Equal(slog.Attr{}) {
+		return nil
+	}
+	if prefix != "" {
+		a.Key = prefix + "." + a.Key
+	}
+	if a.Value.Kind() != slog.KindGroup {
+		return []slog.Attr{a}
+	}
+	group := a.Value.Group()
+	if a.Key != "" {
+		if prefix != "" {
+			prefix = prefix + "." + a.Key
+		} else {
+			prefix = a.Key
+		}
+	}
+	flat := make([]slog.Attr, 0, len(group))
+	for _, ga := range group {
+		flat = append(flat, flattenAttr(prefix, ga)...)
+	}
+	return flat
 }
 
 func appendAttr(line []byte, a slog.Attr) []byte {
@@ -166,13 +208,25 @@ func appendKey(line []byte, key string) []byte {
 func appendValue(line []byte, v slog.Value) []byte {
 	switch v.Kind() {
 	case slog.KindString:
-		if needsQuoting(v.String()) {
-			return strconv.AppendQuote(line, v.String())
-		}
+		return appendString(line, v.String())
+	case slog.KindInt64, slog.KindUint64, slog.KindFloat64, slog.KindBool, slog.KindDuration, slog.KindTime:
 		return append(line, v.String()...)
 	default:
-		return append(line, fmt.Sprintf("%+v", v.Any())...)
+		if err, ok := v.Any().(error); ok {
+			return appendString(line, err.Error())
+		}
+		if s, ok := v.Any().(fmt.Stringer); ok {
+			return appendString(line, s.String())
+		}
+		return appendString(line, fmt.Sprintf("%+v", v.Any()))
 	}
+}
+
+func appendString(line []byte, s string) []byte {
+	if needsQuoting(s) {
+		return strconv.AppendQuote(line, s)
+	}
+	return append(line, s...)
 }
 
 func needsQuoting(s string) bool {

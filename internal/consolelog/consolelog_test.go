@@ -48,7 +48,7 @@ func TestFormatLinePlain(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := string(formatLine(tt.record, tt.attrs, false))
+			got := string(formatLine(tt.record, tt.attrs, "", false))
 			if got != tt.want {
 				t.Fatalf("formatLine mismatch\ngot:  %q\nwant: %q", got, tt.want)
 			}
@@ -59,8 +59,8 @@ func TestFormatLinePlain(t *testing.T) {
 func TestFormatLineColoredHasNoAnsiInFile(t *testing.T) {
 	r := record(slog.LevelWarn, "plugins: unclean shutdown", slog.Any("err", errors.New("boom")))
 
-	plain := string(formatLine(r, nil, false))
-	colored := string(formatLine(r, nil, true))
+	plain := string(formatLine(r, nil, "", false))
+	colored := string(formatLine(r, nil, "", true))
 	if plain == colored {
 		t.Fatal("coloured output should differ from plain output")
 	}
@@ -89,7 +89,7 @@ func TestHandlerWritesToConsoleAndFile(t *testing.T) {
 	if !strings.HasPrefix(file.String(), wantFile) {
 		t.Errorf("file line should start with timestamp bracket, got %q", file.String())
 	}
-	if !strings.Contains(file.String(), "Could not save player data uuid=abc err=disk full") {
+	if !strings.Contains(file.String(), `Could not save player data uuid=abc err="disk full"`) {
 		t.Errorf("file line should carry message and attributes, got %q", file.String())
 	}
 }
@@ -112,12 +112,57 @@ func TestHandlerLevelFilter(t *testing.T) {
 	}
 }
 
-func TestWithAttrsCarriedToLines(t *testing.T) {
+func TestWithGroupPrefixesAttributes(t *testing.T) {
 	var console bytes.Buffer
-	logger := slog.New(New(&console, Options{})).With(slog.String("world", "overworld"))
+	logger := slog.New(New(&console, Options{})).WithGroup("request")
 
-	logger.Info("dimension worlds ready")
-	if !strings.Contains(console.String(), "world=overworld") {
-		t.Errorf("With attributes should appear on every line, got %q", console.String())
+	logger.Info("done", slog.Int("id", 42))
+	if !strings.Contains(console.String(), "request.id=42") {
+		t.Errorf("group name should prefix attributes, got %q", console.String())
+	}
+}
+
+func TestNestedGroupPrefixesAttributes(t *testing.T) {
+	var console bytes.Buffer
+	logger := slog.New(New(&console, Options{}))
+
+	logger.Info("done", slog.Group("request", slog.Int("id", 42), slog.String("method", "GET")))
+	if !strings.Contains(console.String(), "request.id=42 request.method=GET") {
+		t.Errorf("nested group should be flattened with prefixes, got %q", console.String())
+	}
+}
+
+func TestWithGroupThenWithAttrs(t *testing.T) {
+	var console bytes.Buffer
+	logger := slog.New(New(&console, Options{})).WithGroup("request").With(slog.String("method", "GET"))
+
+	logger.Info("done", slog.Int("id", 42))
+	if !strings.Contains(console.String(), "request.method=GET request.id=42") {
+		t.Errorf("WithAttrs after WithGroup should keep the group prefix, got %q", console.String())
+	}
+}
+
+func TestMultilineErrorStaysOneLine(t *testing.T) {
+	var console bytes.Buffer
+	logger := slog.New(New(&console, Options{}))
+
+	logger.Error("failed", slog.Any("err", errors.New("first\nsecond")))
+
+	out := console.String()
+	if strings.Count(out, "\n") != 1 {
+		t.Errorf("one record should produce one line, got %q", out)
+	}
+	if !strings.Contains(out, `err="first\nsecond"`) {
+		t.Errorf("multiline error should be quoted and escaped, got %q", out)
+	}
+}
+
+func TestErrorWithSpacesIsQuoted(t *testing.T) {
+	var console bytes.Buffer
+	logger := slog.New(New(&console, Options{}))
+
+	logger.Warn("failed", slog.Any("err", errors.New("disk full")))
+	if !strings.Contains(console.String(), `err="disk full"`) {
+		t.Errorf("error value with spaces should be quoted, got %q", console.String())
 	}
 }
