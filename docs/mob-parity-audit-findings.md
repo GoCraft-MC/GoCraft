@@ -17,23 +17,24 @@ Legend — severity of divergence: 🟢 faithful · 🟡 minor · 🟠 missing s
 
 GoCraft's shared combat core is **faithful**: movement speeds, attack-damage
 attributes, follow ranges, and the **20-tick (1s) melee cooldown** all match
-vanilla. Divergences are concentrated in **per-mob special goals** (ranged
-attacks, targeting sets, sun/avoid behaviour, block manipulation, egg/trail
-lifecycle), which are simplified or absent.
+vanilla. Verification against the decompiled reference found the implementation
+more complete than a first grep-level pass suggested: enderman block carry,
+zombie villager/golem targeting, pufferfish inflate/sting and horse taming were
+all already present. Remaining divergences are a few per-mob special goals.
 
 | Mob | Attributes | Core combat | Notable gap | Worst |
 | --- | --- | --- | --- | --- |
-| Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | ~~no door-break~~ **fixed (hard)**; no reinforcements, targets players only | 🟡 |
-| Skeleton / Stray | ✅ 0.25 | bow ✅ | ~~no strafe-kite / flee-sun / avoid-wolf~~ **fixed**; arrow dmg flat 3 | 🟡 |
-| Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | dead `CreeperFuse` struct; no charged (r6) | 🟡 |
+| Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | door-break ✅, reinforcements ✅ (hard); targets villagers/golems/turtles player-first | 🟢 |
+| Skeleton / Stray | ✅ 0.25 | bow ✅ | strafe/flee-sun/avoid-wolf ✅; arrow dmg now difficulty-scaled | 🟢 |
+| Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | dead `CreeperFuse` removed; no charged (r6) | 🟡 |
 | Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | block take/place ✅ (holdable set broadened); freeze-on-look partial | 🟡 |
-| Cow / Sheep / Pig / Mooshroom | ✅ speeds & hp | breed/panic/tempt ✅ | panic speed not per-mob; sheep eat-grass? | 🟡 |
+| Cow / Sheep / Pig / Mooshroom | ✅ speeds & hp | breed/panic/tempt ✅ | per-mob panic speed ✅; sheep eat-grass? | 🟢 |
 | Chicken | ✅ 4hp / 0.25 | ✅ | ~~no egg laying~~ **fixed**; slow-fall moot (mobs take no fall damage) | 🟢 |
-| Horse / Donkey / Mule | ✅ 0.225 / jump 0.7 / 53hp | — | taming/rearing partial | 🟠 |
+| Horse / Donkey / Mule | ✅ 0.225 / jump 0.7 / 53hp | — | taming (temper/buck/hearts) ✅ | 🟢 |
 | Wolf | ✅ 0.3 / atk 4 | melee ✅ (range 1.8, cd 20) | no leap-at-target, beg, avoid-llama; wild prey targeting? | 🟡 |
 | Iron Golem | ✅ 100hp / atk 7–21 + toss | ✅ | ~~targets Zombies only~~ **fixed:** all Enemy except Creeper | 🟢 |
 | Snow Golem | ✅ melts in water/rain | ✅ snowballs | ~~no ranged attack~~ **fixed**; no snow trail | 🟡 |
-| Pufferfish | speed 0.7 | — | inflate/sting to verify | 🟠 |
+| Pufferfish | speed 0.7 | inflate/sting ✅ | full puff-state + poison scaling | 🟢 |
 
 ## Per-family detail
 
@@ -47,9 +48,10 @@ AbstractVillager, IronGolem, Turtle eggs; `SPAWN_REINFORCEMENTS_CHANCE`.
   bash a wooden door blocking the way to their target over 240 ticks
   (`tickZombieDoorBreak`), matching vanilla `BreakDoorGoal`. No mobGriefing
   gamerule exists in GoCraft, so it is gated on hard difficulty only.
-- 🟠 No zombie **reinforcement** summon on damage.
-- 🟠 Targeting: no evidence zombies actively hunt villagers / iron golems / baby
-  turtles — appears to target players only.
+- 🟢 **Fixed:** hard-difficulty zombies summon reinforcements when hurt
+  (`tryZombieReinforcement`), bounded by a no-chain flag on the spawned help.
+- 🟢 Correction: zombies already target villagers, iron golems and turtles via
+  `pumpkinMobTargets` (player-first, then the nearest such entity).
 
 ### Skeleton family (Skeleton, Stray)
 Vanilla: `speed 0.25`; `RangedBowAttackGoal` (strafing kite), `MeleeAttackGoal`
@@ -60,15 +62,15 @@ fallback, `RestrictSunGoal`+`FleeSunGoal` (seek shade by day),
   direction every 20 ticks and backing off when too close; `tickSkeletonAvoidance`
   adds `FleeSunGoal` (seek shade while burning) and `AvoidEntityGoal(Wolf, 6)`,
   both prioritised above the bow attack like vanilla.
-- 🟡 Arrow damage flat **3** (`mob_environment.go:266`); vanilla ≈2 base scaled by
-  difficulty/power.
+- 🟢 **Fixed:** arrow damage now scales with difficulty (easy 2, normal 3, hard 4)
+  instead of a flat 3.
 
 ### Creeper — 🟢 faithful
 Swell ≤3 blocks + LOS, fuse 30 ticks, explosion radius 3 — all match
 `SwellGoal`/`Creeper`.
 - 🟡 De-swell on retreat is `-2/tick` vs vanilla `-1`.
-- 🟡 `server/mob_fuse.go` `CreeperFuse` is **dead code** and, unlike the live
-  tick-based path, is wall-clock (`time.Since`, 1500ms) — would drift under lag.
+- 🟢 **Fixed:** the dead wall-clock `CreeperFuse` struct was removed; the live
+  fuse is the tick-based `ai.fuseTick` path.
 - 🟠 Charged creeper (lightning → radius 6) not represented.
 
 ### Enderman
@@ -90,8 +92,8 @@ Vanilla: shared `Animal` goals — `PanicGoal`, `BreedGoal(1.0)`, `TemptGoal`,
 `FollowParentGoal(1.1)`; per-mob panic speed (Sheep 1.25, Pig 1.25, Chicken 1.4).
 - 🟢 Speeds/health match; breeding (`animal_lifecycle.go`), panic (`panicTick=60`)
   and tempt are implemented.
-- 🟡 Panic speed appears flat, not per-mob; verify FollowParent and Sheep
-  `EatBlockGoal` (grass → regrow wool).
+- 🟢 **Fixed:** per-mob PanicGoal speed (sheep/pig 1.25x, chicken 1.4x). Sheep
+  `EatBlockGoal` (grass → regrow wool) still worth verifying.
 - 🟢 **Fixed:** chickens lay an egg every 6000-12000 ticks (`EggLayTicks` in
   `tickAnimalLifecycle`). Slow-fall is moot — GoCraft applies no fall damage to
   mobs.
@@ -100,8 +102,10 @@ Vanilla: shared `Animal` goals — `PanicGoal`, `BreedGoal(1.0)`, `TemptGoal`,
 Vanilla: `speed 0.225, jump 0.7, hp 53 base`; `RunAroundLikeCrazyGoal` (taming
 buck/rear), `TemptGoal(1.25)`, `RandomStandGoal`.
 - 🟢 Attributes match.
-- 🟠 Taming/rearing, jump strength application, and donkey/mule chest inventory
-  are partial — needs a dedicated pass.
+- 🟢 Correction: taming is implemented — mounting an untamed horse rolls against
+  temper, adds 5 temper + a buck event on failure, and grants ownership with the
+  taming-heart event on success (`animal_interaction.go`).
+- 🟡 Donkey/mule chest inventory still worth a dedicated pass.
 
 ### Wolf
 Vanilla: `speed 0.3, atk 4, hp 8 wild`; `LeapAtTargetGoal(0.4)`, `MeleeAttackGoal`,
@@ -133,21 +137,22 @@ snow-friendly biomes, melts in warm biomes / water / rain.
 ### Pufferfish
 Vanilla: `PufferfishPuffGoal` (inflate when a player/mob is near, contact damage
 + poison, deflate after).
-- 🟠 Inflation state, contact damage and poison need verification — likely
-  partial.
+- 🟢 Correction: fully implemented (`server/pufferfish.go`) — inflate to half then
+  full, staged deflate, threat detection, and contact sting dealing `1+puffState`
+  damage plus `puffState*60` ticks of poison.
 
-## Recommended fix priority
+## Status
 
-1. 🔴 **Iron Golem targeting** — one-line-ish widen from Zombies-only to all
-   `Enemy` except Creeper. High player impact, cheap.
-2. 🔴 **Snow Golem snowball attack** — add a ranged goal mirroring
-   `RangedAttackGoal(1.25, 20, 10)`.
-3. 🟠 **Chicken eggs** + **Zombie door-breaking/reinforcements** — visible,
-   commonly-noticed gaps.
-4. 🟠 **Skeleton strafe + flee-sun**, **Enderman block take/place** — behavioural
-   polish.
-5. 🟡 Cleanups: delete dead `CreeperFuse`; per-mob panic speeds; skeleton arrow
-   damage scaling.
+Fixed across the audit passes: iron golem targeting, snow golem snowballs,
+chicken eggs, zombie door-breaking + reinforcements, skeleton
+strafe/flee-sun/avoid-wolf + difficulty-scaled arrows, enderman holdable set,
+per-mob panic speed, and removal of the dead `CreeperFuse`. Verified already
+present: enderman block carry, zombie villager/golem targeting, pufferfish
+inflate/sting, horse taming.
+
+Remaining polish (low priority): charged creeper (radius 6), sheep grass-eating
+regrowth confirmation, donkey/mule chest inventory, and the enderman carry
+running every tick rather than only from idle goals.
 
 ## Method (reproducible)
 
