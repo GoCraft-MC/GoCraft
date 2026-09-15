@@ -57,9 +57,13 @@ func getBindAddress() string {
 		port = defaultServicePort
 	}
 
+	if port == "0" {
+		return ""
+	}
+
 	addr := port
 	if !strings.HasPrefix(addr, ":") {
-		addr = ":" + addr
+		addr = ":" + port
 	}
 
 	return addr
@@ -67,6 +71,10 @@ func getBindAddress() string {
 
 func RunHealthCheckServer(ctx context.Context, state *HealthState) func() {
 	addr := getBindAddress()
+	if addr == "" {
+		slog.Info("healthcheck server disabled")
+		return func() {}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth(state))
 	mux.HandleFunc("GET /readyz", handleReady(state))
