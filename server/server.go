@@ -3067,8 +3067,18 @@ func (s *Server) tickEntities() {
 		handler.BroadcastVillagerSleepState(villager, s.sessions)
 	}
 
+	s.tickWeatherLightning()
+
 	for _, e := range allEntities {
 		e.AgeTicks++
+		if e.Type == corentity.TypeLightningBolt {
+			if e.AgeTicks >= lightningLifeTicks {
+				s.world.Entities.Remove(e.EntityID)
+				handler.BroadcastRemoveEntity(e.EntityID, s.sessions)
+				delete(s.mobAIs, e.EntityID)
+			}
+			continue
+		}
 		if !e.Dead {
 			s.tickMobSunlight(e, &hurtEntities)
 			s.tickEndermanBlockCarry(e)
@@ -4725,7 +4735,11 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 					e.Position.X, e.Position.Y, e.Position.Z, 1, 1)
 			}
 			if ai.fuseTick >= 30 {
-				s.explodeAt(e.Position.X, e.Position.Y, e.Position.Z, 3, "was blown up by a Creeper")
+				creeperRadius := 3.0
+				if e.Charged {
+					creeperRadius = 6.0
+				}
+				s.explodeAt(e.Position.X, e.Position.Y, e.Position.Z, creeperRadius, "was blown up by a Creeper")
 				e.Dead = true
 			}
 			return
