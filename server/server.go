@@ -197,6 +197,7 @@ type mobAI struct {
 	strafeTick      int              // skeleton: ticks since last strafe direction re-roll
 	strafeClockwise bool             // skeleton: current strafe circling direction
 	strafeBackwards bool             // skeleton: strafing away from (vs toward) the target
+	noReinforce     bool             // zombie: spawned as a reinforcement, cannot summon more
 	path            []spatial.Vec3
 	pathIndex       int
 	pathGoal        spatial.BlockPos
@@ -3031,6 +3032,9 @@ func (s *Server) tickEntities() {
 		if isPassiveMob(entity.Type) && !entity.Dead {
 			s.startPassiveMobPanic(entity, event)
 		}
+		if !entity.Dead {
+			s.tryZombieReinforcement(entity, event)
+		}
 		if (entity.Type == corentity.TypeIronGolem || entity.Type == corentity.TypeSnowGolem) &&
 			!entity.Dead && event.HasSource {
 			ai := s.mobAIFor(entity)
@@ -3663,6 +3667,9 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 			}
 			if isPassiveMob(entity.Type) && !entity.Dead {
 				simulation.startPassiveMobPanic(entity, event)
+			}
+			if !entity.Dead {
+				simulation.tryZombieReinforcement(entity, event)
 			}
 			hurtEntities = append(hurtEntities, entity)
 		}
