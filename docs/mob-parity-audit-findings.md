@@ -119,7 +119,8 @@ Vanilla: `speed 0.3, atk 4, hp 8 wild`; `LeapAtTargetGoal(0.4)`, `MeleeAttackGoa
 - 🟢 Melee + owner-combat present.
 - 🟢 **Fixed:** `LeapAtTargetGoal` pounce (`wolfMaybeLeap`), `AvoidEntityGoal(Llama, 24)`,
   and wild-wolf prey targeting (sheep/rabbit/fox + skeleton family) via `tickWolfBehaviour`.
-- 🟡 No `BegGoal` (cosmetic tilt toward players holding food).
+- 🟢 `BegGoal` head-tilt implemented (`tickWolfBegging`); wolf metadata layout
+  corrected (begging index 19, collar 20).
 
 ### Iron Golem — ✅ fixed
 Vanilla: `100hp, 0.25, atk 7.5–21.5 + upward toss, KB-resist 1.0`; targets any
