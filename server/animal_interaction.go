@@ -282,6 +282,20 @@ func (s *Server) interactAnimal(p *player.Player, e *corentity.Entity) bool {
 		return true
 	}
 
+	// Attach a chest to a tamed donkey or mule: gives it a 15-slot storage.
+	if item == "minecraft:chest" && (e.Type == corentity.TypeDonkey || e.Type == corentity.TypeMule) &&
+		e.Tamed && !e.HasChest && !e.IsBaby {
+		if !s.consumeAnimalItem(p, "") {
+			return false
+		}
+		e.HasChest = true
+		e.Storage = player.NewStorageInventory(15)
+		s.broadcastAnimalState(e)
+		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.donkey.chest", handler.SoundCategoryNeutral,
+			e.Position.X, e.Position.Y, e.Position.Z, 1, 1)
+		return true
+	}
+
 	effect := corentity.FoodEffect(e.Type, item, e.Tamed)
 	if effect.Accepted {
 		if effect.Poisons {
