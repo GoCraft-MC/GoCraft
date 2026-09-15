@@ -4182,6 +4182,7 @@ func (s *Server) tickTamedWolfCombat(e *corentity.Entity, ai *mobAI) bool {
 		return true
 	}
 
+	s.wolfMaybeLeap(e, ai, dx, dz, dist)
 	const wolfSpeed = 0.3
 	if !s.navigateMob(e, ai, spatial.Vec3{X: ai.targetX, Y: e.Position.Y, Z: ai.targetZ}, wolfSpeed) {
 		e.VX, e.VZ = dx/dist*wolfSpeed, dz/dist*wolfSpeed
@@ -4198,9 +4199,10 @@ func (s *Server) tickTamedWolfCombat(e *corentity.Entity, ai *mobAI) bool {
 func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 	ai := s.mobAIFor(e)
 
-	// Tamed wolves with a live target assist their owner in combat.
-	if e.Type == corentity.TypeWolf && e.Tamed && !e.Sitting {
-		if s.tickTamedWolfCombat(e, ai) {
+	// Wolves flee llamas, tamed wolves assist their owner, and wild wolves hunt
+	// prey (sheep/rabbit/fox) and skeletons.
+	if e.Type == corentity.TypeWolf && !e.Sitting {
+		if s.tickWolfBehaviour(e, ai) {
 			return false
 		}
 	}
@@ -4690,6 +4692,14 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	visible := s.mobHasLineOfSight(e, target.Player.Position, 1.62)
 	if distance > 0.001 {
 		e.Yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	}
+
+	// EndermanFreezeWhenLookedAt: an enderman being stared at by its target
+	// (within 16 blocks) freezes in place rather than advancing.
+	if e.Type == corentity.TypeEnderman && distance <= 16 && isPlayerStaringAtEnderman(target.Player, e) {
+		e.VX, e.VZ = 0, 0
+		clearMobNavigation(e, ai)
+		return
 	}
 
 	// Hard-difficulty zombies bash through a wooden door blocking the way to

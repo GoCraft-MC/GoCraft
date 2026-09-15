@@ -7,6 +7,7 @@ import (
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
 	"GoCraft/core/spatial"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/handler"
 	"GoCraft/java/session"
 )
@@ -541,6 +542,7 @@ func (s *Server) closestHostileMob(source *corentity.Entity, radius float64) *co
 // and knockback are resolved by the shared projectile-vs-entity path (snowballs
 // deal 0 except 3 to blazes, and always apply knockback).
 func (s *Server) tickSnowGolemAI(e *corentity.Entity, ai *mobAI) {
+	s.placeSnowGolemTrail(e)
 	if ai.attackCooldown > 0 {
 		ai.attackCooldown--
 	}
@@ -561,6 +563,30 @@ func (s *Server) tickSnowGolemAI(e *corentity.Entity, ai *mobAI) {
 		s.shootSnowball(e, target)
 		ai.attackCooldown = 20
 	}
+}
+
+// placeSnowGolemTrail lays a snow layer under the snow golem as it walks,
+// mirroring SnowGolem.aiStep. GoCraft has no per-biome temperature, so the
+// vanilla warm-biome melt gate is omitted; the block simply must be an empty
+// spot over solid ground.
+func (s *Server) placeSnowGolemTrail(e *corentity.Entity) {
+	if e == nil || s.world == nil {
+		return
+	}
+	x := int(math.Floor(e.Position.X))
+	y := int(math.Floor(e.Position.Y))
+	z := int(math.Floor(e.Position.Z))
+	if !s.world.GetBlock(x, y, z).IsAir() {
+		return
+	}
+	below := s.world.GetBlock(x, y-1, z)
+	if below.IsAir() || !coreworld.IsEntityCollisionBlock(below) {
+		return
+	}
+	snow := coreworld.Block{Namespace: "minecraft", Name: "snow", Properties: map[string]string{"layers": "1"}}
+	s.world.SetBlock(x, y, z, snow)
+	handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: y, Z: z, Block: snow},
+		s.javaSessionsForDimension(s.simulationDimension))
 }
 
 func (s *Server) shootSnowball(shooter, target *corentity.Entity) {

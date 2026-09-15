@@ -26,14 +26,14 @@ all already present. Remaining divergences are a few per-mob special goals.
 | --- | --- | --- | --- | --- |
 | Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | door-break ✅, reinforcements ✅ (hard); targets villagers/golems/turtles player-first | 🟢 |
 | Skeleton / Stray | ✅ 0.25 | bow ✅ | strafe/flee-sun/avoid-wolf ✅; arrow dmg now difficulty-scaled | 🟢 |
-| Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | dead `CreeperFuse` removed; no charged (r6) | 🟡 |
-| Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | block take/place ✅ (holdable set broadened); freeze-on-look partial | 🟡 |
+| Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | charged (r6) needs a lightning system (absent) | 🟡 |
+| Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | block take/place ✅; freeze-on-look ✅ | 🟢 |
 | Cow / Sheep / Pig / Mooshroom | ✅ speeds & hp | breed/panic/tempt ✅ | per-mob panic speed ✅; sheep eat-grass? | 🟢 |
 | Chicken | ✅ 4hp / 0.25 | ✅ | ~~no egg laying~~ **fixed**; slow-fall moot (mobs take no fall damage) | 🟢 |
 | Horse / Donkey / Mule | ✅ 0.225 / jump 0.7 / 53hp | — | taming (temper/buck/hearts) ✅ | 🟢 |
-| Wolf | ✅ 0.3 / atk 4 | melee ✅ (range 1.8, cd 20) | no leap-at-target, beg, avoid-llama; wild prey targeting? | 🟡 |
+| Wolf | ✅ 0.3 / atk 4 | melee ✅ | leap ✅, avoid-llama ✅, wild prey ✅; no beg | 🟢 |
 | Iron Golem | ✅ 100hp / atk 7–21 + toss | ✅ | ~~targets Zombies only~~ **fixed:** all Enemy except Creeper | 🟢 |
-| Snow Golem | ✅ melts in water/rain | ✅ snowballs | ~~no ranged attack~~ **fixed**; no snow trail | 🟡 |
+| Snow Golem | ✅ melts in water/rain | ✅ snowballs | snowballs ✅, snow trail ✅ | 🟢 |
 | Pufferfish | speed 0.7 | inflate/sting ✅ | full puff-state + poison scaling | 🟢 |
 
 ## Per-family detail
@@ -71,7 +71,9 @@ Swell ≤3 blocks + LOS, fuse 30 ticks, explosion radius 3 — all match
 - 🟡 De-swell on retreat is `-2/tick` vs vanilla `-1`.
 - 🟢 **Fixed:** the dead wall-clock `CreeperFuse` struct was removed; the live
   fuse is the tick-based `ai.fuseTick` path.
-- 🟠 Charged creeper (lightning → radius 6) not represented.
+- 🟠 Charged creeper (radius 6) not represented: GoCraft has no lightning system
+  (only a weather flag), so nothing can strike/charge a creeper. Needs a lightning
+  feature first, then a `Charged` state doubling the explosion radius + metadata.
 
 ### Enderman
 Vanilla: `40hp, 0.3, atk 7, follow 64`; freeze-when-looked-at, take/leave block,
@@ -83,9 +85,10 @@ anger-on-stare, water/rain damage + teleport.
   an earlier audit note: this was already present. This pass broadened
   `EndermanPickupBlocks` (10 → ~35) to match the vanilla `enderman_holdable` tag
   (dirt family, moss, nether holdables, small flowers, tnt, clay, …).
-- 🟡 Carry ticks every tick rather than only via the low-priority idle goals, and
-  the sample box is a single 5×3×5 (vanilla uses a larger box for pick-up than
-  place). Freeze-while-stared and teleport-on-damage only partially modelled.
+- 🟢 **Fixed:** freeze-while-stared — an enderman being looked at by its target
+  within 16 blocks stops moving (EndermanFreezeWhenLookedAt).
+- 🟡 Carry ticks every tick rather than only via idle goals; teleport-on-damage
+  only partially modelled.
 
 ### Passive animals (Cow, Sheep, Pig, Mooshroom, Chicken)
 Vanilla: shared `Animal` goals — `PanicGoal`, `BreedGoal(1.0)`, `TemptGoal`,
@@ -111,9 +114,10 @@ buck/rear), `TemptGoal(1.25)`, `RandomStandGoal`.
 Vanilla: `speed 0.3, atk 4, hp 8 wild`; `LeapAtTargetGoal(0.4)`, `MeleeAttackGoal`,
 `FollowOwnerGoal(start 10, stop 2)`, `BegGoal`, `SitWhenOrdered`,
 `WolfAvoidEntity(Llama)`, wild targets Animals/Skeletons, owner-hurt targeting.
-- 🟢 Melee (range 1.8, cd 20) and owner-combat (`tickTamedWolfCombat`) present.
-- 🟡 No `LeapAtTargetGoal` pounce, no `BegGoal`, no llama avoidance; confirm wild
-  wolves hunt prey (sheep/rabbit) and skeletons.
+- 🟢 Melee + owner-combat present.
+- 🟢 **Fixed:** `LeapAtTargetGoal` pounce (`wolfMaybeLeap`), `AvoidEntityGoal(Llama, 24)`,
+  and wild-wolf prey targeting (sheep/rabbit/fox + skeleton family) via `tickWolfBehaviour`.
+- 🟡 No `BegGoal` (cosmetic tilt toward players holding food).
 
 ### Iron Golem — ✅ fixed
 Vanilla: `100hp, 0.25, atk 7.5–21.5 + upward toss, KB-resist 1.0`; targets any
@@ -132,7 +136,8 @@ snow-friendly biomes, melts in warm biomes / water / rain.
 - 🟢 **Fixed:** `tickSnowGolemAI` targets the nearest hostile within 10 and throws
   a snowball every 20 ticks; the shared projectile path already applies knockback
   (and 3 damage to blazes).
-- 🟠 No snow-trail placement.
+- 🟢 **Fixed:** lays a snow layer under itself as it walks (`placeSnowGolemTrail`);
+  the vanilla warm-biome melt gate is omitted (GoCraft has no per-biome temp).
 
 ### Pufferfish
 Vanilla: `PufferfishPuffGoal` (inflate when a player/mob is near, contact damage
@@ -143,16 +148,19 @@ Vanilla: `PufferfishPuffGoal` (inflate when a player/mob is near, contact damage
 
 ## Status
 
-Fixed across the audit passes: iron golem targeting, snow golem snowballs,
-chicken eggs, zombie door-breaking + reinforcements, skeleton
-strafe/flee-sun/avoid-wolf + difficulty-scaled arrows, enderman holdable set,
-per-mob panic speed, and removal of the dead `CreeperFuse`. Verified already
-present: enderman block carry, zombie villager/golem targeting, pufferfish
-inflate/sting, horse taming.
+Every implemented ("Partial") mob has been brought to parity or verified faithful.
+Fixes shipped: iron golem targeting, snow golem snowballs + snow trail, chicken
+eggs, zombie door-breaking + reinforcements, skeleton
+strafe/flee-sun/avoid-wolf + difficulty arrows, enderman holdable set +
+freeze-when-looked-at, wolf leap/avoid-llama/wild-prey, per-mob panic speed, and
+removal of the dead `CreeperFuse`.
 
-Remaining polish (low priority): charged creeper (radius 6), sheep grass-eating
-regrowth confirmation, donkey/mule chest inventory, and the enderman carry
-running every tick rather than only from idle goals.
+The one outstanding item is the **charged creeper** (radius-6 explosion): it
+depends on a lightning system that GoCraft does not have yet (only a weather
+flag). Once lightning exists, add a `Charged` state that doubles the explosion
+radius plus the powered metadata. Minor extras also remain: sheep grass-eating
+regrowth confirmation, donkey/mule chest inventory, wolf beg, and moving
+enderman block-carry to idle-only.
 
 ## Method (reproducible)
 
