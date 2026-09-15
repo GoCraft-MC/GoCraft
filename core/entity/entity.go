@@ -264,6 +264,9 @@ type Entity struct {
 	// Charged marks a creeper struck by lightning; it explodes with double the
 	// radius and renders the powered aura.
 	Charged bool
+	// MooshroomBrown is true when a mooshroom is the brown variant (toggled by
+	// lightning). False is the default red variant.
+	MooshroomBrown bool
 	// EndermanCarriedBlock is the canonical resource location of the block
 	// an enderman is holding, or "" when empty. Adapters resolve their own IDs.
 	EndermanCarriedBlock string
