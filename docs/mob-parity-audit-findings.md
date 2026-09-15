@@ -157,12 +157,20 @@ strafe/flee-sun/avoid-wolf + difficulty arrows, enderman holdable set +
 freeze-when-looked-at, wolf leap/avoid-llama/wild-prey, per-mob panic speed, and
 removal of the dead `CreeperFuse`.
 
-A lightning system was added, so the **charged creeper** (radius-6) is now done:
-thunderstorms strike near players, charging creepers and burning entities at the
-column. Remaining are only minor extras: sheep grass-eating regrowth
-confirmation, donkey/mule chest inventory, wolf beg, other lightning conversions
-(pig→zombified piglin, mooshroom recolour, villager→witch), and moving enderman
-block-carry to idle-only.
+A lightning system was added, so the **charged creeper** (radius-6) is done, and
+lightning now also converts a struck **pig → zombified piglin** (golden sword),
+**villager → witch** (both outside peaceful), and toggles a **mooshroom's
+red/brown variant** (server-side; the client-facing variant metadata awaits the
+confirmed 1.21.4 serializer). Sheep now regrow wool by **eating a grass block**
+(EatBlockGoal), with the old timer kept as a fallback.
+
+Still open (small):
+- **Wolf beg** — cosmetic head-tilt. Blocked: GoCraft maps the wolf collar to
+  metadata index 19, which collides with vanilla's begging-at-19, so the wolf
+  metadata layout needs reconciling before adding it (risk of client disconnect).
+- **Donkey/mule chest inventory** — a distinct feature (15-slot inventory + chest
+  attach interaction + container open); the `has_chest` metadata slot already
+  exists at index 18. Planned as a follow-up.
 
 ## Method (reproducible)
 
