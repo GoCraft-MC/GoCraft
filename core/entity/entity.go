@@ -267,6 +267,9 @@ type Entity struct {
 	// MooshroomBrown is true when a mooshroom is the brown variant (toggled by
 	// lightning). False is the default red variant.
 	MooshroomBrown bool
+	// OfferFlowerTicks counts down while an iron golem holds out a poppy to a
+	// nearby villager (vanilla OfferFlowerGoal, 400 ticks). Zero means not offering.
+	OfferFlowerTicks int32
 	// EndermanCarriedBlock is the canonical resource location of the block
 	// an enderman is holding, or "" when empty. Adapters resolve their own IDs.
 	EndermanCarriedBlock string

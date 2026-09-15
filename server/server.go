@@ -4495,6 +4495,37 @@ func (s *Server) wakeVillagerBesideBed(e *corentity.Entity) {
 	e.OnGround = true
 }
 
+// tickIronGolemOfferFlower ports OfferFlowerGoal: by day an idle iron golem
+// rarely holds out a poppy to a nearby villager for 400 ticks. The held flower
+// is a metadata flag (DATA_FLAGS_ID bit 0x01).
+func (s *Server) tickIronGolemOfferFlower(e *corentity.Entity, ai *mobAI) {
+	if e.OfferFlowerTicks > 0 {
+		e.OfferFlowerTicks--
+		if e.OfferFlowerTicks == 0 {
+			handler.BroadcastMobMetadataInDimension(e, s.sessions, s.simulationDimension)
+		}
+		return
+	}
+	if ai.hasTarget {
+		return
+	}
+	dayTime := s.worldAge % 24000
+	if dayTime < 0 {
+		dayTime += 24000
+	}
+	if dayTime >= 12000 {
+		return
+	}
+	if s.nearestVillager(e, 6, true) == nil {
+		return
+	}
+	if ai.rng.Intn(8000) != 0 {
+		return
+	}
+	e.OfferFlowerTicks = 400
+	handler.BroadcastMobMetadataInDimension(e, s.sessions, s.simulationDimension)
+}
+
 // tickGolemAI handles iron and snow golem behaviour.
 //
 // When the golem has been hit by a player, it charges at the attacker's last
@@ -4506,6 +4537,10 @@ func (s *Server) tickGolemAI(e *corentity.Entity) {
 	if e.Type == corentity.TypeSnowGolem {
 		s.tickSnowGolemAI(e, ai)
 		return
+	}
+
+	if e.Type == corentity.TypeIronGolem {
+		s.tickIronGolemOfferFlower(e, ai)
 	}
 
 	if !ai.hasTarget && e.Type == corentity.TypeIronGolem {

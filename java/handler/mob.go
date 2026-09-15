@@ -231,6 +231,15 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		b = b.Byte(17).VarInt(0).Byte(flags)
 		hasMetadata = true
 	}
+	if e.Type == corentity.TypeIronGolem {
+		// IronGolem DATA_FLAGS_ID (index 16, Byte): bit 0x01 = holding a poppy.
+		flags := byte(0)
+		if e.OfferFlowerTicks > 0 {
+			flags |= 0x01
+		}
+		b = b.Byte(16).VarInt(0).Byte(flags)
+		hasMetadata = true
+	}
 	if e.Type == corentity.TypeEnderman && e.EndermanCarriedBlock != "" {
 		b = b.Byte(endermanMetadataCarriedBlockIndex).
 			VarInt(metadataTypeOptionalBlockState).
