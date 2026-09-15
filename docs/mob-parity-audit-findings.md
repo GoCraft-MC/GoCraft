@@ -128,7 +128,11 @@ Vanilla: `100hp, 0.25, atk 7.5–21.5 + upward toss, KB-resist 1.0`; targets any
   upward toss match.
 - 🟢 **Fixed:** now targets any hostile except Creeper via `isIronGolemTarget`
   (was Zombies-only).
-- 🟠 No offer-flower / village-reputation behaviour.
+- 🟢 **Fixed:** offer-flower — by day an idle iron golem rarely holds out a poppy
+  to a nearby villager for 400 ticks (`tickIronGolemOfferFlower`, DATA_FLAGS_ID
+  bit 0x01).
+- 🟠 Village-reputation (gossip affecting golem aggression / trades) is a large
+  separate system, still unimplemented.
 
 ### Snow Golem — ✅ ranged attack added
 Vanilla: `4hp, 0.2`; `RangedAttackGoal(1.25, 20, 10)` throwing snowballs at
