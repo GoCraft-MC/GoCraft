@@ -197,6 +197,7 @@ type mobAI struct {
 	strafeTick      int              // skeleton: ticks since last strafe direction re-roll
 	strafeClockwise bool             // skeleton: current strafe circling direction
 	strafeBackwards bool             // skeleton: strafing away from (vs toward) the target
+	noReinforce     bool             // zombie: spawned as a reinforcement, cannot summon more
 	path            []spatial.Vec3
 	pathIndex       int
 	pathGoal        spatial.BlockPos
@@ -3031,6 +3032,9 @@ func (s *Server) tickEntities() {
 		if isPassiveMob(entity.Type) && !entity.Dead {
 			s.startPassiveMobPanic(entity, event)
 		}
+		if !entity.Dead {
+			s.tryZombieReinforcement(entity, event)
+		}
 		if (entity.Type == corentity.TypeIronGolem || entity.Type == corentity.TypeSnowGolem) &&
 			!entity.Dead && event.HasSource {
 			ai := s.mobAIFor(entity)
@@ -3664,6 +3668,9 @@ func (s *Server) tickAuxiliaryDimensionItems() {
 			if isPassiveMob(entity.Type) && !entity.Dead {
 				simulation.startPassiveMobPanic(entity, event)
 			}
+			if !entity.Dead {
+				simulation.tryZombieReinforcement(entity, event)
+			}
 			hurtEntities = append(hurtEntities, entity)
 		}
 
@@ -4046,6 +4053,20 @@ func (s *Server) applyMobKnockback(e *corentity.Entity, hit coreworld.EntityDama
 	ai.dirZ = dz / distance
 }
 
+// panicSpeedModifier returns the vanilla PanicGoal speed multiplier for a mob.
+// Most animals flee at 1.25x; chickens use 1.4x. Types without a specific
+// vanilla value keep the previous 2.0x default.
+func panicSpeedModifier(t corentity.EntityType) float64 {
+	switch t {
+	case corentity.TypeSheep, corentity.TypePig:
+		return 1.25
+	case corentity.TypeChicken:
+		return 1.4
+	default:
+		return 2.0
+	}
+}
+
 // startPassiveMobPanic makes a recently hurt passive mob jump and sprint away
 // from its attacker. It is called only by the entity tick goroutine.
 func (s *Server) startPassiveMobPanic(e *corentity.Entity, hit coreworld.EntityDamage) {
@@ -4202,7 +4223,7 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 
 	if ai.panicTick > 0 {
 		ai.panicTick--
-		if s.world == nil || !s.navigateMob(e, ai, spatial.Vec3{X: ai.targetX, Y: e.Position.Y, Z: ai.targetZ}, pumpkinMovementSpeed(e.Type, 2.0)) {
+		if s.world == nil || !s.navigateMob(e, ai, spatial.Vec3{X: ai.targetX, Y: e.Position.Y, Z: ai.targetZ}, pumpkinMovementSpeed(e.Type, panicSpeedModifier(e.Type))) {
 			e.VX, e.VZ = ai.dirX*0.28, ai.dirZ*0.28
 			e.Yaw = float32(math.Atan2(-ai.dirX, ai.dirZ) * 180 / math.Pi)
 		}

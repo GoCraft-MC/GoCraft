@@ -263,7 +263,15 @@ func (s *Server) shootMobArrow(shooter *corentity.Entity, target *player.Player)
 	const speed = 1.6
 	arrow := corentity.New(s.game.NextEntityID(), newRandomUUID(), corentity.TypeArrow, start.X, start.Y, start.Z)
 	arrow.OwnerEntityID = shooter.EntityID
+	// Vanilla skeleton arrows carry the ~2 base arrow damage scaled up by
+	// difficulty rather than a flat value.
 	arrow.ProjectileDamage = 3
+	switch s.currentDifficulty() {
+	case 1: // easy
+		arrow.ProjectileDamage = 2
+	case 3: // hard
+		arrow.ProjectileDamage = 4
+	}
 	arrow.VX, arrow.VY, arrow.VZ = dx/distance*speed, dy/distance*speed, dz/distance*speed
 	s.world.Entities.Add(arrow)
 	handler.BroadcastSpawnMob(arrow, s.sessions)
