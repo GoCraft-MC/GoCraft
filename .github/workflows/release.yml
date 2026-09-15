@@ -41,7 +41,7 @@ jobs:
         run: |
           go build \
             -trimpath \
-            -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+            -ldflags="-s -w -X GoCraft/server.Version=${{ github.ref_name }}" \
             -o gocraft-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} \
             .
       - name: Upload to GitHub Release
