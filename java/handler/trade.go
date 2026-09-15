@@ -227,6 +227,12 @@ func handleInteractPacketWithEvents(pkt *protocol.Packet, p *player.Player, w *c
 			return nil
 		}
 	}
+	// Sneak-right-clicking a chested donkey or mule opens its storage (the
+	// riding + inventory-key path is handled in the player-action handler).
+	if (entity.Type == corentity.TypeDonkey || entity.Type == corentity.TypeMule) &&
+		entity.HasChest && entity.Tamed && sneaking {
+		return openBoatInventory(p, conn, entity)
+	}
 	if (corentity.IsAgeableAnimal(entity.Type) || corentity.IsTameableAnimal(entity.Type) || corentity.IsAnimalVehicle(entity.Type)) && len(buses) > 0 && buses[0] != nil {
 		buses[0].PostEntityInteract(intent.EntityInteractIntent{
 			EventChecked: plugins != nil,

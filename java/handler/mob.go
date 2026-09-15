@@ -169,10 +169,14 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		if e.HasTameOwner {
 			b = b.UUID(protocol.UUID(e.TameOwnerUUID))
 		}
+		// Wolf DATA_INTERESTED_ID (index 19, Boolean): the begging head-tilt.
+		if e.Type == corentity.TypeWolf {
+			b = b.Byte(19).VarInt(8).Bool(e.WolfBegging)
+		}
 		// Collar color: send when explicitly set (non-empty).
-		// DyeColor index: Wolf=19, Cat=21.
+		// DyeColor index: Wolf=20 (19 is begging), Cat=21.
 		if e.Tamed && e.CollarColor != "" && (e.Type == corentity.TypeWolf || e.Type == corentity.TypeCat) {
-			collarIndex := byte(19)
+			collarIndex := byte(20)
 			if e.Type == corentity.TypeCat {
 				collarIndex = 21
 			}
@@ -189,6 +193,11 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			flags |= 0x04
 		}
 		b = b.Byte(17).VarInt(0).Byte(flags)
+		if (e.Type == corentity.TypeDonkey || e.Type == corentity.TypeMule) && e.HasChest {
+			// ChestedHorse DATA_ID_CHEST (index 18, Boolean) — only donkey/mule
+			// use index 18 as has_chest, so send it solely for them.
+			b = b.Byte(18).VarInt(8).Bool(true)
+		}
 		// AbstractHorse does NOT expose an owner-UUID tracked datum in protocol 769.
 		// Ownership is server-side state only; the client learns "is tamed" from the
 		// 0x02 flag above. Subtype-specific index-18 fields (Horse variant VarInt,
