@@ -5,8 +5,42 @@ import (
 
 	corentity "GoCraft/core/entity"
 	"GoCraft/core/player"
+	coreworld "GoCraft/core/world"
 	"GoCraft/java/handler"
 )
+
+// trySheepEatGrass mirrors EatBlockGoal: a sheared sheep occasionally eats a
+// grass block below it (turning it to dirt) or short grass/fern at its feet,
+// which is what regrows its wool. Returns true when it ate this tick.
+func (s *Server) trySheepEatGrass(e *corentity.Entity) bool {
+	if s.world == nil {
+		return false
+	}
+	ai := s.mobAIFor(e)
+	if ai.rng.Intn(50) != 0 {
+		return false
+	}
+	x := int(math.Floor(e.Position.X))
+	y := int(math.Floor(e.Position.Y))
+	z := int(math.Floor(e.Position.Z))
+	switch s.world.GetBlock(x, y, z).ResourceLocation() {
+	case "minecraft:short_grass", "minecraft:grass", "minecraft:fern", "minecraft:tall_grass", "minecraft:large_fern":
+		s.setSimulationBlock(x, y, z, coreworld.Air)
+		return true
+	}
+	if s.world.GetBlock(x, y-1, z).ResourceLocation() == "minecraft:grass_block" {
+		s.setSimulationBlock(x, y-1, z, coreworld.Block{Namespace: "minecraft", Name: "dirt"})
+		return true
+	}
+	return false
+}
+
+// setSimulationBlock writes a block in the simulation dimension and tells clients.
+func (s *Server) setSimulationBlock(x, y, z int, block coreworld.Block) {
+	s.world.SetBlock(x, y, z, block)
+	handler.BroadcastBlockChange(coreworld.BlockChange{X: x, Y: y, Z: z, Block: block},
+		s.javaSessionsForDimension(s.simulationDimension))
+}
 
 // nextEggLayTicks re-rolls the vanilla chicken EggLayTime (6000-12000 ticks).
 func nextEggLayTicks(ai *mobAI) int32 {
@@ -37,12 +71,21 @@ func (s *Server) tickAnimalLifecycle(entities []*corentity.Entity) {
 				s.damageEnvironmentalEntity(e, e.MaxHealth, "poison")
 			}
 		}
-		// Sheep wool regrowth: count down and regrow when zero.
-		if e.Type == corentity.TypeSheep && e.Sheared && e.WoolRegrowTicks > 0 {
-			e.WoolRegrowTicks--
-			if e.WoolRegrowTicks == 0 {
+		// Sheep wool regrowth. Vanilla regrows wool only by eating a grass block
+		// (EatBlockGoal); the timer stays as a fallback so a sheared sheep with no
+		// grass nearby still eventually regrows.
+		if e.Type == corentity.TypeSheep && e.Sheared {
+			if s.trySheepEatGrass(e) {
 				e.Sheared = false
+				e.WoolRegrowTicks = 0
+				s.broadcastAnimalEvent(e, 10, 0) // Java EATING_GRASS entity status
 				handler.BroadcastMobMetadata(e, s.sessions)
+			} else if e.WoolRegrowTicks > 0 {
+				e.WoolRegrowTicks--
+				if e.WoolRegrowTicks == 0 {
+					e.Sheared = false
+					handler.BroadcastMobMetadata(e, s.sessions)
+				}
 			}
 		}
 		// Chicken egg laying: adult, non-jockey chickens drop an egg every
