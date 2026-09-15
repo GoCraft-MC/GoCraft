@@ -123,6 +123,32 @@ func TestEndermanIgnoresBlocksOutsideHoldableSet(t *testing.T) {
 	}
 }
 
+func TestEndermanPicksUpExpandedHoldableBlock(t *testing.T) {
+	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
+	defer w.Close()
+	for cx := int32(-1); cx <= 1; cx++ {
+		for cz := int32(-1); cz <= 1; cz++ {
+			w.Chunk(cx, cz)
+		}
+	}
+	// red_sand was not in the original holdable set; it is now part of the
+	// vanilla enderman_holdable tag GoCraft mirrors.
+	for x := -2; x <= 2; x++ {
+		for z := -2; z <= 2; z++ {
+			w.SetBlock(x, 63, z, coreworld.Block{Namespace: "minecraft", Name: "red_sand"})
+		}
+	}
+	enderman := corentity.New(1, [16]byte{}, corentity.TypeEnderman, 0.5, 64, 0.5)
+	s := &Server{world: w, sessions: session.NewManager(), simulationDimension: dimensionOverworld}
+
+	if !tickEndermanUntil(s, enderman, func() bool { return enderman.EndermanCarriedBlock != "" }, 100000) {
+		t.Fatal("enderman never picked up red_sand")
+	}
+	if enderman.EndermanCarriedBlock != "minecraft:red_sand" {
+		t.Fatalf("carried block = %q, want minecraft:red_sand", enderman.EndermanCarriedBlock)
+	}
+}
+
 func TestKilledEndermanDropsCarriedBlock(t *testing.T) {
 	w := coreworld.New(&coreworld.FlatGenerator{}, nil, false)
 	defer w.Close()

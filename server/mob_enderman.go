@@ -50,16 +50,47 @@ func (s *Server) tryEndermanTeleport(enderman *corentity.Entity) bool {
 // EndermanPickupBlocks lists block IDs an enderman can pick up. It mirrors the
 // vanilla minecraft:enderman_holdable block tag.
 var EndermanPickupBlocks = map[string]bool{
-	"minecraft:grass_block":    true,
-	"minecraft:dirt":           true,
+	// Dirt family (#minecraft:dirt) and grass blocks.
+	"minecraft:grass_block": true,
+	"minecraft:dirt":        true,
+	"minecraft:coarse_dirt": true,
+	"minecraft:podzol":      true,
+	"minecraft:rooted_dirt": true,
+	"minecraft:mycelium":    true,
+	"minecraft:mud":         true,
+	// Moss blocks.
+	"minecraft:moss_block":      true,
+	"minecraft:pale_moss_block": true,
+	// Loose blocks and misc holdables.
 	"minecraft:sand":           true,
+	"minecraft:red_sand":       true,
 	"minecraft:gravel":         true,
-	"minecraft:brown_mushroom": true,
-	"minecraft:red_mushroom":   true,
+	"minecraft:clay":           true,
+	"minecraft:tnt":            true,
 	"minecraft:cactus":         true,
 	"minecraft:pumpkin":        true,
+	"minecraft:carved_pumpkin": true,
 	"minecraft:melon":          true,
-	"minecraft:mycelium":       true,
+	"minecraft:brown_mushroom": true,
+	"minecraft:red_mushroom":   true,
+	// Nether holdables.
+	"minecraft:crimson_fungus": true,
+	"minecraft:warped_fungus":  true,
+	"minecraft:crimson_nylium": true,
+	"minecraft:warped_nylium":  true,
+	// Small flowers (#minecraft:small_flowers).
+	"minecraft:dandelion":          true,
+	"minecraft:poppy":              true,
+	"minecraft:blue_orchid":        true,
+	"minecraft:allium":             true,
+	"minecraft:azure_bluet":        true,
+	"minecraft:red_tulip":          true,
+	"minecraft:orange_tulip":       true,
+	"minecraft:white_tulip":        true,
+	"minecraft:pink_tulip":         true,
+	"minecraft:oxeye_daisy":        true,
+	"minecraft:cornflower":         true,
+	"minecraft:lily_of_the_valley": true,
 }
 
 // Vanilla runs the enderman's pick-up and place goals as independent random

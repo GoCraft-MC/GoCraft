@@ -26,7 +26,7 @@ lifecycle), which are simplified or absent.
 | Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | ~~no door-break~~ **fixed (hard)**; no reinforcements, targets players only | 🟡 |
 | Skeleton / Stray | ✅ 0.25 | bow ✅ | ~~no strafe-kite / flee-sun / avoid-wolf~~ **fixed**; arrow dmg flat 3 | 🟡 |
 | Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | dead `CreeperFuse` struct; no charged (r6) | 🟡 |
-| Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | no block take/place, freeze-on-look partial | 🟠 |
+| Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | block take/place ✅ (holdable set broadened); freeze-on-look partial | 🟡 |
 | Cow / Sheep / Pig / Mooshroom | ✅ speeds & hp | breed/panic/tempt ✅ | panic speed not per-mob; sheep eat-grass? | 🟡 |
 | Chicken | ✅ 4hp / 0.25 | ✅ | ~~no egg laying~~ **fixed**; slow-fall moot (mobs take no fall damage) | 🟢 |
 | Horse / Donkey / Mule | ✅ 0.225 / jump 0.7 / 53hp | — | taming/rearing partial | 🟠 |
@@ -76,8 +76,14 @@ Vanilla: `40hp, 0.3, atk 7, follow 64`; freeze-when-looked-at, take/leave block,
 anger-on-stare, water/rain damage + teleport.
 - 🟢 Attributes match; water damage + teleport implemented (`tickEndermanWater`);
   stare-based aggro present (`isPlayerStaringAtEnderman`).
-- 🟠 No **block pick up / place** (`EndermanTakeBlockGoal`/`LeaveBlockGoal`).
-- 🟡 Freeze-while-stared and teleport-on-damage only partially modelled.
+- 🟢 Block **pick up / place** is implemented (`tryEndermanPickupBlock` /
+  `tryEndermanPlaceBlock`, 1/20 and 1/2000 per tick like vanilla). Correction to
+  an earlier audit note: this was already present. This pass broadened
+  `EndermanPickupBlocks` (10 → ~35) to match the vanilla `enderman_holdable` tag
+  (dirt family, moss, nether holdables, small flowers, tnt, clay, …).
+- 🟡 Carry ticks every tick rather than only via the low-priority idle goals, and
+  the sample box is a single 5×3×5 (vanilla uses a larger box for pick-up than
+  place). Freeze-while-stared and teleport-on-damage only partially modelled.
 
 ### Passive animals (Cow, Sheep, Pig, Mooshroom, Chicken)
 Vanilla: shared `Animal` goals — `PanicGoal`, `BreedGoal(1.0)`, `TemptGoal`,
