@@ -1,4 +1,4 @@
-package server
+package permission_editor
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ import (
 	"GoCraft/java/handler"
 )
 
-func newMockBytebin(t *testing.T) *httptest.Server {
+func NewMockBytebin(t *testing.T) *httptest.Server {
 	t.Helper()
 	store := map[string][]byte{}
 	counter := 0
@@ -44,11 +44,11 @@ func newMockBytebin(t *testing.T) *httptest.Server {
 }
 
 func TestPermissionEditorUploadsAndApplies(t *testing.T) {
-	bytebin := newMockBytebin(t)
+	bytebin := NewMockBytebin(t)
 	manager := corepermission.NewMemory()
-	editor := newPermissionEditor(manager, "https://editor.example", bytebin.URL)
+	editor := NewPermissionEditor(manager, "https://editor.example", bytebin.URL)
 
-	link, err := editor.create([]handler.CommandPermission{{Command: "give", Node: "gocraft.command.give"}})
+	link, err := editor.Create([]handler.CommandPermission{{Command: "give", Node: "gocraft.command.give"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestPermissionEditorUploadsAndApplies(t *testing.T) {
 	initial.Document.Groups["builder"] = corepermission.Group{Permissions: map[string]bool{"gocraft.command.give": true}}
 	initial.Document.Users["alex"] = corepermission.User{Groups: []string{"builder"}}
 
-	savePayload, _ := json.Marshal(map[string]interface{}{
+	savePayload, _ := json.Marshal(map[string]any{
 		"type":     "gocraft-permissions-save",
 		"document": initial.Document,
 	})
@@ -86,7 +86,7 @@ func TestPermissionEditorUploadsAndApplies(t *testing.T) {
 	if manager.Allowed("alex", "gocraft.command.give", false, false) {
 		t.Fatal("permissions applied before applyedits")
 	}
-	if err := editor.apply(saveResult.Key); err != nil {
+	if err := editor.Apply(saveResult.Key); err != nil {
 		t.Fatal(err)
 	}
 	if !manager.Allowed("alex", "gocraft.command.give", false, false) {
@@ -95,9 +95,9 @@ func TestPermissionEditorUploadsAndApplies(t *testing.T) {
 }
 
 func TestPermissionEditorRejectsWrongType(t *testing.T) {
-	bytebin := newMockBytebin(t)
+	bytebin := NewMockBytebin(t)
 	manager := corepermission.NewMemory()
-	editor := newPermissionEditor(manager, "https://editor.example", bytebin.URL)
+	editor := NewPermissionEditor(manager, "https://editor.example", bytebin.URL)
 
 	bad, _ := json.Marshal(map[string]string{"type": "something-else", "data": "x"})
 	resp, _ := http.Post(bytebin.URL+"/post", "application/json", bytes.NewReader(bad))
@@ -107,7 +107,7 @@ func TestPermissionEditorRejectsWrongType(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&result)
 	resp.Body.Close()
 
-	if err := editor.apply(result.Key); err == nil {
+	if err := editor.Apply(result.Key); err == nil {
 		t.Fatal("expected error for wrong type, got nil")
 	}
 }

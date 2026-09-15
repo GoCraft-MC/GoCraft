@@ -61,6 +61,7 @@ import (
 	"GoCraft/java/session"
 	javaworld "GoCraft/java/world"
 	"GoCraft/java/world/anvil"
+	"GoCraft/server/permission_editor"
 
 	bedrockpacket "github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -100,7 +101,7 @@ type Server struct {
 	sessions           *session.Manager
 	cmds               *handler.Dispatcher
 	permissions        *corepermission.Manager
-	permissionEditor   *permissionEditor
+	permissionEditor   *permission_editor.PermissionEditor
 
 	// Custom item packs (nil when custom_items.enabled = false or no packs found).
 	customItems *customitems.Manager
@@ -175,39 +176,39 @@ type Server struct {
 // mobAI holds the wander state for a passive mob.
 // All fields are written only by the entity tick goroutine.
 type mobAI struct {
-	homeX, homeZ   float64    // world-space spawn/home position (homed mobs only)
-	dirX, dirZ     float64    // current normalised walk direction
-	wanderTick     int        // ticks until next direction pick (0 = pick now)
-	panicTick      int        // remaining ticks fleeing from a recent attacker
-	knockbackTick  int        // ticks retaining the configured initial hit velocity
-	roaming        bool       // true = no fixed home (animals); false = homed (villagers)
-	rng            *rand.Rand // per-entity PRNG seeded from entity ID
-	sleepingWas    bool       // previous-tick sleeping state — detects transitions for metadata broadcast
-	hasTarget      bool       // hostile AI: currently chasing a target
-	targetX        float64    // hostile AI: current target world X
-	targetZ        float64    // hostile AI: current target world Z
-	targetEntityID int32
-	attackCooldown int  // ticks until next melee swing
-	bowDrawTicks   int  // ticks remaining before a skeleton releases its arrow
-	fuseTick       int  // creeper fuse progress (30 ticks to detonation)
-	angered        bool // enderman: true once provoked (by staring), stays true until target lost
-	doorBreakTick  int              // zombie: ticks spent bashing the current wooden door (240 = break)
-	doorBreakPos   spatial.BlockPos // zombie: the door currently being broken
-	strafeTick      int  // skeleton: ticks since last strafe direction re-roll
-	strafeClockwise bool // skeleton: current strafe circling direction
-	strafeBackwards bool // skeleton: strafing away from (vs toward) the target
-	path           []spatial.Vec3
-	pathIndex      int
-	pathGoal       spatial.BlockPos
-	hasPathGoal    bool
-	repathTick     int
-	wanderTarget   spatial.Vec3
-	hasWanderGoal  bool
-	lookTick       int
-	lookX, lookZ   float64
-	bedClaimTick   int // ticks until next unclaimed-bed scan (villagers only)
-	openedDoor     spatial.BlockPos
-	doorCloseTick  int
+	homeX, homeZ    float64    // world-space spawn/home position (homed mobs only)
+	dirX, dirZ      float64    // current normalised walk direction
+	wanderTick      int        // ticks until next direction pick (0 = pick now)
+	panicTick       int        // remaining ticks fleeing from a recent attacker
+	knockbackTick   int        // ticks retaining the configured initial hit velocity
+	roaming         bool       // true = no fixed home (animals); false = homed (villagers)
+	rng             *rand.Rand // per-entity PRNG seeded from entity ID
+	sleepingWas     bool       // previous-tick sleeping state — detects transitions for metadata broadcast
+	hasTarget       bool       // hostile AI: currently chasing a target
+	targetX         float64    // hostile AI: current target world X
+	targetZ         float64    // hostile AI: current target world Z
+	targetEntityID  int32
+	attackCooldown  int              // ticks until next melee swing
+	bowDrawTicks    int              // ticks remaining before a skeleton releases its arrow
+	fuseTick        int              // creeper fuse progress (30 ticks to detonation)
+	angered         bool             // enderman: true once provoked (by staring), stays true until target lost
+	doorBreakTick   int              // zombie: ticks spent bashing the current wooden door (240 = break)
+	doorBreakPos    spatial.BlockPos // zombie: the door currently being broken
+	strafeTick      int              // skeleton: ticks since last strafe direction re-roll
+	strafeClockwise bool             // skeleton: current strafe circling direction
+	strafeBackwards bool             // skeleton: strafing away from (vs toward) the target
+	path            []spatial.Vec3
+	pathIndex       int
+	pathGoal        spatial.BlockPos
+	hasPathGoal     bool
+	repathTick      int
+	wanderTarget    spatial.Vec3
+	hasWanderGoal   bool
+	lookTick        int
+	lookX, lookZ    float64
+	bedClaimTick    int // ticks until next unclaimed-bed scan (villagers only)
+	openedDoor      spatial.BlockPos
+	doorCloseTick   int
 }
 
 type crossPlayerView struct {
@@ -563,7 +564,7 @@ func New(cfg *config.Config) (*Server, error) {
 	})
 	cmds.RequireOperator(`timings`, `tps`, `mspt`, `time`)
 	if cfg.PermissionEditor.Enabled {
-		s.permissionEditor = newPermissionEditor(permissionManager, cfg.PermissionEditor.EditorURL, cfg.PermissionEditor.BytebinURL)
+		s.permissionEditor = permission_editor.NewPermissionEditor(permissionManager, cfg.PermissionEditor.EditorURL, cfg.PermissionEditor.BytebinURL)
 	}
 	s.registerPermissionCommands()
 	// Warm spawn immediately; login-time streaming will reuse this cache.
