@@ -3090,6 +3090,7 @@ func (s *Server) tickEntities() {
 				deathIDs = append(deathIDs, e.EntityID)
 				spawned = append(spawned, s.spawnMobDrops(e)...)
 				spawned = append(spawned, s.spawnMobExperience(e)...)
+				spawned = append(spawned, s.splitSlimeOnDeath(e)...)
 				debuglog.Info(debuglog.EntityEvents, "entity died", "type", e.Type, "id", e.EntityID)
 			}
 			e.DeathTicks++
