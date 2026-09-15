@@ -26,7 +26,7 @@ all already present. Remaining divergences are a few per-mob special goals.
 | --- | --- | --- | --- | --- |
 | Zombie / Zombie Villager | ✅ 0.23 / atk 3 / range 35 / armor 2 | ✅ | door-break ✅, reinforcements ✅ (hard); targets villagers/golems/turtles player-first | 🟢 |
 | Skeleton / Stray | ✅ 0.25 | bow ✅ | strafe/flee-sun/avoid-wolf ✅; arrow dmg now difficulty-scaled | 🟢 |
-| Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | charged (r6) needs a lightning system (absent) | 🟡 |
+| Creeper | ✅ 0.25 | ✅ swell 3b / fuse 30t / r3 | charged (r6) ✅ via new lightning system | 🟢 |
 | Enderman | ✅ 40hp / 0.3 / atk 7 / range 64 | ✅ + water/teleport | block take/place ✅; freeze-on-look ✅ | 🟢 |
 | Cow / Sheep / Pig / Mooshroom | ✅ speeds & hp | breed/panic/tempt ✅ | per-mob panic speed ✅; sheep eat-grass? | 🟢 |
 | Chicken | ✅ 4hp / 0.25 | ✅ | ~~no egg laying~~ **fixed**; slow-fall moot (mobs take no fall damage) | 🟢 |
@@ -71,9 +71,11 @@ Swell ≤3 blocks + LOS, fuse 30 ticks, explosion radius 3 — all match
 - 🟡 De-swell on retreat is `-2/tick` vs vanilla `-1`.
 - 🟢 **Fixed:** the dead wall-clock `CreeperFuse` struct was removed; the live
   fuse is the tick-based `ai.fuseTick` path.
-- 🟠 Charged creeper (radius 6) not represented: GoCraft has no lightning system
-  (only a weather flag), so nothing can strike/charge a creeper. Needs a lightning
-  feature first, then a `Charged` state doubling the explosion radius + metadata.
+- 🟢 **Fixed:** added a lightning system (`server/lightning.go`) — thunderstorms
+  strike near players, spawning a `lightning_bolt` entity that burns/damages
+  entities at the column (5 dmg + fire) and charges creepers within 15 blocks.
+  A charged creeper renders the powered aura (metadata index 17) and explodes
+  with radius 6.
 
 ### Enderman
 Vanilla: `40hp, 0.3, atk 7, follow 64`; freeze-when-looked-at, take/leave block,
@@ -155,12 +157,12 @@ strafe/flee-sun/avoid-wolf + difficulty arrows, enderman holdable set +
 freeze-when-looked-at, wolf leap/avoid-llama/wild-prey, per-mob panic speed, and
 removal of the dead `CreeperFuse`.
 
-The one outstanding item is the **charged creeper** (radius-6 explosion): it
-depends on a lightning system that GoCraft does not have yet (only a weather
-flag). Once lightning exists, add a `Charged` state that doubles the explosion
-radius plus the powered metadata. Minor extras also remain: sheep grass-eating
-regrowth confirmation, donkey/mule chest inventory, wolf beg, and moving
-enderman block-carry to idle-only.
+A lightning system was added, so the **charged creeper** (radius-6) is now done:
+thunderstorms strike near players, charging creepers and burning entities at the
+column. Remaining are only minor extras: sheep grass-eating regrowth
+confirmation, donkey/mule chest inventory, wolf beg, other lightning conversions
+(pig→zombified piglin, mooshroom recolour, villager→witch), and moving enderman
+block-carry to idle-only.
 
 ## Method (reproducible)
 

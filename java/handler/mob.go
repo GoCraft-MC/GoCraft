@@ -237,6 +237,11 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			VarInt(javaworld.StateID(coreworld.BlockFromResourceLocation(e.EndermanCarriedBlock)))
 		hasMetadata = true
 	}
+	if e.Type == corentity.TypeCreeper && e.Charged {
+		// Creeper DATA_IS_POWERED (index 17, Boolean) renders the charged aura.
+		b = b.Byte(17).VarInt(8).Bool(true)
+		hasMetadata = true
+	}
 	if e.Type != corentity.TypeVillager {
 		if !hasMetadata {
 			return nil

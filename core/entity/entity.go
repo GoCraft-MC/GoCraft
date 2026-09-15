@@ -85,6 +85,7 @@ const (
 	TypePrimedTNT        EntityType = "minecraft:tnt"
 	TypeItem             EntityType = "minecraft:item"
 	TypeExperienceOrb    EntityType = "minecraft:experience_orb"
+	TypeLightningBolt    EntityType = "minecraft:lightning_bolt"
 	TypeArrow            EntityType = "minecraft:arrow"
 	TypeSpectralArrow    EntityType = "minecraft:spectral_arrow"
 	TypeTrident          EntityType = "minecraft:trident"
@@ -260,6 +261,9 @@ type Entity struct {
 	HasPumpkin bool
 
 	// Enderman fields - only used when type == TypeEnderman
+	// Charged marks a creeper struck by lightning; it explodes with double the
+	// radius and renders the powered aura.
+	Charged bool
 	// EndermanCarriedBlock is the canonical resource location of the block
 	// an enderman is holding, or "" when empty. Adapters resolve their own IDs.
 	EndermanCarriedBlock string
