@@ -11,10 +11,31 @@ import (
 
 const boatContainerKind = "minecraft:chest_boat"
 
+// hasEntityStorage reports whether an entity exposes a chest-style storage the
+// player can open: chest boats and chested donkeys/mules.
+func hasEntityStorage(e *corentity.Entity) bool {
+	if e == nil || e.Storage == nil {
+		return false
+	}
+	return corentity.IsChestBoat(e.Type) ||
+		((e.Type == corentity.TypeDonkey || e.Type == corentity.TypeMule) && e.HasChest)
+}
+
 func canAccessBoatInventory(p *player.Player, boat *corentity.Entity) bool {
 	return p != nil && boat != nil && !p.Dead && !boat.Dead &&
-		p.GameMode != player.GameModeSpectator && corentity.IsChestBoat(boat.Type) &&
-		(p.Position.Distance(boat.Position) <= 4 || (p.VehicleEntityID == boat.EntityID && boat.HasPassenger(p.EntityID)))
+		p.GameMode != player.GameModeSpectator && hasEntityStorage(boat) &&
+		(p.Position.Distance(boat.Position) <= 5 || (p.VehicleEntityID == boat.EntityID && boat.HasPassenger(p.EntityID)))
+}
+
+func entityStorageTitle(e *corentity.Entity) string {
+	switch e.Type {
+	case corentity.TypeDonkey:
+		return "Donkey"
+	case corentity.TypeMule:
+		return "Mule"
+	default:
+		return "Boat Chest"
+	}
 }
 
 func openBoatInventory(p *player.Player, conn *network.ClientConn, boat *corentity.Entity) error {
@@ -34,7 +55,7 @@ func openBoatInventory(p *player.Player, conn *network.ClientConn, boat *corenti
 	if conn == nil {
 		return nil
 	}
-	if err := sendOpenScreen(conn, chestContainerID, containerMenuType("minecraft:chest"), "Boat Chest"); err != nil {
+	if err := sendOpenScreen(conn, chestContainerID, containerMenuType("minecraft:chest"), entityStorageTitle(boat)); err != nil {
 		return err
 	}
 	return sendChestContainerContent(conn, p)

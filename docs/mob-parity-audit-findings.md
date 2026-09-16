@@ -173,9 +173,10 @@ Still open (small):
 - **Wolf beg** — cosmetic head-tilt. Blocked: GoCraft maps the wolf collar to
   metadata index 19, which collides with vanilla's begging-at-19, so the wolf
   metadata layout needs reconciling before adding it (risk of client disconnect).
-- **Donkey/mule chest inventory** — a distinct feature (15-slot inventory + chest
-  attach interaction + container open); the `has_chest` metadata slot already
-  exists at index 18. Planned as a follow-up.
+- **Donkey/mule chest** — ✅ done: a tamed donkey/mule accepts a chest (15-slot
+  Storage), renders `has_chest` (index 18), drops the chest + contents on death,
+  and its storage opens as a chest container (sneak-right-click, or the inventory
+  key while riding) by reusing the chest-boat storage path.
 
 ## Method (reproducible)
 

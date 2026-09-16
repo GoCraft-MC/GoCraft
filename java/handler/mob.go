@@ -193,6 +193,11 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 			flags |= 0x04
 		}
 		b = b.Byte(17).VarInt(0).Byte(flags)
+		if (e.Type == corentity.TypeDonkey || e.Type == corentity.TypeMule) && e.HasChest {
+			// ChestedHorse DATA_ID_CHEST (index 18, Boolean) — only donkey/mule
+			// use index 18 as has_chest, so send it solely for them.
+			b = b.Byte(18).VarInt(8).Bool(true)
+		}
 		// AbstractHorse does NOT expose an owner-UUID tracked datum in protocol 769.
 		// Ownership is server-side state only; the client learns "is tamed" from the
 		// 0x02 flag above. Subtype-specific index-18 fields (Horse variant VarInt,
