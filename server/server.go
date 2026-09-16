@@ -3233,6 +3233,8 @@ func (s *Server) tickEntities() {
 				// AI is staggered below.
 				if e.Type == corentity.TypeHoglin {
 					s.tickHoglinConversion(e)
+				} else if e.Type == corentity.TypeVex {
+					s.tickVexLimitedLife(e)
 				}
 				// Stagger hostile AI: run full AI every 2 ticks per mob.
 				// This halves hostile-mob CPU cost without losing reactivity.
