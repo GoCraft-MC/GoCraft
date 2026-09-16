@@ -38,7 +38,9 @@ func (s *Server) tickParityPassiveIdle(e *corentity.Entity, ai *mobAI) bool {
 		return s.tickFrogParity(e, ai, state)
 	case corentity.TypeFox:
 		return s.tickFoxParity(e, ai, state)
-	case corentity.TypeCat, corentity.TypeWolf:
+	case corentity.TypeCat:
+		return s.tickCatParity(e, ai, state)
+	case corentity.TypeWolf:
 		return s.tickTameableFollowParity(e, ai)
 	case corentity.TypePolarBear:
 		return s.tickPolarBearParity(e, ai, state)
@@ -155,6 +157,29 @@ func (s *Server) tickFoxParity(e *corentity.Entity, ai *mobAI, state *mobParityS
 		return s.tickEntityHunter(e, ai, state, prey, 2, 20, 1.6, pumpkinMovementSpeed(e.Type, 1.3))
 	}
 	return false
+}
+
+// tickCatParity mirrors vanilla Cat goals: an untamed cat is skittish and flees
+// nearby players (CatAvoidEntityGoal<Player>, 16 blocks, sprint 1.33) and hunts
+// rabbits (NonTameRandomTargetGoal + OcelotAttackGoal). A tamed cat follows its
+// owner instead.
+func (s *Server) tickCatParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
+	if !e.Tamed {
+		if target := s.closestVisiblePlayer(e, 16); target != nil {
+			dx, dz := e.Position.X-target.Position.X, e.Position.Z-target.Position.Z
+			distance := math.Hypot(dx, dz)
+			if distance > 0.001 {
+				destination := spatial.Vec3{X: e.Position.X + dx/distance*12, Y: e.Position.Y, Z: e.Position.Z + dz/distance*12}
+				s.navigateMob(e, ai, destination, pumpkinMovementSpeed(e.Type, 1.33))
+				return true
+			}
+		}
+		if prey := s.closestEntityOfTypes(e, 12, corentity.TypeRabbit, corentity.TypeChicken); prey != nil {
+			return s.tickEntityHunter(e, ai, state, prey, 3, 20, 1.6, pumpkinMovementSpeed(e.Type, 1.3))
+		}
+		return false
+	}
+	return s.tickTameableFollowParity(e, ai)
 }
 
 func (s *Server) tickTameableFollowParity(e *corentity.Entity, ai *mobAI) bool {
