@@ -21,7 +21,9 @@ func (s *Server) tickParityPassiveIdle(e *corentity.Entity, ai *mobAI) bool {
 	switch e.Type {
 	case corentity.TypeBat:
 		return s.tickBatParity(e, ai, state)
-	case corentity.TypeAllay, corentity.TypeBee:
+	case corentity.TypeBee:
+		return s.tickBeeParity(e, ai, state)
+	case corentity.TypeAllay:
 		return s.tickPassiveFlightParity(e, ai, state)
 	case corentity.TypeParrot:
 		if s.tickTameableFollowParity(e, ai) {
@@ -59,6 +61,89 @@ func (s *Server) tickParityPassiveIdle(e *corentity.Entity, ai *mobAI) bool {
 		}
 	}
 	return false
+}
+
+// tickBeeParity mirrors vanilla Bee combat: a bee provoked by a player becomes
+// angry (refreshParityProvocation sets angerTicks), flies at its aggressor and
+// stings once (BeeAttackGoal). Stinging deals 2 damage plus Poison and, exactly
+// like vanilla, costs the bee its stinger — it then slowly succumbs, with the
+// death chance rising over the ~1200 ticks after stinging. Un-angered bees fall
+// back to normal passive flight.
+func (s *Server) tickBeeParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
+	if state.beeHasStung {
+		state.beeStingTicks++
+		if state.beeStingTicks%5 == 0 {
+			window := 1200 - state.beeStingTicks
+			if window < 1 {
+				window = 1
+			} else if window > 1200 {
+				window = 1200
+			}
+			if ai.rng.Intn(window) == 0 {
+				s.damageEnvironmentalEntity(e, e.MaxHealth, "generic")
+				return true
+			}
+		}
+		return s.tickPassiveFlightParity(e, ai, state)
+	}
+	if state.angerTicks > 0 {
+		if aggressor := s.parityAggressorPlayer(e); aggressor != nil {
+			return s.tickBeeSting(e, state, aggressor)
+		}
+	}
+	return s.tickPassiveFlightParity(e, ai, state)
+}
+
+// tickBeeSting flies the bee toward its aggressor and, once in range with line
+// of sight, delivers a single poisonous sting and marks the bee as having stung.
+func (s *Server) tickBeeSting(e *corentity.Entity, state *mobParityState, target *player.Player) bool {
+	dx := target.Position.X - e.Position.X
+	dy := target.Position.Y - e.Position.Y
+	dz := target.Position.Z - e.Position.Z
+	if math.Sqrt(dx*dx+dy*dy+dz*dz) <= 1.8 {
+		if s.mobHasLineOfSight(e, target.Position, 1.62) {
+			s.damagePlayerFromParityMob(target, 2, "was stung to death by a bee")
+			s.applyParityPlayerPoison(target, 200) // POISON_SECONDS_NORMAL = 10s
+			state.beeHasStung = true
+			state.beeStingTicks = 0
+		}
+		e.VX, e.VY, e.VZ = 0, 0, 0
+		return true
+	}
+	s.navigateFlyingMob(e, spatial.Vec3{X: target.Position.X, Y: target.Position.Y + 0.5, Z: target.Position.Z},
+		parityFlightSpeed(e.Type, pumpkinMovementSpeed(e.Type, 1.4)))
+	return true
+}
+
+// parityAggressorPlayer returns the online player in the simulated dimension who
+// most recently struck the entity, the vanilla anger target for neutral mobs.
+func (s *Server) parityAggressorPlayer(e *corentity.Entity) *player.Player {
+	if s.game == nil {
+		return nil
+	}
+	var aggressor *player.Player
+	s.game.OnlinePlayers(func(candidate *player.Player) {
+		if aggressor == nil && !candidate.Dead && candidate.Dimension == s.simulationDimension &&
+			candidate.LastAttackedEntityID == e.EntityID {
+			aggressor = candidate
+		}
+	})
+	return aggressor
+}
+
+// applyParityPlayerPoison applies (or upgrades) Poison I on a player and syncs it
+// to both protocol editions.
+func (s *Server) applyParityPlayerPoison(target *player.Player, durationTicks int32) {
+	if target == nil {
+		return
+	}
+	stored, changed := target.AddStatusEffect(player.StatusEffect{
+		ID: "minecraft:poison", Amplifier: 0, Duration: durationTicks,
+		ShowParticles: true, ShowIcon: true,
+	})
+	if changed {
+		s.syncPlayerStatusEffect(target, stored)
+	}
 }
 
 func (s *Server) tickPassiveFlightParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {

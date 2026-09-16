@@ -24,6 +24,8 @@ type mobParityState struct {
 	anchor             spatial.Vec3
 	hasAnchor          bool
 	targetEntityID     int32
+	beeHasStung        bool
+	beeStingTicks      int
 }
 
 var mobParityStates sync.Map // map[*corentity.Entity]*mobParityState
