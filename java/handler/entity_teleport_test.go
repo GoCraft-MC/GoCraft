@@ -164,6 +164,14 @@ func TestJavaAnimalMetadataSynchronizesBabyTameOwnerAndSaddle(t *testing.T) {
 	if !present || err != nil || [16]byte(gotOwner) != owner {
 		t.Fatalf("wolf owner = %v/%v/%v", present, gotOwner, err)
 	}
+	index, _ = protocol.ReadByte(r)
+	if index != 19 {
+		t.Fatalf("wolf begging index = %d, want 19", index)
+	}
+	assertMetadataVarInt(t, r, "wolf begging serializer", 8)
+	if begging, _ := protocol.ReadBool(r); begging {
+		t.Fatal("wolf begging metadata should default to false")
+	}
 	assertMetadataTerminator(t, r)
 
 	// Horse: tamed+saddled — index 16 (baby), 17 (flags), then 0xff only.

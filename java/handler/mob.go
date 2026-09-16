@@ -169,10 +169,14 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		if e.HasTameOwner {
 			b = b.UUID(protocol.UUID(e.TameOwnerUUID))
 		}
+		// Wolf DATA_INTERESTED_ID (index 19, Boolean): the begging head-tilt.
+		if e.Type == corentity.TypeWolf {
+			b = b.Byte(19).VarInt(8).Bool(e.WolfBegging)
+		}
 		// Collar color: send when explicitly set (non-empty).
-		// DyeColor index: Wolf=19, Cat=21.
+		// DyeColor index: Wolf=20 (19 is begging), Cat=21.
 		if e.Tamed && e.CollarColor != "" && (e.Type == corentity.TypeWolf || e.Type == corentity.TypeCat) {
-			collarIndex := byte(19)
+			collarIndex := byte(20)
 			if e.Type == corentity.TypeCat {
 				collarIndex = 21
 			}

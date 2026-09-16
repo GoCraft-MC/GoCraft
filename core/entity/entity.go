@@ -270,6 +270,9 @@ type Entity struct {
 	// OfferFlowerTicks counts down while an iron golem holds out a poppy to a
 	// nearby villager (vanilla OfferFlowerGoal, 400 ticks). Zero means not offering.
 	OfferFlowerTicks int32
+	// WolfBegging is true when a wolf is tilting its head at a nearby player
+	// holding wolf food (vanilla BegGoal / DATA_INTERESTED_ID).
+	WolfBegging bool
 	// SlimeSize is the size of a slime or magma cube (1, 2, or 4). Health is
 	// size squared; on death a size>1 cube splits into smaller ones.
 	SlimeSize int32
