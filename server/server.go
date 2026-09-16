@@ -3228,9 +3228,15 @@ func (s *Server) tickEntities() {
 			if e.Type == corentity.TypeIronGolem || e.Type == corentity.TypeSnowGolem {
 				s.tickGolemAI(e)
 			} else if isHostileMob(e.Type) {
+				// Hoglins zombify outside the Nether; this runs every tick so the
+				// conversion timer keeps vanilla wall-clock time even though combat
+				// AI is staggered below.
+				if e.Type == corentity.TypeHoglin {
+					s.tickHoglinConversion(e)
+				}
 				// Stagger hostile AI: run full AI every 2 ticks per mob.
 				// This halves hostile-mob CPU cost without losing reactivity.
-				if e.AgeTicks%2 == 0 {
+				if !e.Dead && e.AgeTicks%2 == 0 {
 					s.tickHostileMobAI(e)
 				}
 			}
