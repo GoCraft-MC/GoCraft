@@ -33,6 +33,21 @@ func TestWolfBegsAtPlayerHoldingWolfFood(t *testing.T) {
 	}
 }
 
+func TestSittingWolfClearsStaleBeggingThroughPassiveAI(t *testing.T) {
+	s := newGolemTestServer(t)
+	wolf := corentity.New(s.game.NextEntityID(), [16]byte{9}, corentity.TypeWolf, 20, 64, 20)
+	wolf.Tamed = true
+	wolf.Sitting = true
+	wolf.WolfBegging = true // stale flag; no players hold food
+	s.world.Entities.Add(wolf)
+
+	s.tickPassiveMobAI(wolf)
+
+	if wolf.WolfBegging {
+		t.Fatal("sitting wolf kept a stale begging flag after the real AI tick")
+	}
+}
+
 func TestWolfDoesNotBegAtDistantPlayer(t *testing.T) {
 	s := newGolemTestServer(t)
 	p := player.New([16]byte{5}, "beggee", player.ClientEditionJava)
