@@ -3411,6 +3411,10 @@ func (s *Server) spawnMobDrops(e *corentity.Entity) []*corentity.Entity {
 		stacks = append(stacks, player.ItemStack{ItemID: string(e.Type), Count: 1})
 	}
 	stacks = append(stacks, e.Storage.Drain()...)
+	// A killed chested donkey/mule drops its chest (contents came from Storage above).
+	if e.HasChest {
+		stacks = append(stacks, player.ItemStack{ItemID: "minecraft:chest", Count: 1})
+	}
 	// A killed enderman drops the block it was carrying.
 	if e.EndermanCarriedBlock != "" {
 		stacks = append(stacks, player.ItemStack{ItemID: e.EndermanCarriedBlock, Count: 1})

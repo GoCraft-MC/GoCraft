@@ -282,6 +282,24 @@ func (s *Server) interactAnimal(p *player.Player, e *corentity.Entity) bool {
 		return true
 	}
 
+	// Attach a chest to a tamed donkey or mule: gives it a 15-slot storage.
+	if item == "minecraft:chest" && (e.Type == corentity.TypeDonkey || e.Type == corentity.TypeMule) &&
+		e.Tamed && !e.HasChest && !e.IsBaby {
+		if !s.consumeAnimalItem(p, "") {
+			return false
+		}
+		e.HasChest = true
+		// GoCraft opens the storage in a generic 9x3 chest menu (27 slots), which
+		// the client and the shared slot-offset code both assume; a 15-slot backing
+		// store would desync every player-inventory slot index. Use 27 until a
+		// dedicated 15-slot horse screen (open_horse_screen) is implemented.
+		e.Storage = player.NewStorageInventory(27)
+		s.broadcastAnimalState(e)
+		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.donkey.chest", handler.SoundCategoryNeutral,
+			e.Position.X, e.Position.Y, e.Position.Z, 1, 1)
+		return true
+	}
+
 	effect := corentity.FoodEffect(e.Type, item, e.Tamed)
 	if effect.Accepted {
 		if effect.Poisons {

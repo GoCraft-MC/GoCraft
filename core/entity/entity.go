@@ -273,6 +273,9 @@ type Entity struct {
 	// WolfBegging is true when a wolf is tilting its head at a nearby player
 	// holding wolf food (vanilla BegGoal / DATA_INTERESTED_ID).
 	WolfBegging bool
+	// HasChest is true when a donkey or mule carries a chest (opened as a 27-slot
+	// chest menu). Rendered via the chested-horse has_chest metadata.
+	HasChest bool
 	// EndermanCarriedBlock is the canonical resource location of the block
 	// an enderman is holding, or "" when empty. Adapters resolve their own IDs.
 	EndermanCarriedBlock string
