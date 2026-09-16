@@ -4210,8 +4210,9 @@ func (s *Server) tickPassiveMobAI(e *corentity.Entity) bool {
 	ai := s.mobAIFor(e)
 
 	// Wolves flee llamas, tamed wolves assist their owner, and wild wolves hunt
-	// prey (sheep/rabbit/fox) and skeletons.
-	if e.Type == corentity.TypeWolf && !e.Sitting {
+	// prey (sheep/rabbit/fox) and skeletons. Sitting wolves still fall through to
+	// tickWolfBehaviour so the begging head-tilt is updated (it no-ops the rest).
+	if e.Type == corentity.TypeWolf {
 		if s.tickWolfBehaviour(e, ai) {
 			return false
 		}

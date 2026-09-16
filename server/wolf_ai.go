@@ -4,9 +4,52 @@ import (
 	"math"
 
 	corentity "GoCraft/core/entity"
+	"GoCraft/core/player"
 	"GoCraft/core/spatial"
 	"GoCraft/java/handler"
 )
+
+// wolfBegItems are the items a wolf begs for (bones plus the meats/fish it eats).
+var wolfBegItems = map[string]struct{}{
+	"minecraft:bone": {}, "minecraft:rotten_flesh": {},
+	"minecraft:beef": {}, "minecraft:cooked_beef": {},
+	"minecraft:porkchop": {}, "minecraft:cooked_porkchop": {},
+	"minecraft:chicken": {}, "minecraft:cooked_chicken": {},
+	"minecraft:mutton": {}, "minecraft:cooked_mutton": {},
+	"minecraft:rabbit": {}, "minecraft:cooked_rabbit": {},
+	"minecraft:cod": {}, "minecraft:cooked_cod": {},
+	"minecraft:salmon": {}, "minecraft:cooked_salmon": {},
+	"minecraft:tropical_fish": {}, "minecraft:pufferfish": {},
+}
+
+func isWolfBegItem(itemID string) bool {
+	_, ok := wolfBegItems[itemID]
+	return ok
+}
+
+// tickWolfBegging updates the head-tilt begging flag: a wolf begs at the nearest
+// visible player within 8 blocks holding wolf food (vanilla BegGoal). Cosmetic —
+// it does not move the wolf.
+func (s *Server) tickWolfBegging(e *corentity.Entity) {
+	if s.game == nil {
+		e.WolfBegging = false
+		return
+	}
+	begging := false
+	s.game.OnlinePlayers(func(p *player.Player) {
+		if begging || p == nil || p.Dead || p.Dimension != s.simulationDimension || p.GameMode == player.GameModeSpectator {
+			return
+		}
+		dx, dy, dz := p.Position.X-e.Position.X, p.Position.Y-e.Position.Y, p.Position.Z-e.Position.Z
+		if dx*dx+dy*dy+dz*dz <= 8*8 && isWolfBegItem(p.HeldItem().ItemID) && s.mobHasUnobstructedSight(e, p.Position, 1.62) {
+			begging = true
+		}
+	})
+	if begging != e.WolfBegging {
+		e.WolfBegging = begging
+		handler.BroadcastMobMetadataInDimension(e, s.sessions, s.simulationDimension)
+	}
+}
 
 const (
 	wolfMeleeReach = 1.8
@@ -29,7 +72,11 @@ func wolfPrey(t corentity.EntityType) bool {
 // AvoidEntityGoal(Llama, 24) and, for untamed wolves, hunting prey. Returns
 // true when it owns the tick so the shared passive wander is skipped.
 func (s *Server) tickWolfBehaviour(e *corentity.Entity, ai *mobAI) bool {
-	if e == nil || ai == nil || s.world == nil || e.Sitting {
+	if e == nil || ai == nil || s.world == nil {
+		return false
+	}
+	s.tickWolfBegging(e) // cosmetic head-tilt; does not own the tick
+	if e.Sitting {
 		return false
 	}
 	if s.tickWolfAvoidLlama(e, ai) {
