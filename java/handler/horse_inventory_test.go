@@ -17,7 +17,7 @@ func newDonkeyChestTest(t *testing.T, chested bool) (*player.Player, *corentity.
 	donkey.Tamed = true
 	if chested {
 		donkey.HasChest = true
-		donkey.Storage = player.NewStorageInventory(15)
+		donkey.Storage = player.NewStorageInventory(27)
 	}
 	w.Entities.Add(donkey)
 	p := player.New([16]byte{1}, "rider", player.ClientEditionJava)
@@ -32,7 +32,7 @@ func TestChestedDonkeyOpensStorageOnSneak(t *testing.T) {
 	if err := handleInteractPacket(pkt, p, w, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if p.OpenContainerKind != boatContainerKind || len(p.ContainerSlots) != 15 {
+	if p.OpenContainerKind != boatContainerKind || len(p.ContainerSlots) != 27 {
 		t.Fatalf("donkey chest did not open: container=%q slots=%d", p.OpenContainerKind, len(p.ContainerSlots))
 	}
 }
@@ -48,6 +48,32 @@ func TestUnchestedDonkeyDoesNotOpenStorage(t *testing.T) {
 	}
 }
 
+func TestDonkeyChestShiftClickTransfersItemFromHotbar(t *testing.T) {
+	p, donkey, w := newDonkeyChestTest(t, true)
+	p.HeldSlot = 0
+	p.Inventory[player.HotbarStart] = player.ItemStack{ItemID: "minecraft:diamond", Count: 3}
+	// Open the storage (sneak-right-click).
+	open := protocol.NewBuilder(packetIDInteract).VarInt(donkey.EntityID).VarInt(0).VarInt(0).Bool(true).Build()
+	if err := handleInteractPacket(open, p, w, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Shift-click the first hotbar slot (container-view index 54 in a 27+36 menu).
+	handleChestClick(p, w, 54, 0, 1)
+
+	moved := false
+	for _, stack := range donkey.Storage.Snapshot() {
+		if stack.ItemID == "minecraft:diamond" && stack.Count == 3 {
+			moved = true
+		}
+	}
+	if !moved {
+		t.Fatal("shift-click did not move the diamonds into the donkey's storage")
+	}
+	if !p.Inventory[player.HotbarStart].IsEmpty() {
+		t.Fatal("diamonds remained in the hotbar after shift-click")
+	}
+}
+
 func TestRiddenChestedDonkeyOpensStorageWithInventoryKey(t *testing.T) {
 	p, donkey, w := newDonkeyChestTest(t, true)
 	donkey.AddPassenger(p.EntityID)
@@ -57,7 +83,7 @@ func TestRiddenChestedDonkeyOpensStorageWithInventoryKey(t *testing.T) {
 	if err := HandlePlayerCommandPacket(pkt, p, w, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if p.OpenContainerKind != boatContainerKind || len(p.ContainerSlots) != 15 {
+	if p.OpenContainerKind != boatContainerKind || len(p.ContainerSlots) != 27 {
 		t.Fatalf("ridden donkey chest did not open: container=%q slots=%d", p.OpenContainerKind, len(p.ContainerSlots))
 	}
 }

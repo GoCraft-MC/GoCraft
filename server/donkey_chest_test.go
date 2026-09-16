@@ -20,8 +20,8 @@ func TestChestAttachesToTamedDonkey(t *testing.T) {
 	if !donkey.HasChest {
 		t.Fatal("chest did not attach to the tamed donkey")
 	}
-	if donkey.Storage == nil || len(donkey.Storage.Snapshot()) != 15 {
-		t.Fatalf("donkey storage = %v, want 15 slots", donkey.Storage)
+	if donkey.Storage == nil || len(donkey.Storage.Snapshot()) != 27 {
+		t.Fatalf("donkey storage = %v, want 27 slots", donkey.Storage)
 	}
 	if !p.Inventory[player.HotbarStart].IsEmpty() {
 		t.Fatal("chest item was not consumed")

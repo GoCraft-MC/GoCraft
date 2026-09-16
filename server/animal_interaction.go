@@ -289,7 +289,11 @@ func (s *Server) interactAnimal(p *player.Player, e *corentity.Entity) bool {
 			return false
 		}
 		e.HasChest = true
-		e.Storage = player.NewStorageInventory(15)
+		// GoCraft opens the storage in a generic 9x3 chest menu (27 slots), which
+		// the client and the shared slot-offset code both assume; a 15-slot backing
+		// store would desync every player-inventory slot index. Use 27 until a
+		// dedicated 15-slot horse screen (open_horse_screen) is implemented.
+		e.Storage = player.NewStorageInventory(27)
 		s.broadcastAnimalState(e)
 		handler.BroadcastSoundAt(s.sessions, "minecraft:entity.donkey.chest", handler.SoundCategoryNeutral,
 			e.Position.X, e.Position.Y, e.Position.Z, 1, 1)
