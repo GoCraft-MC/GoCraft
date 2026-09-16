@@ -231,10 +231,39 @@ func (s *Server) tickGoatParity(e *corentity.Entity, ai *mobAI, state *mobParity
 }
 
 func (s *Server) tickRabbitParity(e *corentity.Entity, ai *mobAI) bool {
+	// Rabbits flee nearby threats (players within 8, wolves/foxes within 10) at
+	// the vanilla RabbitAvoidEntityGoal 2.2x speed.
+	if threat, ok := s.nearestRabbitThreat(e); ok {
+		dx, dz := e.Position.X-threat.X, e.Position.Z-threat.Z
+		if dist := math.Hypot(dx, dz); dist > 0.001 {
+			flee := spatial.Vec3{X: e.Position.X + dx/dist*8, Y: e.Position.Y, Z: e.Position.Z + dz/dist*8}
+			ai.hasWanderGoal = false
+			s.navigateMob(e, ai, flee, pumpkinMovementSpeed(e.Type, 2.2))
+			return true
+		}
+	}
 	if ai.hasWanderGoal {
 		return s.navigateMob(e, ai, ai.wanderTarget, pumpkinMovementSpeed(e.Type, 1.0))
 	}
 	return false
+}
+
+// nearestRabbitThreat returns what a rabbit should flee from: the nearest
+// non-creative player within 8 blocks or the nearest wolf/fox within 10.
+func (s *Server) nearestRabbitThreat(e *corentity.Entity) (spatial.Vec3, bool) {
+	var best spatial.Vec3
+	found := false
+	bestSq := math.MaxFloat64
+	if p := s.closestVisiblePlayer(e, 8); p != nil &&
+		p.GameMode != player.GameModeCreative && p.GameMode != player.GameModeSpectator {
+		best, found, bestSq = p.Position, true, distanceSquaredVec(e.Position, p.Position)
+	}
+	if pred := s.closestEntityOfTypes(e, 10, corentity.TypeWolf, corentity.TypeFox); pred != nil {
+		if d := distanceSquaredVec(e.Position, pred.Position); d < bestSq {
+			best, found = pred.Position, true
+		}
+	}
+	return best, found
 }
 
 func (s *Server) tickStriderIdleParity(e *corentity.Entity, ai *mobAI) bool {
