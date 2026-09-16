@@ -26,6 +26,7 @@ type mobParityState struct {
 	targetEntityID     int32
 	beeHasStung        bool
 	beeStingTicks      int
+	timeInOverworld    int
 }
 
 var mobParityStates sync.Map // map[*corentity.Entity]*mobParityState
