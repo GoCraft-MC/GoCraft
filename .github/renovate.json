@@ -10,7 +10,7 @@
   "gomod": {
     "enabled": true
   },
-  "packaeRules": [
+  "packageRules": [
     {
       "matchManagers": [
         "*"
