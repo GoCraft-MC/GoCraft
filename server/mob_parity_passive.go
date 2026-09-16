@@ -40,6 +40,8 @@ func (s *Server) tickParityPassiveIdle(e *corentity.Entity, ai *mobAI) bool {
 		return s.tickFoxParity(e, ai, state)
 	case corentity.TypeCat:
 		return s.tickCatParity(e, ai, state)
+	case corentity.TypeOcelot:
+		return s.tickOcelotParity(e, ai, state)
 	case corentity.TypeWolf:
 		return s.tickTameableFollowParity(e, ai)
 	case corentity.TypePolarBear:
@@ -180,6 +182,31 @@ func (s *Server) tickCatParity(e *corentity.Entity, ai *mobAI, state *mobParityS
 		return false
 	}
 	return s.tickTameableFollowParity(e, ai)
+}
+
+// tickOcelotParity mirrors vanilla Ocelot goals: an untrusting ocelot flees the
+// nearest player (OcelotAvoidEntityGoal<Player>, 16 blocks, sprint 1.33), and
+// every ocelot hunts chickens and baby turtles on land (OcelotAttackGoal +
+// NearestAttackableTargetGoal for Chicken/Turtle). Attack damage is 3.
+func (s *Server) tickOcelotParity(e *corentity.Entity, ai *mobAI, state *mobParityState) bool {
+	if !e.Trusting {
+		if target := s.closestVisiblePlayer(e, 16); target != nil {
+			dx, dz := e.Position.X-target.Position.X, e.Position.Z-target.Position.Z
+			distance := math.Hypot(dx, dz)
+			if distance > 0.001 {
+				destination := spatial.Vec3{X: e.Position.X + dx/distance*12, Y: e.Position.Y, Z: e.Position.Z + dz/distance*12}
+				s.navigateMob(e, ai, destination, pumpkinMovementSpeed(e.Type, 1.33))
+				return true
+			}
+		}
+	}
+	if prey := s.closestEntityMatching(e, 12, func(candidate *corentity.Entity) bool {
+		return candidate.Type == corentity.TypeChicken ||
+			(candidate.Type == corentity.TypeTurtle && candidate.IsBaby)
+	}); prey != nil {
+		return s.tickEntityHunter(e, ai, state, prey, 3, 20, 1.6, pumpkinMovementSpeed(e.Type, 1.3))
+	}
+	return false
 }
 
 func (s *Server) tickTameableFollowParity(e *corentity.Entity, ai *mobAI) bool {
