@@ -73,7 +73,7 @@ These checks do not complete the remaining per-mob acceptance criteria below.
 | Illusioner | illusioner spells/bow/copies | ground | Incomplete |
 | Iron Golem | golem goals/village/reputation | ground | Partial |
 | Llama | llama goals/caravan/spit | ground | Incomplete |
-| Magma Cube | magma-cube hop/size goals | jumping | Incomplete |
+| Magma Cube | magma-cube hop/size goals | jumping | Partial |
 | Mooshroom | animal goals + mooshroom interactions | ground | Partial |
 | Mule | horse goals | ground | Partial |
 | Ocelot | ocelot avoid/trust goals | ground | Incomplete |
@@ -94,7 +94,7 @@ These checks do not complete the remaining per-mob acceptance criteria below.
 | Silverfish | infest/wake-friends goals | ground | Incomplete |
 | Skeleton | bow/melee goals | ground | Partial |
 | Skeleton Horse | horse/trap goals | ground | Incomplete |
-| Slime | slime hop/size goals | jumping | Incomplete |
+| Slime | slime hop/size goals | jumping | Partial |
 | Sniffer | sniffer Brain/sniff/dig | ground | Incomplete |
 | Snow Golem | ranged/snow/melt goals | ground | Partial |
 | Spider | spider climb/daylight goals | climbing | Incomplete |

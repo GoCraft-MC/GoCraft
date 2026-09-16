@@ -363,6 +363,7 @@ func (s *Server) spawnPumpkinGenerationCreaturesForChunk(cx, cz int32, remaining
 						e.NaturalSpawned = true
 						e.OnGround = true
 						e.Yaw = rng.Float32() * 360
+						s.sizeNaturalCubeMob(e)
 						s.world.Entities.Add(e)
 						if s.sessions != nil {
 							handler.BroadcastSpawnMob(e, s.sessions)
@@ -583,6 +584,7 @@ func (s *Server) spawnCategoryForChunk(state *naturalSpawnState, category mobCat
 			e.NaturalSpawned = true
 			e.Yaw = s.spawnRNG.Float32() * 360
 			e.OnGround = entitySettings.location == spawnLocationOnGround
+			s.sizeNaturalCubeMob(e)
 			s.world.Entities.Add(e)
 			handler.BroadcastSpawnMob(e, s.sessions)
 			state.add(actualCategory, cx, cz)

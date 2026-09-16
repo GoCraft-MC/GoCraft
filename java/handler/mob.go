@@ -249,6 +249,16 @@ func buildMobMetadata(e *corentity.Entity) *protocol.Packet {
 		b = b.Byte(16).VarInt(0).Byte(flags)
 		hasMetadata = true
 	}
+	if e.Type == corentity.TypeSlime || e.Type == corentity.TypeMagmaCube {
+		// Slime/MagmaCube DATA_ID_SIZE (index 16, VarInt): the client scales the
+		// model by this. Sizes are 1, 2, 4.
+		size := e.SlimeSize
+		if size <= 0 {
+			size = 1
+		}
+		b = b.Byte(16).VarInt(1).VarInt(size)
+		hasMetadata = true
+	}
 	if e.Type == corentity.TypeEnderman && e.EndermanCarriedBlock != "" {
 		b = b.Byte(endermanMetadataCarriedBlockIndex).
 			VarInt(metadataTypeOptionalBlockState).
