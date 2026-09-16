@@ -50,6 +50,44 @@ func TestSmallSlimeDoesNotSplit(t *testing.T) {
 	}
 }
 
+func TestNaturalSlimeChildrenInheritStatusAndDespawn(t *testing.T) {
+	s := newGolemTestServer(t)
+	parent := corentity.New(s.game.NextEntityID(), [16]byte{1}, corentity.TypeSlime, 20, 64, 20)
+	parent.NaturalSpawned = true
+	setSlimeSize(parent, 4)
+	s.world.Entities.Add(parent)
+
+	children := s.splitSlimeOnDeath(parent)
+	for _, c := range children {
+		if !c.NaturalSpawned {
+			t.Fatal("child of a natural slime is not marked NaturalSpawned")
+		}
+	}
+
+	// With no players nearby, the natural-spawn despawn pass must remove them.
+	var removed []int32
+	s.despawnDistantNaturalMobs(nil, &removed)
+	for _, c := range children {
+		if _, ok := s.world.Entities.Get(c.EntityID); ok {
+			t.Fatalf("natural slime child %d survived the despawn pass", c.EntityID)
+		}
+	}
+}
+
+func TestNonNaturalSlimeChildrenStayNonNatural(t *testing.T) {
+	s := newGolemTestServer(t)
+	parent := corentity.New(s.game.NextEntityID(), [16]byte{1}, corentity.TypeSlime, 20, 64, 20)
+	parent.NaturalSpawned = false // e.g. spawned via /summon
+	setSlimeSize(parent, 4)
+	s.world.Entities.Add(parent)
+
+	for _, c := range s.splitSlimeOnDeath(parent) {
+		if c.NaturalSpawned {
+			t.Fatal("child of a summoned slime was marked NaturalSpawned")
+		}
+	}
+}
+
 func TestNaturalCubeMobGetsValidSize(t *testing.T) {
 	s := newGolemTestServer(t)
 	magma := corentity.New(s.game.NextEntityID(), [16]byte{1}, corentity.TypeMagmaCube, 20, 64, 20)

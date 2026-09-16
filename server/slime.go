@@ -5,7 +5,6 @@ import (
 	"math/rand"
 
 	corentity "GoCraft/core/entity"
-	"GoCraft/java/handler"
 )
 
 func isCubeMob(t corentity.EntityType) bool {
@@ -54,8 +53,14 @@ func (s *Server) splitSlimeOnDeath(e *corentity.Entity) []*corentity.Entity {
 		child := corentity.New(s.game.NextEntityID(), newRandomUUID(), e.Type,
 			e.Position.X+math.Cos(angle)*0.5, e.Position.Y, e.Position.Z+math.Sin(angle)*0.5)
 		setSlimeSize(child, halfSize)
+		// Inherit the parent's natural-spawn status so the children participate
+		// in the same despawn lifecycle instead of leaking forever.
+		child.NaturalSpawned = e.NaturalSpawned
+		child.OnGround = e.OnGround
 		s.world.Entities.Add(child)
-		handler.BroadcastSpawnMob(child, s.sessions)
+		// Do not broadcast here: the caller appends the returned children to the
+		// tick's spawned batch, which sends their spawn packets once in the owning
+		// dimension. Broadcasting again here double-sends and leaks across dimensions.
 		children = append(children, child)
 	}
 	return children
