@@ -27,6 +27,8 @@ type mobParityState struct {
 	beeHasStung        bool
 	beeStingTicks      int
 	timeInOverworld    int
+	hasLimitedLife     bool
+	limitedLifeTicks   int
 }
 
 var mobParityStates sync.Map // map[*corentity.Entity]*mobParityState
@@ -292,6 +294,9 @@ func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mo
 	if state.phaseTicks > 0 {
 		state.phaseTicks--
 	}
+	if state.secondaryCooldown > 0 {
+		state.secondaryCooldown--
+	}
 	target := s.closestPlayerToPosition(destination, 2.5)
 
 	switch e.Type {
@@ -336,10 +341,19 @@ func (s *Server) tickParityHostileNavigationSpecials(e *corentity.Entity, ai *mo
 		e.VY = 0
 		return true
 	case corentity.TypeEvoker:
-		if target != nil && state.primaryCooldown <= 0 && distance2D(e.Position, target.Position) <= 12 {
-			s.damagePlayerFromParityMob(target, 6, "was bitten by evocation fangs")
-			state.primaryCooldown = 100
-			return true
+		if target != nil {
+			// EvokerSummonSpellGoal: conjure a wave of vexes while fewer than 8 are
+			// nearby, on its own recharge, before falling back to evocation fangs.
+			if state.secondaryCooldown <= 0 && s.nearbyVexCount(e, 16) < 8 {
+				s.evokerSummonVexes(e, 3)
+				state.secondaryCooldown = 340
+				return true
+			}
+			if state.primaryCooldown <= 0 && distance2D(e.Position, target.Position) <= 12 {
+				s.damagePlayerFromParityMob(target, 6, "was bitten by evocation fangs")
+				state.primaryCooldown = 100
+				return true
+			}
 		}
 	}
 	return false
