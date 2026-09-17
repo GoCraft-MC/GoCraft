@@ -4774,6 +4774,12 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 		return
 	}
 
+	// Phantoms dive-bomb from above instead of chasing at head height.
+	if e.Type == corentity.TypePhantom {
+		s.tickPhantomSwoop(e, ai, target, distance, visible)
+		return
+	}
+
 	if e.Type == corentity.TypeCreeper {
 		if distance <= 3 && visible {
 			e.VX, e.VZ = 0, 0
