@@ -37,6 +37,16 @@ func pumpkinMobTargets(attacker, candidate corentity.EntityType) bool {
 	case corentity.TypePillager, corentity.TypeVindicator, corentity.TypeEvoker,
 		corentity.TypeIllusioner, corentity.TypeRavager:
 		return candidate == corentity.TypeVillager || candidate == corentity.TypeIronGolem
+	case corentity.TypeZoglin:
+		// Zoglin.findNearestValidAttackTarget: hostile to every living creature
+		// except other zoglins and creepers.
+		switch candidate {
+		case corentity.TypeZoglin, corentity.TypeCreeper:
+			return false
+		case corentity.TypeIronGolem, corentity.TypeSnowGolem:
+			return true
+		}
+		return isPassiveMob(candidate) || isHostileMob(candidate)
 	case corentity.TypeGuardian, corentity.TypeElderGuardian:
 		return candidate == corentity.TypeSquid || candidate == corentity.TypeGlowSquid || candidate == corentity.TypeAxolotl
 	case corentity.TypeEnderman:
