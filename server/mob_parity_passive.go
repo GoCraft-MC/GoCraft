@@ -52,6 +52,8 @@ func (s *Server) tickParityPassiveIdle(e *corentity.Entity, ai *mobAI) bool {
 		return s.tickGoatParity(e, ai, state)
 	case corentity.TypeRabbit:
 		return s.tickRabbitParity(e, ai)
+	case corentity.TypePanda:
+		return s.tickPandaParity(e, ai)
 	case corentity.TypeStrider:
 		return s.tickStriderIdleParity(e, ai)
 	case corentity.TypeSquid, corentity.TypeGlowSquid, corentity.TypePufferfish, corentity.TypeTadpole:
@@ -290,6 +292,19 @@ func (s *Server) tickOcelotParity(e *corentity.Entity, ai *mobAI, state *mobPari
 			(candidate.Type == corentity.TypeTurtle && candidate.IsBaby)
 	}); prey != nil {
 		return s.tickEntityHunter(e, ai, state, prey, 3, 20, 1.6, pumpkinMovementSpeed(e.Type, 1.3))
+	}
+	return false
+}
+
+// tickPandaParity ports the worried panda's storm fright (Panda.isScared): a
+// worried panda cowers in place while it is thundering instead of wandering.
+func (s *Server) tickPandaParity(e *corentity.Entity, ai *mobAI) bool {
+	if e.PandaVariant() == corentity.PandaGeneWorried {
+		if _, thundering := s.currentWeather(); thundering {
+			e.VX, e.VZ = 0, 0
+			clearMobNavigation(e, ai)
+			return true
+		}
 	}
 	return false
 }

@@ -267,6 +267,12 @@ type Entity struct {
 	// MooshroomBrown is true when a mooshroom is the brown variant (toggled by
 	// lightning). False is the default red variant.
 	MooshroomBrown bool
+	// PandaMainGene and PandaHiddenGene are a panda's two genes (0=NORMAL, 1=LAZY,
+	// 2=WORRIED, 3=PLAYFUL, 4=BROWN, 5=WEAK, 6=AGGRESSIVE). The expressed variant
+	// derives from the pair: a recessive main gene (BROWN/WEAK) only shows when the
+	// hidden gene matches it, otherwise the panda is NORMAL.
+	PandaMainGene   int8
+	PandaHiddenGene int8
 	// OfferFlowerTicks counts down while an iron golem holds out a poppy to a
 	// nearby villager (vanilla OfferFlowerGoal, 400 ticks). Zero means not offering.
 	OfferFlowerTicks int32
@@ -460,6 +466,13 @@ func New(id int32, uuid [16]byte, t EntityType, x, y, z float64) *Entity {
 		// Default to the smallest size; natural spawn and splitting set larger.
 		e.SlimeSize = 1
 		e.Health, e.MaxHealth = 1, 1
+	}
+	if t == TypePanda {
+		// Roll two independent genes (vanilla finalizeSpawn), derived from the id
+		// so a given panda is deterministic.
+		roll := uint32(id)*2654435761 + 2246822519
+		e.PandaMainGene = RandomPandaGene(int(roll % 16))
+		e.PandaHiddenGene = RandomPandaGene(int((roll >> 8) % 16))
 	}
 	switch t {
 	case TypeSkeleton, TypeStray, TypeBogged:
