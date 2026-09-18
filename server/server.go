@@ -3235,6 +3235,8 @@ func (s *Server) tickEntities() {
 					s.tickHoglinConversion(e)
 				} else if e.Type == corentity.TypeVex {
 					s.tickVexLimitedLife(e)
+				} else if e.Type == corentity.TypeRavager {
+					s.tickRavagerTimers(e)
 				}
 				// Stagger hostile AI: run full AI every 2 ticks per mob.
 				// This halves hostile-mob CPU cost without losing reactivity.
@@ -4777,6 +4779,12 @@ func (s *Server) tickHostileMobAI(e *corentity.Entity) {
 	// Phantoms dive-bomb from above instead of chasing at head height.
 	if e.Type == corentity.TypePhantom {
 		s.tickPhantomSwoop(e, ai, target, distance, visible)
+		return
+	}
+
+	// Ravagers pursue and melee, but a shield block can stun them into a roar.
+	if e.Type == corentity.TypeRavager {
+		s.tickRavagerCombat(e, ai, target, distance, visible)
 		return
 	}
 
