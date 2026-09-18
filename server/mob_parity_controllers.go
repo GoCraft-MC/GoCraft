@@ -29,6 +29,8 @@ type mobParityState struct {
 	timeInOverworld    int
 	hasLimitedLife     bool
 	limitedLifeTicks   int
+	phantomSwooping    bool
+	phantomCircleTicks int
 }
 
 var mobParityStates sync.Map // map[*corentity.Entity]*mobParityState
