@@ -31,6 +31,9 @@ type mobParityState struct {
 	limitedLifeTicks   int
 	phantomSwooping    bool
 	phantomCircleTicks int
+	ravagerStunTicks   int
+	ravagerRoarTicks   int
+	ravagerAttackTicks int
 }
 
 var mobParityStates sync.Map // map[*corentity.Entity]*mobParityState
