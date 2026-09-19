@@ -1,5 +1,7 @@
 package healthcheck
 
+// This comment is here to force a PR validation check
+
 import (
 	"context"
 	"errors"

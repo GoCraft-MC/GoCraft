@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# vim: set filetype=dockerfile :
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 
@@ -12,9 +13,8 @@ ARG TARGETARCH
 ARG VERSION=dev
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/gocraft .
-
-RUN mkdir -p /out/data
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/gocraft . \
+ && mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 ENV GOCRAFT_HEALTHCHECK_PORT=8081

@@ -5,11 +5,6 @@ on:
       - main
     paths-ignore:
       - 'miniserv/**'
-  pull_request:
-    branches:
-      - main
-    paths-ignore:
-      - 'miniserv/**'
 env:
   GO_VERSION: ${{ vars.GO_VERSION || '1.24' }}
 jobs:
