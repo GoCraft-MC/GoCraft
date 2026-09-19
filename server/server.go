@@ -229,6 +229,25 @@ type bedrockRecentBlockUse struct {
 	at        time.Time
 }
 
+// buildPermissionStore constructs the permission Store from cfg.Permissions.
+func buildPermissionStore(cfg *config.Config) (corepermission.Store, error) {
+	pc := cfg.Permissions
+	switch pc.Storage {
+	case "sqlite":
+		return corepermission.SQLiteStore(pc.DSN, pc.Table)
+	case "mongodb":
+		return corepermission.MongoDBStore(pc.DSN, pc.Database, pc.Collection)
+	case "postgresql":
+		return corepermission.PostgreSQLStore(pc.DSN, pc.Table)
+	default: // "json" or empty
+		path := pc.Path
+		if path == "" {
+			path = "permissions.json"
+		}
+		return corepermission.JSONStore(path), nil
+	}
+}
+
 // New creates a Server with the given configuration.
 // It initialises the game core and generates the RSA keypair for online-mode auth.
 // The plugin drop directory is not created here. It was, against a hardcoded
@@ -337,8 +356,13 @@ func New(cfg *config.Config) (*Server, error) {
 	if err := handler.ConfigureBans(`banned-players.json`, `banned-ips.json`); err != nil {
 		return nil, fmt.Errorf("server: loading bans: %w", err)
 	}
-	permissionManager, err := corepermission.Load(`permissions.json`)
+	permStore, err := buildPermissionStore(cfg)
 	if err != nil {
+		return nil, fmt.Errorf("server: opening permission store: %w", err)
+	}
+	permissionManager, err := corepermission.Open(permStore)
+	if err != nil {
+		_ = permStore.Close()
 		return nil, fmt.Errorf("server: loading permissions: %w", err)
 	}
 	cmds := handler.NewDispatcher()
@@ -653,6 +677,11 @@ func New(cfg *config.Config) (*Server, error) {
 	cmds.SetLinkMessenger(s.sendPlayerLink)
 	cmds.SetAbilitySync(s.syncPlayerAbilities)
 	cmds.SetStatusEffectSync(s.syncPlayerStatusEffect)
+	cmds.SetCommandPermissionSync(func(target *player.Player) {
+		if javaSession, ok := s.sessions.Get(target.UUID); ok {
+			_ = handler.SyncCommandPermissions(javaSession.Conn, target, s.cmds)
+		}
+	})
 	// Registered here rather than beside the registry, because a runtime that
 	// can come back from a crash needs to tell the server it did — and only the
 	// server knows who is online to replay it to.
@@ -921,6 +950,11 @@ func (s *Server) executeConsoleCommand(input string) string {
 			target.Operator = true
 			if s.bedrockListener != nil {
 				s.bedrockListener.RefreshPlayerAbilities(target)
+			}
+			if s.sessions != nil {
+				if javaSession, ok := s.sessions.Get(target.UUID); ok {
+					_ = handler.SyncCommandPermissions(javaSession.Conn, target, s.cmds)
+				}
 			}
 		}
 		return fmt.Sprintf(`Made %s a server operator`, name)
@@ -3051,8 +3085,8 @@ func (s *Server) tickEntities() {
 	endDamage()
 
 	simulationPlayers := s.naturalSpawnPlayers()
-	s.despawnDistantNaturalMobs(simulationPlayers, &deadIDs)
 	allEntities := s.world.Entities.Snapshot()
+	s.despawnDistantNaturalMobs(simulationPlayers, allEntities, &deadIDs)
 	s.tickAnimalLifecycle(allEntities)
 	s.tickPufferfishContact(allEntities)
 

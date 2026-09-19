@@ -14,19 +14,22 @@ import (
 const (
 	pumpkinNavigatorRepathTicks       = 15
 	pumpkinNavigatorRepathSpreadTicks = 15
-	// A 4096-node A* search per mob can monopolise the 20 TPS simulation tick
-	// when several mobs repath together. Damage is drained by the same tick, so
-	// a pathfinding spike also makes mobs look invulnerable/frozen to clients.
-	// The pathfinder returns its best partial route when this budget is reached,
-	// allowing AI to keep moving while bounding the work done by one repath.
-	pumpkinNavigatorMaxVisited = 768
-	// Villagers need a larger budget than the shared combat cap: routing from
-	// outside a house to a claimed bed has to find the doorway, and a partial
-	// path that stops at the wall leaves the villager stuck against a closed
-	// door with no door node to open. Vanilla scales its node limit with
-	// followRange (far above 768); villager repaths are already spread across
-	// ticks by entity ID, so the wider search does not bunch into a spike.
-	villagerNavigatorMaxVisited = 4096
+	// Budget caps keep A* from monopolising the 20 TPS simulation tick. Each
+	// node visit calls BlockIfLoaded (world RLock) several times, so large
+	// budgets compound lock pressure when multiple mobs repath in parallel.
+	// The pathfinder returns its best partial route when the budget is reached,
+	// so mobs keep moving rather than stopping at the first wall they cannot
+	// cross within the remaining budget.
+	//
+	// Vanilla GroundPathNavigation uses maxVisitedNodes ≈ 50 by default.
+	// GoCraft uses slightly larger values so partial paths cover more ground,
+	// while still bounding worst-case cost to tens of microseconds per A*.
+	pumpkinNavigatorMaxVisited = 64
+	// Villagers open wooden doors, so their paths must find the doorway rather
+	// than stopping at the wall. A budget of 200 covers ~14×14 open terrain or
+	// a typical house interior plus the path to its door — enough for bed/work
+	// routing without the 4 096-node worst case that saturated the tick budget.
+	villagerNavigatorMaxVisited = 200
 )
 
 // navigateMob owns the MOVE control for one tick. Ground mobs use the bounded
@@ -130,6 +133,37 @@ func pumpkinMovementSpeed(t corentity.EntityType, modifier float64) float64 {
 	return settings.movementSpeed * modifier * 0.5
 }
 
+// findSurfaceWanderTarget picks a random ground position within lateralRange
+// blocks (X/Z) and verticalRange blocks (Y) of the mob. The returned Y is
+// surface-snapped via the loaded chunk height map, matching vanilla's
+// DefaultRandomPos / LandRandomPos approach. Water is rejected so land
+// animals behave like WaterAvoidingRandomStrollGoal.
+// Returns (target, true) or (zero, false) when no valid position was found.
+func (s *Server) findSurfaceWanderTarget(e *corentity.Entity, ai *mobAI, lateralRange, verticalRange int) (spatial.Vec3, bool) {
+	if s.world == nil {
+		return spatial.Vec3{}, false
+	}
+	for attempt := 0; attempt < 10; attempt++ {
+		tx := e.Position.X + (ai.rng.Float64()*2-1)*float64(lateralRange)
+		tz := e.Position.Z + (ai.rng.Float64()*2-1)*float64(lateralRange)
+		ix, iz := int(math.Floor(tx)), int(math.Floor(tz))
+		surfaceY, loaded := s.world.SurfaceYIfLoaded(ix, iz)
+		if !loaded {
+			continue
+		}
+		ty := float64(surfaceY) + 1.0
+		if math.Abs(ty-e.Position.Y) > float64(verticalRange) {
+			continue
+		}
+		// WaterAvoidingRandomStrollGoal: land animals skip water destinations.
+		if s.waterAt(spatial.Vec3{X: float64(ix) + 0.5, Y: float64(surfaceY), Z: float64(iz) + 0.5}) {
+			continue
+		}
+		return spatial.Vec3{X: tx, Y: ty, Z: tz}, true
+	}
+	return spatial.Vec3{}, false
+}
+
 // tickPassiveIdleGoals implements the common passive goal stack after
 // higher-priority swim, escape-danger, sleeping, breeding and riding goals.
 // Mob families with dedicated vanilla goals are given first ownership here.
@@ -157,28 +191,35 @@ func (s *Server) tickPassiveIdleGoals(e *corentity.Entity, ai *mobAI) {
 		clearMobNavigation(e, ai)
 	}
 
+	// Vanilla GoalSelector ticks MOVE goals independently of LOOK goals. Advance
+	// the wander cadence clock every tick regardless of look state so look mode
+	// cannot delay the wander schedule (RandomStrollGoal uses Flag.MOVE; Look
+	// goals use Flag.LOOK — they are independent in vanilla).
+	ai.wanderTick--
+	if ai.wanderTick <= 0 {
+		ai.wanderTick = 2
+		// 1/60 chance every 2 ticks ≈ vanilla reducedTickDelay(120) = 60.
+		if ai.rng.Intn(60) == 0 {
+			if target, ok := s.findSurfaceWanderTarget(e, ai, 10, 7); ok {
+				ai.wanderTarget = target
+				ai.hasWanderGoal = true
+				// Eagerly start navigation so the mob begins moving this tick.
+				// If A* finds no path, clear navigation state so the stale
+				// hasPathGoal/repathTick values cannot block future attempts.
+				if s.navigateMob(e, ai, ai.wanderTarget, pumpkinMovementSpeed(e.Type, 1.0)) {
+					return
+				}
+				ai.hasWanderGoal = false
+				clearMobNavigation(e, ai)
+			}
+		}
+	}
+
 	if ai.lookTick > 0 {
 		ai.lookTick--
 		e.VX, e.VZ = 0, 0
 		e.Yaw = float32(math.Atan2(-(ai.lookX-e.Position.X), ai.lookZ-e.Position.Z) * 180 / math.Pi)
 		return
-	}
-
-	ai.wanderTick--
-	if ai.wanderTick <= 0 {
-		ai.wanderTick = 2
-		if ai.rng.Intn(60) == 0 {
-			ai.wanderTarget = spatial.Vec3{
-				X: e.Position.X + ai.rng.Float64()*20 - 10,
-				Y: e.Position.Y + ai.rng.Float64()*14 - 7,
-				Z: e.Position.Z + ai.rng.Float64()*20 - 10,
-			}
-			ai.hasWanderGoal = true
-			if s.navigateMob(e, ai, ai.wanderTarget, pumpkinMovementSpeed(e.Type, 1.0)) {
-				return
-			}
-			ai.hasWanderGoal = false
-		}
 	}
 
 	if ai.rng.Float64() < 0.02 {

@@ -44,3 +44,9 @@ func (w Writer) WriteStringEntry(name string, value string) {
 	w.WriteString(name)
 	w.WriteString(value)
 }
+
+func (w Writer) WriteInt32(value int32) {
+	var data [4]byte
+	binary.BigEndian.PutUint32(data[:], uint32(value))
+	w.writeBytes(data[:])
+}

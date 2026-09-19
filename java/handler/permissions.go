@@ -38,6 +38,9 @@ func cmdOp(ctx CommandContext) error {
 		if ctx.SyncAbilities != nil {
 			ctx.SyncAbilities(target)
 		}
+		if ctx.SyncCommandPermissions != nil {
+			ctx.SyncCommandPermissions(target)
+		}
 	}
 	return sendCommandMessage(ctx, fmt.Sprintf(`Made %s a server operator`, name))
 }

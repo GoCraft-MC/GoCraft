@@ -2,7 +2,6 @@ java_enabled: true
 host: 0.0.0.0
 port: 25565
 motd: A GoCraft Server
-server_icon: server-icon.png
 max_players: 20
 version_name: 1.21.4
 protocol_version: 769
@@ -10,63 +9,95 @@ online_mode: false
 villagers: true
 difficulty: normal
 default_gamemode: survival
+
 # Natural-mob caps for a complete 17x17 chunk simulation area. Use 0 to
 # disable a category; smaller loaded areas scale the cap down automatically.
 mob_spawning:
-    hostile: 35
-    passive: 16
-    ambient: 15
-    axolotls: 5
-    underground_water_creatures: 5
-    water_creatures: 5
-    water_ambient: 20
+  hostile: 35
+  passive: 16
+  ambient: 15
+  axolotls: 5
+  underground_water_creatures: 5
+  water_creatures: 5
+  water_ambient: 20
+
 operators: []
+
 whitelist:
+  enabled: false
+  players: []
+
+# Resource pack configuration. Java and Bedrock need separate pack files
+# (different formats). Set enabled: true and fill in the fields to use.
+resource_pack:
+  java:
     enabled: false
-    players: []
+    url: ""        # HTTPS URL to the Java .zip resource pack
+    hash: ""       # SHA-1 hex of the zip (for client-side caching)
+    forced: false  # kick the player if they decline
+    prompt: ""     # MiniMessage text shown before the accept dialog
+  bedrock:
+    enabled: false
+    path: ""       # local path to a Bedrock .mcpack or .zip file
+    forced: false  # kick the player if they decline
+
+# Permission storage backend.
+# storage: json      — flat file (default); path: is the file path.
+# storage: sqlite    — SQLite database; dsn: is the file path (e.g. permissions.db).
+# storage: mongodb   — MongoDB; dsn: mongodb://... ; database: and collection: are optional.
+# storage: postgresql — PostgreSQL; dsn: postgres://user:pass@host/db ; table: is optional.
+#
+# Examples:
+#
+# MongoDB:
+#   permissions:
+#     storage: mongodb
+#     dsn: mongodb://username:password@localhost:27017
+#     database: gocraft       # optional, defaults to "gocraft"
+#     collection: permissions # optional, defaults to "permissions"
+#
+# PostgreSQL:
+#   permissions:
+#     storage: postgresql
+#     dsn: postgres://username:password@localhost:5432/gocraft
+#     table: permissions      # optional, defaults to "permissions"
+permissions:
+  storage: json
+  path: permissions.json
+
+# GoPerm — permission editor (bytebin relay, no inbound port needed).
 permission_editor:
-    enabled: true
-    address: 127.0.0.1:8080
-    public_url: http://127.0.0.1:8080
-    session_minutes: 15
-# Verbose diagnostics. Enable only the category you are investigating.
-debug:
-    startup_registry: false
-    environment_overrides: false
-    world_loading: false
-    mob_spawning: false
-    autosaves: false
-    entity_events: false
-    entity_tick_overruns: false
-    bedrock_catalogues: false
-    bedrock_login: false
-    bedrock_chunks: false
-    bedrock_inventory: false
-    profiling: false
+  enabled: true
+  editor_url: https://gocraft-mc.github.io/GoCraft/editor
+  bytebin_url: https://bytebin.lucko.me
+
 combat:
-    attack_cooldown: false
-    knockback_horizontal: 0.4
-    knockback_vertical: 0.4
+  attack_cooldown: false
+  knockback_horizontal: 0.4
+  knockback_vertical: 0.4
+
 item_tooltips:
-    show_durability: true
-    show_attributes: true
-    hide_vanilla_attributes: true
+  show_durability: true
+  show_attributes: true
+  hide_vanilla_attributes: true
+
 clear_lag:
-    enabled: false
-    interval_seconds: 300
-    minimum_entity_age_seconds: 30
-    warning_seconds: [60, 30, 10, 5, 4, 3, 2, 1]
-    warning_message: "[ClearLag] Removing old entities in {seconds}s"
-    complete_message: "[ClearLag] Removed {count} old entities"
-    remove:
-        dropped_items: true
-        experience_orbs: true
-        projectiles: true
-        primed_tnt: true
-        falling_blocks: true
-        boats: false
-        passive_mobs: false
-        hostile_mobs: false
+  enabled: false
+  interval_seconds: 300
+  minimum_entity_age_seconds: 30
+  warning_seconds: [60, 30, 10, 5, 4, 3, 2, 1]
+  warning_message: "[ClearLag] Removing old entities in {seconds}s"
+  complete_message: "[ClearLag] Removed {count} old entities"
+  remove:
+    dropped_items: true
+    experience_orbs: true
+    projectiles: true
+    primed_tnt: true
+    falling_blocks: true
+    boats: false
+    passive_mobs: false
+    hostile_mobs: false
+
 world_storage: disk
 # Dimension layout: Overworld is here; sibling folders with suffixes _nether
 # and _end are created at server startup (world, world_nether, world_end).
@@ -76,7 +107,23 @@ world_seed: 0
 view_distance: 8
 pregenerate_radius: 8
 max_cached_chunks: 256
+
 bedrock:
-    enabled: true
-    address: 0.0.0.0:19106
-    online_mode: true
+  enabled: true
+  address: 0.0.0.0:19106
+  online_mode: true
+
+# Verbose diagnostics. Enable only the category you are investigating.
+debug:
+  startup_registry: false
+  environment_overrides: false
+  world_loading: false
+  mob_spawning: false
+  autosaves: false
+  entity_events: false
+  entity_tick_overruns: false
+  bedrock_catalogues: false
+  bedrock_login: false
+  bedrock_chunks: false
+  bedrock_inventory: false
+  profiling: false

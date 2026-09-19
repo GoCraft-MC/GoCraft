@@ -119,8 +119,8 @@ func entityWithinSimulationRange(entity *corentity.Entity, players []naturalSpaw
 // despawnDistantNaturalMobs provides the chunk-unload lifecycle that GoCraft's
 // global entity manager otherwise lacks. Generated villagers, summoned mobs,
 // boats, and player-created entities are deliberately excluded.
-func (s *Server) despawnDistantNaturalMobs(players []naturalSpawnPlayer, removedIDs *[]int32) {
-	for _, entity := range s.world.Entities.Snapshot() {
+func (s *Server) despawnDistantNaturalMobs(players []naturalSpawnPlayer, entities []*corentity.Entity, removedIDs *[]int32) {
+	for _, entity := range entities {
 		if entity.Dead || !entity.NaturalSpawned || entity.Tamed || entity.HasTameOwner {
 			continue
 		}

@@ -330,7 +330,7 @@ func TestDistantNaturalMobsDespawnButGeneratedEntitiesRemain(t *testing.T) {
 	world.Entities.Add(generated)
 	s := &Server{world: world, game: gameCore, mobAIs: make(map[int32]*mobAI)}
 	var removed []int32
-	s.despawnDistantNaturalMobs(s.naturalSpawnPlayers(), &removed)
+	s.despawnDistantNaturalMobs(s.naturalSpawnPlayers(), world.Entities.Snapshot(), &removed)
 	if _, ok := world.Entities.Get(natural.EntityID); ok {
 		t.Error("distant naturally spawned cow was retained")
 	}

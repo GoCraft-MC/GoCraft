@@ -66,7 +66,7 @@ func TestNaturalSlimeChildrenInheritStatusAndDespawn(t *testing.T) {
 
 	// With no players nearby, the natural-spawn despawn pass must remove them.
 	var removed []int32
-	s.despawnDistantNaturalMobs(nil, &removed)
+	s.despawnDistantNaturalMobs(nil, s.world.Entities.Snapshot(), &removed)
 	for _, c := range children {
 		if _, ok := s.world.Entities.Get(c.EntityID); ok {
 			t.Fatalf("natural slime child %d survived the despawn pass", c.EntityID)

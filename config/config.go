@@ -128,6 +128,26 @@ type CustomItemsConfig struct {
 	} `yaml:"java"`
 }
 
+// PermissionsConfig selects the storage backend for permissions.json data.
+// The default backend is "json" (a local file). Set storage to "sqlite",
+// "mongodb", or "postgresql" to use an external database instead.
+type PermissionsConfig struct {
+	// Storage selects the backend: "json" | "sqlite" | "mongodb" | "postgresql"
+	Storage string `yaml:"storage"`
+	// Path is the file path used by the "json" backend (default: permissions.json)
+	// and the database file path used by the "sqlite" backend.
+	Path string `yaml:"path"`
+	// DSN is the connection string for "sqlite" (file path), "mongodb"
+	// (mongodb:// URI), and "postgresql" (postgres:// URL or libpq string).
+	DSN string `yaml:"dsn"`
+	// Database is the MongoDB database name (default: "gocraft").
+	Database string `yaml:"database"`
+	// Collection is the MongoDB collection name (default: "permissions").
+	Collection string `yaml:"collection"`
+	// Table is the SQL table name for "sqlite" and "postgresql" (default: "permissions").
+	Table string `yaml:"table"`
+}
+
 // PermissionEditorConfig controls the bytebin-based permission editor.
 // The server uploads permission data to bytebin (outbound only — no listening
 // port needed), and the editor runs as a static GitHub Pages site.
@@ -289,6 +309,7 @@ type Config struct {
 	ResourcePack     ResourcePackConfig     `yaml:"resource_pack"`
 	CustomItems      CustomItemsConfig      `yaml:"custom_items"`
 	PermissionEditor PermissionEditorConfig `yaml:"permission_editor"`
+	Permissions      PermissionsConfig      `yaml:"permissions"`
 	Plugins          PluginsConfig          `yaml:"plugins"`
 	Debug            DebugConfig            `yaml:"debug"`
 
@@ -344,6 +365,10 @@ func defaults() *Config {
 			Enabled:    true,
 			EditorURL:  "https://gocraft-mc.github.io/GoCraft/editor",
 			BytebinURL: "https://bytebin.lucko.me",
+		},
+		Permissions: PermissionsConfig{
+			Storage: "json",
+			Path:    "permissions.json",
 		},
 		Plugins: PluginsConfig{
 			Enabled:              true,
@@ -503,6 +528,30 @@ func (c *Config) validate() error {
 		if parsed, err := url.ParseRequestURI(c.PermissionEditor.BytebinURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("permission_editor.bytebin_url %q must be a valid http/https URL", c.PermissionEditor.BytebinURL)
 		}
+	}
+	c.Permissions.Storage = strings.ToLower(strings.TrimSpace(c.Permissions.Storage))
+	if c.Permissions.Storage == "" {
+		c.Permissions.Storage = "json"
+	}
+	switch c.Permissions.Storage {
+	case "json":
+		if strings.TrimSpace(c.Permissions.Path) == "" {
+			c.Permissions.Path = "permissions.json"
+		}
+	case "sqlite":
+		if strings.TrimSpace(c.Permissions.DSN) == "" {
+			return errors.New("permissions.dsn must not be empty when storage is sqlite")
+		}
+	case "mongodb":
+		if strings.TrimSpace(c.Permissions.DSN) == "" {
+			return errors.New("permissions.dsn must not be empty when storage is mongodb")
+		}
+	case "postgresql":
+		if strings.TrimSpace(c.Permissions.DSN) == "" {
+			return errors.New("permissions.dsn must not be empty when storage is postgresql")
+		}
+	default:
+		return fmt.Errorf("permissions.storage %q must be json, sqlite, mongodb, or postgresql", c.Permissions.Storage)
 	}
 	if c.Plugins.Enabled {
 		c.Plugins.Directory = strings.TrimSpace(c.Plugins.Directory)

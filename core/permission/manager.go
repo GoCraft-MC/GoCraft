@@ -1,41 +1,37 @@
 package permission
 
 import (
-	"encoding/json"
-	"errors"
-	"os"
-	"path/filepath"
 	"sync"
 )
 
 type Manager struct {
 	mu       sync.RWMutex
-	path     string
+	store    Store
 	document Document
 }
 
-func Load(path string) (*Manager, error) {
-	manager := &Manager{path: path, document: DefaultDocument()}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return manager, manager.persist(manager.document)
-	}
+// Open loads a Document from store and returns a ready Manager.
+func Open(store Store) (*Manager, error) {
+	doc, err := store.Load()
 	if err != nil {
 		return nil, err
 	}
-	var document Document
-	if err := json.Unmarshal(data, &document); err != nil {
-		return nil, errors.New("decode permissions: " + err.Error())
-	}
-	if err := validateDocument(document); err != nil {
+	if err := validateDocument(doc); err != nil {
 		return nil, err
 	}
-	manager.document = document
-	return manager, nil
+	return &Manager{store: store, document: doc}, nil
 }
 
+// Load is a convenience wrapper that opens a JSON file store at path.
+// It is equivalent to Open(JSONStore(path)).
+func Load(path string) (*Manager, error) {
+	return Open(JSONStore(path))
+}
+
+// NewMemory returns a Manager that is pre-seeded with DefaultDocument and
+// never persists changes. Intended for tests.
 func NewMemory() *Manager {
-	return &Manager{document: DefaultDocument()}
+	return &Manager{store: noopStore{}, document: DefaultDocument()}
 }
 
 func (m *Manager) Snapshot() Document {
@@ -51,33 +47,32 @@ func (m *Manager) Replace(document Document) error {
 	document = cloneDocument(document)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.persist(document); err != nil {
+	if err := m.store.Save(document); err != nil {
 		return err
 	}
 	m.document = document
 	return nil
 }
 
-// Reload replaces the active document from its configured file atomically.
+// Reload re-reads the Document from the backing store and replaces the
+// in-memory copy atomically.
 func (m *Manager) Reload() error {
-	if m.path == "" {
-		return nil
-	}
-	data, err := os.ReadFile(m.path)
+	doc, err := m.store.Load()
 	if err != nil {
 		return err
 	}
-	var document Document
-	if err := json.Unmarshal(data, &document); err != nil {
-		return errors.New("decode permissions: " + err.Error())
-	}
-	if err := validateDocument(document); err != nil {
+	if err := validateDocument(doc); err != nil {
 		return err
 	}
 	m.mu.Lock()
-	m.document = cloneDocument(document)
+	m.document = cloneDocument(doc)
 	m.mu.Unlock()
 	return nil
+}
+
+// Close releases resources held by the backing store.
+func (m *Manager) Close() error {
+	return m.store.Close()
 }
 
 // GroupPrefix returns the chat prefix of the highest-weight group the player
@@ -101,23 +96,4 @@ func (m *Manager) GroupPrefix(username string) string {
 		}
 	}
 	return bestPrefix
-}
-
-func (m *Manager) persist(document Document) error {
-	if m.path == "" {
-		return nil
-	}
-	data, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
-		return err
-	}
-	temporary := m.path + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(temporary, m.path)
 }
