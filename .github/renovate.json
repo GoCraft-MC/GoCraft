@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "github-actions": {
+    "enabled": true
+  },
+  "gomod": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "matchManagers": [
+        "*"
+      ],
+      "groupName": "Weekly Dependencies Update"
+    }
+  ],
+  "timezone": "America/New_York",
+  "schedule": [
+    "on sunday"
+  ]
+}
