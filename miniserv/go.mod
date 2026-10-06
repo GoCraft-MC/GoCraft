@@ -2,7 +2,7 @@ module miniserv
 
 go 1.25.0
 
-require github.com/sandertv/gophertunnel v1.25.3-0.20260804190447-1f617284845c
+require github.com/sandertv/gophertunnel v1.62.0
 
 require (
 	github.com/coder/websocket v1.8.14 // indirect
@@ -43,4 +43,4 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 )
 
-replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6
+replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20260928233358-80c811b61860
