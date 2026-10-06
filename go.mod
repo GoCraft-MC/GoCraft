@@ -4,18 +4,18 @@ go 1.26.0
 
 require (
 	github.com/GoCraft-MC/gocraft-abi v0.4.1-0.20260909091520-46f15c995cb4
-	github.com/GoCraft-MC/gocraft-api-go v0.3.1-0.20260909092105-c01a15fc60a3
-	github.com/df-mc/dragonfly v0.11.0
+	github.com/GoCraft-MC/gocraft-api-go v0.3.1-0.20260911073903-23bc7b56e8a6
+	github.com/df-mc/dragonfly v0.11.5
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea
+	github.com/sandertv/gophertunnel v1.62.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	go.mongodb.org/mongo-driver/v2 v2.9.1
-	google.golang.org/protobuf v1.36.11
+	go.mongodb.org/mongo-driver/v2 v2.9.2
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -27,7 +27,7 @@ require (
 	github.com/df-mc/go-xsapi/v2 v2.0.3 // indirect
 	github.com/df-mc/goleveldb v1.1.9 // indirect
 	github.com/df-mc/jsonc v1.0.5 // indirect
-	github.com/df-mc/worldupgrader v1.0.21 // indirect
+	github.com/df-mc/worldupgrader v1.0.22 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
@@ -77,13 +77,13 @@ require (
 	golang.org/x/exp v0.0.0-20250103183323-7d7fa50e5329 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6
+replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20260928233358-80c811b61860

@@ -1,5 +1,7 @@
 github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6 h1:C05p0vLRkLkLLBMmkvmpMBIBT+CSEafqCXzT5hUEdKA=
 github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6/go.mod h1:JMKsf8DmVmn+qEVJ1IA9m7zEo9qHJ3ZN6IEvySEk9bs=
+github.com/HashimTheArab/gophertunnel v1.25.3-0.20260928233358-80c811b61860 h1:RsgWaNFfS1X4b1yelkG9T8Gxm7nEbwhfNUCdM/79w8M=
+github.com/HashimTheArab/gophertunnel v1.25.3-0.20260928233358-80c811b61860/go.mod h1:9Vds0PWvqxZMMGR99ZEELCucsburAI7L5Ysvv/6w9Iw=
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
 github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/coreos/go-oidc/v3 v3.17.0 h1:hWBGaQfbi0iVviX4ibC7bk8OKT5qNr4klBaCHVNvehc=
