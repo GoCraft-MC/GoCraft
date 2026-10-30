@@ -4,31 +4,31 @@ go 1.26.0
 
 require (
 	github.com/GoCraft-MC/gocraft-abi v0.4.1-0.20260909091520-46f15c995cb4
-	github.com/GoCraft-MC/gocraft-api-go v0.3.1-0.20260909092105-c01a15fc60a3
-	github.com/df-mc/dragonfly v0.11.0
+	github.com/GoCraft-MC/gocraft-api-go v0.3.1-0.20260911073903-23bc7b56e8a6
+	github.com/df-mc/dragonfly v0.11.6
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea
+	github.com/sandertv/gophertunnel v1.63.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	go.mongodb.org/mongo-driver/v2 v2.9.1
-	google.golang.org/protobuf v1.36.11
+	go.mongodb.org/mongo-driver/v2 v2.9.2
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.61.0
 )
 
 require (
 	github.com/brentp/intintmap v0.0.0-20251106190759-56907b1f8479 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
-	github.com/df-mc/go-nethernet v1.0.20 // indirect
+	github.com/df-mc/go-nethernet v1.0.26 // indirect
 	github.com/df-mc/go-playfab/v2 v2.0.2 // indirect
 	github.com/df-mc/go-xsapi/v2 v2.0.3 // indirect
 	github.com/df-mc/goleveldb v1.1.9 // indirect
 	github.com/df-mc/jsonc v1.0.5 // indirect
-	github.com/df-mc/worldupgrader v1.0.21 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/df-mc/worldupgrader v1.0.22 // indirect
+	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
@@ -39,25 +39,27 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
-	github.com/pion/datachannel v1.6.2 // indirect
-	github.com/pion/dtls/v3 v3.1.4 // indirect
-	github.com/pion/ice/v4 v4.2.7 // indirect
-	github.com/pion/interceptor v0.1.45 // indirect
+	github.com/pion/datachannel v1.6.3 // indirect
+	github.com/pion/dtls/v3 v3.1.9 // indirect
+	github.com/pion/ice/v4 v4.4.4 // indirect
+	github.com/pion/interceptor v0.1.49 // indirect
 	github.com/pion/logging v0.2.4 // indirect
-	github.com/pion/mdns/v2 v2.1.0 // indirect
+	github.com/pion/mdns/v2 v2.2.1 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.16 // indirect
-	github.com/pion/rtp v1.10.2 // indirect
-	github.com/pion/sctp v1.10.2 // indirect
-	github.com/pion/sdp/v3 v3.0.19 // indirect
-	github.com/pion/srtp/v3 v3.0.12 // indirect
+	github.com/pion/rtcp v1.2.17 // indirect
+	github.com/pion/rtp v1.10.5 // indirect
+	github.com/pion/sctp v1.11.3 // indirect
+	github.com/pion/sdp/v3 v3.0.20 // indirect
+	github.com/pion/srtp/v3 v3.1.0 // indirect
 	github.com/pion/stun/v3 v3.1.6 // indirect
+	github.com/pion/stun/v4 v4.0.1 // indirect
 	github.com/pion/transport/v4 v4.0.2 // indirect
-	github.com/pion/turn/v5 v5.0.10 // indirect
-	github.com/pion/webrtc/v4 v4.2.16-0.20260627075746-7a223a6f4d4f // indirect
+	github.com/pion/transport/v5 v5.0.1 // indirect
+	github.com/pion/turn/v5 v5.1.2 // indirect
+	github.com/pion/webrtc/v4 v4.2.21-0.20260920133716-91bfc6c2039f // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sandertv/go-raknet v1.15.2-0.20260705184311-0d1fd09e2cf6 // indirect
@@ -72,18 +74,18 @@ require (
 	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20250103183323-7d7fa50e5329 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20260825080041-283a5a97dfe6
+replace github.com/sandertv/gophertunnel => github.com/HashimTheArab/gophertunnel v1.25.3-0.20261028113046-25acc41eb24a
